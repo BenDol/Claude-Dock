@@ -47,6 +47,7 @@ export class PtyManager {
       cols: 80,
       rows: 24,
       cwd,
+      useConpty: false,
       env: {
         ...process.env as Record<string, string>,
         COLORTERM: 'truecolor',
