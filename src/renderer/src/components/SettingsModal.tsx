@@ -60,6 +60,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   </select>
                 </label>
                 <label>
+                  Terminal Style
+                  <select
+                    value={settings.theme.terminalStyle}
+                    onChange={(e) => updateTheme({ terminalStyle: e.target.value as Settings['theme']['terminalStyle'] })}
+                  >
+                    <option value="default">Default</option>
+                    <option value="standard">Standard Console</option>
+                  </select>
+                </label>
+                <label>
                   Accent Color
                   <input
                     type="color"

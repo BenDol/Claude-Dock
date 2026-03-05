@@ -1,7 +1,10 @@
+export type TerminalStyle = 'default' | 'standard'
+
 export interface Settings {
   theme: {
     mode: 'dark' | 'light' | 'system'
     accentColor: string
+    terminalStyle: TerminalStyle
     terminalColors: TerminalColors
   }
   terminal: {
@@ -69,6 +72,29 @@ export const DARK_TERMINAL_COLORS: TerminalColors = {
   brightWhite: '#c0caf5'
 }
 
+export const STANDARD_TERMINAL_COLORS: TerminalColors = {
+  background: '#000000',
+  foreground: '#cccccc',
+  cursor: '#ffffff',
+  selectionBackground: '#444444',
+  black: '#000000',
+  red: '#cc0000',
+  green: '#00cc00',
+  yellow: '#cccc00',
+  blue: '#0000cc',
+  magenta: '#cc00cc',
+  cyan: '#00cccc',
+  white: '#cccccc',
+  brightBlack: '#666666',
+  brightRed: '#ff0000',
+  brightGreen: '#00ff00',
+  brightYellow: '#ffff00',
+  brightBlue: '#5c5cff',
+  brightMagenta: '#ff00ff',
+  brightCyan: '#00ffff',
+  brightWhite: '#ffffff'
+}
+
 export const LIGHT_TERMINAL_COLORS: TerminalColors = {
   background: '#fafafa',
   foreground: '#383a42',
@@ -96,6 +122,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: {
     mode: 'dark',
     accentColor: '#6366f1',
+    terminalStyle: 'default',
     terminalColors: { ...DARK_TERMINAL_COLORS }
   },
   terminal: {
