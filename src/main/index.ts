@@ -7,6 +7,12 @@ import { createAppMenu } from './menu'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 
+// Set explicit AppUserModelId so Windows groups taskbar icons correctly
+// (must be called before app.whenReady and match electron-builder appId)
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.claude.dock')
+}
+
 // Handle creating/removing shortcuts on Windows when installing/uninstalling (Squirrel only)
 try {
   if (require('electron-squirrel-startup') === true) {
