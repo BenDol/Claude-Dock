@@ -23,6 +23,8 @@ Claude Dock is an Electron app that lets you run multiple [Claude Code](https://
 - **Copy/paste support** - Ctrl+C/V, Ctrl+Shift+C/V, and right-click context menu
 - **Window controls** - Custom frameless window with minimize, maximize, and close
 
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/0448aafb-1a6b-44a0-8aca-b28a3d49d38f" />
+
 ## Setup
 
 ### Prerequisites
@@ -81,10 +83,6 @@ src/
     lib/            # Theme, IPC bridge
   shared/         # Shared types (IPC channels, settings schema)
 ```
-
-## Example
-
-<img width="1200" height="800" alt="image" src="https://github.com/user-attachments/assets/0448aafb-1a6b-44a0-8aca-b28a3d49d38f" />
 
 
 ## License
