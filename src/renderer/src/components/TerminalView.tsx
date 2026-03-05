@@ -14,6 +14,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
   const { initTerminal, fit, focus, gotDataRef } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
+  const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
+
+  // Sync loading state to store
+  useEffect(() => {
+    setTerminalLoading(terminalId, loading)
+  }, [terminalId, loading, setTerminalLoading])
 
   const resizeRef = useResizeObserver(() => {
     fit()

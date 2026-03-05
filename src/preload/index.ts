@@ -47,6 +47,10 @@ export interface DockApi {
     maximize: () => Promise<void>
     close: () => Promise<void>
   }
+  debug: {
+    write: (text: string) => Promise<void>
+    openDevTools: () => Promise<void>
+  }
 }
 
 const dockApi: DockApi = {
@@ -108,6 +112,10 @@ const dockApi: DockApi = {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),
     maximize: () => ipcRenderer.invoke(IPC.WIN_MAXIMIZE),
     close: () => ipcRenderer.invoke(IPC.WIN_CLOSE)
+  },
+  debug: {
+    write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
+    openDevTools: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_DEVTOOLS)
   }
 }
 

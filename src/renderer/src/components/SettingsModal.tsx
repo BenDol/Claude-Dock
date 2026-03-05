@@ -243,6 +243,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <div className="settings-update-status">{updateCheckStatus}</div>
                   )}
                 </div>
+                <div>
+                  <button
+                    className="settings-check-update-btn"
+                    onClick={() => getDockApi().debug.openDevTools()}
+                  >
+                    Open DevTools
+                  </button>
+                </div>
               </div>
             )}
           </div>

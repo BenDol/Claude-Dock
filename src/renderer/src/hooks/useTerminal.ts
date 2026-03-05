@@ -42,6 +42,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       if (dataLenRef.current > 1500) {
         gotDataRef.current = true
       }
+
       if (termRef.current) {
         termRef.current.write(data)
       } else {

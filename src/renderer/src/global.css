@@ -139,6 +139,37 @@ body {
   background: var(--hover-color);
 }
 
+.toolbar-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+}
+
+.toolbar-btn-active {
+  color: #9ece6a;
+  border-color: rgba(158, 206, 106, 0.3);
+}
+
+.toolbar-btn-active:hover {
+  color: #9ece6a;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.toolbar-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: block;
+}
+
 /* Grid */
 .dock-grid-container {
   flex: 1;

@@ -10,6 +10,8 @@ interface DockState {
   freeformLayout: Layout[]
   focusedTerminalId: string | null
   nextTerminalNum: number
+  rcTerminals: Set<string>
+  loadingTerminals: Set<string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -21,6 +23,8 @@ interface DockState {
   setFreeformLayout: (layout: Layout[]) => void
   setFocusedTerminal: (id: string | null) => void
   focusNextTerminal: () => void
+  setTerminalRC: (id: string, active: boolean) => void
+  setTerminalLoading: (id: string, loading: boolean) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -31,6 +35,8 @@ export const useDockStore = create<DockState>((set, get) => ({
   freeformLayout: [],
   focusedTerminalId: null,
   nextTerminalNum: 1,
+  rcTerminals: new Set<string>(),
+  loadingTerminals: new Set<string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -50,7 +56,9 @@ export const useDockStore = create<DockState>((set, get) => ({
             ? terminals[terminals.length - 1].id
             : null
           : state.focusedTerminalId
-      return { terminals, focusedTerminalId }
+      const rcTerminals = new Set(state.rcTerminals)
+      rcTerminals.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -75,5 +83,21 @@ export const useDockStore = create<DockState>((set, get) => ({
       const currentIdx = state.terminals.findIndex((t) => t.id === state.focusedTerminalId)
       const nextIdx = (currentIdx + 1) % state.terminals.length
       return { focusedTerminalId: state.terminals[nextIdx].id }
+    }),
+
+  setTerminalRC: (id, active) =>
+    set((state) => {
+      const next = new Set(state.rcTerminals)
+      if (active) next.add(id)
+      else next.delete(id)
+      return { rcTerminals: next }
+    }),
+
+  setTerminalLoading: (id, loading) =>
+    set((state) => {
+      const next = new Set(state.loadingTerminals)
+      if (loading) next.add(id)
+      else next.delete(id)
+      return { loadingTerminals: next }
     })
 }))

@@ -1,4 +1,6 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
 import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
@@ -145,6 +147,17 @@ export function registerIpcHandlers(): void {
       return filePath
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Download failed')
+    }
+  })
+
+  ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {
+    fs.appendFileSync(path.join(process.cwd(), 'rc-debug.log'), text + '\n')
+  })
+
+  ipcMain.handle(IPC.DEBUG_OPEN_DEVTOOLS, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) {
+      win.webContents.openDevTools()
     }
   })
 
