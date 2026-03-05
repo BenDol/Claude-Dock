@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2019
             platform: win
           - os: macos-latest
             platform: mac
