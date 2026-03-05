@@ -3,6 +3,7 @@ import * as path from 'path'
 import { PtyManager } from './pty-manager'
 import { IPC } from '../shared/ipc-channels'
 import { getSessions, saveSessions, clearSessions } from './session-store'
+import { getWindowState, saveWindowState, WindowState } from './window-state-store'
 
 export class DockWindow {
   readonly id: string
@@ -16,9 +17,12 @@ export class DockWindow {
     this.projectDir = projectDir
     this.savedResumeIds = getSessions(projectDir)
 
+    const saved = getWindowState(projectDir)
+
     this.window = new BrowserWindow({
-      width: 1200,
-      height: 800,
+      width: saved?.width ?? 1200,
+      height: saved?.height ?? 800,
+      ...(saved ? { x: saved.x, y: saved.y } : {}),
       minWidth: 600,
       minHeight: 400,
       frame: false,
@@ -30,6 +34,12 @@ export class DockWindow {
         sandbox: false // Required for node-pty via preload
       }
     })
+
+    if (saved?.maximized) {
+      this.window.maximize()
+    }
+
+    this.trackWindowState()
 
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
@@ -92,6 +102,33 @@ export class DockWindow {
     this.window.on('closed', () => {
       this.ptyManager.killAll()
     })
+  }
+
+  private trackWindowState(): void {
+    let saveTimeout: ReturnType<typeof setTimeout> | null = null
+
+    const save = (): void => {
+      if (saveTimeout) clearTimeout(saveTimeout)
+      saveTimeout = setTimeout(() => {
+        if (this.window.isDestroyed()) return
+        const maximized = this.window.isMaximized()
+        // Save the normal (non-maximized) bounds so restore works properly
+        const bounds = maximized ? this.window.getNormalBounds() : this.window.getBounds()
+        const state: WindowState = {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          maximized
+        }
+        saveWindowState(this.projectDir, state)
+      }, 300)
+    }
+
+    this.window.on('resize', save)
+    this.window.on('move', save)
+    this.window.on('maximize', save)
+    this.window.on('unmaximize', save)
   }
 
   private persistCurrentSessions(): void {
