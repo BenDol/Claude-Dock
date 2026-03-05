@@ -1,5 +1,5 @@
 import type { Settings, TerminalColors } from '../../../shared/settings-schema'
-import { DARK_TERMINAL_COLORS, LIGHT_TERMINAL_COLORS, STANDARD_TERMINAL_COLORS } from '../../../shared/settings-schema'
+import { DARK_TERMINAL_COLORS, LIGHT_TERMINAL_COLORS, STANDARD_TERMINAL_COLORS, CLAUDE_CODE_TERMINAL_COLORS } from '../../../shared/settings-schema'
 
 export function isDarkMode(settings: Settings): boolean {
   return settings.theme.mode === 'dark' ||
@@ -8,6 +8,7 @@ export function isDarkMode(settings: Settings): boolean {
 
 export function getEffectiveTerminalColors(settings: Settings): TerminalColors {
   if (settings.theme.terminalStyle === 'standard') return STANDARD_TERMINAL_COLORS
+  if (settings.theme.terminalStyle === 'claude-code') return CLAUDE_CODE_TERMINAL_COLORS
   const customized = JSON.stringify(settings.theme.terminalColors) !== JSON.stringify(DARK_TERMINAL_COLORS)
   if (customized) return settings.theme.terminalColors
   return isDarkMode(settings) ? DARK_TERMINAL_COLORS : LIGHT_TERMINAL_COLORS

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useSettingsStore } from '../stores/settings-store'
@@ -81,17 +80,6 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.unicode.activeVersion = '11'
 
       term.open(container)
-
-      // Try WebGL addon
-      try {
-        const webglAddon = new WebglAddon()
-        webglAddon.onContextLoss(() => {
-          webglAddon.dispose()
-        })
-        term.loadAddon(webglAddon)
-      } catch {
-        // WebGL not available, fall back to canvas
-      }
 
       fitAddon.fit()
 

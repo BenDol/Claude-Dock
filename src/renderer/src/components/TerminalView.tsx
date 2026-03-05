@@ -47,10 +47,11 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, gotDataRef])
 
-  // Re-fit when loading dismissed (terminal just mounted)
+  // Re-fit when loading dismissed — multiple attempts to handle layout settling
   useEffect(() => {
     if (!loading) {
-      setTimeout(() => fit(), 50)
+      const timers = [50, 200, 500].map((ms) => setTimeout(() => fit(), ms))
+      return () => timers.forEach(clearTimeout)
     }
   }, [loading, fit])
 

@@ -1,4 +1,4 @@
-export type TerminalStyle = 'default' | 'standard'
+export type TerminalStyle = 'default' | 'standard' | 'claude-code'
 
 export interface Settings {
   theme: {
@@ -100,6 +100,29 @@ export const STANDARD_TERMINAL_COLORS: TerminalColors = {
   brightMagenta: '#ff00ff',
   brightCyan: '#00ffff',
   brightWhite: '#ffffff'
+}
+
+export const CLAUDE_CODE_TERMINAL_COLORS: TerminalColors = {
+  background: '#000000',
+  foreground: '#D4D4D4',
+  cursor: '#DA8B55',
+  selectionBackground: '#2D3450',
+  black: '#1A1A1A',
+  red: '#E87D5F',
+  green: '#8BBF65',
+  yellow: '#DA8B55',
+  blue: '#7B9FE8',
+  magenta: '#C49BD6',
+  cyan: '#5FB8C2',
+  white: '#D4D4D4',
+  brightBlack: '#555555',
+  brightRed: '#F09B7F',
+  brightGreen: '#A5D67E',
+  brightYellow: '#E8A86F',
+  brightBlue: '#99B9F0',
+  brightMagenta: '#D4B3E0',
+  brightCyan: '#7FCCD4',
+  brightWhite: '#FFFFFF'
 }
 
 export const LIGHT_TERMINAL_COLORS: TerminalColors = {

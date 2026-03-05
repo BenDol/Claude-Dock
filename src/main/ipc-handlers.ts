@@ -167,7 +167,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DEBUG_OPEN_DEVTOOLS, (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) {
-      win.webContents.openDevTools()
+      win.webContents.openDevTools({ mode: 'detach' })
     }
   })
 

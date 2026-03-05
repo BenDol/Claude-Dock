@@ -89,6 +89,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => updateTheme({ terminalStyle: e.target.value as Settings['theme']['terminalStyle'] })}
                   >
                     <option value="default">Default</option>
+                    <option value="claude-code">Claude Code</option>
                     <option value="standard">Standard Console</option>
                   </select>
                 </label>
