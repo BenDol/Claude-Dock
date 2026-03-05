@@ -38,6 +38,8 @@ if (!gotLock) {
     const manager = DockManager.getInstance()
     if (dir) {
       await manager.createDock(dir)
+    } else if (manager.shouldShowLauncher()) {
+      await manager.showLauncher()
     } else {
       await manager.createDock()
     }
@@ -50,12 +52,22 @@ if (!gotLock) {
 
     const manager = DockManager.getInstance()
     const dir = getProjectDirFromArgs(process.argv)
-    await manager.createDock(dir)
+    if (dir) {
+      await manager.createDock(dir)
+    } else if (manager.shouldShowLauncher()) {
+      await manager.showLauncher()
+    } else {
+      await manager.createDock()
+    }
 
     // macOS: re-create window when dock icon clicked
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        await manager.createDock()
+        if (manager.shouldShowLauncher()) {
+          await manager.showLauncher()
+        } else {
+          await manager.createDock()
+        }
       }
     })
   })

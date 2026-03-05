@@ -3,13 +3,36 @@ import DockGrid from './components/DockGrid'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
 import SettingsModal from './components/SettingsModal'
+import Launcher from './components/Launcher'
 import { useDockStore } from './stores/dock-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
+import { applyThemeToDocument } from './lib/theme'
+
+const isLauncher = new URLSearchParams(window.location.search).has('launcher')
+
+function App() {
+  if (isLauncher) {
+    return <LauncherApp />
+  }
+  return <DockApp />
+}
+
+function LauncherApp() {
+  const loadSettings = useSettingsStore((s) => s.load)
+
+  useEffect(() => {
+    loadSettings().then(() => {
+      applyThemeToDocument(useSettingsStore.getState().settings)
+    })
+  }, [loadSettings])
+
+  return <Launcher />
+}
 
 let nextTermId = 1
 
-function App() {
+function DockApp() {
   const terminals = useDockStore((s) => s.terminals)
   const projectDir = useDockStore((s) => s.projectDir)
   const setDockInfo = useDockStore((s) => s.setDockInfo)

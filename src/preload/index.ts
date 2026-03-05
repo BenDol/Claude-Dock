@@ -22,6 +22,9 @@ export interface DockApi {
   app: {
     newDock: () => Promise<void>
     pickDirectory: () => Promise<string | null>
+    getRecentPaths: () => Promise<{ path: string; name: string; lastOpened: number }[]>
+    removeRecentPath: (dir: string) => Promise<void>
+    openDockPath: (dir: string) => Promise<void>
   }
   win: {
     minimize: () => Promise<void>
@@ -67,7 +70,10 @@ const dockApi: DockApi = {
   },
   app: {
     newDock: () => ipcRenderer.invoke(IPC.APP_NEW_DOCK),
-    pickDirectory: () => ipcRenderer.invoke(IPC.APP_PICK_DIRECTORY)
+    pickDirectory: () => ipcRenderer.invoke(IPC.APP_PICK_DIRECTORY),
+    getRecentPaths: () => ipcRenderer.invoke(IPC.APP_GET_RECENT_PATHS),
+    removeRecentPath: (dir) => ipcRenderer.invoke(IPC.APP_REMOVE_RECENT_PATH, dir),
+    openDockPath: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_DOCK_PATH, dir)
   },
   win: {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),

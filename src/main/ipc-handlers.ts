@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
+import { getRecentPaths, removeRecentPath } from './recent-store'
 
 export function registerIpcHandlers(): void {
   const manager = DockManager.getInstance()
@@ -60,7 +61,11 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.APP_NEW_DOCK, async () => {
-    await manager.createDock()
+    if (manager.shouldShowLauncher()) {
+      await manager.showLauncher()
+    } else {
+      await manager.createDock()
+    }
   })
 
   ipcMain.handle(IPC.WIN_MINIMIZE, (event) => {
@@ -89,6 +94,23 @@ export function registerIpcHandlers(): void {
       return null
     }
     return result.filePaths[0]
+  })
+
+  ipcMain.handle(IPC.APP_GET_RECENT_PATHS, () => {
+    return getRecentPaths()
+  })
+
+  ipcMain.handle(IPC.APP_REMOVE_RECENT_PATH, (_event, dir: string) => {
+    removeRecentPath(dir)
+  })
+
+  ipcMain.handle(IPC.APP_OPEN_DOCK_PATH, async (event, dir: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    await manager.createDock(dir)
+    // Close the launcher window
+    if (win && !win.isDestroyed()) {
+      win.close()
+    }
   })
 }
 

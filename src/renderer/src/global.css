@@ -496,6 +496,181 @@ body {
   color: var(--text-secondary);
 }
 
+/* Launcher */
+.launcher {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.launcher-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.launcher-titlebar-drag {
+  flex: 1;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+
+.launcher-win-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+
+.launcher-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px 24px;
+  min-height: 0;
+}
+
+.launcher-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.launcher-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.launcher-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.launcher-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+.launcher-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.launcher-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.launcher-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.launcher-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+
+.launcher-item:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+.launcher-item:hover .launcher-item-remove {
+  opacity: 1;
+}
+
+.launcher-item-icon {
+  color: var(--accent-color);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.launcher-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.launcher-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.launcher-item-path {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--term-font-family);
+}
+
+.launcher-item-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.launcher-item-remove {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+
+.launcher-item-remove:hover {
+  color: #f7768e;
+  background: #f7768e22;
+}
+
+.launcher-footer {
+  padding-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.launcher-browse-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 8px 24px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.launcher-browse-btn:hover {
+  opacity: 0.9;
+}
+
 /* react-grid-layout overrides */
 .react-grid-item > .react-resizable-handle {
   background: none;
