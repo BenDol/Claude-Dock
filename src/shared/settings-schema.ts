@@ -46,32 +46,57 @@ export interface TerminalColors {
   brightWhite: string
 }
 
+export const DARK_TERMINAL_COLORS: TerminalColors = {
+  background: '#1a1b26',
+  foreground: '#c0caf5',
+  cursor: '#c0caf5',
+  selectionBackground: '#33467c',
+  black: '#15161e',
+  red: '#f7768e',
+  green: '#9ece6a',
+  yellow: '#e0af68',
+  blue: '#7aa2f7',
+  magenta: '#bb9af7',
+  cyan: '#7dcfff',
+  white: '#a9b1d6',
+  brightBlack: '#414868',
+  brightRed: '#f7768e',
+  brightGreen: '#9ece6a',
+  brightYellow: '#e0af68',
+  brightBlue: '#7aa2f7',
+  brightMagenta: '#bb9af7',
+  brightCyan: '#7dcfff',
+  brightWhite: '#c0caf5'
+}
+
+export const LIGHT_TERMINAL_COLORS: TerminalColors = {
+  background: '#fafafa',
+  foreground: '#383a42',
+  cursor: '#526eff',
+  selectionBackground: '#bfceff',
+  black: '#383a42',
+  red: '#e45649',
+  green: '#50a14f',
+  yellow: '#c18401',
+  blue: '#4078f2',
+  magenta: '#a626a4',
+  cyan: '#0184bc',
+  white: '#a0a1a7',
+  brightBlack: '#696c77',
+  brightRed: '#e45649',
+  brightGreen: '#50a14f',
+  brightYellow: '#c18401',
+  brightBlue: '#4078f2',
+  brightMagenta: '#a626a4',
+  brightCyan: '#0184bc',
+  brightWhite: '#fafafa'
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: {
     mode: 'dark',
     accentColor: '#6366f1',
-    terminalColors: {
-      background: '#1a1b26',
-      foreground: '#c0caf5',
-      cursor: '#c0caf5',
-      selectionBackground: '#33467c',
-      black: '#15161e',
-      red: '#f7768e',
-      green: '#9ece6a',
-      yellow: '#e0af68',
-      blue: '#7aa2f7',
-      magenta: '#bb9af7',
-      cyan: '#7dcfff',
-      white: '#a9b1d6',
-      brightBlack: '#414868',
-      brightRed: '#f7768e',
-      brightGreen: '#9ece6a',
-      brightYellow: '#e0af68',
-      brightBlue: '#7aa2f7',
-      brightMagenta: '#bb9af7',
-      brightCyan: '#7dcfff',
-      brightWhite: '#c0caf5'
-    }
+    terminalColors: { ...DARK_TERMINAL_COLORS }
   },
   terminal: {
     fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace",
@@ -83,7 +108,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   grid: {
     maxColumns: 4,
-    gapSize: 8,
+    gapSize: 0,
     defaultMode: 'auto'
   },
   behavior: {

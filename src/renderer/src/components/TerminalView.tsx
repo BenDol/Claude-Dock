@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminal } from '../hooks/useTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
-import { useAutoTitle } from '../hooks/useAutoTitle'
 import { useDockStore } from '../stores/dock-store'
+import { getDockApi } from '../lib/ipc-bridge'
 
 interface TerminalViewProps {
   terminalId: string
@@ -11,34 +11,75 @@ interface TerminalViewProps {
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, focus } = useTerminal({ terminalId })
-  useAutoTitle(terminalId)
+  const { initTerminal, fit, focus, gotDataRef } = useTerminal({ terminalId })
+  const [loading, setLoading] = useState(true)
+  const mountTimeRef = useRef(Date.now())
 
   const resizeRef = useResizeObserver(() => {
     fit()
   }, 100)
 
-  // Focus terminal when it becomes the focused one
+  // Poll gotDataRef until enough data arrives + minimum display time, then dismiss loading
   useEffect(() => {
-    if (isFocused) {
-      // Small delay to ensure DOM is ready
+    if (!loading) return
+    const MIN_DISPLAY_MS = 800
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - mountTimeRef.current
+      if (gotDataRef.current && elapsed >= MIN_DISPLAY_MS) {
+        setLoading(false)
+        clearInterval(interval)
+      }
+    }, 50)
+    // Safety timeout: dismiss after 15s regardless
+    const timeout = setTimeout(() => {
+      setLoading(false)
+      clearInterval(interval)
+    }, 15000)
+    return () => {
+      clearInterval(interval)
+      clearTimeout(timeout)
+    }
+  }, [loading, gotDataRef])
+
+  // Re-fit when loading dismissed (terminal just mounted)
+  useEffect(() => {
+    if (!loading) {
+      setTimeout(() => fit(), 50)
+    }
+  }, [loading, fit])
+
+  useEffect(() => {
+    if (isFocused && !loading) {
       const timer = setTimeout(() => focus(), 50)
       return () => clearTimeout(timer)
     }
-  }, [isFocused, focus])
+  }, [isFocused, loading, focus])
+
+  if (loading) {
+    return (
+      <div className="terminal-view-wrapper">
+        <div className="terminal-loading">
+          <div className="terminal-spinner" />
+          <span>Starting claude...</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div
-      className="terminal-view"
-      ref={(el) => {
-        resizeRef(el)
-        if (el) initTerminal(el)
-      }}
-      onClick={() => {
-        useDockStore.getState().setFocusedTerminal(terminalId)
-        focus()
-      }}
-    />
+    <div className="terminal-view-wrapper">
+      <div
+        className="terminal-view"
+        ref={(el) => {
+          resizeRef(el)
+          if (el) initTerminal(el)
+        }}
+        onClick={() => {
+          useDockStore.getState().setFocusedTerminal(terminalId)
+          focus()
+        }}
+      />
+    </div>
   )
 }
 

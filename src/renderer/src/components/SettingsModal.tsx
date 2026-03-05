@@ -153,7 +153,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     min={0}
                     max={32}
                     value={settings.grid.gapSize}
-                    onChange={(e) => updateGrid({ gapSize: parseInt(e.target.value) || 8 })}
+                    onChange={(e) => { const v = parseInt(e.target.value); updateGrid({ gapSize: isNaN(v) ? 0 : v }) }}
                   />
                 </label>
                 <label>

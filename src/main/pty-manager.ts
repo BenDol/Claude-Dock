@@ -1,43 +1,58 @@
 import * as pty from 'node-pty'
+import * as crypto from 'crypto'
 import { getDefaultShell, getShellArgs } from './util/shell'
 
 export interface PtyInstance {
   id: string
   process: pty.IPty
   cwd: string
+  sessionId: string
 }
 
 export class PtyManager {
   private ptys = new Map<string, PtyInstance>()
   private onData: (terminalId: string, data: string) => void
   private onExit: (terminalId: string, exitCode: number) => void
+  private onSessionCreated: (sessionId: string) => void
+  private onSessionsChanged: () => void
+  // Serial launch queue to prevent claude config file race conditions
+  private launchQueue: (() => void)[] = []
+  private launching = false
 
   constructor(
     onData: (terminalId: string, data: string) => void,
-    onExit: (terminalId: string, exitCode: number) => void
+    onExit: (terminalId: string, exitCode: number) => void,
+    onSessionCreated: (sessionId: string) => void,
+    onSessionsChanged: () => void
   ) {
     this.onData = onData
     this.onExit = onExit
+    this.onSessionCreated = onSessionCreated
+    this.onSessionsChanged = onSessionsChanged
   }
 
-  spawn(terminalId: string, cwd: string): void {
-    // Spawn claude directly via the system shell so PATH resolution works
+  spawn(terminalId: string, cwd: string, resumeId?: string): void {
     const shell = getDefaultShell()
-    const isWindows = process.platform === 'win32'
-    const args = isWindows ? ['/c', 'claude'] : ['-c', 'claude']
+    const args = getShellArgs(shell)
+    const sessionId = resumeId ?? crypto.randomUUID()
 
     const ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd,
-      env: process.env as Record<string, string>
+      env: {
+        ...process.env as Record<string, string>,
+        COLORTERM: 'truecolor',
+        TERM_PROGRAM: 'claude-dock'
+      }
     })
 
     const instance: PtyInstance = {
       id: terminalId,
       process: ptyProcess,
-      cwd
+      cwd,
+      sessionId
     }
 
     this.ptys.set(terminalId, instance)
@@ -49,7 +64,48 @@ export class PtyManager {
     ptyProcess.onExit(({ exitCode }) => {
       this.ptys.delete(terminalId)
       this.onExit(terminalId, exitCode)
+      this.onSessionsChanged()
     })
+
+    const cmd = resumeId
+      ? `claude --resume ${sessionId}\r`
+      : `claude --session-id ${sessionId}\r`
+
+    // Persist session immediately for fresh terminals
+    if (!resumeId) {
+      this.onSessionCreated(sessionId)
+    }
+
+    // Queue the claude launch to run serially
+    this.enqueueLaunch(() => {
+      if (this.ptys.has(terminalId)) {
+        ptyProcess.write(cmd)
+      }
+    })
+  }
+
+  private enqueueLaunch(fn: () => void): void {
+    this.launchQueue.push(fn)
+    if (!this.launching) {
+      this.processQueue()
+    }
+  }
+
+  private processQueue(): void {
+    if (this.launchQueue.length === 0) {
+      this.launching = false
+      return
+    }
+    this.launching = true
+    const next = this.launchQueue.shift()!
+    setTimeout(() => {
+      next()
+      setTimeout(() => this.processQueue(), 3000)
+    }, 200)
+  }
+
+  getSessionIds(): string[] {
+    return Array.from(this.ptys.values()).map((p) => p.sessionId)
   }
 
   write(terminalId: string, data: string): void {
@@ -75,6 +131,7 @@ export class PtyManager {
     if (instance) {
       instance.process.kill()
       this.ptys.delete(terminalId)
+      this.onSessionsChanged()
     }
   }
 

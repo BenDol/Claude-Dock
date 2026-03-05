@@ -34,7 +34,8 @@ const DockGrid: React.FC = () => {
   }, [])
 
   const rows = Math.max(1, Math.ceil(terminals.length / cols))
-  const rowHeight = Math.floor((containerHeight - (rows + 1) * gapSize) / rows)
+  const totalGap = gapSize * (rows - 1)
+  const rowHeight = Math.floor((containerHeight - totalGap) / rows)
 
   const onLayoutChange = useCallback(
     (newLayout: ReactGridLayout.Layout[]) => {
@@ -56,6 +57,7 @@ const DockGrid: React.FC = () => {
         rowHeight={rowHeight}
         width={containerWidth}
         margin={[gapSize, gapSize]}
+        containerPadding={[0, 0]}
         isDraggable={gridMode === 'freeform'}
         isResizable={gridMode === 'freeform'}
         draggableHandle=".terminal-card-header"

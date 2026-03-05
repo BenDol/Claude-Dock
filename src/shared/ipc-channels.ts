@@ -9,6 +9,9 @@ export const IPC = {
   SETTINGS_SET: 'settings:set',
   APP_NEW_DOCK: 'app:newDock',
   APP_PICK_DIRECTORY: 'app:pickDirectory',
+  WIN_MINIMIZE: 'win:minimize',
+  WIN_MAXIMIZE: 'win:maximize',
+  WIN_CLOSE: 'win:close',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',

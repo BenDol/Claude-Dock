@@ -11,7 +11,12 @@
       "Bash(npx:*)",
       "Bash(GYP_DEFINES=\"spectre_mitigation=false\" npx:*)",
       "Bash(grep:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(ls:*)",
+      "Bash(tasklist:*)",
+      "Bash(unzip:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)"
     ]
   }
 }

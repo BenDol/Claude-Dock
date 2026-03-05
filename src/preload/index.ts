@@ -23,6 +23,11 @@ export interface DockApi {
     newDock: () => Promise<void>
     pickDirectory: () => Promise<string | null>
   }
+  win: {
+    minimize: () => Promise<void>
+    maximize: () => Promise<void>
+    close: () => Promise<void>
+  }
 }
 
 const dockApi: DockApi = {
@@ -63,6 +68,11 @@ const dockApi: DockApi = {
   app: {
     newDock: () => ipcRenderer.invoke(IPC.APP_NEW_DOCK),
     pickDirectory: () => ipcRenderer.invoke(IPC.APP_PICK_DIRECTORY)
+  },
+  win: {
+    minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),
+    maximize: () => ipcRenderer.invoke(IPC.WIN_MAXIMIZE),
+    close: () => ipcRenderer.invoke(IPC.WIN_CLOSE)
   }
 }
 

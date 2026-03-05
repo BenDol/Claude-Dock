@@ -1,14 +1,26 @@
-import type { Settings } from '../../../shared/settings-schema'
+import type { Settings, TerminalColors } from '../../../shared/settings-schema'
+import { DARK_TERMINAL_COLORS, LIGHT_TERMINAL_COLORS } from '../../../shared/settings-schema'
+
+export function isDarkMode(settings: Settings): boolean {
+  return settings.theme.mode === 'dark' ||
+    (settings.theme.mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
+
+export function getEffectiveTerminalColors(settings: Settings): TerminalColors {
+  const customized = JSON.stringify(settings.theme.terminalColors) !== JSON.stringify(DARK_TERMINAL_COLORS)
+  if (customized) return settings.theme.terminalColors
+  return isDarkMode(settings) ? DARK_TERMINAL_COLORS : LIGHT_TERMINAL_COLORS
+}
 
 export function applyThemeToDocument(settings: Settings): void {
   const root = document.documentElement
-  const { theme, terminal } = settings
+  const { terminal } = settings
 
   // UI theme
-  root.style.setProperty('--accent-color', theme.accentColor)
+  root.style.setProperty('--accent-color', settings.theme.accentColor)
 
   // Terminal colors
-  const tc = theme.terminalColors
+  const tc = getEffectiveTerminalColors(settings)
   root.style.setProperty('--term-bg', tc.background)
   root.style.setProperty('--term-fg', tc.foreground)
   root.style.setProperty('--term-cursor', tc.cursor)
@@ -23,8 +35,5 @@ export function applyThemeToDocument(settings: Settings): void {
   root.style.setProperty('--grid-gap', `${settings.grid.gapSize}px`)
 
   // Dark/light mode
-  const isDark = theme.mode === 'dark' ||
-    (theme.mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-
-  root.setAttribute('data-theme', isDark ? 'dark' : 'light')
+  root.setAttribute('data-theme', isDarkMode(settings) ? 'dark' : 'light')
 }

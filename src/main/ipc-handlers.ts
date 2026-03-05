@@ -9,7 +9,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     if (dock) {
-      dock.ptyManager.spawn(terminalId, dock.projectDir)
+      const resumeId = dock.getNextResumeId()
+      dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId)
       return true
     }
     return false
@@ -39,7 +40,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.DOCK_GET_INFO, (event) => {
     const dock = getDockForEvent(event)
     if (dock) {
-      return { id: dock.id, projectDir: dock.projectDir }
+      return { id: dock.id, projectDir: dock.projectDir, savedSessionCount: dock.savedSessionCount }
     }
     return null
   })
@@ -60,6 +61,23 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.APP_NEW_DOCK, async () => {
     await manager.createDock()
+  })
+
+  ipcMain.handle(IPC.WIN_MINIMIZE, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.minimize()
+  })
+
+  ipcMain.handle(IPC.WIN_MAXIMIZE, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) {
+      win.isMaximized() ? win.unmaximize() : win.maximize()
+    }
+  })
+
+  ipcMain.handle(IPC.WIN_CLOSE, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win?.close()
   })
 
   ipcMain.handle(IPC.APP_PICK_DIRECTORY, async () => {
