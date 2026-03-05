@@ -21,6 +21,8 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const dataLenRef = useRef(0)
   const gotDataRef = useRef(false)
   const mountTimeRef = useRef(Date.now())
+  const lastColsRef = useRef(0)
+  const lastRowsRef = useRef(0)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -172,15 +174,22 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     if (fitAddonRef.current && termRef.current) {
       try {
         const term = termRef.current
-        // Clear scrollback before resize to prevent xterm reflow duplication
-        // But skip during first 10s so resumed sessions keep their history
-        if (Date.now() - mountTimeRef.current > 10000) {
-          term.clear()
-        }
+        const prevCols = lastColsRef.current
+        const prevRows = lastRowsRef.current
         fitAddonRef.current.fit()
         const { cols, rows } = term
-        getDockApi().terminal.resize(terminalId, cols, rows)
-        term.scrollToBottom()
+        // Only notify PTY and clear if dimensions actually changed
+        if (cols !== prevCols || rows !== prevRows) {
+          lastColsRef.current = cols
+          lastRowsRef.current = rows
+          // Clear scrollback on real resize to prevent xterm reflow duplication
+          // But skip during first 10s so resumed sessions keep their history
+          if (prevCols > 0 && Date.now() - mountTimeRef.current > 10000) {
+            term.clear()
+          }
+          getDockApi().terminal.resize(terminalId, cols, rows)
+          term.scrollToBottom()
+        }
       } catch {
         // Ignore fit errors
       }
@@ -220,7 +229,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   }, [settings, terminalId])
 
   const focus = useCallback(() => {
-    termRef.current?.focus()
+    if (termRef.current) {
+      termRef.current.focus()
+      termRef.current.refresh(0, termRef.current.rows - 1)
+    }
   }, [])
 
   return { initTerminal, fit, focus, termRef, gotDataRef }
