@@ -28,7 +28,13 @@ export default defineConfig({
       __DEBUG_DEFAULT__: JSON.stringify(debugDefault)
     },
     build: {
-      outDir: 'out/main'
+      outDir: 'out/main',
+      rollupOptions: {
+        input: {
+          index: 'src/main/index.ts',
+          'pty-host': 'src/main/pty-host.ts'
+        }
+      }
     }
   },
   preload: {

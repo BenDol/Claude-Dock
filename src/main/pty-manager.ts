@@ -1,11 +1,12 @@
-import * as pty from 'node-pty'
+import * as path from 'path'
 import * as crypto from 'crypto'
+import { utilityProcess, UtilityProcess } from 'electron'
 import { getDefaultShell, getShellArgs } from './util/shell'
 import { log, logError } from './logger'
 
 export interface PtyInstance {
   id: string
-  process: pty.IPty
+  pid: number
   cwd: string
   sessionId: string
 }
@@ -23,6 +24,8 @@ export class PtyManager {
   // Data batching to reduce IPC overhead
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  // Utility process hosting node-pty
+  private host: UtilityProcess | null = null
 
   constructor(
     onData: (terminalId: string, data: string) => void,
@@ -34,6 +37,47 @@ export class PtyManager {
     this.onExit = onExit
     this.onSessionCreated = onSessionCreated
     this.onSessionsChanged = onSessionsChanged
+    this.startHost()
+  }
+
+  private startHost(): void {
+    const hostPath = path.join(__dirname, 'pty-host.js')
+    log(`PtyManager: starting pty-host from ${hostPath}`)
+    this.host = utilityProcess.fork(hostPath, [], {
+      serviceName: 'pty-host'
+    })
+    this.host.on('message', (msg: any) => {
+      switch (msg.type) {
+        case 'data':
+          this.bufferData(msg.terminalId, msg.data)
+          break
+        case 'exit':
+          this.ptys.delete(msg.terminalId)
+          this.onExit(msg.terminalId, msg.exitCode)
+          if (!this.suppressSessionChanges) {
+            this.onSessionsChanged()
+          }
+          break
+        case 'spawned':
+          log(`pty-host: spawned ${msg.terminalId} pid=${msg.pid}`)
+          break
+        case 'error':
+          logError(`pty-host: spawn error ${msg.terminalId}: ${msg.error}`)
+          break
+      }
+    })
+    this.host.on('exit', (code) => {
+      log(`PtyManager: pty-host exited code=${code}`)
+      this.host = null
+    })
+  }
+
+  private sendToHost(msg: any): void {
+    if (this.host) {
+      this.host.postMessage(msg)
+    } else {
+      logError('PtyManager: pty-host not running')
+    }
   }
 
   spawn(terminalId: string, cwd: string, resumeId?: string): void {
@@ -42,37 +86,28 @@ export class PtyManager {
     const sessionId = resumeId ?? crypto.randomUUID()
 
     log(`pty.spawn: terminalId=${terminalId} shell=${shell} cwd=${cwd} resume=${!!resumeId}`)
-    const ptyProcess = pty.spawn(shell, args, {
-      name: 'xterm-256color',
+
+    const instance: PtyInstance = {
+      id: terminalId,
+      pid: 0,
+      cwd,
+      sessionId
+    }
+    this.ptys.set(terminalId, instance)
+
+    this.sendToHost({
+      type: 'spawn',
+      terminalId,
+      shell,
+      args,
+      cwd,
+      sessionId,
       cols: 80,
       rows: 24,
-      cwd,
       env: {
         ...process.env as Record<string, string>,
         COLORTERM: 'truecolor',
         TERM_PROGRAM: 'claude-dock'
-      }
-    })
-
-    const instance: PtyInstance = {
-      id: terminalId,
-      process: ptyProcess,
-      cwd,
-      sessionId
-    }
-
-    this.ptys.set(terminalId, instance)
-    log(`pty.spawn: process created pid=${ptyProcess.pid}`)
-
-    ptyProcess.onData((data) => {
-      this.bufferData(terminalId, data)
-    })
-
-    ptyProcess.onExit(({ exitCode }) => {
-      this.ptys.delete(terminalId)
-      this.onExit(terminalId, exitCode)
-      if (!this.suppressSessionChanges) {
-        this.onSessionsChanged()
       }
     })
 
@@ -88,7 +123,7 @@ export class PtyManager {
     // Queue the claude launch to run serially
     this.enqueueLaunch(() => {
       if (this.ptys.has(terminalId)) {
-        ptyProcess.write(cmd)
+        this.sendToHost({ type: 'write', terminalId, data: cmd })
       }
     })
   }
@@ -134,27 +169,20 @@ export class PtyManager {
   }
 
   write(terminalId: string, data: string): void {
-    const instance = this.ptys.get(terminalId)
-    if (instance) {
-      instance.process.write(data)
+    if (this.ptys.has(terminalId)) {
+      this.sendToHost({ type: 'write', terminalId, data })
     }
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
-    const instance = this.ptys.get(terminalId)
-    if (instance) {
-      try {
-        instance.process.resize(cols, rows)
-      } catch {
-        // Ignore resize errors (process may have exited)
-      }
+    if (this.ptys.has(terminalId)) {
+      this.sendToHost({ type: 'resize', terminalId, cols, rows })
     }
   }
 
   kill(terminalId: string): void {
-    const instance = this.ptys.get(terminalId)
-    if (instance) {
-      instance.process.kill()
+    if (this.ptys.has(terminalId)) {
+      this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
       if (!this.suppressSessionChanges) {
@@ -170,10 +198,14 @@ export class PtyManager {
       this.flushTimer = null
     }
     this.pendingData.clear()
-    for (const [id] of this.ptys) {
-      this.kill(id)
-    }
+    this.sendToHost({ type: 'killAll' })
+    this.ptys.clear()
     this.suppressSessionChanges = false
+    // Terminate the host process
+    if (this.host) {
+      this.host.kill()
+      this.host = null
+    }
   }
 
   has(terminalId: string): boolean {
