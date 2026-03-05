@@ -2,6 +2,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { Settings } from '../shared/settings-schema'
 
+export interface UpdateInfo {
+  available: boolean
+  version: string
+  releaseNotes: string
+  downloadUrl: string
+  assetName: string
+  assetSize: number
+}
+
 export interface DockApi {
   terminal: {
     spawn: (terminalId: string) => Promise<boolean>
@@ -25,6 +34,12 @@ export interface DockApi {
     getRecentPaths: () => Promise<{ path: string; name: string; lastOpened: number }[]>
     removeRecentPath: (dir: string) => Promise<void>
     openDockPath: (dir: string) => Promise<void>
+  }
+  updater: {
+    check: (profile: string) => Promise<UpdateInfo>
+    download: (url: string, assetName: string) => Promise<string>
+    install: () => Promise<void>
+    onProgress: (callback: (downloaded: number, total: number) => void) => () => void
   }
   win: {
     minimize: () => Promise<void>
@@ -74,6 +89,18 @@ const dockApi: DockApi = {
     getRecentPaths: () => ipcRenderer.invoke(IPC.APP_GET_RECENT_PATHS),
     removeRecentPath: (dir) => ipcRenderer.invoke(IPC.APP_REMOVE_RECENT_PATH, dir),
     openDockPath: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_DOCK_PATH, dir)
+  },
+  updater: {
+    check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),
+    download: (url, assetName) => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD, url, assetName),
+    install: () => ipcRenderer.invoke(IPC.UPDATER_INSTALL),
+    onProgress: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, downloaded: number, total: number) => {
+        callback(downloaded, total)
+      }
+      ipcRenderer.on(IPC.UPDATER_PROGRESS, handler)
+      return () => ipcRenderer.removeListener(IPC.UPDATER_PROGRESS, handler)
+    }
   },
   win: {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),

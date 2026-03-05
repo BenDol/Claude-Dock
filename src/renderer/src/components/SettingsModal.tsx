@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useSettingsStore } from '../stores/settings-store'
+import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
 
 interface SettingsModalProps {
@@ -12,6 +13,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [tab, setTab] = useState<SettingsTab>('appearance')
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsStore((s) => s.update)
+  const [updateCheckStatus, setUpdateCheckStatus] = useState('')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   const updateTheme = (partial: Partial<Settings['theme']>) => {
     update({ theme: { ...settings.theme, ...partial } })
@@ -24,6 +27,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   }
   const updateBehavior = (partial: Partial<Settings['behavior']>) => {
     update({ behavior: { ...settings.behavior, ...partial } })
+  }
+  const updateUpdater = (partial: Partial<Settings['updater']>) => {
+    update({ updater: { ...settings.updater, ...partial } })
+  }
+
+  const handleCheckForUpdates = async () => {
+    setCheckingUpdate(true)
+    setUpdateCheckStatus('Checking...')
+    try {
+      const profile = settings.updater?.profile || 'latest'
+      const info = await getDockApi().updater.check(profile)
+      if (info.available) {
+        setUpdateCheckStatus(`Update available: ${info.version}. Restart the launcher to update.`)
+      } else {
+        setUpdateCheckStatus('You are up to date.')
+      }
+    } catch {
+      setUpdateCheckStatus('Failed to check for updates.')
+    }
+    setCheckingUpdate(false)
   }
 
   return (
@@ -198,6 +221,28 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Auto-spawn first terminal
                 </label>
+                <label>
+                  Update Profile
+                  <select
+                    value={settings.updater?.profile || 'latest'}
+                    onChange={(e) => updateUpdater({ profile: e.target.value })}
+                  >
+                    <option value="latest">Latest (stable)</option>
+                    <option value="bleeding-edge">Bleeding Edge</option>
+                  </select>
+                </label>
+                <div>
+                  <button
+                    className="settings-check-update-btn"
+                    onClick={handleCheckForUpdates}
+                    disabled={checkingUpdate}
+                  >
+                    {checkingUpdate ? 'Checking...' : 'Check for Updates'}
+                  </button>
+                  {updateCheckStatus && (
+                    <div className="settings-update-status">{updateCheckStatus}</div>
+                  )}
+                </div>
               </div>
             )}
           </div>

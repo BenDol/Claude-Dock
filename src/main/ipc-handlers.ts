@@ -3,6 +3,9 @@ import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
+import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
+
+declare const __DEV__: boolean
 
 export function registerIpcHandlers(): void {
   const manager = DockManager.getInstance()
@@ -110,6 +113,40 @@ export function registerIpcHandlers(): void {
     // Close the launcher window
     if (win && !win.isDestroyed()) {
       win.close()
+    }
+  })
+
+  ipcMain.handle(IPC.UPDATER_CHECK, async (_event, profile: string) => {
+    if (__DEV__) {
+      return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
+    }
+    try {
+      return await checkForUpdate(profile)
+    } catch {
+      return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
+    }
+  })
+
+  ipcMain.handle(IPC.UPDATER_DOWNLOAD, async (event, url: string, assetName: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    try {
+      const filePath = await downloadUpdate(url, assetName, (downloaded, total) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send(IPC.UPDATER_PROGRESS, downloaded, total)
+        }
+      })
+      setDownloadedPath(filePath)
+      return filePath
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'Download failed')
+    }
+  })
+
+  ipcMain.handle(IPC.UPDATER_INSTALL, () => {
+    try {
+      installAndRestart()
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : 'Install failed')
     }
   })
 }

@@ -24,6 +24,9 @@ export interface Settings {
     confirmCloseWithRunning: boolean
     autoSpawnFirstTerminal: boolean
   }
+  updater: {
+    profile: string // 'latest' | 'bleeding-edge' | specific release tag
+  }
 }
 
 export interface TerminalColors {
@@ -141,5 +144,8 @@ export const DEFAULT_SETTINGS: Settings = {
   behavior: {
     confirmCloseWithRunning: true,
     autoSpawnFirstTerminal: true
+  },
+  updater: {
+    profile: 'latest'
   }
 }

@@ -1,13 +1,19 @@
 import Store from 'electron-store'
 import { Settings, DEFAULT_SETTINGS } from '../shared/settings-schema'
 
+declare const __UPDATE_PROFILE__: string
+
 let store: Store<Settings> | null = null
 
 function getStore(): Store<Settings> {
   if (!store) {
+    const defaults = {
+      ...DEFAULT_SETTINGS,
+      updater: { ...DEFAULT_SETTINGS.updater, profile: __UPDATE_PROFILE__ }
+    }
     store = new Store<Settings>({
       name: 'settings',
-      defaults: DEFAULT_SETTINGS
+      defaults
     })
   }
   return store

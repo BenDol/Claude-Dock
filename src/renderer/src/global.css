@@ -671,6 +671,136 @@ body {
   opacity: 0.9;
 }
 
+/* Updater Banner */
+.updater-banner {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.updater-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.updater-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.updater-icon {
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.updater-icon-success {
+  color: #9ece6a;
+}
+
+.updater-icon-error {
+  color: #f7768e;
+}
+
+.updater-text {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.updater-text strong {
+  color: var(--accent-color);
+}
+
+.updater-text-error {
+  color: #f7768e;
+}
+
+.updater-size {
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+.updater-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 22px;
+}
+
+.updater-btn {
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.updater-btn:hover {
+  opacity: 0.85;
+}
+
+.updater-btn-primary {
+  background: var(--accent-color);
+  color: white;
+}
+
+.updater-btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.updater-progress-track {
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.updater-progress-bar {
+  height: 100%;
+  background: var(--accent-color);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+/* Settings updater section */
+.settings-check-update-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-check-update-btn:hover {
+  background: var(--hover-color);
+}
+
+.settings-check-update-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-update-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
 /* react-grid-layout overrides */
 .react-grid-item > .react-resizable-handle {
   background: none;

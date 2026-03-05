@@ -15,9 +15,13 @@ export const IPC = {
   WIN_MINIMIZE: 'win:minimize',
   WIN_MAXIMIZE: 'win:maximize',
   WIN_CLOSE: 'win:close',
+  UPDATER_CHECK: 'updater:check',
+  UPDATER_DOWNLOAD: 'updater:download',
+  UPDATER_INSTALL: 'updater:install',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
-  SETTINGS_CHANGED: 'settings:changed'
+  SETTINGS_CHANGED: 'settings:changed',
+  UPDATER_PROGRESS: 'updater:progress'
 } as const
