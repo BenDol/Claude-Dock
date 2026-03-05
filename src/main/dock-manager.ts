@@ -60,9 +60,10 @@ export class DockManager {
 
     this.launcherWindow = new BrowserWindow({
       width: 500,
-      height: 450,
+      height: 550,
+      minWidth: 400,
+      minHeight: 350,
       frame: false,
-      resizable: false,
       title: 'Claude Dock',
       backgroundColor: isDark ? '#0f0f14' : '#f5f5f5',
       webPreferences: {
