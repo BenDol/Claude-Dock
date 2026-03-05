@@ -192,9 +192,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             )}
           </div>
         </div>
+        <div className="modal-footer">
+          {__BUILD_SHA__} &middot; {__BUILD_DATE__}
+        </div>
       </div>
     </div>
   )
 }
+
+declare const __BUILD_SHA__: string
+declare const __BUILD_DATE__: string
 
 export default SettingsModal
