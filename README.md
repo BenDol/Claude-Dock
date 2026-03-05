@@ -27,6 +27,7 @@ Claude Dock is an Electron app that lets you run multiple [Claude Code](https://
 - **Customizable terminal** - Font family, font size, line height, cursor style, scrollback, and full 16-color palette
 - **Serialized launches** - Claude instances are launched sequentially to prevent config file race conditions
 - **Copy/paste support** - Ctrl+C/V, Ctrl+Shift+C/V, and right-click context menu
+- **Auto-updater** - Checks GitHub releases on launch with configurable update profiles (latest, bleeding-edge, or a specific tag)
 - **Window controls** - Custom frameless window with minimize, maximize, and close
 
 <img width="800" alt="image" src="https://github.com/user-attachments/assets/0448aafb-1a6b-44a0-8aca-b28a3d49d38f" />
