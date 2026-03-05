@@ -179,7 +179,7 @@ const Launcher: React.FC = () => {
       <div className="launcher-content">
         <div className="launcher-header">
           <h1 className="launcher-title">Claude Dock</h1>
-          <p className="launcher-subtitle">Select a project to open</p>
+          <p className="launcher-subtitle">Select a project to open (updater test)</p>
         </div>
 
         {showUpdateBanner && (
