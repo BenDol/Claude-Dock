@@ -56,18 +56,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           <h2>Settings</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
+        <div className="settings-tabs">
+          {(['appearance', 'terminal', 'grid', 'behavior'] as SettingsTab[]).map((t) => (
+            <button
+              key={t}
+              className={`settings-tab ${tab === t ? 'active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
         <div className="modal-body">
-          <div className="settings-tabs">
-            {(['appearance', 'terminal', 'grid', 'behavior'] as SettingsTab[]).map((t) => (
-              <button
-                key={t}
-                className={`settings-tab ${tab === t ? 'active' : ''}`}
-                onClick={() => setTab(t)}
-              >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
-            ))}
-          </div>
           <div className="settings-content">
             {tab === 'appearance' && (
               <div className="settings-group">
@@ -248,7 +248,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           </div>
         </div>
         <div className="modal-footer">
-          {__BUILD_SHA__} &middot; {__BUILD_DATE__}
+          <span className="modal-footer-left">
+            {__BUILD_SHA__} &middot; {__BUILD_DATE__}
+          </span>
+          <span className="modal-footer-right">
+            By{' '}
+            <a className="footer-link" onClick={() => getDockApi().app.openExternal('https://github.com/BenDol')}>
+              Ben Dol
+            </a>
+            {' '}&middot;{' '}
+            <a className="footer-link footer-sponsor" onClick={() => getDockApi().app.openExternal('https://github.com/sponsors/BenDol')}>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.6 20.6 0 008 13.393a20.6 20.6 0 003.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 01-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5z" /></svg>
+              {' '}Sponsor
+            </a>
+          </span>
         </div>
       </div>
     </div>

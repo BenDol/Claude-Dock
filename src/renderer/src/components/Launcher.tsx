@@ -304,6 +304,18 @@ const Launcher: React.FC = () => {
           </button>
         </div>
       </div>
+      <div className="launcher-bottom-bar">
+        <span className="launcher-author">
+          By{' '}
+          <a className="footer-link" onClick={() => getDockApi().app.openExternal('https://github.com/BenDol')}>
+            Ben Dol
+          </a>
+        </span>
+        <a className="launcher-sponsor-btn" onClick={() => getDockApi().app.openExternal('https://github.com/sponsors/BenDol')}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.6 20.6 0 008 13.393a20.6 20.6 0 003.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.749.749 0 01-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5z" /></svg>
+          {' '}Sponsor
+        </a>
+      </div>
     </div>
   )
 }

@@ -34,6 +34,7 @@ export interface DockApi {
     getRecentPaths: () => Promise<{ path: string; name: string; lastOpened: number }[]>
     removeRecentPath: (dir: string) => Promise<void>
     openDockPath: (dir: string) => Promise<void>
+    openExternal: (url: string) => Promise<void>
   }
   updater: {
     check: (profile: string) => Promise<UpdateInfo>
@@ -88,7 +89,8 @@ const dockApi: DockApi = {
     pickDirectory: () => ipcRenderer.invoke(IPC.APP_PICK_DIRECTORY),
     getRecentPaths: () => ipcRenderer.invoke(IPC.APP_GET_RECENT_PATHS),
     removeRecentPath: (dir) => ipcRenderer.invoke(IPC.APP_REMOVE_RECENT_PATH, dir),
-    openDockPath: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_DOCK_PATH, dir)
+    openDockPath: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_DOCK_PATH, dir),
+    openExternal: (url) => ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL, url)
   },
   updater: {
     check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),

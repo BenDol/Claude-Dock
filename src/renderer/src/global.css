@@ -370,6 +370,7 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   width: 500px;
+  height: 480px;
   max-height: 80vh;
   overflow: hidden;
   display: flex;
@@ -406,20 +407,39 @@ body {
 .modal-body {
   padding: 16px 20px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .modal-footer {
   padding: 8px 20px;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 11px;
-  color: #666;
+  color: var(--text-secondary);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.modal-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
 }
 
 .settings-tabs {
   display: flex;
   gap: 4px;
-  margin-bottom: 20px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 
 .settings-tab {
@@ -669,6 +689,60 @@ body {
 
 .launcher-browse-btn:hover {
   opacity: 0.9;
+}
+
+.launcher-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 24px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.launcher-author {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.launcher-sponsor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #db61a2;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.launcher-sponsor-btn:hover {
+  background: rgba(219, 97, 162, 0.12);
+}
+
+.footer-link {
+  color: var(--accent-color);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.footer-link:hover {
+  opacity: 0.8;
+}
+
+.footer-sponsor {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #db61a2;
+}
+
+.footer-sponsor svg {
+  flex-shrink: 0;
 }
 
 /* Updater Banner */

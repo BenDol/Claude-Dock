@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
@@ -113,6 +113,12 @@ export function registerIpcHandlers(): void {
     // Close the launcher window
     if (win && !win.isDestroyed()) {
       win.close()
+    }
+  })
+
+  ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_event, url: string) => {
+    if (url.startsWith('https://')) {
+      shell.openExternal(url)
     }
   })
 
