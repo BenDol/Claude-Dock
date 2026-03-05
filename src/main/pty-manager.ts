@@ -1,6 +1,7 @@
 import * as pty from 'node-pty'
 import * as crypto from 'crypto'
 import { getDefaultShell, getShellArgs } from './util/shell'
+import { log, logError } from './logger'
 
 export interface PtyInstance {
   id: string
@@ -40,6 +41,7 @@ export class PtyManager {
     const args = getShellArgs(shell)
     const sessionId = resumeId ?? crypto.randomUUID()
 
+    log(`pty.spawn: terminalId=${terminalId} shell=${shell} cwd=${cwd} resume=${!!resumeId}`)
     const ptyProcess = pty.spawn(shell, args, {
       name: 'xterm-256color',
       cols: 80,
@@ -60,6 +62,7 @@ export class PtyManager {
     }
 
     this.ptys.set(terminalId, instance)
+    log(`pty.spawn: process created pid=${ptyProcess.pid}`)
 
     ptyProcess.onData((data) => {
       this.bufferData(terminalId, data)

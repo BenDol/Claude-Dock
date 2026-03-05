@@ -6,6 +6,7 @@ import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
+import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
 
@@ -15,8 +16,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     if (dock) {
+      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}`)
       const resumeId = dock.getNextResumeId()
       dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId)
+      log(`TERMINAL_SPAWN: ${terminalId} spawned`)
       return true
     }
     return false
@@ -57,10 +60,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.SETTINGS_SET, (_event, settings) => {
     setSettings(settings)
+    // Toggle debug logging if changed
+    const current = getSettings()
+    setDebug(current.advanced?.debugLogging ?? false)
     // Broadcast to all dock windows
     for (const dock of manager.getAllDocks()) {
       if (!dock.window.isDestroyed()) {
-        dock.window.webContents.send(IPC.SETTINGS_CHANGED, getSettings())
+        dock.window.webContents.send(IPC.SETTINGS_CHANGED, current)
       }
     }
   })
@@ -110,9 +116,12 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.APP_OPEN_DOCK_PATH, async (_event, dir: string) => {
-    // Close the launcher window immediately for responsiveness
-    manager.closeLauncher()
+    log(`APP_OPEN_DOCK_PATH: dir=${dir}`)
+    // Wait for launcher to fully close and release GPU resources before creating dock
+    await manager.closeLauncherAndWait()
+    log('APP_OPEN_DOCK_PATH: launcher closed, creating dock')
     await manager.createDock(dir)
+    log('APP_OPEN_DOCK_PATH: done')
   })
 
   ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_event, url: string) => {
@@ -148,7 +157,11 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {
-    fs.appendFileSync(path.join(process.cwd(), 'rc-debug.log'), text + '\n')
+    log(`[renderer] ${text}`)
+  })
+
+  ipcMain.handle(IPC.DEBUG_OPEN_LOGS, () => {
+    shell.openPath(getLogDir())
   })
 
   ipcMain.handle(IPC.DEBUG_OPEN_DEVTOOLS, (event) => {

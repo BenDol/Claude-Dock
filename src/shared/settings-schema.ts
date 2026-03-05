@@ -27,6 +27,10 @@ export interface Settings {
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
   }
+  advanced: {
+    debugLogging: boolean
+    disableGpuAcceleration: boolean
+  }
 }
 
 export interface TerminalColors {
@@ -147,5 +151,9 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   updater: {
     profile: 'latest'
+  },
+  advanced: {
+    debugLogging: false,
+    disableGpuAcceleration: false
   }
 }

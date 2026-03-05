@@ -16,6 +16,7 @@ function getBuildInfo() {
 const { sha, fullSha, date } = getBuildInfo()
 const isDev = process.env.NODE_ENV !== 'production'
 const updateProfile = process.env.UPDATE_PROFILE || 'latest'
+const debugDefault = updateProfile === 'bleeding-edge'
 
 export default defineConfig({
   main: {
@@ -23,7 +24,8 @@ export default defineConfig({
     define: {
       __BUILD_SHA__: JSON.stringify(fullSha),
       __DEV__: JSON.stringify(isDev),
-      __UPDATE_PROFILE__: JSON.stringify(updateProfile)
+      __UPDATE_PROFILE__: JSON.stringify(updateProfile),
+      __DEBUG_DEFAULT__: JSON.stringify(debugDefault)
     },
     build: {
       outDir: 'out/main'

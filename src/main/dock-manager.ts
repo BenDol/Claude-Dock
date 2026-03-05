@@ -3,6 +3,7 @@ import * as path from 'path'
 import { DockWindow } from './dock-window'
 import { addRecentPath, hasRecentPaths } from './recent-store'
 import { getSettings } from './settings-store'
+import { log, logError } from './logger'
 
 let nextId = 1
 
@@ -35,11 +36,14 @@ export class DockManager {
     addRecentPath(dir)
 
     const id = `dock-${nextId++}`
+    log(`createDock: creating DockWindow id=${id} dir=${dir}`)
     const dock = new DockWindow(id, dir)
+    log(`createDock: DockWindow created`)
 
     this.docks.set(id, dock)
 
     dock.window.on('closed', () => {
+      log(`dock ${id} closed`)
       this.docks.delete(id)
     })
 
@@ -47,8 +51,9 @@ export class DockManager {
     // Blocking here starves the event loop during BrowserWindow page load,
     // freezing any existing windows (launcher, other docks).
     dock.loadRenderer().catch((err) => {
-      console.error('[dock-manager] Failed to load renderer:', err)
+      logError('Failed to load dock renderer:', err)
     })
+    log(`createDock: loadRenderer started (fire-and-forget)`)
     return dock
   }
 
@@ -97,8 +102,22 @@ export class DockManager {
 
   closeLauncher(): void {
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
+      log('closeLauncher: closing')
       this.launcherWindow.close()
     }
+  }
+
+  /** Close launcher and wait for it to be fully destroyed before resolving */
+  async closeLauncherAndWait(): Promise<void> {
+    if (!this.launcherWindow || this.launcherWindow.isDestroyed()) return
+    log('closeLauncherAndWait: waiting for closed event')
+    return new Promise((resolve) => {
+      this.launcherWindow!.once('closed', () => {
+        log('closeLauncherAndWait: launcher fully closed')
+        resolve()
+      })
+      this.launcherWindow!.close()
+    })
   }
 
   shouldShowLauncher(): boolean {

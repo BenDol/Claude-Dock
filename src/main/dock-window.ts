@@ -4,6 +4,7 @@ import { PtyManager } from './pty-manager'
 import { IPC } from '../shared/ipc-channels'
 import { getSessions, saveSessions, clearSessions } from './session-store'
 import { getWindowState, saveWindowState, WindowState } from './window-state-store'
+import { log } from './logger'
 
 export class DockWindow {
   readonly id: string
@@ -15,9 +16,12 @@ export class DockWindow {
   constructor(id: string, projectDir: string) {
     this.id = id
     this.projectDir = projectDir
+    log(`DockWindow: constructor id=${id} dir=${projectDir}`)
     this.savedResumeIds = getSessions(projectDir)
+    log(`DockWindow: ${this.savedResumeIds.length} saved sessions`)
 
     const saved = getWindowState(projectDir)
+    log(`DockWindow: creating BrowserWindow`)
 
     this.window = new BrowserWindow({
       width: saved?.width ?? 1200,
@@ -38,12 +42,14 @@ export class DockWindow {
     })
 
     this.window.once('ready-to-show', () => {
+      log(`DockWindow ${id}: ready-to-show`)
       this.window.show()
       if (saved?.maximized) {
         this.window.maximize()
       }
     })
 
+    log(`DockWindow: BrowserWindow created`)
     this.trackWindowState()
 
     this.ptyManager = new PtyManager(
@@ -66,6 +72,18 @@ export class DockWindow {
         this.persistCurrentSessions()
       }
     )
+
+    this.window.webContents.on('render-process-gone', (_event, details) => {
+      log(`DockWindow ${id}: renderer gone reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+
+    this.window.on('unresponsive', () => {
+      log(`DockWindow ${id}: window unresponsive`)
+    })
+
+    this.window.on('responsive', () => {
+      log(`DockWindow ${id}: window responsive again`)
+    })
 
     // Open external links in browser
     this.window.webContents.setWindowOpenHandler(({ url }) => {

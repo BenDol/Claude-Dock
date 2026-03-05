@@ -21,6 +21,7 @@ export const IPC = {
   UPDATER_INSTALL: 'updater:install',
   DEBUG_WRITE: 'debug:write',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
+  DEBUG_OPEN_LOGS: 'debug:openLogs',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',
