@@ -64,6 +64,24 @@ npm run package:linux
 
 Build output is in the `dist/` directory.
 
+## CLI Usage
+
+After launching Claude Dock once, the `claude-dock` command is automatically registered and available from any terminal (you may need to restart your terminal for PATH changes to take effect).
+
+```bash
+# Open a dock in the current directory
+claude-dock
+
+# Open a dock in a specific project directory
+claude-dock /path/to/project
+```
+
+If Claude Dock is already running, the command opens a new dock window in the existing instance instead of launching a second process.
+
+**How it works:**
+- **Windows** — A `claude-dock.cmd` shim is created next to the app executable and its directory is added to the user `PATH` via the registry.
+- **macOS / Linux** — A wrapper script is placed in the app's user data directory and symlinked to `/usr/local/bin/claude-dock`. If `/usr/local/bin` isn't writable, you can manually add the wrapper directory to your `PATH`.
+
 ## Architecture
 
 ```
