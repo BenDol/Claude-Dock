@@ -109,13 +109,10 @@ export function registerIpcHandlers(): void {
     removeRecentPath(dir)
   })
 
-  ipcMain.handle(IPC.APP_OPEN_DOCK_PATH, async (event, dir: string) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  ipcMain.handle(IPC.APP_OPEN_DOCK_PATH, async (_event, dir: string) => {
+    // Close the launcher window immediately for responsiveness
+    manager.closeLauncher()
     await manager.createDock(dir)
-    // Close the launcher window
-    if (win && !win.isDestroyed()) {
-      win.close()
-    }
   })
 
   ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_event, url: string) => {

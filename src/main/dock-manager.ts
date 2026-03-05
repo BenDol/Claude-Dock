@@ -43,7 +43,12 @@ export class DockManager {
       this.docks.delete(id)
     })
 
-    await dock.loadRenderer()
+    // Don't await - window is visible immediately, page loads in background.
+    // Blocking here starves the event loop during BrowserWindow page load,
+    // freezing any existing windows (launcher, other docks).
+    dock.loadRenderer().catch((err) => {
+      console.error('[dock-manager] Failed to load renderer:', err)
+    })
     return dock
   }
 

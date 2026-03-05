@@ -19,6 +19,9 @@ export class PtyManager {
   private launchQueue: (() => void)[] = []
   private launching = false
   private suppressSessionChanges = false
+  // Data batching to reduce IPC overhead
+  private pendingData = new Map<string, string>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     onData: (terminalId: string, data: string) => void,
@@ -59,7 +62,7 @@ export class PtyManager {
     this.ptys.set(terminalId, instance)
 
     ptyProcess.onData((data) => {
-      this.onData(terminalId, data)
+      this.bufferData(terminalId, data)
     })
 
     ptyProcess.onExit(({ exitCode }) => {
@@ -107,6 +110,22 @@ export class PtyManager {
     }, 200)
   }
 
+  private bufferData(terminalId: string, data: string): void {
+    const existing = this.pendingData.get(terminalId)
+    this.pendingData.set(terminalId, existing ? existing + data : data)
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flushData(), 8)
+    }
+  }
+
+  private flushData(): void {
+    this.flushTimer = null
+    for (const [terminalId, data] of this.pendingData) {
+      this.onData(terminalId, data)
+    }
+    this.pendingData.clear()
+  }
+
   getSessionIds(): string[] {
     return Array.from(this.ptys.values()).map((p) => p.sessionId)
   }
@@ -134,6 +153,7 @@ export class PtyManager {
     if (instance) {
       instance.process.kill()
       this.ptys.delete(terminalId)
+      this.pendingData.delete(terminalId)
       if (!this.suppressSessionChanges) {
         this.onSessionsChanged()
       }
@@ -142,6 +162,11 @@ export class PtyManager {
 
   killAll(): void {
     this.suppressSessionChanges = true
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    this.pendingData.clear()
     for (const [id] of this.ptys) {
       this.kill(id)
     }
