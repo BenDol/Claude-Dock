@@ -34,7 +34,7 @@ Claude Dock is an Electron app that lets you run multiple [Claude Code](https://
 ### Install
 
 ```bash
-git clone https://github.com/AkemiHomura-maworiqez79/claude-dock.git
+git clone https://github.com/BenDol/claude-dock.git
 cd claude-dock
 npm install
 ```
