@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-2019
+          - os: windows-latest
             platform: win
           - os: macos-latest
             platform: mac
@@ -54,6 +54,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          GYP_MSVS_VERSION: ${{ matrix.platform == 'win' && '2019' || '' }}
 
       - name: Build app
         run: npx electron-vite build
@@ -64,6 +66,7 @@ jobs:
         run: npx electron-builder --${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GYP_MSVS_VERSION: ${{ matrix.platform == 'win' && '2019' || '' }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
