@@ -61,21 +61,17 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [isFocused, loading, focus])
 
-  if (loading) {
-    return (
-      <div className="terminal-view-wrapper">
+  return (
+    <div className="terminal-view-wrapper">
+      {loading && (
         <div className="terminal-loading">
           <div className="terminal-spinner" />
           <span>Starting claude...</span>
         </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="terminal-view-wrapper">
+      )}
       <div
         className="terminal-view"
+        style={loading ? { opacity: 0, pointerEvents: 'none' } : undefined}
         ref={(el) => {
           resizeRef(el)
           if (el) initTerminal(el)

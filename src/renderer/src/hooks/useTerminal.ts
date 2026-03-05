@@ -178,18 +178,14 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         const prevRows = lastRowsRef.current
         fitAddonRef.current.fit()
         const { cols, rows } = term
-        // Only notify PTY and clear if dimensions actually changed
-        if (cols !== prevCols || rows !== prevRows) {
-          lastColsRef.current = cols
-          lastRowsRef.current = rows
-          // Clear scrollback on real resize to prevent xterm reflow duplication
-          // But skip during first 10s so resumed sessions keep their history
-          if (prevCols > 0 && Date.now() - mountTimeRef.current > 10000) {
-            term.clear()
-          }
-          getDockApi().terminal.resize(terminalId, cols, rows)
-          term.scrollToBottom()
+        lastColsRef.current = cols
+        lastRowsRef.current = rows
+        getDockApi().terminal.resize(terminalId, cols, rows)
+        // Only clear scrollback on actual dimension change to prevent content loss on focus switch
+        if ((cols !== prevCols || rows !== prevRows) && prevCols > 0 && Date.now() - mountTimeRef.current > 10000) {
+          term.clear()
         }
+        term.scrollToBottom()
       } catch {
         // Ignore fit errors
       }
