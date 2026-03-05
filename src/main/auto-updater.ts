@@ -69,19 +69,39 @@ function fetchJSON<T>(url: string): Promise<T> {
   })
 }
 
+/**
+ * Detect whether this instance is a portable exe (vs NSIS-installed).
+ * electron-builder sets PORTABLE_EXECUTABLE_FILE only for portable builds.
+ */
+function isPortableExe(): boolean {
+  return !!process.env.PORTABLE_EXECUTABLE_FILE
+}
+
+function findPortableExeAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
+  // Prefer explicitly named .Portable.exe
+  const named = assets.find((a) => a.name.toLowerCase().includes('.portable.') && a.name.endsWith('.exe'))
+  if (named) return named
+  // Fallback: any exe that isn't a setup installer or blockmap (backward compat with older releases)
+  const portable = assets.find(
+    (a) =>
+      a.name.endsWith('.exe') &&
+      !a.name.toLowerCase().includes('setup') &&
+      !a.name.endsWith('.blockmap')
+  )
+  if (portable) return portable
+  return assets.find((a) => a.name.endsWith('.exe') && !a.name.endsWith('.blockmap'))
+}
+
 function findPlatformAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
   switch (process.platform) {
     case 'win32': {
-      // Prefer portable exe (no "setup" in name), exclude blockmap files
-      const portable = assets.find(
-        (a) =>
-          a.name.endsWith('.exe') &&
-          !a.name.toLowerCase().includes('setup') &&
-          !a.name.endsWith('.blockmap')
-      )
-      if (portable) return portable
-      // Fallback to any exe (not blockmap, not setup)
-      return assets.find((a) => a.name.endsWith('.exe') && !a.name.endsWith('.blockmap'))
+      if (isPortableExe()) {
+        return findPortableExeAsset(assets)
+      }
+      // NSIS install: prefer win-unpacked zip, fallback to portable exe for older releases
+      const unpacked = assets.find((a) => a.name.toLowerCase().includes('win-unpacked') && a.name.endsWith('.zip'))
+      if (unpacked) return unpacked
+      return findPortableExeAsset(assets)
     }
     case 'darwin':
       return assets.find((a) => a.name.endsWith('.dmg'))
@@ -272,7 +292,11 @@ export function installAndRestart(): void {
   const currentExe = app.getPath('exe')
 
   if (process.platform === 'win32') {
-    installWindows(downloadedFilePath, currentExe)
+    if (isPortableExe()) {
+      installWindowsPortable(downloadedFilePath, currentExe)
+    } else {
+      installWindowsNsis(downloadedFilePath, currentExe)
+    }
   } else if (process.platform === 'darwin') {
     installMacOS(downloadedFilePath, currentExe)
   } else {
@@ -280,19 +304,15 @@ export function installAndRestart(): void {
   }
 }
 
-function installWindows(newExe: string, currentExe: string): void {
+function installWindowsPortable(newExe: string, currentExe: string): void {
   const exeName = path.basename(currentExe)
   const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.cmd')
   const script = [
     '@echo off',
-    // Gracefully close ALL instances (including crashed/background ones)
     `taskkill /IM "${exeName}" >nul 2>&1`,
-    // Wait for graceful shutdown
     'ping 127.0.0.1 -n 5 > nul',
-    // Force kill any remaining instances
     `taskkill /F /IM "${exeName}" >nul 2>&1`,
     'ping 127.0.0.1 -n 3 > nul',
-    // Copy with retry (file locks may take a moment to release)
     'set /a tries=0',
     ':copy_retry',
     `copy /Y "${newExe}" "${currentExe}" >nul 2>&1`,
@@ -305,6 +325,38 @@ function installWindows(newExe: string, currentExe: string): void {
     `start "" "${currentExe}"`,
     ':copy_fail',
     `del "${newExe}" >nul 2>&1`,
+    '(goto) 2>nul & del "%~f0"'
+  ].join('\r\n')
+
+  fs.writeFileSync(scriptPath, script)
+  spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  app.quit()
+}
+
+function installWindowsNsis(zipPath: string, currentExe: string): void {
+  const exeName = path.basename(currentExe)
+  const installDir = path.dirname(currentExe)
+  const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.cmd')
+  const script = [
+    '@echo off',
+    // Kill app processes
+    `taskkill /IM "${exeName}" >nul 2>&1`,
+    'ping 127.0.0.1 -n 5 > nul',
+    `taskkill /F /IM "${exeName}" >nul 2>&1`,
+    'ping 127.0.0.1 -n 3 > nul',
+    // Extract zip over install directory with retry for file locking
+    'set /a tries=0',
+    ':extract_retry',
+    `powershell -NoProfile -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${installDir}' -Force" >nul 2>&1`,
+    'if not errorlevel 1 goto extract_ok',
+    'set /a tries+=1',
+    'if %tries% GEQ 5 goto extract_fail',
+    'ping 127.0.0.1 -n 3 > nul',
+    'goto extract_retry',
+    ':extract_ok',
+    `start "" "${currentExe}"`,
+    ':extract_fail',
+    `del "${zipPath}" >nul 2>&1`,
     '(goto) 2>nul & del "%~f0"'
   ].join('\r\n')
 

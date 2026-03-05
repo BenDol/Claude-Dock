@@ -55,6 +55,9 @@
         "portable"
       ]
     },
+    "portable": {
+      "artifactName": "${productName}-${version}.Portable.${ext}"
+    },
     "mac": {
       "icon": "assets/icon.png",
       "target": [

@@ -30,9 +30,12 @@ const settingsDebug = (() => { try { return getSetting('advanced')?.debugLogging
 const buildDebug = typeof __DEBUG_DEFAULT__ !== 'undefined' && __DEBUG_DEFAULT__
 initLogger(cliDebug || settingsDebug || buildDebug)
 
-// Disable GPU acceleration — terminal rendering doesn't need it, and GPU compositing
-// causes rendering failures (tiny terminals, CSS dumps) when multiple windows are open
-app.disableHardwareAcceleration()
+// Disable GPU acceleration if user opted out (prevents GPU process crashes)
+const disableGpu = (() => { try { return getSetting('advanced')?.disableGpuAcceleration } catch { return false } })()
+if (disableGpu) {
+  logInfo('GPU acceleration disabled by user setting')
+  app.disableHardwareAcceleration()
+}
 
 function getProjectDirFromArgs(argv: string[]): string | undefined {
   // Skip electron binary and main script, look for a real directory path

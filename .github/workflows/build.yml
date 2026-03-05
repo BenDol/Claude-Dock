@@ -65,6 +65,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Zip win-unpacked directory
+        if: matrix.platform == 'win'
+        working-directory: dist/win-unpacked
+        run: 7z a -tzip "../Claude-Dock-win-unpacked.zip" .
+        shell: bash
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -73,6 +79,7 @@ jobs:
             dist/*.exe
             dist/*.dmg
             dist/*.AppImage
+            dist/Claude-Dock-win-unpacked.zip
           if-no-files-found: error
 
   release:
