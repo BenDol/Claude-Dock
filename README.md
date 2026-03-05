@@ -8,6 +8,10 @@
   A terminal dock for managing multiple Claude Code CLI instances side by side.
 </p>
 
+<p align="center">
+  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock.Setup.1.0.0.exe">Download for Windows</a>
+</p>
+
 ---
 
 Claude Dock is an Electron app that lets you run multiple [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI sessions in a tiled grid layout. It handles PTY management, session persistence, and automatic resumption so you can close and reopen your workspace without losing context.
