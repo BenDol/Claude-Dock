@@ -31,7 +31,6 @@ export class DockWindow {
       minHeight: 400,
       show: false, // Defer show until page is ready to avoid GPU blocking
       frame: false,
-      titleBarStyle: 'hidden',
       backgroundColor: '#0f0f14',
       title: `Claude Dock - ${path.basename(projectDir)}`,
       webPreferences: {

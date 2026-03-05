@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useSettingsStore } from '../stores/settings-store'
@@ -77,6 +78,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.unicode.activeVersion = '11'
 
       term.open(container)
+
+      // Use canvas renderer instead of DOM renderer (avoids CSS dump) or WebGL (GPU contention)
+      try {
+        term.loadAddon(new CanvasAddon())
+      } catch {
+        // Falls back to DOM renderer if canvas fails
+      }
 
       fitAddon.fit()
 

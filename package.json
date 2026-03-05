@@ -14,6 +14,7 @@
     "rebuild": "node scripts/fix-node-pty.js && npx @electron/rebuild --force"
   },
   "dependencies": {
+    "@xterm/addon-canvas": "^0.7.0",
     "electron-squirrel-startup": "^1.0.1",
     "electron-store": "^8.2.0",
     "node-pty": "^1.1.0",
