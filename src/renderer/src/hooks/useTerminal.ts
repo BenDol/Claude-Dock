@@ -19,9 +19,6 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const dataBufferRef = useRef<string[]>([])
   const dataLenRef = useRef(0)
   const gotDataRef = useRef(false)
-  const mountTimeRef = useRef(Date.now())
-  const lastColsRef = useRef(0)
-  const lastRowsRef = useRef(0)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -161,19 +158,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const fit = useCallback(() => {
     if (fitAddonRef.current && termRef.current) {
       try {
-        const term = termRef.current
-        const prevCols = lastColsRef.current
-        const prevRows = lastRowsRef.current
         fitAddonRef.current.fit()
-        const { cols, rows } = term
-        lastColsRef.current = cols
-        lastRowsRef.current = rows
+        const { cols, rows } = termRef.current
         getDockApi().terminal.resize(terminalId, cols, rows)
-        // Only clear scrollback on actual dimension change to prevent content loss on focus switch
-        if ((cols !== prevCols || rows !== prevRows) && prevCols > 0 && Date.now() - mountTimeRef.current > 10000) {
-          term.clear()
-        }
-        term.scrollToBottom()
       } catch {
         // Ignore fit errors
       }
@@ -204,9 +191,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     setTimeout(() => {
       if (fitAddonRef.current && termRef.current) {
         try {
-          fitAddonRef.current.fit()
-          const { cols, rows } = termRef.current
-          getDockApi().terminal.resize(terminalId, cols, rows)
+          fit()
         } catch { /* ignore */ }
       }
     }, 50)

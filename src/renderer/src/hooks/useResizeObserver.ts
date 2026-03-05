@@ -7,14 +7,8 @@ export function useResizeObserver(
   const observerRef = useRef<ResizeObserver | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const elementRef = useRef<HTMLElement | null>(null)
-
-  const debouncedCallback = useCallback(
-    (entry: ResizeObserverEntry) => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(() => callback(entry), debounceMs)
-    },
-    [callback, debounceMs]
-  )
+  const callbackRef = useRef(callback)
+  callbackRef.current = callback
 
   useEffect(() => {
     return () => {
@@ -25,9 +19,12 @@ export function useResizeObserver(
 
   const refCallback = useCallback(
     (node: HTMLElement | null) => {
-      // Cleanup previous
+      // Skip if same element — avoids observer recreation from unstable ref callbacks
+      if (node === elementRef.current) return
+
       if (observerRef.current) {
         observerRef.current.disconnect()
+        observerRef.current = null
       }
 
       elementRef.current = node
@@ -35,13 +32,15 @@ export function useResizeObserver(
       if (node) {
         observerRef.current = new ResizeObserver((entries) => {
           for (const entry of entries) {
-            debouncedCallback(entry)
+            if (timerRef.current) clearTimeout(timerRef.current)
+            timerRef.current = setTimeout(() => callbackRef.current(entry), debounceMs)
           }
         })
         observerRef.current.observe(node)
       }
     },
-    [debouncedCallback]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debounceMs]
   )
 
   return refCallback

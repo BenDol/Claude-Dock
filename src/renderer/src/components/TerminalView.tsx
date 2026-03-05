@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminal } from '../hooks/useTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
@@ -21,9 +21,15 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     setTerminalLoading(terminalId, loading)
   }, [terminalId, loading, setTerminalLoading])
 
-  const resizeRef = useResizeObserver(() => {
-    fit()
-  }, 100)
+  const resizeRef = useResizeObserver(fit, 100)
+
+  const terminalRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      resizeRef(el)
+      if (el) initTerminal(el)
+    },
+    [resizeRef, initTerminal]
+  )
 
   // Poll gotDataRef until enough data arrives + minimum display time, then dismiss loading
   useEffect(() => {
@@ -73,10 +79,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
       <div
         className="terminal-view"
         style={loading ? { opacity: 0, pointerEvents: 'none' } : undefined}
-        ref={(el) => {
-          resizeRef(el)
-          if (el) initTerminal(el)
-        }}
+        ref={terminalRef}
         onClick={() => {
           useDockStore.getState().setFocusedTerminal(terminalId)
           focus()
