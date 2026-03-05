@@ -281,19 +281,31 @@ export function installAndRestart(): void {
 }
 
 function installWindows(newExe: string, currentExe: string): void {
-  // Create a batch script that waits for us to exit, replaces the exe, and relaunches
+  const exeName = path.basename(currentExe)
   const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.cmd')
   const script = [
     '@echo off',
-    // Wait for the current process to exit
-    `ping 127.0.0.1 -n 4 > nul`,
-    // Copy new exe over current
-    `copy /Y "${newExe}" "${currentExe}"`,
-    // Launch the updated exe
+    // Gracefully close ALL instances (including crashed/background ones)
+    `taskkill /IM "${exeName}" >nul 2>&1`,
+    // Wait for graceful shutdown
+    'ping 127.0.0.1 -n 5 > nul',
+    // Force kill any remaining instances
+    `taskkill /F /IM "${exeName}" >nul 2>&1`,
+    'ping 127.0.0.1 -n 3 > nul',
+    // Copy with retry (file locks may take a moment to release)
+    'set /a tries=0',
+    ':copy_retry',
+    `copy /Y "${newExe}" "${currentExe}" >nul 2>&1`,
+    'if not errorlevel 1 goto copy_ok',
+    'set /a tries+=1',
+    'if %tries% GEQ 5 goto copy_fail',
+    'ping 127.0.0.1 -n 3 > nul',
+    'goto copy_retry',
+    ':copy_ok',
     `start "" "${currentExe}"`,
-    // Clean up temp files
-    `del "${newExe}"`,
-    `(goto) 2>nul & del "%~f0"`
+    ':copy_fail',
+    `del "${newExe}" >nul 2>&1`,
+    '(goto) 2>nul & del "%~f0"'
   ].join('\r\n')
 
   fs.writeFileSync(scriptPath, script)
@@ -306,13 +318,19 @@ function installMacOS(dmgPath: string, currentExe: string): void {
   // We need to replace the .app bundle
   const appBundle = path.resolve(currentExe, '..', '..', '..')
   const appName = path.basename(appBundle)
+  const appNameNoExt = appName.replace(/\.app$/, '')
   const appParent = path.dirname(appBundle)
   const mountPoint = path.join(os.tmpdir(), 'claude-dock-dmg')
 
   const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.sh')
   const script = [
     '#!/bin/bash',
+    // Gracefully close ALL instances
+    `pkill -x "${appNameNoExt}" 2>/dev/null || true`,
     'sleep 3',
+    // Force kill any remaining instances
+    `pkill -9 -x "${appNameNoExt}" 2>/dev/null || true`,
+    'sleep 1',
     `mkdir -p "${mountPoint}"`,
     `hdiutil attach "${dmgPath}" -mountpoint "${mountPoint}" -nobrowse -quiet`,
     `rm -rf "${appBundle}"`,
@@ -329,10 +347,16 @@ function installMacOS(dmgPath: string, currentExe: string): void {
 }
 
 function installLinux(newAppImage: string, currentExe: string): void {
+  const exeBasename = path.basename(currentExe)
   const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.sh')
   const script = [
     '#!/bin/bash',
+    // Gracefully close ALL instances
+    `pkill -f "${exeBasename}" 2>/dev/null || true`,
     'sleep 3',
+    // Force kill any remaining instances
+    `pkill -9 -f "${exeBasename}" 2>/dev/null || true`,
+    'sleep 1',
     `cp -f "${newAppImage}" "${currentExe}"`,
     `chmod +x "${currentExe}"`,
     `rm -f "${newAppImage}"`,
