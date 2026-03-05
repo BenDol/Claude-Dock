@@ -89,27 +89,6 @@ If Claude Dock is already running, the command opens a new dock window in the ex
 - **Windows** — A `claude-dock.cmd` shim is created next to the app executable and its directory is added to the user `PATH` via the registry.
 - **macOS / Linux** — A wrapper script is placed in the app's user data directory and symlinked to `/usr/local/bin/claude-dock`. If `/usr/local/bin` isn't writable, you can manually add the wrapper directory to your `PATH`.
 
-## Architecture
-
-```
-src/
-  main/           # Electron main process
-    index.ts        # App entry point
-    dock-window.ts  # Window + PTY lifecycle
-    dock-manager.ts # Multi-window management
-    pty-manager.ts  # PTY spawn queue + session tracking
-    session-store.ts # Session persistence (electron-store)
-    settings-store.ts
-  preload/        # Context bridge (dockApi)
-  renderer/       # React UI
-    components/     # DockGrid, TerminalCard, TerminalView, Toolbar, SettingsModal
-    hooks/          # useTerminal (xterm.js), useGridLayout, useResizeObserver
-    stores/         # Zustand stores (dock-store, settings-store)
-    lib/            # Theme, IPC bridge
-  shared/         # Shared types (IPC channels, settings schema)
-```
-
-
 ## License
 
 MIT
