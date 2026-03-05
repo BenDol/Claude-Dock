@@ -30,10 +30,13 @@ const settingsDebug = (() => { try { return getSetting('advanced')?.debugLogging
 const buildDebug = typeof __DEBUG_DEFAULT__ !== 'undefined' && __DEBUG_DEFAULT__
 initLogger(cliDebug || settingsDebug || buildDebug)
 
-// Disable GPU acceleration if user opted out (prevents GPU process crashes)
+// Disable GPU acceleration for portable exe — GPU compositing from the temp extraction
+// directory causes rendering failures (tiny terminals, broken canvas) with multiple windows.
+// Also allow users to opt-in via settings for any install type.
+const isPortable = !!process.env.PORTABLE_EXECUTABLE_FILE
 const disableGpu = (() => { try { return getSetting('advanced')?.disableGpuAcceleration } catch { return false } })()
-if (disableGpu) {
-  logInfo('GPU acceleration disabled by user setting')
+if (isPortable || disableGpu) {
+  logInfo(`GPU acceleration disabled (portable=${isPortable}, setting=${disableGpu})`)
   app.disableHardwareAcceleration()
 }
 
