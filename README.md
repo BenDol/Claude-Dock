@@ -82,6 +82,11 @@ src/
   shared/         # Shared types (IPC channels, settings schema)
 ```
 
+## Example
+
+<img width="1200" height="800" alt="image" src="https://github.com/user-attachments/assets/0448aafb-1a6b-44a0-8aca-b28a3d49d38f" />
+
+
 ## License
 
 MIT
