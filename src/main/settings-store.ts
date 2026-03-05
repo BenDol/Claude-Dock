@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { Settings, DEFAULT_SETTINGS } from '../shared/settings-schema'
+import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
 
 declare const __UPDATE_PROFILE__: string
 
@@ -11,7 +12,7 @@ function getStore(): Store<Settings> {
       ...DEFAULT_SETTINGS,
       updater: { ...DEFAULT_SETTINGS.updater, profile: __UPDATE_PROFILE__ }
     }
-    store = new Store<Settings>({
+    store = createSafeStore<Settings>({
       name: 'settings',
       defaults
     })
@@ -20,20 +21,25 @@ function getStore(): Store<Settings> {
 }
 
 export function getSettings(): Settings {
-  return getStore().store
+  return safeRead(() => getStore().store) ?? DEFAULT_SETTINGS
 }
 
 export function getSetting<K extends keyof Settings>(key: K): Settings[K] {
-  return getStore().get(key)
+  return safeRead(() => getStore().get(key)) ?? DEFAULT_SETTINGS[key]
 }
 
 export function setSetting<K extends keyof Settings>(key: K, value: Settings[K]): void {
-  getStore().set(key, value)
+  safeWriteSync(() => getStore().set(key, value))
 }
 
 export function setSettings(settings: Partial<Settings>): void {
-  const s = getStore()
+  // Batch into a single write by merging with current settings
+  const current = getSettings()
+  const merged = { ...current }
   for (const [key, value] of Object.entries(settings)) {
-    s.set(key as keyof Settings, value)
+    if (value !== undefined) {
+      ;(merged as any)[key] = value
+    }
   }
+  safeWriteSync(() => getStore().set(merged))
 }

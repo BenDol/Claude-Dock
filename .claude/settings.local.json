@@ -18,7 +18,8 @@
       "Bash(mkdir:*)",
       "Bash(cp:*)",
       "Bash(gh release:*)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(node:*)"
     ]
   }
 }

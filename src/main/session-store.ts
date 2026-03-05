@@ -1,4 +1,5 @@
 import Store from 'electron-store'
+import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
 
 interface SessionData {
   [normalizedPath: string]: {
@@ -10,7 +11,7 @@ let store: Store<SessionData> | null = null
 
 function getStore(): Store<SessionData> {
   if (!store) {
-    store = new Store<SessionData>({
+    store = createSafeStore<SessionData>({
       name: 'sessions'
     })
   }
@@ -23,16 +24,16 @@ function normalizePath(dir: string): string {
 
 export function getSessions(projectDir: string): string[] {
   const key = normalizePath(projectDir)
-  const entry = getStore().get(key)
+  const entry = safeRead(() => getStore().get(key))
   return entry?.terminals ?? []
 }
 
 export function saveSessions(projectDir: string, resumeIds: string[]): void {
   const key = normalizePath(projectDir)
-  getStore().set(key, { terminals: resumeIds })
+  safeWriteSync(() => getStore().set(key, { terminals: resumeIds }))
 }
 
 export function clearSessions(projectDir: string): void {
   const key = normalizePath(projectDir)
-  getStore().delete(key as any)
+  safeWriteSync(() => getStore().delete(key as any))
 }

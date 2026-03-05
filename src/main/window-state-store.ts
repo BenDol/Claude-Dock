@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { screen } from 'electron'
+import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
 
 export interface WindowState {
   x: number
@@ -17,7 +18,7 @@ let store: Store<WindowStateData> | null = null
 
 function getStore(): Store<WindowStateData> {
   if (!store) {
-    store = new Store<WindowStateData>({
+    store = createSafeStore<WindowStateData>({
       name: 'window-state'
     })
   }
@@ -30,7 +31,7 @@ function normalizePath(dir: string): string {
 
 export function getWindowState(projectDir: string): WindowState | undefined {
   const key = normalizePath(projectDir)
-  const state = getStore().get(key) as WindowState | undefined
+  const state = safeRead(() => getStore().get(key) as WindowState | undefined)
   if (!state) return undefined
 
   // Validate the saved position is visible on a current display
@@ -43,7 +44,7 @@ export function getWindowState(projectDir: string): WindowState | undefined {
 
 export function saveWindowState(projectDir: string, state: WindowState): void {
   const key = normalizePath(projectDir)
-  getStore().set(key, state)
+  safeWriteSync(() => getStore().set(key, state))
 }
 
 function isVisibleOnAnyDisplay(state: WindowState): boolean {
