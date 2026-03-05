@@ -18,6 +18,7 @@ export class PtyManager {
   // Serial launch queue to prevent claude config file race conditions
   private launchQueue: (() => void)[] = []
   private launching = false
+  private suppressSessionChanges = false
 
   constructor(
     onData: (terminalId: string, data: string) => void,
@@ -64,7 +65,9 @@ export class PtyManager {
     ptyProcess.onExit(({ exitCode }) => {
       this.ptys.delete(terminalId)
       this.onExit(terminalId, exitCode)
-      this.onSessionsChanged()
+      if (!this.suppressSessionChanges) {
+        this.onSessionsChanged()
+      }
     })
 
     const cmd = resumeId
@@ -131,14 +134,18 @@ export class PtyManager {
     if (instance) {
       instance.process.kill()
       this.ptys.delete(terminalId)
-      this.onSessionsChanged()
+      if (!this.suppressSessionChanges) {
+        this.onSessionsChanged()
+      }
     }
   }
 
   killAll(): void {
+    this.suppressSessionChanges = true
     for (const [id] of this.ptys) {
       this.kill(id)
     }
+    this.suppressSessionChanges = false
   }
 
   has(terminalId: string): boolean {
