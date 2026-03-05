@@ -16,7 +16,9 @@
       "Bash(tasklist:*)",
       "Bash(unzip:*)",
       "Bash(mkdir:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(gh release:*)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }
