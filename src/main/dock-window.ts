@@ -25,7 +25,9 @@ export class DockWindow {
       ...(saved ? { x: saved.x, y: saved.y } : {}),
       minWidth: 600,
       minHeight: 400,
+      show: false, // Defer show until page is ready to avoid GPU blocking
       frame: false,
+      backgroundColor: '#0f0f14',
       title: `Claude Dock - ${path.basename(projectDir)}`,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
@@ -35,9 +37,12 @@ export class DockWindow {
       }
     })
 
-    if (saved?.maximized) {
-      this.window.maximize()
-    }
+    this.window.once('ready-to-show', () => {
+      this.window.show()
+      if (saved?.maximized) {
+        this.window.maximize()
+      }
+    })
 
     this.trackWindowState()
 

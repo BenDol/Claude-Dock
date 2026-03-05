@@ -5,9 +5,13 @@ import { DockManager } from './dock-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { createAppMenu } from './menu'
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling
-if (require('electron-squirrel-startup') === true) {
-  app.quit()
+// Handle creating/removing shortcuts on Windows when installing/uninstalling (Squirrel only)
+try {
+  if (require('electron-squirrel-startup') === true) {
+    app.quit()
+  }
+} catch {
+  // Not a Squirrel install (e.g. NSIS portable) — safe to ignore
 }
 
 function getProjectDirFromArgs(argv: string[]): string | undefined {
