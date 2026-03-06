@@ -11,6 +11,26 @@ export interface UpdateInfo {
   assetSize: number
 }
 
+export interface ClaudeCliStatus {
+  installed: boolean
+  path?: string
+  version?: string
+}
+
+export interface ClaudeInstallResult {
+  success: boolean
+  error?: string
+}
+
+export interface GitStatus {
+  installed: boolean
+}
+
+export interface GitInstallResult {
+  success: boolean
+  error?: string
+}
+
 export interface DockApi {
   terminal: {
     spawn: (terminalId: string) => Promise<boolean>
@@ -41,6 +61,15 @@ export interface DockApi {
     download: (url: string, assetName: string) => Promise<string>
     install: () => Promise<void>
     onProgress: (callback: (downloaded: number, total: number) => void) => () => void
+  }
+  git: {
+    check: () => Promise<GitStatus>
+    install: () => Promise<GitInstallResult>
+  }
+  claude: {
+    checkInstall: () => Promise<ClaudeCliStatus>
+    install: () => Promise<ClaudeInstallResult>
+    version: () => Promise<string | null>
   }
   win: {
     minimize: () => Promise<void>
@@ -108,6 +137,15 @@ const dockApi: DockApi = {
       ipcRenderer.on(IPC.UPDATER_PROGRESS, handler)
       return () => ipcRenderer.removeListener(IPC.UPDATER_PROGRESS, handler)
     }
+  },
+  git: {
+    check: () => ipcRenderer.invoke(IPC.GIT_CHECK),
+    install: () => ipcRenderer.invoke(IPC.GIT_INSTALL)
+  },
+  claude: {
+    checkInstall: () => ipcRenderer.invoke(IPC.CLAUDE_CHECK_INSTALL),
+    install: () => ipcRenderer.invoke(IPC.CLAUDE_INSTALL),
+    version: () => ipcRenderer.invoke(IPC.CLAUDE_VERSION)
   },
   win: {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),

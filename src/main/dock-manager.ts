@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog } from 'electron'
 import * as path from 'path'
 import { DockWindow } from './dock-window'
-import { addRecentPath, hasRecentPaths } from './recent-store'
+import { addRecentPath } from './recent-store'
 import { getSettings } from './settings-store'
 import { log, logError } from './logger'
 
@@ -121,7 +121,7 @@ export class DockManager {
   }
 
   shouldShowLauncher(): boolean {
-    return hasRecentPaths()
+    return true
   }
 
   getDock(id: string): DockWindow | undefined {

@@ -17,6 +17,10 @@ interface UpdateInfo {
 }
 
 type UpdatePhase = 'checking' | 'available' | 'downloading' | 'ready' | 'skipped' | 'error'
+type GitPhase = 'checking' | 'not-installed' | 'installing' | 'installed' | 'skipped' | 'error'
+type ClaudePhase = 'checking' | 'not-installed' | 'installing' | 'installed' | 'skipped' | 'error'
+
+const CLAUDE_DOCS_URL = 'https://code.claude.com/docs/en/overview'
 
 const Launcher: React.FC = () => {
   const [recentPaths, setRecentPaths] = useState<RecentPath[]>([])
@@ -29,10 +33,19 @@ const Launcher: React.FC = () => {
   const [updateError, setUpdateError] = useState('')
   const progressCleanup = useRef<(() => void) | null>(null)
 
+  // Git install state
+  const [gitPhase, setGitPhase] = useState<GitPhase>('checking')
+  const [gitError, setGitError] = useState('')
+
+  // Claude CLI install state (starts as 'checking' but won't actually check until git resolves)
+  const [claudePhase, setClaudePhase] = useState<ClaudePhase>('checking')
+  const [claudeError, setClaudeError] = useState('')
+  const [claudeVersion, setClaudeVersion] = useState('')
+
   useEffect(() => {
     const api = getDockApi()
 
-    // Start update check, then load recent paths
+    // Start update check
     api.settings.get().then((settings) => {
       const profile = settings.updater?.profile || 'latest'
       api.updater
@@ -48,6 +61,15 @@ const Launcher: React.FC = () => {
       setUpdatePhase('skipped')
     })
 
+    // Check Git first (Claude check happens after git resolves via second useEffect)
+    api.git.check()
+      .then((status) => {
+        setGitPhase(status.installed ? 'installed' : 'not-installed')
+      })
+      .catch(() => {
+        setGitPhase('installed') // assume installed on error
+      })
+
     api.app.getRecentPaths().then((paths) => {
       setRecentPaths(paths)
       setLoading(false)
@@ -57,6 +79,22 @@ const Launcher: React.FC = () => {
       progressCleanup.current?.()
     }
   }, [])
+
+  // When git is resolved (installed or skipped), trigger Claude CLI check
+  useEffect(() => {
+    if (gitPhase !== 'installed' && gitPhase !== 'skipped') return
+
+    const api = getDockApi()
+    setClaudePhase('checking')
+    api.claude.checkInstall()
+      .then((status) => {
+        setClaudePhase(status.installed ? 'skipped' : 'not-installed')
+        if (status.version) setClaudeVersion(status.version)
+      })
+      .catch(() => {
+        setClaudePhase('skipped')
+      })
+  }, [gitPhase])
 
   const startDownload = async () => {
     if (!updateInfo) return
@@ -108,6 +146,74 @@ const Launcher: React.FC = () => {
     }
   }
 
+  const startGitInstall = async () => {
+    setGitPhase('installing')
+    setGitError('')
+    try {
+      const result = await getDockApi().git.install()
+      if (result.success) {
+        setGitPhase('installed')
+      } else {
+        setGitError(result.error || 'Installation failed')
+        setGitPhase('error')
+      }
+    } catch {
+      setGitError('Installation failed unexpectedly')
+      setGitPhase('error')
+    }
+  }
+
+  const skipGitInstall = () => {
+    setGitPhase('skipped')
+  }
+
+  const retryGitCheck = async () => {
+    setGitPhase('checking')
+    setGitError('')
+    try {
+      const status = await getDockApi().git.check()
+      setGitPhase(status.installed ? 'installed' : 'not-installed')
+    } catch {
+      setGitPhase('installed')
+    }
+  }
+
+  const startClaudeInstall = async () => {
+    setClaudePhase('installing')
+    setClaudeError('')
+    try {
+      const result = await getDockApi().claude.install()
+      if (result.success) {
+        setClaudePhase('installed')
+      } else {
+        setClaudeError(result.error || 'Installation failed')
+        setClaudePhase('error')
+      }
+    } catch {
+      setClaudeError('Installation failed unexpectedly')
+      setClaudePhase('error')
+    }
+  }
+
+  const skipClaudeInstall = () => {
+    setClaudePhase('skipped')
+  }
+
+  const openClaudeDocs = () => {
+    getDockApi().app.openExternal(CLAUDE_DOCS_URL)
+  }
+
+  const retryClaudeCheck = async () => {
+    setClaudePhase('checking')
+    setClaudeError('')
+    try {
+      const status = await getDockApi().claude.checkInstall()
+      setClaudePhase(status.installed ? 'skipped' : 'not-installed')
+    } catch {
+      setClaudePhase('skipped')
+    }
+  }
+
   const openPath = (dir: string) => {
     getDockApi().app.openDockPath(dir)
   }
@@ -150,6 +256,11 @@ const Launcher: React.FC = () => {
     : 0
 
   const showUpdateBanner = updatePhase !== 'skipped'
+  const showGitBanner = gitPhase !== 'installed' && gitPhase !== 'skipped'
+  const showClaudeBanner = claudePhase !== 'skipped'
+
+  const isBlocked = gitPhase === 'checking' || gitPhase === 'not-installed' || gitPhase === 'installing'
+    || claudePhase === 'checking' || claudePhase === 'not-installed' || claudePhase === 'installing'
 
   if (loading && updatePhase === 'checking') {
     return (
@@ -178,7 +289,7 @@ const Launcher: React.FC = () => {
       </div>
       <div className="launcher-content">
         <div className="launcher-header">
-          <h1 className="launcher-title">Claude Dock</h1>
+          <h1 className="launcher-title">Claude Dock{claudeVersion && <span className="launcher-cli-version">{claudeVersion}</span>}</h1>
           <p className="launcher-subtitle">Select a project to open</p>
         </div>
 
@@ -271,35 +382,192 @@ const Launcher: React.FC = () => {
           </div>
         )}
 
-        <div className="launcher-list">
-          {recentPaths.map((entry) => (
-            <button
-              key={entry.path}
-              className="launcher-item"
-              onClick={() => openPath(entry.path)}
-            >
-              <div className="launcher-item-icon">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1.5 1h5l1 1H14.5a.5.5 0 01.5.5v11a.5.5 0 01-.5.5h-13a.5.5 0 01-.5-.5v-12A.5.5 0 011.5 1z" />
-                </svg>
+        {showGitBanner && (
+          <div className="claude-setup-banner">
+            {gitPhase === 'checking' && (
+              <div className="updater-row">
+                <div className="updater-spinner" />
+                <span className="updater-text">Checking for Git...</span>
               </div>
-              <div className="launcher-item-info">
-                <span className="launcher-item-name">{entry.name}</span>
-                <span className="launcher-item-path">{entry.path}</span>
+            )}
+
+            {gitPhase === 'not-installed' && (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon claude-setup-icon-warn" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8.22 1.754a.25.25 0 00-.44 0L1.698 13.132a.25.25 0 00.22.368h12.164a.25.25 0 00.22-.368L8.22 1.754zm-1.763-.707c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0114.082 15H1.918a1.75 1.75 0 01-1.543-2.575L6.457 1.047zM9 11a1 1 0 11-2 0 1 1 0 012 0zm-.25-5.25a.75.75 0 00-1.5 0v2.5a.75.75 0 001.5 0v-2.5z" />
+                  </svg>
+                  <span className="updater-text">
+                    <strong>Git</strong> is not installed. It is required for Claude Code to work.
+                  </span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-primary" onClick={startGitInstall}>
+                    Install
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={skipGitInstall}>
+                    Skip
+                  </button>
+                </div>
+              </>
+            )}
+
+            {gitPhase === 'installing' && (
+              <div className="updater-row">
+                <div className="updater-spinner" />
+                <span className="updater-text">Installing Git — close the terminal window when finished.</span>
               </div>
-              <span className="launcher-item-time">{formatTime(entry.lastOpened)}</span>
+            )}
+
+            {gitPhase === 'error' && (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon updater-icon-error" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2.343 13.657A8 8 0 1113.657 2.343 8 8 0 012.343 13.657zM6.03 4.97a.75.75 0 00-1.06 1.06L6.94 8 4.97 9.97a.75.75 0 101.06 1.06L8 9.06l1.97 1.97a.75.75 0 101.06-1.06L9.06 8l1.97-1.97a.75.75 0 10-1.06-1.06L8 6.94 6.03 4.97z" />
+                  </svg>
+                  <span className="updater-text updater-text-error">
+                    {gitError || 'Git installation failed'}
+                  </span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-secondary" onClick={retryGitCheck}>
+                    Retry
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={skipGitInstall}>
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {showClaudeBanner && (
+          <div className="claude-setup-banner">
+            {claudePhase === 'checking' && (
+              <div className="updater-row">
+                <div className="updater-spinner" />
+                <span className="updater-text">Checking for Claude CLI...</span>
+              </div>
+            )}
+
+            {claudePhase === 'not-installed' && (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon claude-setup-icon-warn" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8.22 1.754a.25.25 0 00-.44 0L1.698 13.132a.25.25 0 00.22.368h12.164a.25.25 0 00.22-.368L8.22 1.754zm-1.763-.707c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0114.082 15H1.918a1.75 1.75 0 01-1.543-2.575L6.457 1.047zM9 11a1 1 0 11-2 0 1 1 0 012 0zm-.25-5.25a.75.75 0 00-1.5 0v2.5a.75.75 0 001.5 0v-2.5z" />
+                  </svg>
+                  <span className="updater-text">
+                    <strong>Claude CLI</strong> is not installed. It is required for terminals to work.
+                  </span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-primary" onClick={startClaudeInstall}>
+                    Install
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={openClaudeDocs}>
+                    View Docs
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={skipClaudeInstall}>
+                    Skip
+                  </button>
+                </div>
+              </>
+            )}
+
+            {claudePhase === 'installing' && (
+              <div className="updater-row">
+                <div className="updater-spinner" />
+                <span className="updater-text">Installer opened — close the terminal window when finished.</span>
+              </div>
+            )}
+
+            {claudePhase === 'installed' && (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon updater-icon-success" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm3.78-9.72a.75.75 0 00-1.06-1.06L6.75 9.19 5.28 7.72a.75.75 0 00-1.06 1.06l2 2a.75.75 0 001.06 0l4.5-4.5z" />
+                  </svg>
+                  <span className="updater-text">Claude CLI installed successfully!</span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-secondary" onClick={skipClaudeInstall}>
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            )}
+
+            {claudePhase === 'error' && (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon updater-icon-error" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2.343 13.657A8 8 0 1113.657 2.343 8 8 0 012.343 13.657zM6.03 4.97a.75.75 0 00-1.06 1.06L6.94 8 4.97 9.97a.75.75 0 101.06 1.06L8 9.06l1.97 1.97a.75.75 0 101.06-1.06L9.06 8l1.97-1.97a.75.75 0 10-1.06-1.06L8 6.94 6.03 4.97z" />
+                  </svg>
+                  <span className="updater-text updater-text-error">
+                    {claudeError || 'Claude CLI installation failed'}
+                  </span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-primary" onClick={openClaudeDocs}>
+                    Install Manually
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={() => getDockApi().debug.openLogs()}>
+                    Open Log
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={retryClaudeCheck}>
+                    Retry
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={skipClaudeInstall}>
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {recentPaths.length > 0 ? (
+          <div className="launcher-list">
+            {recentPaths.map((entry) => (
               <button
-                className="launcher-item-remove"
-                onClick={(e) => removePath(e, entry.path)}
-                title="Remove from recent"
+                key={entry.path}
+                className="launcher-item"
+                onClick={() => openPath(entry.path)}
+                disabled={isBlocked}
               >
-                &times;
+                <div className="launcher-item-icon">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M1.5 1h5l1 1H14.5a.5.5 0 01.5.5v11a.5.5 0 01-.5.5h-13a.5.5 0 01-.5-.5v-12A.5.5 0 011.5 1z" />
+                  </svg>
+                </div>
+                <div className="launcher-item-info">
+                  <span className="launcher-item-name">{entry.name}</span>
+                  <span className="launcher-item-path">{entry.path}</span>
+                </div>
+                <span className="launcher-item-time">{formatTime(entry.lastOpened)}</span>
+                <button
+                  className="launcher-item-remove"
+                  onClick={(e) => removePath(e, entry.path)}
+                  title="Remove from recent"
+                >
+                  &times;
+                </button>
               </button>
-            </button>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="launcher-empty">
+            <p className="launcher-empty-text">No recent projects</p>
+            <p className="launcher-empty-hint">Open a folder to get started</p>
+          </div>
+        )}
         <div className="launcher-footer">
-          <button className="launcher-browse-btn" onClick={browsePath}>
+          <button
+            className="launcher-browse-btn"
+            onClick={browsePath}
+            disabled={isBlocked}
+          >
             Browse Folder...
           </button>
         </div>

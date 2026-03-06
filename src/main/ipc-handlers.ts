@@ -6,6 +6,7 @@ import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
+import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -153,6 +154,55 @@ export function registerIpcHandlers(): void {
       return filePath
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Download failed')
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_CHECK, async () => {
+    try {
+      return await detectGit()
+    } catch {
+      return { installed: true }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_INSTALL, async () => {
+    try {
+      return await installGit()
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Git installation failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.CLAUDE_CHECK_INSTALL, async () => {
+    try {
+      const status = await detectClaudeCli()
+      // If installed but no version yet, fetch it now
+      if (status.installed && !status.version) {
+        try {
+          const v = await getClaudeVersion()
+          if (v) status.version = v
+        } catch { /* version is cosmetic, don't fail */ }
+      }
+      return status
+    } catch {
+      // On failure, assume installed to avoid blocking user
+      return { installed: true }
+    }
+  })
+
+  ipcMain.handle(IPC.CLAUDE_VERSION, async () => {
+    try {
+      return await getClaudeVersion()
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle(IPC.CLAUDE_INSTALL, async () => {
+    try {
+      return await installClaudeCli()
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Installation failed' }
     }
   })
 

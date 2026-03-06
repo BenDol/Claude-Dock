@@ -70,12 +70,9 @@ if (!gotLock) {
     if (dir) {
       log('second-instance: creating dock for', dir)
       await manager.createDock(dir)
-    } else if (manager.shouldShowLauncher()) {
+    } else {
       log('second-instance: showing launcher')
       await manager.showLauncher()
-    } else {
-      log('second-instance: creating dock (no dir)')
-      await manager.createDock()
     }
     log('second-instance: handler complete')
   })
@@ -103,20 +100,14 @@ if (!gotLock) {
     const dir = getProjectDirFromArgs(process.argv)
     if (dir) {
       await manager.createDock(dir)
-    } else if (manager.shouldShowLauncher()) {
-      await manager.showLauncher()
     } else {
-      await manager.createDock()
+      await manager.showLauncher()
     }
 
     // macOS: re-create window when dock icon clicked
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        if (manager.shouldShowLauncher()) {
-          await manager.showLauncher()
-        } else {
-          await manager.createDock()
-        }
+        await manager.showLauncher()
       }
     })
   })
@@ -164,37 +155,26 @@ function installCliWindows(): void {
 
   fs.writeFileSync(cmdPath, cmdContent)
 
-  // Add appDir to user PATH if not already present
+  // Add appDir to user PATH if not already present.
+  // Uses PowerShell [Environment] API to safely read/write REG_EXPAND_SZ values
+  // without cmd.exe %variable% expansion or special character issues.
   const { execSync } = require('child_process')
   try {
-    const currentPath: string = execSync(
-      'reg query "HKCU\\Environment" /v Path',
-      { encoding: 'utf8' }
-    )
-    const match = currentPath.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i)
-    const existingPath = match ? match[1].trim() : ''
+    const psScript = `
+      $dir = '${appDir.replace(/'/g, "''")}'
+      $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+      if ($null -eq $current) { $current = '' }
+      $entries = $current -split ';' | ForEach-Object { $_.ToLower() }
+      if ($entries -contains $dir.ToLower()) { exit 0 }
+      $newPath = if ($current) { "$current;$dir" } else { $dir }
+      [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+    `.trim().replace(/\n\s*/g, ' ')
 
-    if (!existingPath.toLowerCase().includes(appDir.toLowerCase())) {
-      const newPath = existingPath ? `${existingPath};${appDir}` : appDir
-      execSync(
-        `reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${newPath}" /f`,
-        { encoding: 'utf8' }
-      )
-      // Broadcast WM_SETTINGCHANGE so new terminals pick up the PATH change
-      execSync(
-        'powershell -Command "[System.Environment]::SetEnvironmentVariable(\'__dummy__\',\'\',[System.EnvironmentVariableTarget]::User)"',
-        { encoding: 'utf8' }
-      )
-    }
-  } catch {
-    // PATH registry entry may not exist yet, create it
-    try {
-      execSync(
-        `reg add "HKCU\\Environment" /v Path /t REG_EXPAND_SZ /d "${appDir}" /f`,
-        { encoding: 'utf8' }
-      )
-    } catch { /* best effort */ }
-  }
+    execSync(
+      `powershell -NoProfile -Command "${psScript}"`,
+      { encoding: 'utf8', timeout: 10000 }
+    )
+  } catch { /* best effort */ }
 }
 
 function installCliUnix(): void {
