@@ -156,24 +156,26 @@ function installCliWindows(): void {
   fs.writeFileSync(cmdPath, cmdContent)
 
   // Add appDir to user PATH if not already present.
-  // Uses PowerShell [Environment] API to safely read/write REG_EXPAND_SZ values
-  // without cmd.exe %variable% expansion or special character issues.
+  // Uses a temp .ps1 file with [Environment] API to safely read/write
+  // REG_EXPAND_SZ values without cmd.exe quoting/escaping issues.
   const { execSync } = require('child_process')
   try {
-    const psScript = `
-      $dir = '${appDir.replace(/'/g, "''")}'
-      $current = [Environment]::GetEnvironmentVariable('Path', 'User')
-      if ($null -eq $current) { $current = '' }
-      $entries = $current -split ';' | ForEach-Object { $_.ToLower() }
-      if ($entries -contains $dir.ToLower()) { exit 0 }
-      $newPath = if ($current) { "$current;$dir" } else { $dir }
-      [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-    `.trim().replace(/\n\s*/g, ' ')
+    const psPath = path.join(require('os').tmpdir(), 'claude-dock-cli-path.ps1')
+    fs.writeFileSync(psPath, [
+      `$dir = '${appDir.replace(/'/g, "''")}'`,
+      `$current = [Environment]::GetEnvironmentVariable('Path', 'User')`,
+      `if ($null -eq $current) { $current = '' }`,
+      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() }`,
+      `if ($entries -contains $dir.ToLower()) { exit 0 }`,
+      `$newPath = if ($current) { "$current;$dir" } else { $dir }`,
+      `[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')`,
+    ].join('\r\n'))
 
     execSync(
-      `powershell -NoProfile -Command "${psScript}"`,
-      { encoding: 'utf8', timeout: 10000 }
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`,
+      { encoding: 'utf8', timeout: 15000 }
     )
+    try { fs.unlinkSync(psPath) } catch { /* ignore */ }
   } catch { /* best effort */ }
 }
 

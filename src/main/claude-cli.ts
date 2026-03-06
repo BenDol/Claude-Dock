@@ -611,59 +611,69 @@ function logInstallResult(logPath: string): void {
 }
 
 /**
- * If ~/.local/bin contains claude but isn't in the user's PATH, add it.
+ * If ~/.local/bin contains any claude binary but isn't in the user's PATH, add it.
  * This fixes the case where the official installer puts the binary there
  * but doesn't update PATH (or the update didn't stick).
  *
- * Uses PowerShell's [Environment] API to read/write the registry safely:
- * - Avoids cmd.exe %variable% expansion that would corrupt REG_EXPAND_SZ values
- * - Avoids special character issues (&, |, ^, " in existing PATH entries)
- * - Read + check + write runs atomically in one PowerShell invocation
- * - If the read returns $null (no user PATH exists), only then creates a new one
+ * Uses a temp .ps1 file to avoid all cmd.exe quoting/escaping issues.
+ * The PowerShell [Environment] API reads/writes REG_EXPAND_SZ safely
+ * (preserving %VAR% references in the existing PATH).
  */
 function ensureClaudeInWindowsPath(): void {
   if (process.platform !== 'win32') return
   try {
     const localBin = path.join(os.homedir(), '.local', 'bin')
-    const claudeExe = path.join(localBin, 'claude.exe')
 
-    // Only act if claude.exe actually exists in ~/.local/bin
-    if (!fs.existsSync(claudeExe)) return
+    // Check if ANY claude binary exists in ~/.local/bin
+    const candidates = ['claude.exe', 'claude.cmd', 'claude']
+    const hasClaude = candidates.some((name) => {
+      try { return fs.existsSync(path.join(localBin, name)) } catch { return false }
+    })
+    if (!hasClaude) {
+      log(`ensureClaudeInWindowsPath: no claude binary found in ${localBin}`)
+      return
+    }
 
     const { execSync } = require('child_process')
 
-    // Single PowerShell script that safely reads, checks, and appends.
-    // [Environment]::GetEnvironmentVariable reads the raw registry value
-    // (preserving %VAR% references), and SetEnvironmentVariable writes
-    // it back as REG_EXPAND_SZ without any shell escaping issues.
-    // Outputs 'ALREADY' if already present, 'ADDED' if we added it,
-    // 'SKIPPED' if the dir doesn't need adding.
-    const psScript = `
-      $dir = '${localBin.replace(/'/g, "''")}'
-      $current = [Environment]::GetEnvironmentVariable('Path', 'User')
-      if ($null -eq $current) { $current = '' }
-      $entries = $current -split ';' | ForEach-Object { $_.ToLower() }
-      if ($entries -contains $dir.ToLower()) {
-        Write-Output 'ALREADY'
-      } else {
-        $newPath = if ($current) { "$current;$dir" } else { $dir }
-        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        Write-Output 'ADDED'
-      }
-    `.trim().replace(/\n\s*/g, ' ')
+    // Write a temp .ps1 script file to avoid all cmd.exe quoting issues.
+    // This is the safest way to run multi-line PowerShell from Node.
+    const psPath = path.join(os.tmpdir(), 'claude-dock-pathfix.ps1')
+    fs.writeFileSync(psPath, [
+      `$dir = '${localBin.replace(/'/g, "''")}'`,
+      `$current = [Environment]::GetEnvironmentVariable('Path', 'User')`,
+      `if ($null -eq $current) { $current = '' }`,
+      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() }`,
+      `if ($entries -contains $dir.ToLower()) {`,
+      `  Write-Output 'ALREADY'`,
+      `} else {`,
+      `  $newPath = if ($current) { "$current;$dir" } else { $dir }`,
+      `  [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')`,
+      `  Write-Output 'ADDED'`,
+      `}`,
+    ].join('\r\n'))
+
+    log(`ensureClaudeInWindowsPath: running ${psPath}`)
 
     const result: string = execSync(
-      `powershell -NoProfile -Command "${psScript}"`,
-      { encoding: 'utf8', timeout: 10000 }
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}"`,
+      { encoding: 'utf8', timeout: 15000 }
     ).trim()
+
+    log(`ensureClaudeInWindowsPath: PowerShell returned: "${result}"`)
+
+    // Clean up temp file
+    try { fs.unlinkSync(psPath) } catch { /* ignore */ }
 
     if (result === 'ADDED') {
       logInfo(`ensureClaudeInWindowsPath: added ${localBin} to user PATH`)
       // Update our own process.env so subsequent detection works
       process.env.PATH = (process.env.PATH || '') + ';' + localBin
       process.env.Path = process.env.PATH
-    } else {
+    } else if (result === 'ALREADY') {
       log(`ensureClaudeInWindowsPath: ${localBin} already in user PATH`)
+    } else {
+      logError(`ensureClaudeInWindowsPath: unexpected output: "${result}"`)
     }
   } catch (err) {
     logError('ensureClaudeInWindowsPath failed:', err)
