@@ -115,6 +115,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
         // Ctrl+Shift+V: paste
         if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+          e.preventDefault()
           navigator.clipboard.readText().then((text) => {
             api.terminal.write(terminalId, text)
           })
@@ -130,6 +131,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
         // Ctrl+V: paste
         if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
+          e.preventDefault()
           navigator.clipboard.readText().then((text) => {
             api.terminal.write(terminalId, text)
           })
