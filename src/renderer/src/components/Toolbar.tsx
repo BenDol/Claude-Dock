@@ -39,6 +39,21 @@ const RemoteControlIcon: React.FC = () => (
   </svg>
 )
 
+const FolderIcon: React.FC = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+  </svg>
+)
+
 const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSettings }) => {
   const gridMode = useDockStore((s) => s.gridMode)
   const setGridMode = useDockStore((s) => s.setGridMode)
@@ -148,6 +163,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         <span className="toolbar-project" title={projectDir}>
           {projectDir.split(/[/\\]/).pop()}
         </span>
+        <button
+          className="toolbar-btn toolbar-btn-icon"
+          onClick={() => api.app.openInExplorer(projectDir)}
+          title="Open in file explorer"
+        >
+          <FolderIcon />
+        </button>
         <span className="toolbar-count">{terminalCount} terminal{terminalCount !== 1 ? 's' : ''}</span>
         <button
           className={`toolbar-btn toolbar-btn-icon${rcCount > 0 ? ' toolbar-btn-active' : ''}`}

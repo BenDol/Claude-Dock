@@ -131,6 +131,10 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.APP_OPEN_IN_EXPLORER, (_event, dir: string) => {
+    shell.openPath(dir)
+  })
+
   ipcMain.handle(IPC.UPDATER_CHECK, async (_event, profile: string) => {
     if (__DEV__) {
       return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
