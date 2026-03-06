@@ -289,7 +289,8 @@ const Launcher: React.FC = () => {
       </div>
       <div className="launcher-content">
         <div className="launcher-header">
-          <h1 className="launcher-title">Claude Dock{claudeVersion && <span className="launcher-cli-version">{claudeVersion}</span>}</h1>
+          <h1 className="launcher-title">Claude Dock</h1>
+          {claudeVersion && <p className="launcher-cli-version">{claudeVersion}</p>}
           <p className="launcher-subtitle">Select a project to open</p>
         </div>
 

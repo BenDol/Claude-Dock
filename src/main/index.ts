@@ -162,13 +162,13 @@ function installCliWindows(): void {
   try {
     const psPath = path.join(require('os').tmpdir(), 'claude-dock-cli-path.ps1')
     fs.writeFileSync(psPath, [
-      `$dir = '${appDir.replace(/'/g, "''")}'`,
-      `$current = [Environment]::GetEnvironmentVariable('Path', 'User')`,
-      `if ($null -eq $current) { $current = '' }`,
-      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() }`,
-      `if ($entries -contains $dir.ToLower()) { exit 0 }`,
-      `$newPath = if ($current) { "$current;$dir" } else { $dir }`,
-      `[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')`,
+      `$dir = '${appDir.replace(/'/g, "''")}';`,
+      `$current = [Environment]::GetEnvironmentVariable('Path', 'User');`,
+      `if ($null -eq $current) { $current = '' };`,
+      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() };`,
+      `if ($entries -contains $dir.ToLower()) { exit 0 };`,
+      `$newPath = if ($current) { "$current;$dir" } else { $dir };`,
+      `[Environment]::SetEnvironmentVariable('Path', $newPath, 'User');`,
     ].join('\r\n'))
 
     execSync(

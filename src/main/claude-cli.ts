@@ -639,17 +639,19 @@ function ensureClaudeInWindowsPath(): void {
     // Write a temp .ps1 script file to avoid all cmd.exe quoting issues.
     // This is the safest way to run multi-line PowerShell from Node.
     const psPath = path.join(os.tmpdir(), 'claude-dock-pathfix.ps1')
+    // Semicolons after every statement so this is valid even if the
+    // bundler collapses newlines into a single line.
     fs.writeFileSync(psPath, [
-      `$dir = '${localBin.replace(/'/g, "''")}'`,
-      `$current = [Environment]::GetEnvironmentVariable('Path', 'User')`,
-      `if ($null -eq $current) { $current = '' }`,
-      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() }`,
+      `$dir = '${localBin.replace(/'/g, "''")}';`,
+      `$current = [Environment]::GetEnvironmentVariable('Path', 'User');`,
+      `if ($null -eq $current) { $current = '' };`,
+      `$entries = $current -split ';' | ForEach-Object { $_.Trim().ToLower() };`,
       `if ($entries -contains $dir.ToLower()) {`,
-      `  Write-Output 'ALREADY'`,
+      `  Write-Output 'ALREADY';`,
       `} else {`,
-      `  $newPath = if ($current) { "$current;$dir" } else { $dir }`,
-      `  [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')`,
-      `  Write-Output 'ADDED'`,
+      `  $newPath = if ($current) { "$current;$dir" } else { $dir };`,
+      `  [Environment]::SetEnvironmentVariable('Path', $newPath, 'User');`,
+      `  Write-Output 'ADDED';`,
       `}`,
     ].join('\r\n'))
 
