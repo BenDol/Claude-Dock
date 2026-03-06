@@ -163,13 +163,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         <span className="toolbar-project" title={projectDir}>
           {projectDir.split(/[/\\]/).pop()}
         </span>
-        <button
-          className="toolbar-btn toolbar-btn-icon"
-          onClick={() => api.app.openInExplorer(projectDir)}
-          title="Open in file explorer"
-        >
-          <FolderIcon />
-        </button>
         <span className="toolbar-count">{terminalCount} terminal{terminalCount !== 1 ? 's' : ''}</span>
         <button
           className={`toolbar-btn toolbar-btn-icon${rcCount > 0 ? ' toolbar-btn-active' : ''}`}
@@ -195,6 +188,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         </button>
         <button className="toolbar-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
           +
+        </button>
+        <button
+          className="toolbar-btn toolbar-btn-icon"
+          onClick={() => api.app.openInExplorer(projectDir)}
+          title="Open in file explorer"
+        >
+          <FolderIcon />
         </button>
         <button className="toolbar-btn" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           &#9881;
