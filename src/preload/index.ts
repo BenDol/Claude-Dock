@@ -37,6 +37,7 @@ export interface DockApi {
     write: (terminalId: string, data: string) => Promise<void>
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>
+    getSessionId: (terminalId: string) => Promise<string | null>
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
   }
@@ -90,6 +91,7 @@ const dockApi: DockApi = {
     write: (terminalId, data) => ipcRenderer.invoke(IPC.TERMINAL_WRITE, terminalId, data),
     resize: (terminalId, cols, rows) => ipcRenderer.invoke(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_KILL, terminalId),
+    getSessionId: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_GET_SESSION_ID, terminalId),
     onData: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, terminalId: string, data: string) => {
         callback(terminalId, data)

@@ -168,6 +168,10 @@ export class PtyManager {
     return Array.from(this.ptys.values()).map((p) => p.sessionId)
   }
 
+  getSessionId(terminalId: string): string | null {
+    return this.ptys.get(terminalId)?.sessionId ?? null
+  }
+
   write(terminalId: string, data: string): void {
     if (this.ptys.has(terminalId)) {
       this.sendToHost({ type: 'write', terminalId, data })

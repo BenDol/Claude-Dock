@@ -47,6 +47,11 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.TERMINAL_GET_SESSION_ID, (event, terminalId: string) => {
+    const dock = getDockForEvent(event)
+    return dock?.ptyManager.getSessionId(terminalId) ?? null
+  })
+
   ipcMain.handle(IPC.DOCK_GET_INFO, (event) => {
     const dock = getDockForEvent(event)
     if (dock) {

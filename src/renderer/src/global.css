@@ -255,12 +255,57 @@ body {
   width: 100%;
 }
 
-.terminal-close-btn {
+.terminal-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.terminal-actions-panel {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  transition: max-width 0.2s ease, opacity 0.15s ease;
+}
+
+.terminal-actions-panel.open {
+  max-width: 100px;
+  opacity: 1;
+}
+
+.terminal-actions-toggle {
+  font-size: 17px !important;
+  padding: 0 2px !important;
+}
+
+.terminal-action-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.terminal-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 15px;
   line-height: 1;
   padding: 0px 3px;
   border-radius: 3px;
