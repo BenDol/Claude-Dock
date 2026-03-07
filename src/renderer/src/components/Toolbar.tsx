@@ -25,8 +25,8 @@ async function sendRCCommand(api: ReturnType<typeof getDockApi>, terminalId: str
 
 const RemoteControlIcon: React.FC = () => (
   <svg
-    width="12"
-    height="12"
+    width="14"
+    height="14"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -41,8 +41,8 @@ const RemoteControlIcon: React.FC = () => (
 
 const FolderIcon: React.FC = () => (
   <svg
-    width="12"
-    height="12"
+    width="14"
+    height="14"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -55,8 +55,6 @@ const FolderIcon: React.FC = () => (
 )
 
 const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSettings }) => {
-  const gridMode = useDockStore((s) => s.gridMode)
-  const setGridMode = useDockStore((s) => s.setGridMode)
   const terminalCount = useDockStore((s) => s.terminals.length)
   const rcCount = useDockStore((s) => s.rcTerminals.size)
   const hasLoadingTerminals = useDockStore((s) => s.loadingTerminals.size > 0)
@@ -85,10 +83,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     })
     return cleanup
   }, [rcCount > 0])
-
-  const toggleMode = () => {
-    setGridMode(gridMode === 'auto' ? 'freeform' : 'auto')
-  }
 
   const toggleRemoteControl = useCallback(async () => {
     if (toggling) return
@@ -183,9 +177,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
       </div>
       <div className="toolbar-center" />
       <div className="toolbar-right">
-        <button className="toolbar-btn" onClick={toggleMode} title={`Mode: ${gridMode}`}>
-          {gridMode === 'auto' ? 'Auto' : 'Free'}
-        </button>
         <button className="toolbar-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
           +
         </button>

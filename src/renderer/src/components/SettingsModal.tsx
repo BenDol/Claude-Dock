@@ -228,7 +228,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     value={settings.updater?.profile || 'latest'}
                     onChange={(e) => updateUpdater({ profile: e.target.value })}
                   >
-                    <option value="latest">Latest (stable)</option>
+                    <option value="latest" disabled>Latest (stable)</option>
                     <option value="bleeding-edge">Bleeding Edge</option>
                   </select>
                 </label>
