@@ -11,6 +11,31 @@ interface TerminalCardProps {
   isFocused: boolean
 }
 
+const LockIcon: React.FC<{ locked: boolean }> = ({ locked }) => (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    {locked ? (
+      <>
+        <rect x="3" y="11" width="18" height="11" rx="2" />
+        <path d="M7 11V7a5 5 0 0110 0v4" />
+      </>
+    ) : (
+      <>
+        <rect x="3" y="11" width="18" height="11" rx="2" />
+        <path d="M7 11V7a5 5 0 019.9-1" />
+      </>
+    )}
+  </svg>
+)
+
 const ClearIcon: React.FC = () => (
   <svg
     width="11"
@@ -51,6 +76,8 @@ const CopyIdIcon: React.FC<{ copied?: boolean }> = ({ copied }) => (
 
 const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive, isFocused }) => {
   const removeTerminal = useDockStore((s) => s.removeTerminal)
+  const isUnlocked = useDockStore((s) => s.unlockedTerminals.has(terminalId))
+  const toggleTerminalLock = useDockStore((s) => s.toggleTerminalLock)
 
   const handleClose = useCallback(() => {
     getDockApi().terminal.kill(terminalId)
@@ -98,6 +125,13 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
             title={actionsOpen ? 'Collapse actions' : 'Expand actions'}
           >
             {actionsOpen ? '\u203A' : '\u2039'}
+          </button>
+          <button
+            className={`terminal-action-btn terminal-lock-btn${isUnlocked ? ' unlocked' : ''}`}
+            onClick={() => toggleTerminalLock(terminalId)}
+            title={isUnlocked ? 'Lock (disable drag)' : 'Unlock (enable drag)'}
+          >
+            <LockIcon locked={!isUnlocked} />
           </button>
           <button className="terminal-close-btn" onClick={handleClose} title="Close terminal">
             &times;

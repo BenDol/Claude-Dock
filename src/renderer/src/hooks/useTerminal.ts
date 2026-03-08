@@ -207,6 +207,18 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }, 50)
   }, [settings, terminalId])
 
+  // Scroll to bottom after grid reposition
+  useEffect(() => {
+    const handler = () => {
+      if (termRef.current) {
+        termRef.current.scrollToBottom()
+        fit()
+      }
+    }
+    window.addEventListener('terminals-repositioned', handler)
+    return () => window.removeEventListener('terminals-repositioned', handler)
+  }, [fit])
+
   const focus = useCallback(() => {
     if (termRef.current) {
       termRef.current.focus()

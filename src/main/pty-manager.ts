@@ -168,6 +168,12 @@ export class PtyManager {
     return Array.from(this.ptys.values()).map((p) => p.sessionId)
   }
 
+  getOrderedSessionIds(terminalIds: string[]): string[] {
+    return terminalIds
+      .map((id) => this.ptys.get(id)?.sessionId)
+      .filter((s): s is string => !!s)
+  }
+
   getSessionId(terminalId: string): string | null {
     return this.ptys.get(terminalId)?.sessionId ?? null
   }

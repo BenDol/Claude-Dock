@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { Layout } from 'react-grid-layout'
 import type { TerminalInfo, GridMode } from '../types'
 
 interface DockState {
@@ -7,9 +6,9 @@ interface DockState {
   projectDir: string
   terminals: TerminalInfo[]
   gridMode: GridMode
-  freeformLayout: Layout[]
   focusedTerminalId: string | null
   nextTerminalNum: number
+  unlockedTerminals: Set<string>
   rcTerminals: Set<string>
   loadingTerminals: Set<string>
 
@@ -20,7 +19,8 @@ interface DockState {
   setTerminalTitle: (id: string, title: string) => void
   setTerminalAlive: (id: string, alive: boolean) => void
   setGridMode: (mode: GridMode) => void
-  setFreeformLayout: (layout: Layout[]) => void
+  toggleTerminalLock: (id: string) => void
+  swapTerminals: (id1: string, id2: string) => void
   setFocusedTerminal: (id: string | null) => void
   focusNextTerminal: () => void
   setTerminalRC: (id: string, active: boolean) => void
@@ -32,20 +32,25 @@ export const useDockStore = create<DockState>((set, get) => ({
   projectDir: '',
   terminals: [],
   gridMode: 'auto',
-  freeformLayout: [],
   focusedTerminalId: null,
   nextTerminalNum: 1,
+  unlockedTerminals: new Set<string>(),
   rcTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
   addTerminal: (id) =>
-    set((state) => ({
-      terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}`, isAlive: true }],
-      nextTerminalNum: state.nextTerminalNum + 1,
-      focusedTerminalId: id
-    })),
+    set((state) => {
+      const unlockedTerminals = new Set(state.unlockedTerminals)
+      unlockedTerminals.add(id)
+      return {
+        terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}`, isAlive: true }],
+        nextTerminalNum: state.nextTerminalNum + 1,
+        focusedTerminalId: id,
+        unlockedTerminals
+      }
+    }),
 
   removeTerminal: (id) =>
     set((state) => {
@@ -58,7 +63,9 @@ export const useDockStore = create<DockState>((set, get) => ({
           : state.focusedTerminalId
       const rcTerminals = new Set(state.rcTerminals)
       rcTerminals.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals }
+      const unlockedTerminals = new Set(state.unlockedTerminals)
+      unlockedTerminals.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -73,7 +80,23 @@ export const useDockStore = create<DockState>((set, get) => ({
 
   setGridMode: (mode) => set({ gridMode: mode }),
 
-  setFreeformLayout: (layout) => set({ freeformLayout: layout }),
+  toggleTerminalLock: (id) =>
+    set((state) => {
+      const next = new Set(state.unlockedTerminals)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return { unlockedTerminals: next }
+    }),
+
+  swapTerminals: (id1, id2) =>
+    set((state) => {
+      const idx1 = state.terminals.findIndex((t) => t.id === id1)
+      const idx2 = state.terminals.findIndex((t) => t.id === id2)
+      if (idx1 === -1 || idx2 === -1 || idx1 === idx2) return state
+      const terminals = [...state.terminals]
+      ;[terminals[idx1], terminals[idx2]] = [terminals[idx2], terminals[idx1]]
+      return { terminals }
+    }),
 
   setFocusedTerminal: (id) => set({ focusedTerminalId: id }),
 

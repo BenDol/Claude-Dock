@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
+import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
 import { log, logError, setDebug, getLogDir } from './logger'
@@ -50,6 +51,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_GET_SESSION_ID, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     return dock?.ptyManager.getSessionId(terminalId) ?? null
+  })
+
+  ipcMain.handle(IPC.TERMINAL_SYNC_ORDER, (event, terminalIds: string[]) => {
+    const dock = getDockForEvent(event)
+    if (dock) {
+      const ids = dock.ptyManager.getOrderedSessionIds(terminalIds)
+      if (ids.length > 0) {
+        saveSessions(dock.projectDir, ids)
+      }
+    }
   })
 
   ipcMain.handle(IPC.DOCK_GET_INFO, (event) => {

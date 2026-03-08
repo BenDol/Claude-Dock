@@ -5,12 +5,12 @@ import TerminalCard from './TerminalCard'
 import { useDockStore } from '../stores/dock-store'
 import { useGridLayout } from '../hooks/useGridLayout'
 import { useSettingsStore } from '../stores/settings-store'
+import { getDockApi } from '../lib/ipc-bridge'
 
 const DockGrid: React.FC = () => {
   const terminals = useDockStore((s) => s.terminals)
-  const gridMode = useDockStore((s) => s.gridMode)
   const focusedTerminalId = useDockStore((s) => s.focusedTerminalId)
-  const setFreeformLayout = useDockStore((s) => s.setFreeformLayout)
+  const swapTerminals = useDockStore((s) => s.swapTerminals)
   const gapSize = useSettingsStore((s) => s.settings.grid.gapSize)
   const { cols, layout } = useGridLayout()
 
@@ -37,13 +37,23 @@ const DockGrid: React.FC = () => {
   const totalGap = gapSize * (rows - 1)
   const rowHeight = Math.floor((containerHeight - totalGap) / rows)
 
-  const onLayoutChange = useCallback(
-    (newLayout: ReactGridLayout.Layout[]) => {
-      if (gridMode === 'freeform') {
-        setFreeformLayout(newLayout)
+  // On drag stop, find which terminal occupies the drop position and swap
+  const onDragStop = useCallback(
+    (_layout: ReactGridLayout.Layout[], _oldItem: ReactGridLayout.Layout, newItem: ReactGridLayout.Layout) => {
+      const draggedId = newItem.i
+      const targetItem = layout.find(
+        (l) => l.i !== draggedId && l.x === newItem.x && l.y === newItem.y
+      )
+      if (targetItem) {
+        swapTerminals(draggedId, targetItem.i)
+        // Persist new order to sessions.json
+        const newOrder = useDockStore.getState().terminals.map((t) => t.id)
+        getDockApi().terminal.syncOrder(newOrder)
+        // Scroll all terminals to bottom after reposition
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 100)
       }
     },
-    [gridMode, setFreeformLayout]
+    [layout, swapTerminals]
   )
 
   if (terminals.length === 0) return null
@@ -58,10 +68,11 @@ const DockGrid: React.FC = () => {
         width={containerWidth}
         margin={[gapSize, gapSize]}
         containerPadding={[0, 0]}
-        isDraggable={gridMode === 'freeform'}
-        isResizable={gridMode === 'freeform'}
+        isDraggable={true}
+        isResizable={false}
         draggableHandle=".terminal-card-header"
-        onLayoutChange={onLayoutChange}
+        draggableCancel=".terminal-card-actions"
+        onDragStop={onDragStop}
         compactType="vertical"
         useCSSTransforms
       >

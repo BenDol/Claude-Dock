@@ -5,6 +5,7 @@ export const IPC = {
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_KILL: 'terminal:kill',
   TERMINAL_GET_SESSION_ID: 'terminal:getSessionId',
+  TERMINAL_SYNC_ORDER: 'terminal:syncOrder',
   DOCK_GET_INFO: 'dock:getInfo',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
