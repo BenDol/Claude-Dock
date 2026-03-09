@@ -8,8 +8,23 @@ import { useDockStore } from './stores/dock-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
+import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 
 const isLauncher = new URLSearchParams(window.location.search).has('launcher')
+
+function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
+  const parts = keybind.split('+').map((p) => p.trim().toLowerCase())
+  const needCtrl = parts.includes('ctrl')
+  const needShift = parts.includes('shift')
+  const needAlt = parts.includes('alt')
+  const key = parts.find((p) => !['ctrl', 'shift', 'alt', 'meta'].includes(p))
+  if (!key) return false
+
+  if (needCtrl !== (e.ctrlKey || e.metaKey)) return false
+  if (needShift !== e.shiftKey) return false
+  if (needAlt !== e.altKey) return false
+  return e.key.toLowerCase() === key
+}
 
 function App() {
   if (isLauncher) {
@@ -101,9 +116,37 @@ function DockApp() {
     document.documentElement.style.setProperty('--term-header-font', `${headerFont}px`)
   }, [])
 
+  // Directional terminal focus navigation
+  const focusDirection = useCallback((direction: Direction) => {
+    const state = useDockStore.getState()
+    if (!state.focusedTerminalId || state.terminals.length < 2) return
+    const maxCols = useSettingsStore.getState().settings.grid.maxColumns
+    const { layout } = computeAutoLayout(state.terminals.map((t) => t.id), maxCols)
+    const targetId = findAdjacentTerminal(layout, state.focusedTerminalId, direction)
+    if (targetId) {
+      useDockStore.getState().setFocusedTerminal(targetId)
+    }
+  }, [])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Check directional focus keybinds first
+      const { keybindings } = useSettingsStore.getState().settings
+      const directionMap: [string, Direction][] = [
+        [keybindings.focusUp, 'up'],
+        [keybindings.focusDown, 'down'],
+        [keybindings.focusLeft, 'left'],
+        [keybindings.focusRight, 'right']
+      ]
+      for (const [bind, dir] of directionMap) {
+        if (matchesKeybind(e, bind)) {
+          e.preventDefault()
+          focusDirection(dir)
+          return
+        }
+      }
+
       if (e.ctrlKey || e.metaKey) {
         const currentSize = useSettingsStore.getState().settings.terminal.fontSize
         switch (e.key) {
@@ -145,7 +188,7 @@ function DockApp() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [focusNextTerminal, applyZoom])
+  }, [focusNextTerminal, applyZoom, focusDirection])
 
   // Ctrl+MouseWheel zoom
   useEffect(() => {

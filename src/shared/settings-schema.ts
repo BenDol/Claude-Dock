@@ -27,6 +27,12 @@ export interface Settings {
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
   }
+  keybindings: {
+    focusUp: string
+    focusDown: string
+    focusLeft: string
+    focusRight: string
+  }
   advanced: {
     debugLogging: boolean
     disableGpuAcceleration: boolean
@@ -174,6 +180,12 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   updater: {
     profile: 'latest'
+  },
+  keybindings: {
+    focusUp: 'Ctrl+Shift+ArrowUp',
+    focusDown: 'Ctrl+Shift+ArrowDown',
+    focusLeft: 'Ctrl+Shift+ArrowLeft',
+    focusRight: 'Ctrl+Shift+ArrowRight'
   },
   advanced: {
     debugLogging: false,

@@ -582,6 +582,18 @@ body {
   accent-color: var(--accent-color);
 }
 
+.keybind-input {
+  cursor: pointer;
+  text-align: center;
+  caret-color: transparent;
+}
+
+.keybind-input.listening {
+  border-color: var(--accent-color);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 /* Loading */
 .loading {
   display: flex;

@@ -1,13 +1,65 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
+
+function formatKeybind(e: KeyboardEvent): string | null {
+  // Ignore standalone modifier presses
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return null
+
+  const parts: string[] = []
+  if (e.ctrlKey || e.metaKey) parts.push('Ctrl')
+  if (e.shiftKey) parts.push('Shift')
+  if (e.altKey) parts.push('Alt')
+  parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key)
+  return parts.join('+')
+}
+
+const KeybindInput: React.FC<{
+  label: string
+  value: string
+  onChange: (value: string) => void
+}> = ({ label, value, onChange }) => {
+  const [listening, setListening] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (!listening) return
+      e.preventDefault()
+      e.stopPropagation()
+      const formatted = formatKeybind(e.nativeEvent)
+      if (formatted) {
+        onChange(formatted)
+        setListening(false)
+        inputRef.current?.blur()
+      }
+    },
+    [listening, onChange]
+  )
+
+  return (
+    <label>
+      {label}
+      <input
+        ref={inputRef}
+        type="text"
+        readOnly
+        value={listening ? 'Press a key combo...' : value}
+        className={`keybind-input${listening ? ' listening' : ''}`}
+        onClick={() => setListening(true)}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setListening(false)}
+      />
+    </label>
+  )
+}
 
 interface SettingsModalProps {
   onClose: () => void
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'behavior'
+type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'behavior'
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [tab, setTab] = useState<SettingsTab>('appearance')
@@ -27,6 +79,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   }
   const updateBehavior = (partial: Partial<Settings['behavior']>) => {
     update({ behavior: { ...settings.behavior, ...partial } })
+  }
+  const updateKeybindings = (partial: Partial<Settings['keybindings']>) => {
+    update({ keybindings: { ...settings.keybindings, ...partial } })
   }
   const updateUpdater = (partial: Partial<Settings['updater']>) => {
     update({ updater: { ...settings.updater, ...partial } })
@@ -57,7 +112,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         <div className="settings-tabs">
-          {(['appearance', 'terminal', 'grid', 'behavior'] as SettingsTab[]).map((t) => (
+          {(['appearance', 'terminal', 'grid', 'keybindings', 'behavior'] as SettingsTab[]).map((t) => (
             <button
               key={t}
               className={`settings-tab ${tab === t ? 'active' : ''}`}
@@ -202,6 +257,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <option value="freeform">Freeform</option>
                   </select>
                 </label>
+              </div>
+            )}
+            {tab === 'keybindings' && (
+              <div className="settings-group">
+                <KeybindInput
+                  label="Focus Up"
+                  value={settings.keybindings.focusUp}
+                  onChange={(v) => updateKeybindings({ focusUp: v })}
+                />
+                <KeybindInput
+                  label="Focus Down"
+                  value={settings.keybindings.focusDown}
+                  onChange={(v) => updateKeybindings({ focusDown: v })}
+                />
+                <KeybindInput
+                  label="Focus Left"
+                  value={settings.keybindings.focusLeft}
+                  onChange={(v) => updateKeybindings({ focusLeft: v })}
+                />
+                <KeybindInput
+                  label="Focus Right"
+                  value={settings.keybindings.focusRight}
+                  onChange={(v) => updateKeybindings({ focusRight: v })}
+                />
               </div>
             )}
             {tab === 'behavior' && (
