@@ -13,6 +13,7 @@ import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/g
 const isLauncher = new URLSearchParams(window.location.search).has('launcher')
 
 function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
+  if (!keybind || keybind.startsWith('!')) return false
   const parts = keybind.split('+').map((p) => p.trim().toLowerCase())
   const needCtrl = parts.includes('ctrl')
   const needShift = parts.includes('shift')

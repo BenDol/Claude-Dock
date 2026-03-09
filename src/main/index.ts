@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import { DockManager } from './dock-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { createAppMenu } from './menu'
+import { ActivityTracker } from './activity-tracker'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 
@@ -119,6 +120,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    try { ActivityTracker.getInstance().shutdown() } catch (e) { log(`ActivityTracker.shutdown error: ${e}`) }
     DockManager.getInstance().shutdownAll()
   })
 }

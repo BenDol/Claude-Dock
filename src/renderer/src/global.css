@@ -582,6 +582,61 @@ body {
   accent-color: var(--accent-color);
 }
 
+.settings-divider {
+  border-top: 1px solid var(--border-color);
+  margin: 8px 0;
+}
+
+.settings-section-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.settings-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: -4px;
+}
+
+.settings-btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.settings-group label.disabled {
+  opacity: 0.5;
+}
+
+.keybind-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.keybind-row .keybind-input {
+  flex: 1;
+}
+
 .keybind-input {
   cursor: pointer;
   text-align: center;
@@ -592,6 +647,36 @@ body {
   border-color: var(--accent-color);
   color: var(--text-secondary);
   font-style: italic;
+}
+
+.keybind-input.disabled-bind {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.keybind-clear {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.keybind-clear:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.keybind-clear:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* Loading */

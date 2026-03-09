@@ -20,8 +20,31 @@ function getStore(): Store<Settings> {
   return store
 }
 
+/**
+ * Deep merge stored settings with defaults so newly added keys
+ * (e.g. keybindings, linked) always have values even when the
+ * persisted JSON predates their introduction.
+ */
+function deepMergeDefaults(defaults: Record<string, any>, stored: Record<string, any>): any {
+  const result = { ...defaults }
+  for (const key of Object.keys(stored)) {
+    const sval = stored[key]
+    const dval = defaults[key]
+    if (sval !== undefined && sval !== null) {
+      if (dval && typeof dval === 'object' && !Array.isArray(dval) && typeof sval === 'object' && !Array.isArray(sval)) {
+        result[key] = deepMergeDefaults(dval, sval)
+      } else {
+        result[key] = sval
+      }
+    }
+  }
+  return result
+}
+
 export function getSettings(): Settings {
-  return safeRead(() => getStore().store) ?? DEFAULT_SETTINGS
+  const stored = safeRead(() => getStore().store)
+  if (!stored) return DEFAULT_SETTINGS
+  return deepMergeDefaults(DEFAULT_SETTINGS, stored as Record<string, any>) as Settings
 }
 
 export function getSetting<K extends keyof Settings>(key: K): Settings[K] {

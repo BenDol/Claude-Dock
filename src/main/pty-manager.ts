@@ -210,12 +210,13 @@ export class PtyManager {
     this.pendingData.clear()
     this.sendToHost({ type: 'killAll' })
     this.ptys.clear()
-    this.suppressSessionChanges = false
-    // Terminate the host process
+    // Terminate the host process before unsuppressing to prevent
+    // late exit events from clearing persisted sessions
     if (this.host) {
       this.host.kill()
       this.host = null
     }
+    this.suppressSessionChanges = false
   }
 
   has(terminalId: string): boolean {

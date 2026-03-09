@@ -8,6 +8,8 @@ import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
+import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled } from './linked-mode'
+import { ActivityTracker } from './activity-tracker'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -20,7 +22,18 @@ export function registerIpcHandlers(): void {
     if (dock) {
       log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}`)
       const resumeId = dock.getNextResumeId()
+      // Restore saved terminal buffer before PTY starts (for resumed sessions)
+      if (resumeId) {
+        dock.restoreBuffer(terminalId, resumeId)
+      }
       dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId)
+      // Register with activity tracker (non-critical)
+      try {
+        const sessionId = dock.ptyManager.getSessionId(terminalId)
+        ActivityTracker.getInstance().addTerminal(
+          dock.id, terminalId, `Terminal`, sessionId || '', dock.projectDir
+        )
+      } catch (e) { log(`ActivityTracker.addTerminal error: ${e}`) }
       log(`TERMINAL_SPAWN: ${terminalId} spawned`)
       return true
     }
@@ -69,6 +82,16 @@ export function registerIpcHandlers(): void {
       return { id: dock.id, projectDir: dock.projectDir, savedSessionCount: dock.savedSessionCount }
     }
     return null
+  })
+
+  ipcMain.handle(IPC.DOCK_RESTART, async (event) => {
+    const dock = getDockForEvent(event)
+    if (dock) {
+      const projectDir = dock.projectDir
+      log(`DOCK_RESTART: restarting dock for ${projectDir}`)
+      dock.close()
+      await manager.createDock(projectDir)
+    }
   })
 
   ipcMain.handle(IPC.SETTINGS_GET, () => {
@@ -223,6 +246,37 @@ export function registerIpcHandlers(): void {
       return await installClaudeCli()
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Installation failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.LINKED_CHECK_MCP, (event) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return { installed: false }
+    try {
+      return { installed: isMcpInstalled(dock.projectDir) }
+    } catch (err) {
+      logError('linked:checkMcp failed', err)
+      return { installed: false }
+    }
+  })
+
+  ipcMain.handle(IPC.LINKED_INSTALL_MCP, (event) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return { success: false, error: 'No dock found' }
+    return installMcp(dock.projectDir)
+  })
+
+  ipcMain.handle(IPC.LINKED_UNINSTALL_MCP, (event) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return { success: false, error: 'No dock found' }
+    return uninstallMcp(dock.projectDir)
+  })
+
+  ipcMain.handle(IPC.LINKED_SET_ENABLED, (_event, enabled: boolean) => {
+    try {
+      setLinkedEnabled(enabled)
+    } catch (err) {
+      logError('linked:setEnabled failed', err)
     }
   })
 

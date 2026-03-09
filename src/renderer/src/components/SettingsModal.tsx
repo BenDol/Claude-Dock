@@ -1,7 +1,8 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
+import { DEFAULT_SETTINGS } from '../../../shared/settings-schema'
 
 function formatKeybind(e: KeyboardEvent): string | null {
   // Ignore standalone modifier presses
@@ -18,10 +19,14 @@ function formatKeybind(e: KeyboardEvent): string | null {
 const KeybindInput: React.FC<{
   label: string
   value: string
+  defaultValue: string
   onChange: (value: string) => void
-}> = ({ label, value, onChange }) => {
+}> = ({ label, value, defaultValue, onChange }) => {
   const [listening, setListening] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const isDisabled = value.startsWith('!')
+  const displayValue = isDisabled ? value.slice(1) : value
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -38,19 +43,45 @@ const KeybindInput: React.FC<{
     [listening, onChange]
   )
 
+  const toggleEnabled = () => {
+    if (isDisabled) {
+      onChange(displayValue)
+    } else {
+      onChange('!' + displayValue)
+    }
+  }
+
+  const isDefault = value === defaultValue
+
   return (
     <label>
       {label}
-      <input
-        ref={inputRef}
-        type="text"
-        readOnly
-        value={listening ? 'Press a key combo...' : value}
-        className={`keybind-input${listening ? ' listening' : ''}`}
-        onClick={() => setListening(true)}
-        onKeyDown={handleKeyDown}
-        onBlur={() => setListening(false)}
-      />
+      <div className="keybind-row">
+        <input
+          type="checkbox"
+          checked={!isDisabled}
+          onChange={toggleEnabled}
+          title={isDisabled ? 'Enable this keybind' : 'Disable this keybind'}
+        />
+        <input
+          ref={inputRef}
+          type="text"
+          readOnly
+          value={listening ? 'Press a key combo...' : displayValue || 'None'}
+          className={`keybind-input${listening ? ' listening' : ''}${isDisabled ? ' disabled-bind' : ''}`}
+          onClick={() => { if (!isDisabled) setListening(true) }}
+          onKeyDown={handleKeyDown}
+          onBlur={() => setListening(false)}
+        />
+        <button
+          className="keybind-restore"
+          title="Restore default"
+          disabled={isDefault}
+          onClick={(e) => { e.preventDefault(); onChange(defaultValue) }}
+        >
+          ↺
+        </button>
+      </div>
     </label>
   )
 }
@@ -67,6 +98,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const update = useSettingsStore((s) => s.update)
   const [updateCheckStatus, setUpdateCheckStatus] = useState('')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null)
+  const [mcpBusy, setMcpBusy] = useState(false)
+  const [mcpStatus, setMcpStatus] = useState('')
+
+  // Check MCP install status when behavior tab is shown
+  useEffect(() => {
+    if (tab === 'behavior' && mcpInstalled === null) {
+      getDockApi().linked.checkMcp().then((r) => setMcpInstalled(r.installed))
+    }
+  }, [tab, mcpInstalled])
 
   const updateTheme = (partial: Partial<Settings['theme']>) => {
     update({ theme: { ...settings.theme, ...partial } })
@@ -82,6 +123,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   }
   const updateKeybindings = (partial: Partial<Settings['keybindings']>) => {
     update({ keybindings: { ...settings.keybindings, ...partial } })
+  }
+  const updateLinked = (partial: Partial<Settings['linked']>) => {
+    update({ linked: { ...settings.linked, ...partial } })
   }
   const updateUpdater = (partial: Partial<Settings['updater']>) => {
     update({ updater: { ...settings.updater, ...partial } })
@@ -264,22 +308,45 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <KeybindInput
                   label="Focus Up"
                   value={settings.keybindings.focusUp}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.focusUp}
                   onChange={(v) => updateKeybindings({ focusUp: v })}
                 />
                 <KeybindInput
                   label="Focus Down"
                   value={settings.keybindings.focusDown}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.focusDown}
                   onChange={(v) => updateKeybindings({ focusDown: v })}
                 />
                 <KeybindInput
                   label="Focus Left"
                   value={settings.keybindings.focusLeft}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.focusLeft}
                   onChange={(v) => updateKeybindings({ focusLeft: v })}
                 />
                 <KeybindInput
                   label="Focus Right"
                   value={settings.keybindings.focusRight}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.focusRight}
                   onChange={(v) => updateKeybindings({ focusRight: v })}
+                />
+                <div className="settings-divider" />
+                <KeybindInput
+                  label="Undo Input"
+                  value={settings.keybindings.undo}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.undo}
+                  onChange={(v) => updateKeybindings({ undo: v })}
+                />
+                <KeybindInput
+                  label="Redo Input"
+                  value={settings.keybindings.redo}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.redo}
+                  onChange={(v) => updateKeybindings({ redo: v })}
+                />
+                <KeybindInput
+                  label="Select All"
+                  value={settings.keybindings.selectAll}
+                  defaultValue={DEFAULT_SETTINGS.keybindings.selectAll}
+                  onChange={(v) => updateKeybindings({ selectAll: v })}
                 />
               </div>
             )}
@@ -301,6 +368,78 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Auto-spawn first terminal
                 </label>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Dock MCP Server</div>
+                <div className="settings-row">
+                  <span className="settings-label">
+                    Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}
+                  </span>
+                  <div className="settings-btn-group">
+                    <button
+                      className="settings-check-update-btn"
+                      disabled={mcpBusy}
+                      onClick={async () => {
+                        setMcpBusy(true)
+                        setMcpStatus('')
+                        try {
+                          if (mcpInstalled) {
+                            const r = await getDockApi().linked.uninstallMcp()
+                            if (r.success) {
+                              setMcpInstalled(false)
+                              if (settings.linked?.enabled) {
+                                updateLinked({ enabled: false })
+                                await getDockApi().linked.setEnabled(false)
+                              }
+                              setMcpStatus('Uninstalled successfully.')
+                            } else {
+                              setMcpStatus(r.error || 'Uninstall failed.')
+                            }
+                          } else {
+                            const r = await getDockApi().linked.installMcp()
+                            if (r.success) {
+                              setMcpInstalled(true)
+                              setMcpStatus('Installed. Restart dock to activate.')
+                            } else {
+                              setMcpStatus(r.error || 'Install failed.')
+                            }
+                          }
+                        } catch {
+                          setMcpStatus('Operation failed.')
+                        }
+                        setMcpBusy(false)
+                      }}
+                    >
+                      {mcpBusy ? '...' : mcpInstalled ? 'Uninstall' : 'Install'}
+                    </button>
+                    <button
+                      className="settings-check-update-btn"
+                      disabled={!mcpInstalled}
+                      onClick={() => getDockApi().dock.restart()}
+                      title="Restart dock to apply MCP changes"
+                    >
+                      Restart Dock
+                    </button>
+                  </div>
+                </div>
+                {mcpStatus && <div className="settings-update-status">{mcpStatus}</div>}
+                <label className={`checkbox-label${mcpInstalled ? '' : ' disabled'}`}>
+                  <input
+                    type="checkbox"
+                    checked={settings.linked?.enabled ?? false}
+                    disabled={!mcpInstalled}
+                    onChange={async (e) => {
+                      const enabled = e.target.checked
+                      updateLinked({ enabled })
+                      await getDockApi().linked.setEnabled(enabled)
+                    }}
+                  />
+                  Linked Mode
+                  {!mcpInstalled && <span className="settings-hint"> (install MCP first)</span>}
+                </label>
+                <div className="settings-description">
+                  When enabled, Claude sessions can see what other terminals are working on to coordinate tasks.
+                </div>
+                <div className="settings-divider" />
                 <label>
                   Update Profile
                   <select

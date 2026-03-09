@@ -6,6 +6,21 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
+import { InputUndoManager } from '../lib/input-undo'
+
+function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
+  if (!keybind || keybind.startsWith('!')) return false
+  const parts = keybind.split('+').map((p) => p.trim().toLowerCase())
+  const needCtrl = parts.includes('ctrl')
+  const needShift = parts.includes('shift')
+  const needAlt = parts.includes('alt')
+  const key = parts.find((p) => !['ctrl', 'shift', 'alt', 'meta'].includes(p))
+  if (!key) return false
+  if (needCtrl !== (e.ctrlKey || e.metaKey)) return false
+  if (needShift !== e.shiftKey) return false
+  if (needAlt !== e.altKey) return false
+  return e.key.toLowerCase() === key
+}
 
 interface UseTerminalOptions {
   terminalId: string
@@ -20,6 +35,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const dataBufferRef = useRef<string[]>([])
   const dataLenRef = useRef(0)
   const gotDataRef = useRef(false)
+  const undoRef = useRef(new InputUndoManager())
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -106,6 +122,63 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true
 
+        // Configurable keybinds (undo/redo, select all, directional focus)
+        try {
+          const { keybindings } = useSettingsStore.getState().settings
+          if (matchesKeybind(e, keybindings.undo)) {
+            const backspaces = undoRef.current.undo()
+            if (backspaces) api.terminal.write(terminalId, backspaces)
+            return false
+          }
+          if (matchesKeybind(e, keybindings.redo)) {
+            const text = undoRef.current.redo()
+            if (text) api.terminal.write(terminalId, text)
+            return false
+          }
+          if (matchesKeybind(e, keybindings.selectAll)) {
+            // Select only the current input, not the entire terminal
+            const inputLen = undoRef.current.inputLength
+            if (inputLen > 0) {
+              const buf = term.buffer.active
+              const row = buf.cursorY + buf.baseY
+              const col = buf.cursorX
+              // Input starts inputLen chars before cursor
+              const startCol = col - inputLen
+              if (startCol >= 0) {
+                term.select(startCol, row, inputLen)
+              } else {
+                // Input wraps lines — select what we can on current line
+                term.select(0, row, col)
+              }
+            }
+            return false
+          }
+          // Directional focus: prevent xterm from sending CSI sequences,
+          // let the event bubble to the window handler in App.tsx
+          if (matchesKeybind(e, keybindings.focusUp) ||
+              matchesKeybind(e, keybindings.focusDown) ||
+              matchesKeybind(e, keybindings.focusLeft) ||
+              matchesKeybind(e, keybindings.focusRight)) {
+            return false
+          }
+        } catch { /* non-critical */ }
+
+        // Selection + typing: delete selected text, then let new key through
+        if (term.hasSelection() && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          const sel = term.getSelection()
+          if (sel && (e.key === 'Backspace' || e.key === 'Delete' || e.key.length === 1)) {
+            const delCount = sel.length
+            term.clearSelection()
+            api.terminal.write(terminalId, '\x7f'.repeat(delCount))
+            undoRef.current.clear()
+            if (e.key === 'Backspace' || e.key === 'Delete') {
+              return false // just delete, don't type anything
+            }
+            // For printable keys, let xterm process the new character normally
+            return true
+          }
+        }
+
         // Ctrl+Shift+C: copy
         if (e.ctrlKey && e.shiftKey && e.key === 'C') {
           const sel = term.getSelection()
@@ -155,8 +228,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         }
       })
 
-      // Send input to PTY
+      // Send input to PTY and track for undo
       term.onData((data) => {
+        try { undoRef.current.onInput(data) } catch { /* non-critical */ }
         api.terminal.write(terminalId, data)
       })
     },

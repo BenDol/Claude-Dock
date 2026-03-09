@@ -45,6 +45,12 @@
     "files": [
       "out/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "resources/claude-dock-mcp.js",
+        "to": "claude-dock-mcp.js"
+      }
+    ],
     "asarUnpack": [
       "node_modules/node-pty/**"
     ],

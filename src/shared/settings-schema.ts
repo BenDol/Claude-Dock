@@ -32,6 +32,12 @@ export interface Settings {
     focusDown: string
     focusLeft: string
     focusRight: string
+    undo: string
+    redo: string
+    selectAll: string
+  }
+  linked: {
+    enabled: boolean
   }
   advanced: {
     debugLogging: boolean
@@ -185,7 +191,13 @@ export const DEFAULT_SETTINGS: Settings = {
     focusUp: 'Ctrl+Shift+ArrowUp',
     focusDown: 'Ctrl+Shift+ArrowDown',
     focusLeft: 'Ctrl+Shift+ArrowLeft',
-    focusRight: 'Ctrl+Shift+ArrowRight'
+    focusRight: 'Ctrl+Shift+ArrowRight',
+    undo: 'Ctrl+Shift+Z',
+    redo: 'Ctrl+Shift+Y',
+    selectAll: 'Ctrl+Shift+A'
+  },
+  linked: {
+    enabled: false
   },
   advanced: {
     debugLogging: false,

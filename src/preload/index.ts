@@ -44,6 +44,7 @@ export interface DockApi {
   }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
+    restart: () => Promise<void>
   }
   settings: {
     get: () => Promise<Settings>
@@ -79,6 +80,12 @@ export interface DockApi {
     maximize: () => Promise<void>
     close: () => Promise<void>
   }
+  linked: {
+    checkMcp: () => Promise<{ installed: boolean }>
+    installMcp: () => Promise<{ success: boolean; error?: string }>
+    uninstallMcp: () => Promise<{ success: boolean; error?: string }>
+    setEnabled: (enabled: boolean) => Promise<void>
+  }
   debug: {
     write: (text: string) => Promise<void>
     openDevTools: () => Promise<void>
@@ -110,7 +117,8 @@ const dockApi: DockApi = {
     }
   },
   dock: {
-    getInfo: () => ipcRenderer.invoke(IPC.DOCK_GET_INFO)
+    getInfo: () => ipcRenderer.invoke(IPC.DOCK_GET_INFO),
+    restart: () => ipcRenderer.invoke(IPC.DOCK_RESTART)
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
@@ -157,6 +165,12 @@ const dockApi: DockApi = {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),
     maximize: () => ipcRenderer.invoke(IPC.WIN_MAXIMIZE),
     close: () => ipcRenderer.invoke(IPC.WIN_CLOSE)
+  },
+  linked: {
+    checkMcp: () => ipcRenderer.invoke(IPC.LINKED_CHECK_MCP),
+    installMcp: () => ipcRenderer.invoke(IPC.LINKED_INSTALL_MCP),
+    uninstallMcp: () => ipcRenderer.invoke(IPC.LINKED_UNINSTALL_MCP),
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_ENABLED, enabled)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
