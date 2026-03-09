@@ -4,15 +4,25 @@ import { app } from 'electron'
 import { DockManager } from './dock-manager'
 import { log, logError } from './logger'
 
+// Bump this when CLAUDE.md block or MCP server script changes.
+// Migration will auto-update existing installs on startup.
+const MCP_VERSION = 3
+
 const CLAUDE_MD_START = '<!-- claude-dock-start -->'
 const CLAUDE_MD_END = '<!-- claude-dock-end -->'
 
 const CLAUDE_MD_BLOCK = `${CLAUDE_MD_START}
 # Dock Link
 If the file \`.linked\` exists in the project root, call the \`dock_status\` MCP tool
-(pass \`project_dir\` with the absolute path to the project root) before starting your
-task to see what other terminals are working on. This helps coordinate work and avoid
-conflicts. If the tool is unavailable or errors, proceed normally — do not retry.
+(pass \`project_dir\` with the absolute path to the project root, and \`session_id\` with
+your session ID) before starting your task to see what other terminals are working on and
+check for messages. This helps coordinate work and avoid conflicts.
+
+If the \`dock_send_message\` tool is available, you can send messages to other terminals
+to coordinate work (e.g., warn about file conflicts, request information, or share status).
+Use \`dock_check_messages\` with your session ID to explicitly check for new messages.
+
+If any tool is unavailable or errors, proceed normally — do not retry.
 ${CLAUDE_MD_END}`
 
 function getUserClaudeDir(): string {
@@ -27,12 +37,19 @@ function getClaudeMdPath(): string {
   return path.join(getUserClaudeDir(), 'CLAUDE.md')
 }
 
-function getMcpServerDestDir(): string {
+/** Runtime data directory (AppData) — for config, messages, activity, version */
+function getDataDir(): string {
   return path.join(app.getPath('userData').replace(/claude-dock$/, ''), 'claude-dock')
 }
 
-function getMcpServerDestPath(): string {
-  return path.join(getMcpServerDestDir(), 'claude-dock-mcp.js')
+/** Project-local MCP script path (shareable via git) */
+function getProjectMcpScriptPath(projectDir: string): string {
+  return path.join(projectDir, '.claude', 'claude-dock-mcp.js')
+}
+
+/** Legacy absolute path (AppData) — used for migration cleanup */
+function getLegacyMcpServerPath(): string {
+  return path.join(getDataDir(), 'claude-dock-mcp.js')
 }
 
 function getMcpServerSourcePath(): string {
@@ -40,6 +57,14 @@ function getMcpServerSourcePath(): string {
     return path.join(process.resourcesPath, 'claude-dock-mcp.js')
   }
   return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.js')
+}
+
+function getDockConfigPath(): string {
+  return path.join(getDataDir(), 'dock-config.json')
+}
+
+function getVersionPath(): string {
+  return path.join(getDataDir(), 'mcp-version')
 }
 
 // ---------- .mcp.json manipulation ----------
@@ -61,6 +86,29 @@ function writeMcpJson(projectDir: string, data: Record<string, any>): void {
   fs.writeFileSync(mcpPath, JSON.stringify(data, null, 2))
 }
 
+// ---------- dock-config.json ----------
+
+function syncDockConfig(overrides?: Partial<{ messagingEnabled: boolean }>): void {
+  try {
+    const configPath = getDockConfigPath()
+    let config: Record<string, any> = {}
+    try {
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      }
+    } catch { /* start fresh */ }
+
+    if (overrides) {
+      Object.assign(config, overrides)
+    }
+
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
+  } catch (err) {
+    logError('linked-mode: failed to sync dock-config.json', err)
+  }
+}
+
 // ---------- CLAUDE.md manipulation ----------
 
 function appendClaudeMd(): void {
@@ -76,6 +124,29 @@ function appendClaudeMd(): void {
     fs.mkdirSync(path.dirname(mdPath), { recursive: true })
     fs.writeFileSync(mdPath, content + separator + CLAUDE_MD_BLOCK + '\n')
     log('linked-mode: appended CLAUDE.md instructions')
+  } catch (err) {
+    logError('linked-mode: failed to update CLAUDE.md', err)
+  }
+}
+
+/** Replace existing CLAUDE.md block with the latest version */
+function updateClaudeMd(): void {
+  const mdPath = getClaudeMdPath()
+  try {
+    if (!fs.existsSync(mdPath)) {
+      appendClaudeMd()
+      return
+    }
+    let content = fs.readFileSync(mdPath, 'utf8')
+    if (!content.includes(CLAUDE_MD_START)) {
+      appendClaudeMd()
+      return
+    }
+    // Replace existing block
+    const regex = new RegExp(`${escapeRegex(CLAUDE_MD_START)}[\\s\\S]*?${escapeRegex(CLAUDE_MD_END)}`, 'g')
+    content = content.replace(regex, CLAUDE_MD_BLOCK)
+    fs.writeFileSync(mdPath, content)
+    log('linked-mode: updated CLAUDE.md instructions')
   } catch (err) {
     logError('linked-mode: failed to update CLAUDE.md', err)
   }
@@ -132,9 +203,7 @@ function removeLinkedFile(projectDir: string): void {
 
 // ---------- Legacy cleanup ----------
 
-/** Remove claude-dock entries from old install locations */
 function cleanLegacySettings(projectDir: string): void {
-  // Clean user-level ~/.claude/ files
   const userDir = getUserClaudeDir()
   for (const file of ['settings.json', 'settings.local.json']) {
     try {
@@ -150,7 +219,6 @@ function cleanLegacySettings(projectDir: string): void {
       log(`linked-mode: cleanLegacySettings warning (${file}): ${err}`)
     }
   }
-  // Clean project-level .claude/settings.local.json
   try {
     const projSettings = path.join(projectDir, '.claude', 'settings.local.json')
     if (!fs.existsSync(projSettings)) return
@@ -165,6 +233,28 @@ function cleanLegacySettings(projectDir: string): void {
   }
 }
 
+// ---------- Version tracking ----------
+
+function getInstalledVersion(): number {
+  try {
+    const vPath = getVersionPath()
+    if (fs.existsSync(vPath)) {
+      return parseInt(fs.readFileSync(vPath, 'utf8').trim(), 10) || 0
+    }
+  } catch { /* no version file */ }
+  return 0
+}
+
+function setInstalledVersion(version: number): void {
+  try {
+    const vPath = getVersionPath()
+    fs.mkdirSync(path.dirname(vPath), { recursive: true })
+    fs.writeFileSync(vPath, String(version))
+  } catch (err) {
+    log(`linked-mode: failed to write version: ${err}`)
+  }
+}
+
 // ---------- Public API ----------
 
 export function isMcpInstalled(projectDir: string): boolean {
@@ -174,9 +264,9 @@ export function isMcpInstalled(projectDir: string): boolean {
 
 export function installMcp(projectDir: string): { success: boolean; error?: string } {
   try {
-    // 1. Copy MCP server script
+    // 1. Copy MCP server script into project (.claude/ directory)
     const src = getMcpServerSourcePath()
-    const dest = getMcpServerDestPath()
+    const dest = getProjectMcpScriptPath(projectDir)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
 
     if (!fs.existsSync(src)) {
@@ -185,12 +275,12 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
     fs.copyFileSync(src, dest)
     log(`linked-mode: copied MCP server to ${dest}`)
 
-    // 2. Add to project-level .mcp.json
+    // 2. Add to project-level .mcp.json with relative path
     const mcpJson = readMcpJson(projectDir)
     if (!mcpJson.mcpServers) mcpJson.mcpServers = {}
     mcpJson.mcpServers['claude-dock'] = {
       command: 'node',
-      args: [dest.replace(/\\/g, '/')]
+      args: ['.claude/claude-dock-mcp.js']
     }
     writeMcpJson(projectDir, mcpJson)
     log(`linked-mode: added claude-dock to ${projectDir}/.mcp.json`)
@@ -200,6 +290,10 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
 
     // 4. Add CLAUDE.md instructions
     appendClaudeMd()
+
+    // 5. Write dock config and version
+    syncDockConfig({ messagingEnabled: false })
+    setInstalledVersion(MCP_VERSION)
 
     return { success: true }
   } catch (err) {
@@ -225,12 +319,21 @@ export function uninstallMcp(projectDir: string): { success: boolean; error?: st
     // 2. Remove CLAUDE.md instructions
     removeClaudeMd()
 
-    // 3. Delete MCP server file
-    const dest = getMcpServerDestPath()
-    if (fs.existsSync(dest)) {
-      fs.unlinkSync(dest)
-      log(`linked-mode: deleted ${dest}`)
+    // 3. Delete project-local MCP server script
+    const projectScript = getProjectMcpScriptPath(projectDir)
+    try { if (fs.existsSync(projectScript)) fs.unlinkSync(projectScript) } catch { /* ignore */ }
+
+    // 4. Delete runtime data files from AppData
+    for (const file of [getLegacyMcpServerPath(), getDockConfigPath(), getVersionPath()]) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file) } catch { /* ignore */ }
     }
+    // Clean messages file too
+    try {
+      const msgFile = path.join(getDataDir(), 'dock-messages.json')
+      if (fs.existsSync(msgFile)) fs.unlinkSync(msgFile)
+    } catch { /* ignore */ }
+
+    log(`linked-mode: deleted MCP files`)
 
     // 4. Disable linked mode for all open docks
     setLinkedEnabled(false)
@@ -253,4 +356,90 @@ export function setLinkedEnabled(enabled: boolean): void {
     }
   }
   log(`linked-mode: ${enabled ? 'enabled' : 'disabled'} for ${manager.size} dock(s)`)
+}
+
+export function setMessagingEnabled(enabled: boolean): void {
+  syncDockConfig({ messagingEnabled: enabled })
+  log(`linked-mode: messaging ${enabled ? 'enabled' : 'disabled'}`)
+}
+
+/**
+ * Run on app startup. Handles global migrations (CLAUDE.md, version tracking).
+ */
+export function migrateIfNeeded(): void {
+  try {
+    const installed = getInstalledVersion()
+    if (installed === 0) return // MCP never installed
+    if (installed >= MCP_VERSION) return // already up-to-date
+
+    log(`linked-mode: global migration from v${installed} to v${MCP_VERSION}`)
+
+    // Update CLAUDE.md block
+    updateClaudeMd()
+
+    // Ensure dock-config.json exists
+    syncDockConfig()
+
+    // Clean up legacy MCP script from AppData (moved to project in v3)
+    const legacyScript = getLegacyMcpServerPath()
+    try { if (fs.existsSync(legacyScript)) fs.unlinkSync(legacyScript) } catch { /* ignore */ }
+
+    setInstalledVersion(MCP_VERSION)
+    log('linked-mode: global migration complete')
+  } catch (err) {
+    logError('linked-mode: migration failed (non-fatal)', err)
+  }
+}
+
+/**
+ * Run when a dock opens. Migrates the project's .mcp.json from absolute paths
+ * to relative paths, and ensures the MCP script is in the project directory.
+ */
+export function migrateProjectIfNeeded(projectDir: string): void {
+  try {
+    const mcpJson = readMcpJson(projectDir)
+    const entry = mcpJson.mcpServers?.['claude-dock']
+    if (!entry) return // MCP not installed for this project
+
+    const args: string[] = entry.args || []
+    const currentPath = args[0] || ''
+
+    // Check if using old absolute path (contains AppData or similar absolute prefix)
+    const isAbsolute = path.isAbsolute(currentPath.replace(/\//g, path.sep))
+    const isAlreadyRelative = currentPath === '.claude/claude-dock-mcp.js'
+
+    if (isAlreadyRelative) {
+      // Just ensure the script file is up-to-date
+      const dest = getProjectMcpScriptPath(projectDir)
+      const src = getMcpServerSourcePath()
+      if (fs.existsSync(src)) {
+        fs.mkdirSync(path.dirname(dest), { recursive: true })
+        fs.copyFileSync(src, dest)
+      }
+      return
+    }
+
+    if (isAbsolute || !isAlreadyRelative) {
+      log(`linked-mode: migrating project MCP to relative path in ${projectDir}`)
+
+      // Copy MCP script into project
+      const src = getMcpServerSourcePath()
+      const dest = getProjectMcpScriptPath(projectDir)
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest)
+      }
+
+      // Update .mcp.json to use relative path
+      mcpJson.mcpServers['claude-dock'] = {
+        command: 'node',
+        args: ['.claude/claude-dock-mcp.js']
+      }
+      writeMcpJson(projectDir, mcpJson)
+      log(`linked-mode: project migration complete for ${projectDir}`)
+    }
+  } catch (err) {
+    logError(`linked-mode: project migration failed for ${projectDir} (non-fatal)`, err)
+  }
 }

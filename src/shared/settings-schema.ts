@@ -38,6 +38,7 @@ export interface Settings {
   }
   linked: {
     enabled: boolean
+    messagingEnabled: boolean
   }
   advanced: {
     debugLogging: boolean
@@ -197,7 +198,8 @@ export const DEFAULT_SETTINGS: Settings = {
     selectAll: 'Ctrl+Shift+A'
   },
   linked: {
-    enabled: false
+    enabled: false,
+    messagingEnabled: false
   },
   advanced: {
     debugLogging: false,

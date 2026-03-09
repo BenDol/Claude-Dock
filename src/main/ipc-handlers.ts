@@ -8,7 +8,7 @@ import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
-import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled } from './linked-mode'
+import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
 import { log, logError, setDebug, getLogDir } from './logger'
 
@@ -277,6 +277,14 @@ export function registerIpcHandlers(): void {
       setLinkedEnabled(enabled)
     } catch (err) {
       logError('linked:setEnabled failed', err)
+    }
+  })
+
+  ipcMain.handle(IPC.LINKED_SET_MESSAGING, (_event, enabled: boolean) => {
+    try {
+      setMessagingEnabled(enabled)
+    } catch (err) {
+      logError('linked:setMessaging failed', err)
     }
   })
 

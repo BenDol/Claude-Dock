@@ -3,6 +3,7 @@ import * as path from 'path'
 import { DockWindow } from './dock-window'
 import { addRecentPath } from './recent-store'
 import { getSettings } from './settings-store'
+import { migrateProjectIfNeeded } from './linked-mode'
 import { log, logError } from './logger'
 
 let nextId = 1
@@ -34,6 +35,7 @@ export class DockManager {
     }
 
     addRecentPath(dir)
+    try { migrateProjectIfNeeded(dir) } catch (e) { log(`MCP project migration error: ${e}`) }
 
     const id = `dock-${nextId++}`
     log(`createDock: creating DockWindow id=${id} dir=${dir}`)

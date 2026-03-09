@@ -5,6 +5,7 @@ import { DockManager } from './dock-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { createAppMenu } from './menu'
 import { ActivityTracker } from './activity-tracker'
+import { migrateIfNeeded } from './linked-mode'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 
@@ -96,6 +97,7 @@ if (!gotLock) {
     createAppMenu()
     registerIpcHandlers()
     installCli()
+    try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
 
     const manager = DockManager.getInstance()
     const dir = getProjectDirFromArgs(process.argv)

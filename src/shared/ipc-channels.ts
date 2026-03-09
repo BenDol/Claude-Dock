@@ -32,6 +32,7 @@ export const IPC = {
   LINKED_INSTALL_MCP: 'linked:installMcp',
   LINKED_UNINSTALL_MCP: 'linked:uninstallMcp',
   LINKED_SET_ENABLED: 'linked:setEnabled',
+  LINKED_SET_MESSAGING: 'linked:setMessaging',
   DEBUG_WRITE: 'debug:write',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
   DEBUG_OPEN_LOGS: 'debug:openLogs',

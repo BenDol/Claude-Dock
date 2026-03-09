@@ -439,6 +439,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description">
                   When enabled, Claude sessions can see what other terminals are working on to coordinate tasks.
                 </div>
+                <label className={`checkbox-label${mcpInstalled && settings.linked?.enabled ? '' : ' disabled'}`} style={{ paddingLeft: 24 }}>
+                  <input
+                    type="checkbox"
+                    checked={settings.linked?.messagingEnabled ?? false}
+                    disabled={!mcpInstalled || !settings.linked?.enabled}
+                    onChange={async (e) => {
+                      const enabled = e.target.checked
+                      updateLinked({ messagingEnabled: enabled })
+                      await getDockApi().linked.setMessaging(enabled)
+                    }}
+                  />
+                  Inter-terminal Messaging
+                  {(!mcpInstalled || !settings.linked?.enabled) && <span className="settings-hint"> (enable Linked Mode first)</span>}
+                </label>
+                <div className="settings-description" style={{ paddingLeft: 24 }}>
+                  Allow Claude sessions to send messages to each other for coordination.
+                </div>
                 <div className="settings-divider" />
                 <label>
                   Update Profile

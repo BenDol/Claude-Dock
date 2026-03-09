@@ -85,6 +85,7 @@ export interface DockApi {
     installMcp: () => Promise<{ success: boolean; error?: string }>
     uninstallMcp: () => Promise<{ success: boolean; error?: string }>
     setEnabled: (enabled: boolean) => Promise<void>
+    setMessaging: (enabled: boolean) => Promise<void>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -170,7 +171,8 @@ const dockApi: DockApi = {
     checkMcp: () => ipcRenderer.invoke(IPC.LINKED_CHECK_MCP),
     installMcp: () => ipcRenderer.invoke(IPC.LINKED_INSTALL_MCP),
     uninstallMcp: () => ipcRenderer.invoke(IPC.LINKED_UNINSTALL_MCP),
-    setEnabled: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_ENABLED, enabled)
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_ENABLED, enabled),
+    setMessaging: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_MESSAGING, enabled)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
