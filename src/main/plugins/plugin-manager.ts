@@ -9,7 +9,8 @@ import {
   isProjectConfigured,
   markProjectConfigured
 } from './plugin-store'
-import type { PluginInfo, ProjectPluginStates } from '../../shared/plugin-types'
+import type { PluginInfo, ProjectPluginStates, PluginToolbarAction } from '../../shared/plugin-types'
+import type { PluginManifest } from '../../shared/plugin-manifest'
 import type { DockWindow } from '../dock-window'
 import { log, logError } from '../logger'
 
@@ -108,7 +109,9 @@ export class PluginManager {
   }
 
   emitProjectPostClose(projectDir: string): void {
-    this.bus.emitPost('project:postClose', { projectDir }, this.enabledFilter(projectDir))
+    // Always run postClose handlers (no enabled filter) — cleanup must happen
+    // even if the plugin was disabled between open and close
+    this.bus.emitPost('project:postClose', { projectDir }, () => true)
   }
 
   emitTerminalPreSpawn(projectDir: string, terminalId: string): void {
@@ -129,6 +132,28 @@ export class PluginManager {
 
   emitSettingsChanged(settings: any): void {
     this.bus.emitPost('settings:changed', { settings }, () => true)
+  }
+
+  /**
+   * Returns toolbar actions defined in runtime plugin manifests.
+   * These are serializable and sent to the renderer via IPC.
+   */
+  getToolbarActionsFromManifests(): PluginToolbarAction[] {
+    const actions: PluginToolbarAction[] = []
+    for (const plugin of this.plugins) {
+      // Duck-type check for runtime plugins with manifests
+      const manifest = (plugin as any).manifest as PluginManifest | undefined
+      if (manifest?.toolbar) {
+        actions.push({
+          pluginId: plugin.id,
+          title: manifest.toolbar.title,
+          icon: manifest.toolbar.icon,
+          action: manifest.toolbar.action,
+          order: manifest.toolbar.order ?? 100
+        })
+      }
+    }
+    return actions.sort((a, b) => a.order - b.order)
   }
 
   dispose(): void {

@@ -12,6 +12,12 @@ export interface DockPlugin {
   readonly defaultEnabled: boolean
   readonly settingsSchema?: PluginSettingDef[]
 
+  /**
+   * When true, plugin registration is deferred to after the first window shows.
+   * Use for plugins that don't need to hook early lifecycle events like project:preOpen.
+   */
+  readonly lazyLoad?: boolean
+
   /** Called once at app startup to register event listeners on the bus */
   register(bus: PluginEventBus): void
 

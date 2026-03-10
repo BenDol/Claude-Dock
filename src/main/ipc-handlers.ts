@@ -10,7 +10,7 @@ import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } 
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
-import { PluginManager } from './plugins'
+import { PluginManager, getPluginsDir } from './plugins'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -323,6 +323,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_MARK_CONFIGURED, (_event, projectDir: string) => {
     pluginManager.markConfigured(projectDir)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_TOOLBAR_ACTIONS, () => {
+    return pluginManager.getToolbarActionsFromManifests()
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_DIR, () => {
+    return getPluginsDir()
+  })
+
+  ipcMain.handle(IPC.PLUGIN_OPEN_DIR, () => {
+    shell.openPath(getPluginsDir())
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

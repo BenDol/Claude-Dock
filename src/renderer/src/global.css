@@ -160,6 +160,28 @@ body {
   cursor: default;
 }
 
+.toolbar-btn-badge-wrap {
+  position: relative;
+}
+
+.toolbar-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent-color);
+  color: #fff;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
 .toolbar-spinner {
   width: 10px;
   height: 10px;
@@ -1278,3 +1300,4 @@ body {
   opacity: 0.2 !important;
   border-radius: 6px;
 }
+

@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
+import { getToolbarActions } from '../toolbar-actions'
+import type { PluginToolbarAction } from '../../../shared/plugin-types'
+import { sanitizeSvg } from '../lib/svg-sanitize'
 
 interface ToolbarProps {
   projectDir: string
@@ -54,12 +57,50 @@ const FolderIcon: React.FC = () => (
   </svg>
 )
 
+
 const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSettings }) => {
   const terminalCount = useDockStore((s) => s.terminals.length)
   const rcCount = useDockStore((s) => s.rcTerminals.size)
   const hasLoadingTerminals = useDockStore((s) => s.loadingTerminals.size > 0)
   const [toggling, setToggling] = useState(false)
   const rcBufsRef = useRef<Map<string, string>>(new Map())
+  const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
+  const [badges, setBadges] = useState<Record<string, string | number>>({})
+
+  // Load runtime plugin toolbar actions on mount, sanitizing SVG icons
+  useEffect(() => {
+    getDockApi().plugins.getToolbarActions().then((actions) => {
+      setRuntimeActions(actions.map((a) => ({ ...a, icon: sanitizeSvg(a.icon) })))
+    }).catch(() => {})
+  }, [])
+
+  // Poll badges for toolbar actions that provide getBadge
+  useEffect(() => {
+    if (!projectDir) return
+    const actions = getToolbarActions().filter((a) => a.getBadge)
+    if (actions.length === 0) return
+
+    const poll = () => {
+      for (const action of actions) {
+        action.getBadge!(projectDir).then((val) => {
+          setBadges((prev) => {
+            if (val == null) {
+              if (!(action.id in prev)) return prev
+              const next = { ...prev }
+              delete next[action.id]
+              return next
+            }
+            if (prev[action.id] === val) return prev
+            return { ...prev, [action.id]: val }
+          })
+        }).catch(() => {})
+      }
+    }
+
+    poll()
+    const interval = setInterval(poll, 10000)
+    return () => clearInterval(interval)
+  }, [projectDir])
 
   // Listen for RC disconnect only while RC terminals exist
   useEffect(() => {
@@ -180,6 +221,29 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         <button className="toolbar-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
           +
         </button>
+        {getToolbarActions().map((action) => (
+          <button
+            key={action.id}
+            className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap"
+            onClick={() => action.onClick(projectDir)}
+            title={action.title}
+          >
+            {action.icon}
+            {badges[action.id] != null && (
+              <span className="toolbar-badge">{badges[action.id]}</span>
+            )}
+          </button>
+        ))}
+        {runtimeActions.map((action) => (
+          <button
+            key={action.pluginId}
+            className="toolbar-btn toolbar-btn-icon"
+            onClick={() => getDockApi().plugins.invoke(action.action, projectDir)}
+            title={action.title}
+          >
+            <span dangerouslySetInnerHTML={{ __html: action.icon }} />
+          </button>
+        ))}
         <button
           className="toolbar-btn toolbar-btn-icon"
           onClick={() => api.app.openInExplorer(projectDir)}

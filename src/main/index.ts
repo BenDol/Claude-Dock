@@ -6,7 +6,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { createAppMenu } from './menu'
 import { ActivityTracker } from './activity-tracker'
 import { migrateIfNeeded } from './linked-mode'
-import { registerPlugins } from './plugins'
+import { registerPlugins, PluginManager } from './plugins'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 
@@ -125,6 +125,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     try { ActivityTracker.getInstance().shutdown() } catch (e) { log(`ActivityTracker.shutdown error: ${e}`) }
+    try { PluginManager.getInstance().dispose() } catch (e) { log(`PluginManager.dispose error: ${e}`) }
     DockManager.getInstance().shutdownAll()
   })
 }

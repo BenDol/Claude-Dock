@@ -1,7 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { Settings } from '../shared/settings-schema'
-import type { PluginInfo, ProjectPluginStates } from '../shared/plugin-types'
+import type { PluginInfo, ProjectPluginStates, PluginToolbarAction } from '../shared/plugin-types'
+import type {
+  GitCommitInfo,
+  GitBranchInfo,
+  GitStatusResult,
+  GitFileDiff,
+  GitCommitDetail,
+  GitLogOptions,
+  GitStashEntry,
+  GitSubmoduleInfo,
+  GitMergeState,
+  GitConflictFileContent
+} from '../shared/git-manager-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -96,6 +108,59 @@ export interface DockApi {
     setSetting: (projectDir: string, pluginId: string, key: string, value: unknown) => Promise<void>
     isConfigured: (projectDir: string) => Promise<boolean>
     markConfigured: (projectDir: string) => Promise<void>
+    getToolbarActions: () => Promise<PluginToolbarAction[]>
+    getDir: () => Promise<string>
+    openDir: () => Promise<void>
+    invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+  }
+  gitManager: {
+    open: (projectDir: string) => Promise<void>
+    getLog: (projectDir: string, opts?: GitLogOptions) => Promise<GitCommitInfo[]>
+    getBranches: (projectDir: string) => Promise<GitBranchInfo[]>
+    getStatus: (projectDir: string) => Promise<GitStatusResult>
+    getDiff: (projectDir: string, filePath?: string, staged?: boolean) => Promise<GitFileDiff[]>
+    getCommitDetail: (projectDir: string, hash: string) => Promise<GitCommitDetail | null>
+    stage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    unstage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    commit: (projectDir: string, message: string) => Promise<{ success: boolean; hash?: string; error?: string }>
+    checkoutBranch: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
+    createBranch: (projectDir: string, name: string, startPoint?: string) => Promise<{ success: boolean; error?: string }>
+    deleteBranch: (projectDir: string, name: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
+    pull: (projectDir: string, mode?: 'merge' | 'rebase') => Promise<{ success: boolean; output?: string; error?: string }>
+    pullAdvanced: (projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
+    push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    fetch: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    fetchSimple: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    fetchAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    fetchPruneAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    stashList: (projectDir: string) => Promise<GitStashEntry[]>
+    stashSave: (projectDir: string, message?: string) => Promise<{ success: boolean; error?: string }>
+    stashApply: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
+    stashPop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
+    stashDrop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
+    getSubmodules: (projectDir: string) => Promise<GitSubmoduleInfo[]>
+    generateCommitMsg: (projectDir: string) => Promise<{ success: boolean; message?: string; error?: string }>
+    reset: (projectDir: string, hash: string, mode: string) => Promise<{ success: boolean; error?: string }>
+    revert: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
+    cherryPick: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
+    createTag: (projectDir: string, name: string, hash: string, message?: string) => Promise<{ success: boolean; error?: string }>
+    renameBranch: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
+    discard: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    deleteFiles: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    showInFolder: (projectDir: string, filePath: string) => Promise<void>
+    applyPatch: (projectDir: string, patch: string, cached: boolean, reverse: boolean) => Promise<{ success: boolean; error?: string }>
+    openBash: (projectDir: string) => Promise<void>
+    addSubmodule: (projectDir: string, url: string, localPath?: string, branch?: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
+    removeSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; error?: string }>
+    getRemotes: (projectDir: string) => Promise<{ name: string; fetchUrl: string; pushUrl: string }[]>
+    addRemote: (projectDir: string, name: string, url: string) => Promise<{ success: boolean; error?: string }>
+    removeRemote: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
+    getMergeState: (projectDir: string) => Promise<GitMergeState>
+    getConflictContent: (projectDir: string, filePath: string) => Promise<GitConflictFileContent>
+    resolveConflict: (projectDir: string, filePath: string, resolution: 'ours' | 'theirs' | 'both', chunkIndex?: number) => Promise<{ success: boolean; error?: string }>
+    abortMerge: (projectDir: string) => Promise<{ success: boolean; error?: string }>
+    continueMerge: (projectDir: string) => Promise<{ success: boolean; error?: string }>
+    mergeBranch: (projectDir: string, branchName: string) => Promise<{ success: boolean; error?: string }>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -191,7 +256,60 @@ const dockApi: DockApi = {
     getSetting: (projectDir, pluginId, key) => ipcRenderer.invoke(IPC.PLUGIN_GET_SETTING, projectDir, pluginId, key),
     setSetting: (projectDir, pluginId, key, value) => ipcRenderer.invoke(IPC.PLUGIN_SET_SETTING, projectDir, pluginId, key, value),
     isConfigured: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_IS_CONFIGURED, projectDir),
-    markConfigured: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_MARK_CONFIGURED, projectDir)
+    markConfigured: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_MARK_CONFIGURED, projectDir),
+    getToolbarActions: () => ipcRenderer.invoke(IPC.PLUGIN_GET_TOOLBAR_ACTIONS),
+    getDir: () => ipcRenderer.invoke(IPC.PLUGIN_GET_DIR),
+    openDir: () => ipcRenderer.invoke(IPC.PLUGIN_OPEN_DIR),
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
+  },
+  gitManager: {
+    open: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN, projectDir),
+    getLog: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_GET_LOG, projectDir, opts),
+    getBranches: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BRANCHES, projectDir),
+    getStatus: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_STATUS, projectDir),
+    getDiff: (projectDir, filePath, staged) => ipcRenderer.invoke(IPC.GIT_MGR_GET_DIFF, projectDir, filePath, staged),
+    getCommitDetail: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_DETAIL, projectDir, hash),
+    stage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_STAGE, projectDir, paths),
+    unstage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_UNSTAGE, projectDir, paths),
+    commit: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_COMMIT, projectDir, message),
+    checkoutBranch: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_CHECKOUT_BRANCH, projectDir, name),
+    createBranch: (projectDir, name, startPoint) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_BRANCH, projectDir, name, startPoint),
+    deleteBranch: (projectDir, name, force) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_BRANCH, projectDir, name, force),
+    pull: (projectDir, mode) => ipcRenderer.invoke(IPC.GIT_MGR_PULL, projectDir, mode),
+    pullAdvanced: (projectDir, remote, branch, rebase, autostash, tags, prune) => ipcRenderer.invoke(IPC.GIT_MGR_PULL_ADVANCED, projectDir, remote, branch, rebase, autostash, tags, prune),
+    push: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH, projectDir),
+    fetch: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH, projectDir),
+    fetchSimple: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_SIMPLE, projectDir),
+    fetchAll: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_ALL, projectDir),
+    fetchPruneAll: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_PRUNE_ALL, projectDir),
+    stashList: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_LIST, projectDir),
+    stashSave: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_SAVE, projectDir, message),
+    stashApply: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_APPLY, projectDir, index),
+    stashPop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_POP, projectDir, index),
+    stashDrop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_DROP, projectDir, index),
+    getSubmodules: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SUBMODULES, projectDir),
+    generateCommitMsg: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GENERATE_COMMIT_MSG, projectDir),
+    reset: (projectDir, hash, mode) => ipcRenderer.invoke(IPC.GIT_MGR_RESET, projectDir, hash, mode),
+    revert: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_REVERT, projectDir, hash),
+    cherryPick: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_CHERRY_PICK, projectDir, hash),
+    createTag: (projectDir, name, hash, message) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_TAG, projectDir, name, hash, message),
+    renameBranch: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName),
+    discard: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DISCARD, projectDir, paths),
+    deleteFiles: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_FILES, projectDir, paths),
+    showInFolder: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_SHOW_IN_FOLDER, projectDir, filePath),
+    applyPatch: (projectDir, patch, cached, reverse) => ipcRenderer.invoke(IPC.GIT_MGR_APPLY_PATCH, projectDir, patch, cached, reverse),
+    openBash: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN_BASH, projectDir),
+    addSubmodule: (projectDir, url, localPath, branch, force) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_SUBMODULE, projectDir, url, localPath, branch, force),
+    removeSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_SUBMODULE, projectDir, subPath),
+    getRemotes: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_REMOTES, projectDir),
+    addRemote: (projectDir, name, url) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_REMOTE, projectDir, name, url),
+    removeRemote: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_REMOTE, projectDir, name),
+    getMergeState: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_MERGE_STATE, projectDir),
+    getConflictContent: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_GET_CONFLICT_CONTENT, projectDir, filePath),
+    resolveConflict: (projectDir, filePath, resolution, chunkIndex) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_CONFLICT, projectDir, filePath, resolution, chunkIndex),
+    abortMerge: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_ABORT_MERGE, projectDir),
+    continueMerge: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_CONTINUE_MERGE, projectDir),
+    mergeBranch: (projectDir, branchName) => ipcRenderer.invoke(IPC.GIT_MGR_MERGE_BRANCH, projectDir, branchName)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

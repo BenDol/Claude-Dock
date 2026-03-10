@@ -26,3 +26,12 @@ export interface PluginSettingDef {
 
 /** State for all plugins for a given project */
 export type ProjectPluginStates = Record<PluginId, PluginProjectState>
+
+/** Toolbar action exposed by a runtime plugin manifest (serializable for IPC) */
+export interface PluginToolbarAction {
+  pluginId: string
+  title: string
+  icon: string // SVG markup
+  action: string // IPC channel to invoke with (projectDir)
+  order: number
+}

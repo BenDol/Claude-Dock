@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, Suspense } from 'react'
 import DockGrid from './components/DockGrid'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
@@ -9,8 +9,11 @@ import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
+import { getPluginViews } from './plugin-views'
 
-const isLauncher = new URLSearchParams(window.location.search).has('launcher')
+const searchParams = new URLSearchParams(window.location.search)
+const isLauncher = searchParams.has('launcher')
+const pluginView = getPluginViews().find((v) => searchParams.has(v.queryParam))
 
 function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   if (!keybind || keybind.startsWith('!')) return false
@@ -28,6 +31,14 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
 }
 
 function App() {
+  if (pluginView) {
+    const PluginComponent = pluginView.component
+    return (
+      <Suspense fallback={<div className="loading">Loading...</div>}>
+        <PluginComponent />
+      </Suspense>
+    )
+  }
   if (isLauncher) {
     return <LauncherApp />
   }

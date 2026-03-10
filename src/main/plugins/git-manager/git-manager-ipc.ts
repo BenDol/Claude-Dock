@@ -1,0 +1,430 @@
+import { ipcMain, shell } from 'electron'
+import { execFile } from 'child_process'
+import * as path from 'path'
+import { IPC } from '../../../shared/ipc-channels'
+import { GitManagerWindowManager } from './git-manager-window'
+import * as gitOps from './git-operations'
+import type { GitLogOptions } from '../../../shared/git-manager-types'
+import { log, logError } from '../../logger'
+
+export function registerGitManagerIpc(): void {
+  const winManager = GitManagerWindowManager.getInstance()
+
+  ipcMain.handle(IPC.GIT_MGR_OPEN, (_event, projectDir: string) => {
+    return winManager.open(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_LOG, async (_event, projectDir: string, opts?: GitLogOptions) => {
+    return gitOps.getLog(projectDir, opts)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_BRANCHES, async (_event, projectDir: string) => {
+    return gitOps.getBranches(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_STATUS, async (_event, projectDir: string) => {
+    return gitOps.getStatus(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_DIFF, async (_event, projectDir: string, filePath?: string, staged?: boolean) => {
+    return gitOps.getDiff(projectDir, filePath, staged)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_COMMIT_DETAIL, async (_event, projectDir: string, hash: string) => {
+    return gitOps.getCommitDetail(projectDir, hash)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STAGE, async (_event, projectDir: string, paths: string[]) => {
+    try {
+      await gitOps.stageFiles(projectDir, paths)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] stage failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Stage failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_UNSTAGE, async (_event, projectDir: string, paths: string[]) => {
+    try {
+      await gitOps.unstageFiles(projectDir, paths)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] unstage failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Unstage failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_COMMIT, async (_event, projectDir: string, message: string) => {
+    try {
+      const result = await gitOps.createCommit(projectDir, message)
+      return { success: true, hash: result.hash }
+    } catch (err) {
+      logError('[git-manager] commit failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Commit failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CHECKOUT_BRANCH, async (_event, projectDir: string, name: string) => {
+    try {
+      await gitOps.checkoutBranch(projectDir, name)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] checkout failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Checkout failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CREATE_BRANCH, async (_event, projectDir: string, name: string, startPoint?: string) => {
+    try {
+      await gitOps.createBranch(projectDir, name, startPoint)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] create branch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Create branch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_DELETE_BRANCH, async (_event, projectDir: string, name: string, force?: boolean) => {
+    try {
+      await gitOps.deleteBranch(projectDir, name, force)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] delete branch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Delete branch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_PULL, async (_event, projectDir: string, mode?: string) => {
+    try {
+      const output = await gitOps.pull(projectDir, mode as 'merge' | 'rebase' | undefined)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] pull failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Pull failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_PULL_ADVANCED, async (_event, projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => {
+    try {
+      const output = await gitOps.pullAdvanced(projectDir, remote, branch, rebase, autostash, tags, prune)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] pull advanced failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Pull failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_FETCH_SIMPLE, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.fetchSimple(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] fetch simple failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Fetch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_FETCH_ALL, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.fetchAll(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] fetch all failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Fetch all failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_FETCH_PRUNE_ALL, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.fetchPruneAll(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] fetch prune all failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Fetch and prune all failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_PUSH, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.push(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] push failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Push failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_FETCH, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.fetch(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] fetch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Fetch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STASH_LIST, async (_event, projectDir: string) => {
+    return gitOps.getStashList(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STASH_SAVE, async (_event, projectDir: string, message?: string) => {
+    try {
+      await gitOps.stashSave(projectDir, message)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] stash save failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Stash failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STASH_APPLY, async (_event, projectDir: string, index: number) => {
+    try {
+      await gitOps.stashApply(projectDir, index)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] stash apply failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Stash apply failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STASH_POP, async (_event, projectDir: string, index: number) => {
+    try {
+      await gitOps.stashPop(projectDir, index)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] stash pop failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Stash pop failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_STASH_DROP, async (_event, projectDir: string, index: number) => {
+    try {
+      await gitOps.stashDrop(projectDir, index)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] stash drop failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Stash drop failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_SUBMODULES, async (_event, projectDir: string) => {
+    return gitOps.getSubmodules(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GENERATE_COMMIT_MSG, async (_event, projectDir: string) => {
+    try {
+      const message = await gitOps.generateCommitMessage(projectDir)
+      return { success: true, message }
+    } catch (err) {
+      logError('[git-manager] generate commit message failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Generation failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_RESET, async (_event, projectDir: string, hash: string, mode: string) => {
+    try {
+      await gitOps.resetBranch(projectDir, hash, mode as 'soft' | 'mixed' | 'keep' | 'merge' | 'hard')
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] reset failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Reset failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_REVERT, async (_event, projectDir: string, hash: string) => {
+    try {
+      await gitOps.revertCommit(projectDir, hash)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] revert failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Revert failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CHERRY_PICK, async (_event, projectDir: string, hash: string) => {
+    try {
+      await gitOps.cherryPick(projectDir, hash)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] cherry-pick failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Cherry pick failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CREATE_TAG, async (_event, projectDir: string, name: string, hash: string, message?: string) => {
+    try {
+      await gitOps.createTag(projectDir, name, hash, message)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] create tag failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Create tag failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_RENAME_BRANCH, async (_event, projectDir: string, oldName: string, newName: string) => {
+    try {
+      await gitOps.renameBranch(projectDir, oldName, newName)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] rename branch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Rename branch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_DISCARD, async (_event, projectDir: string, paths: string[]) => {
+    try {
+      await gitOps.discardFiles(projectDir, paths)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] discard failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Discard failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_DELETE_FILES, async (_event, projectDir: string, paths: string[]) => {
+    try {
+      await gitOps.deleteUntrackedFiles(projectDir, paths)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] delete files failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Delete failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_APPLY_PATCH, async (_event, projectDir: string, patch: string, cached: boolean, reverse: boolean) => {
+    try {
+      await gitOps.applyPatch(projectDir, patch, cached, reverse)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] apply patch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Apply patch failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_SHOW_IN_FOLDER, (_event, projectDir: string, filePath: string) => {
+    shell.showItemInFolder(path.join(projectDir, filePath))
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_ADD_SUBMODULE, async (_event, projectDir: string, url: string, localPath?: string, branch?: string, force?: boolean) => {
+    try {
+      await gitOps.addSubmodule(projectDir, url, localPath, branch, force)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] add submodule failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Add submodule failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_REMOVE_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
+    try {
+      await gitOps.removeSubmodule(projectDir, subPath)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] remove submodule failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Remove submodule failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_REMOTES, async (_event, projectDir: string) => {
+    return gitOps.getRemotes(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_ADD_REMOTE, async (_event, projectDir: string, name: string, url: string) => {
+    try {
+      await gitOps.addRemote(projectDir, name, url)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] add remote failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Add remote failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_REMOVE_REMOTE, async (_event, projectDir: string, name: string) => {
+    try {
+      await gitOps.removeRemote(projectDir, name)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] remove remote failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Remove remote failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_MERGE_STATE, async (_event, projectDir: string) => {
+    return gitOps.getMergeState(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_CONFLICT_CONTENT, async (_event, projectDir: string, filePath: string) => {
+    return gitOps.getConflictFileContent(projectDir, filePath)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_RESOLVE_CONFLICT, async (_event, projectDir: string, filePath: string, resolution: string, chunkIndex?: number) => {
+    try {
+      await gitOps.resolveConflictFile(projectDir, filePath, resolution as 'ours' | 'theirs' | 'both', chunkIndex)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] resolve conflict failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Resolve conflict failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_ABORT_MERGE, async (_event, projectDir: string) => {
+    try {
+      await gitOps.abortMerge(projectDir)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] abort merge failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Abort merge failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CONTINUE_MERGE, async (_event, projectDir: string) => {
+    try {
+      await gitOps.continueMerge(projectDir)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] continue merge failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Continue merge failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_MERGE_BRANCH, async (_event, projectDir: string, branchName: string) => {
+    try {
+      await gitOps.mergeBranch(projectDir, branchName)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] merge branch failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Merge failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_OPEN_BASH, (_event, projectDir: string) => {
+    // Try git-bash locations, fallback to plain bash/sh
+    const gitBashPaths = [
+      'C:\\Program Files\\Git\\git-bash.exe',
+      'C:\\Program Files (x86)\\Git\\git-bash.exe'
+    ]
+    // Find git.exe and derive git-bash.exe from same dir
+    try {
+      const { execFileSync } = require('child_process')
+      const gitPath = execFileSync('where', ['git'], { timeout: 5000 }).toString().trim().split('\n')[0].trim()
+      if (gitPath) {
+        // git.exe is usually in cmd/, git-bash.exe is in parent dir
+        const gitDir = path.resolve(path.dirname(gitPath), '..')
+        gitBashPaths.unshift(path.join(gitDir, 'git-bash.exe'))
+      }
+    } catch { /* ignore */ }
+
+    const fs = require('fs')
+    for (const p of gitBashPaths) {
+      if (fs.existsSync(p)) {
+        execFile(p, ['--cd=' + projectDir], { detached: true })
+        return
+      }
+    }
+    // Fallback: open default terminal in the directory
+    shell.openPath(projectDir)
+  })
+
+  log('[git-manager] IPC handlers registered')
+}
