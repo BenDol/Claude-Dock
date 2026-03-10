@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { Settings } from '../shared/settings-schema'
+import type { PluginInfo, ProjectPluginStates } from '../shared/plugin-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -86,6 +87,15 @@ export interface DockApi {
     uninstallMcp: () => Promise<{ success: boolean; error?: string }>
     setEnabled: (enabled: boolean) => Promise<void>
     setMessaging: (enabled: boolean) => Promise<void>
+  }
+  plugins: {
+    getList: () => Promise<PluginInfo[]>
+    getStates: (projectDir: string) => Promise<ProjectPluginStates>
+    setEnabled: (projectDir: string, pluginId: string, enabled: boolean) => Promise<void>
+    getSetting: (projectDir: string, pluginId: string, key: string) => Promise<unknown>
+    setSetting: (projectDir: string, pluginId: string, key: string, value: unknown) => Promise<void>
+    isConfigured: (projectDir: string) => Promise<boolean>
+    markConfigured: (projectDir: string) => Promise<void>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -173,6 +183,15 @@ const dockApi: DockApi = {
     uninstallMcp: () => ipcRenderer.invoke(IPC.LINKED_UNINSTALL_MCP),
     setEnabled: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_ENABLED, enabled),
     setMessaging: (enabled) => ipcRenderer.invoke(IPC.LINKED_SET_MESSAGING, enabled)
+  },
+  plugins: {
+    getList: () => ipcRenderer.invoke(IPC.PLUGIN_GET_LIST),
+    getStates: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_GET_STATES, projectDir),
+    setEnabled: (projectDir, pluginId, enabled) => ipcRenderer.invoke(IPC.PLUGIN_SET_ENABLED, projectDir, pluginId, enabled),
+    getSetting: (projectDir, pluginId, key) => ipcRenderer.invoke(IPC.PLUGIN_GET_SETTING, projectDir, pluginId, key),
+    setSetting: (projectDir, pluginId, key, value) => ipcRenderer.invoke(IPC.PLUGIN_SET_SETTING, projectDir, pluginId, key, value),
+    isConfigured: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_IS_CONFIGURED, projectDir),
+    markConfigured: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_MARK_CONFIGURED, projectDir)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

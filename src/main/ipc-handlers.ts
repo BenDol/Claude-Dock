@@ -10,6 +10,7 @@ import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } 
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
+import { PluginManager } from './plugins'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -21,6 +22,7 @@ export function registerIpcHandlers(): void {
     const dock = getDockForEvent(event)
     if (dock) {
       log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}`)
+      pluginManager.emitTerminalPreSpawn(dock.projectDir, terminalId)
       const resumeId = dock.getNextResumeId()
       // Restore saved terminal buffer before PTY starts (for resumed sessions)
       if (resumeId) {
@@ -28,12 +30,13 @@ export function registerIpcHandlers(): void {
       }
       dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId)
       // Register with activity tracker (non-critical)
+      const sessionId = dock.ptyManager.getSessionId(terminalId) || ''
       try {
-        const sessionId = dock.ptyManager.getSessionId(terminalId)
         ActivityTracker.getInstance().addTerminal(
-          dock.id, terminalId, `Terminal`, sessionId || '', dock.projectDir
+          dock.id, terminalId, `Terminal`, sessionId, dock.projectDir
         )
       } catch (e) { log(`ActivityTracker.addTerminal error: ${e}`) }
+      pluginManager.emitTerminalPostSpawn(dock.projectDir, terminalId, sessionId)
       log(`TERMINAL_SPAWN: ${terminalId} spawned`)
       return true
     }
@@ -57,7 +60,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_KILL, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     if (dock) {
+      pluginManager.emitTerminalPreKill(dock.projectDir, terminalId)
       dock.ptyManager.kill(terminalId)
+      pluginManager.emitTerminalPostKill(dock.projectDir, terminalId)
     }
   })
 
@@ -109,6 +114,7 @@ export function registerIpcHandlers(): void {
         dock.window.webContents.send(IPC.SETTINGS_CHANGED, current)
       }
     }
+    pluginManager.emitSettingsChanged(current)
   })
 
   ipcMain.handle(IPC.APP_NEW_DOCK, async () => {
@@ -286,6 +292,37 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       logError('linked:setMessaging failed', err)
     }
+  })
+
+  // Plugin system
+  const pluginManager = PluginManager.getInstance()
+
+  ipcMain.handle(IPC.PLUGIN_GET_LIST, () => {
+    return pluginManager.getPluginInfoList()
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_STATES, (_event, projectDir: string) => {
+    return pluginManager.getAllStates(projectDir)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_SET_ENABLED, (_event, projectDir: string, pluginId: string, enabled: boolean) => {
+    pluginManager.setEnabled(projectDir, pluginId, enabled)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_SETTING, (_event, projectDir: string, pluginId: string, key: string) => {
+    return pluginManager.getSetting(projectDir, pluginId, key)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_SET_SETTING, (_event, projectDir: string, pluginId: string, key: string, value: unknown) => {
+    pluginManager.setSetting(projectDir, pluginId, key, value)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_IS_CONFIGURED, (_event, projectDir: string) => {
+    return pluginManager.isConfigured(projectDir)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_MARK_CONFIGURED, (_event, projectDir: string) => {
+    pluginManager.markConfigured(projectDir)
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
+import PluginPanel from './PluginPanel'
 
 interface RecentPath {
   path: string
@@ -25,6 +26,8 @@ const CLAUDE_DOCS_URL = 'https://code.claude.com/docs/en/overview'
 const Launcher: React.FC = () => {
   const [recentPaths, setRecentPaths] = useState<RecentPath[]>([])
   const [loading, setLoading] = useState(true)
+  const [pluginPanelPath, setPluginPanelPath] = useState<string | null>(null)
+  const [pluginSetupPath, setPluginSetupPath] = useState<string | null>(null)
 
   // Updater state
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('checking')
@@ -214,14 +217,29 @@ const Launcher: React.FC = () => {
     }
   }
 
-  const openPath = (dir: string) => {
-    getDockApi().app.openDockPath(dir)
+  const openPath = async (dir: string) => {
+    const api = getDockApi()
+    const configured = await api.plugins.isConfigured(dir)
+    if (!configured) {
+      setPluginSetupPath(dir)
+      return
+    }
+    api.app.openDockPath(dir)
+  }
+
+  const finishPluginSetup = async () => {
+    if (!pluginSetupPath) return
+    const api = getDockApi()
+    await api.plugins.markConfigured(pluginSetupPath)
+    const dir = pluginSetupPath
+    setPluginSetupPath(null)
+    api.app.openDockPath(dir)
   }
 
   const browsePath = async () => {
     const dir = await getDockApi().app.pickDirectory()
     if (dir) {
-      getDockApi().app.openDockPath(dir)
+      openPath(dir)
     }
   }
 
@@ -531,30 +549,48 @@ const Launcher: React.FC = () => {
         {recentPaths.length > 0 ? (
           <div className="launcher-list">
             {recentPaths.map((entry) => (
-              <button
-                key={entry.path}
-                className="launcher-item"
-                onClick={() => openPath(entry.path)}
-                disabled={isBlocked}
-              >
-                <div className="launcher-item-icon">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M1.5 1h5l1 1H14.5a.5.5 0 01.5.5v11a.5.5 0 01-.5.5h-13a.5.5 0 01-.5-.5v-12A.5.5 0 011.5 1z" />
-                  </svg>
-                </div>
-                <div className="launcher-item-info">
-                  <span className="launcher-item-name">{entry.name}</span>
-                  <span className="launcher-item-path">{entry.path}</span>
-                </div>
-                <span className="launcher-item-time">{formatTime(entry.lastOpened)}</span>
+              <div key={entry.path} className="launcher-item-wrapper">
                 <button
-                  className="launcher-item-remove"
-                  onClick={(e) => removePath(e, entry.path)}
-                  title="Remove from recent"
+                  className="launcher-item"
+                  onClick={() => openPath(entry.path)}
+                  disabled={isBlocked}
                 >
-                  &times;
+                  <div className="launcher-item-icon">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M1.5 1h5l1 1H14.5a.5.5 0 01.5.5v11a.5.5 0 01-.5.5h-13a.5.5 0 01-.5-.5v-12A.5.5 0 011.5 1z" />
+                    </svg>
+                  </div>
+                  <div className="launcher-item-info">
+                    <span className="launcher-item-name">{entry.name}</span>
+                    <span className="launcher-item-path" title={entry.path}>{entry.path}</span>
+                  </div>
+                  <span className="launcher-item-time">{formatTime(entry.lastOpened)}</span>
+                  <button
+                    className="launcher-item-plugins"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPluginPanelPath(pluginPanelPath === entry.path ? null : entry.path)
+                    }}
+                    title="Plugins"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 01-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 01.872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 012.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 012.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 01.872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 01-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 01-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 110-5.86 2.929 2.929 0 010 5.858z" />
+                    </svg>
+                  </button>
+                  <button
+                    className="launcher-item-remove"
+                    onClick={(e) => removePath(e, entry.path)}
+                    title="Remove from recent"
+                  >
+                    &times;
+                  </button>
                 </button>
-              </button>
+                {pluginPanelPath === entry.path && (
+                  <div className="launcher-plugin-panel">
+                    <PluginPanel projectDir={entry.path} />
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         ) : (
@@ -585,6 +621,25 @@ const Launcher: React.FC = () => {
           {' '}Sponsor
         </a>
       </div>
+
+      {pluginSetupPath && (
+        <div className="modal-overlay" onClick={() => setPluginSetupPath(null)}>
+          <div className="plugin-setup-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="plugin-setup-title">Plugin Setup</h3>
+            <p className="plugin-setup-subtitle">
+              Enable plugins for <strong>{pluginSetupPath.split(/[/\\]/).pop()}</strong>
+            </p>
+            <div className="plugin-setup-body">
+              <PluginPanel projectDir={pluginSetupPath} />
+            </div>
+            <div className="plugin-setup-footer">
+              <button className="plugin-setup-done" onClick={finishPluginSetup}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

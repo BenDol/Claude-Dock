@@ -1,8 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useSettingsStore } from '../stores/settings-store'
+import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
 import { DEFAULT_SETTINGS } from '../../../shared/settings-schema'
+import PluginPanel from './PluginPanel'
 
 function formatKeybind(e: KeyboardEvent): string | null {
   // Ignore standalone modifier presses
@@ -90,10 +92,11 @@ interface SettingsModalProps {
   onClose: () => void
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'behavior'
+type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior'
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [tab, setTab] = useState<SettingsTab>('appearance')
+  const projectDir = useDockStore((s) => s.projectDir)
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsStore((s) => s.update)
   const [updateCheckStatus, setUpdateCheckStatus] = useState('')
@@ -156,7 +159,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         <div className="settings-tabs">
-          {(['appearance', 'terminal', 'grid', 'keybindings', 'behavior'] as SettingsTab[]).map((t) => (
+          {(['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior'] as SettingsTab[]).map((t) => (
             <button
               key={t}
               className={`settings-tab ${tab === t ? 'active' : ''}`}
@@ -348,6 +351,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   defaultValue={DEFAULT_SETTINGS.keybindings.selectAll}
                   onChange={(v) => updateKeybindings({ selectAll: v })}
                 />
+              </div>
+            )}
+            {tab === 'plugins' && projectDir && (
+              <div className="settings-group">
+                <div className="settings-description" style={{ marginBottom: 12 }}>
+                  Plugins run when this project directory opens. Enable or disable per-project.
+                </div>
+                <PluginPanel projectDir={projectDir} />
               </div>
             )}
             {tab === 'behavior' && (

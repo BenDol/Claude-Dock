@@ -4,6 +4,7 @@ import { DockWindow } from './dock-window'
 import { addRecentPath } from './recent-store'
 import { getSettings } from './settings-store'
 import { migrateProjectIfNeeded } from './linked-mode'
+import { PluginManager } from './plugins'
 import { log, logError } from './logger'
 
 let nextId = 1
@@ -44,10 +45,21 @@ export class DockManager {
 
     this.docks.set(id, dock)
 
+    const pluginManager = PluginManager.getInstance()
+
     dock.window.on('closed', () => {
       log(`dock ${id} closed`)
+      pluginManager.emitProjectPostClose(dir)
       this.docks.delete(id)
     })
+
+    // Run pre-open plugins (e.g., git-sync) before loading the renderer.
+    // This allows plugins to show dialogs and do work before terminals appear.
+    try {
+      await pluginManager.emitProjectPreOpen(dir, dock)
+    } catch (e) {
+      log(`plugin preOpen error: ${e}`)
+    }
 
     // Don't await - window is visible immediately, page loads in background.
     // Blocking here starves the event loop during BrowserWindow page load,
@@ -56,6 +68,9 @@ export class DockManager {
       logError('Failed to load dock renderer:', err)
     })
     log(`createDock: loadRenderer started (fire-and-forget)`)
+
+    pluginManager.emitProjectPostOpen(dir, dock)
+
     return dock
   }
 
