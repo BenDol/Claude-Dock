@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type { Settings } from '../shared/settings-schema'
 import type { PluginInfo, ProjectPluginStates, PluginToolbarAction } from '../shared/plugin-types'
@@ -174,6 +174,10 @@ export interface DockApi {
     getIdentity: (projectDir: string) => Promise<{ name: string; email: string }>
     setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
   }
+  launcher: {
+    setZoom: (factor: number) => void
+    getZoom: () => number
+  }
   debug: {
     write: (text: string) => Promise<void>
     openDevTools: () => Promise<void>
@@ -334,6 +338,10 @@ const dockApi: DockApi = {
     removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir),
     getIdentity: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_IDENTITY, projectDir),
     setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global)
+  },
+  launcher: {
+    setZoom: (factor) => webFrame.setZoomFactor(factor),
+    getZoom: () => webFrame.getZoomFactor()
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

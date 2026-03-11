@@ -1,6 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
 import PluginPanel from './PluginPanel'
+
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2.0
+const ZOOM_STEP = 0.1
 
 interface RecentPath {
   path: string
@@ -107,6 +111,49 @@ const Launcher: React.FC = () => {
         setClaudePhase('skipped')
       })
   }, [gitPhase])
+
+  // Zoom: Ctrl+Scroll, Ctrl++/-, Ctrl+0 to reset
+  const applyZoom = useCallback((newZoom: number) => {
+    const api = getDockApi()
+    const clamped = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom)) * 100) / 100
+    api.launcher.setZoom(clamped)
+    api.settings.get().then((s) => {
+      api.settings.set({ launcher: { ...s.launcher, zoom: clamped } })
+    })
+  }, [])
+
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const api = getDockApi()
+      const current = api.launcher.getZoom()
+      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+      applyZoom(current + delta)
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.shiftKey || e.altKey) return
+      const api = getDockApi()
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        applyZoom(api.launcher.getZoom() + ZOOM_STEP)
+      } else if (e.key === '-') {
+        e.preventDefault()
+        applyZoom(api.launcher.getZoom() - ZOOM_STEP)
+      } else if (e.key === '0') {
+        e.preventDefault()
+        applyZoom(1.0)
+      }
+    }
+
+    window.addEventListener('wheel', handleWheel, { passive: false })
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [applyZoom])
 
   const startDownload = async () => {
     if (!updateInfo) return

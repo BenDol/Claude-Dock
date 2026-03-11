@@ -3135,3 +3135,18 @@
 .gm-conflict-accept-both:hover:not(:disabled) {
   background: #bb9af722;
 }
+
+/* Large diff gate */
+.gm-diff-large-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+}
+
+.gm-diff-large-gate-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+}

@@ -2,7 +2,7 @@ import { BrowserWindow, dialog } from 'electron'
 import * as path from 'path'
 import { DockWindow } from './dock-window'
 import { addRecentPath } from './recent-store'
-import { getSettings } from './settings-store'
+import { getSettings, setSettings } from './settings-store'
 import { migrateProjectIfNeeded } from './linked-mode'
 import { PluginManager } from './plugins'
 import { log, logError } from './logger'
@@ -85,9 +85,13 @@ export class DockManager {
     const isDark = settings.theme.mode === 'dark' ||
       (settings.theme.mode === 'system') // default to dark for launcher
 
+    const launcherWidth = settings.launcher?.width || 500
+    const launcherHeight = settings.launcher?.height || 550
+    const launcherZoom = settings.launcher?.zoom || 1.0
+
     this.launcherWindow = new BrowserWindow({
-      width: 500,
-      height: 550,
+      width: launcherWidth,
+      height: launcherHeight,
       minWidth: 400,
       minHeight: 350,
       frame: false,
@@ -101,7 +105,20 @@ export class DockManager {
       }
     })
 
+    // Save size changes (not position) with debounce
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null
+    this.launcherWindow.on('resize', () => {
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        if (!this.launcherWindow || this.launcherWindow.isDestroyed()) return
+        const [w, h] = this.launcherWindow.getSize()
+        const current = getSettings()
+        setSettings({ launcher: { ...current.launcher, width: w, height: h } })
+      }, 300)
+    })
+
     this.launcherWindow.on('closed', () => {
+      if (resizeTimer) clearTimeout(resizeTimer)
       this.launcherWindow = null
     })
 
@@ -114,6 +131,11 @@ export class DockManager {
         path.join(__dirname, '../renderer/index.html'),
         { search: queryParam.slice(1) }
       )
+    }
+
+    // Apply saved zoom after page loads
+    if (launcherZoom !== 1.0) {
+      this.launcherWindow.webContents.setZoomFactor(launcherZoom)
     }
   }
 

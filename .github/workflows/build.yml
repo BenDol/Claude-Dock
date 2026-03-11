@@ -122,7 +122,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          SKIP_NOTARIZE: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+          SKIP_NOTARIZE: 'true' # ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
       - name: Zip win-unpacked directory
         if: matrix.platform == 'win'

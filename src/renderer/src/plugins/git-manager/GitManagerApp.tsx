@@ -1415,11 +1415,19 @@ const CommitLog: React.FC<{
     if (el) setScrollTop(el.scrollTop)
   }, [])
 
+  // Local visual selection that updates immediately (before debounced detail fetch)
+  const [activeHash, setActiveHash] = useState<string | null>(null)
+  // Sync activeHash when parent's selectedHash catches up (e.g. from click)
+  useEffect(() => {
+    setActiveHash(null)
+  }, [selectedHash])
+
   // Track selected index in a ref so rapid key-repeat events see the latest value
   const selectedIdxRef = useRef(-1)
   useEffect(() => {
-    selectedIdxRef.current = selectedHash ? globalIndexMap.get(selectedHash) ?? -1 : -1
-  }, [selectedHash, globalIndexMap])
+    const hash = activeHash || selectedHash
+    selectedIdxRef.current = hash ? globalIndexMap.get(hash) ?? -1 : -1
+  }, [selectedHash, activeHash, globalIndexMap])
 
   // Arrow key navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1442,6 +1450,7 @@ const CommitLog: React.FC<{
 
     if (commit) {
       selectedIdxRef.current = newIdx
+      setActiveHash(commit.hash)
       onSelect(commit.hash)
     }
 
@@ -1572,7 +1581,7 @@ const CommitLog: React.FC<{
     return (
       <div
         key={c.hash}
-        className={`gm-commit-row${selectedHash === c.hash ? ' gm-commit-row-selected' : ''}${head ? ' gm-commit-row-head' : ''}${!onCurrentBranch ? ' gm-commit-row-dimmed' : ''}${highlightHash === c.hash ? ' gm-commit-row-highlight' : ''}`}
+        className={`gm-commit-row${(activeHash || selectedHash) === c.hash ? ' gm-commit-row-selected' : ''}${head ? ' gm-commit-row-head' : ''}${!onCurrentBranch ? ' gm-commit-row-dimmed' : ''}${highlightHash === c.hash ? ' gm-commit-row-highlight' : ''}`}
         style={{ height: COMMIT_ROW_HEIGHT }}
         onClick={() => onSelect(c.hash)}
         onContextMenu={(e) => handleContextMenu(e, c)}
@@ -1981,35 +1990,37 @@ const CommitDetailPanel: React.FC<{
             {f.isBinary ? (
               <div className="gm-diff-binary">Binary file</div>
             ) : (
-              <div className="gm-diff-file-body">
-                {f.hunks.map((h, hi) => (
-                  <div key={hi} className="gm-diff-hunk">
-                    <div className="gm-diff-hunk-header">{h.header}</div>
-                    {h.lines.map((l, li) => {
-                      const key = `${fi}:${hi}:${li}`
-                      const isSelected = selectedLines.has(key)
-                      return (
-                        <div
-                          key={li}
-                          data-linekey={key}
-                          className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
-                          onMouseDown={(e) => handleLineMouseDown(key, e)}
-                          onContextMenu={(e) => handleContextMenu(fi, e)}
-                        >
-                          <span className="gm-diff-line-no">
-                            <span>{l.oldLineNo ?? ' '}</span>
-                            <span>{l.newLineNo ?? ' '}</span>
-                          </span>
-                          <span className="gm-diff-line-prefix">
-                            {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
-                          </span>
-                          <span className="gm-diff-line-content">{l.content}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
+              <LargeDiffGate lineCount={f.hunks.reduce((n, h) => n + h.lines.length, 0)}>
+                <div className="gm-diff-file-body">
+                  {f.hunks.map((h, hi) => (
+                    <div key={hi} className="gm-diff-hunk">
+                      <div className="gm-diff-hunk-header">{h.header}</div>
+                      {h.lines.map((l, li) => {
+                        const key = `${fi}:${hi}:${li}`
+                        const isSelected = selectedLines.has(key)
+                        return (
+                          <div
+                            key={li}
+                            data-linekey={key}
+                            className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
+                            onMouseDown={(e) => handleLineMouseDown(key, e)}
+                            onContextMenu={(e) => handleContextMenu(fi, e)}
+                          >
+                            <span className="gm-diff-line-no">
+                              <span>{l.oldLineNo ?? ' '}</span>
+                              <span>{l.newLineNo ?? ' '}</span>
+                            </span>
+                            <span className="gm-diff-line-prefix">
+                              {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
+                            </span>
+                            <span className="gm-diff-line-content">{l.content}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </LargeDiffGate>
             )}
           </div>
         ))}
@@ -3232,33 +3243,35 @@ const WorkingDiffViewer: React.FC<{
               {f.isBinary ? (
                 <div className="gm-diff-binary">Binary file</div>
               ) : (
-                f.hunks.map((h, hi) => (
-                  <div key={hi} className="gm-diff-hunk">
-                    <div className="gm-diff-hunk-header">{h.header}</div>
-                    {h.lines.map((l, li) => {
-                      const key = `${hi}:${li}`
-                      const isSelected = selectedLines.has(key)
-                      return (
-                        <div
-                          key={li}
-                          data-linekey={key}
-                          className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
-                          onMouseDown={(e) => handleLineMouseDown(key, e)}
-                          onContextMenu={handleContextMenu}
-                        >
-                          <span className="gm-diff-line-no">
-                            <span>{l.oldLineNo ?? ' '}</span>
-                            <span>{l.newLineNo ?? ' '}</span>
-                          </span>
-                          <span className="gm-diff-line-prefix">
-                            {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
-                          </span>
-                          <span className="gm-diff-line-content">{l.content}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))
+                <LargeDiffGate lineCount={f.hunks.reduce((n, h) => n + h.lines.length, 0)}>
+                  {f.hunks.map((h, hi) => (
+                    <div key={hi} className="gm-diff-hunk">
+                      <div className="gm-diff-hunk-header">{h.header}</div>
+                      {h.lines.map((l, li) => {
+                        const key = `${hi}:${li}`
+                        const isSelected = selectedLines.has(key)
+                        return (
+                          <div
+                            key={li}
+                            data-linekey={key}
+                            className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
+                            onMouseDown={(e) => handleLineMouseDown(key, e)}
+                            onContextMenu={handleContextMenu}
+                          >
+                            <span className="gm-diff-line-no">
+                              <span>{l.oldLineNo ?? ' '}</span>
+                              <span>{l.newLineNo ?? ' '}</span>
+                            </span>
+                            <span className="gm-diff-line-prefix">
+                              {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
+                            </span>
+                            <span className="gm-diff-line-content">{l.content}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </LargeDiffGate>
               )}
             </div>
           ))
@@ -3352,6 +3365,21 @@ const DiffLineContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={onCopyPatch}>Copy patch</div>
       <div className="gm-ctx-item" onClick={onCopyNew}>Copy new version</div>
       <div className="gm-ctx-item" onClick={onCopyOld}>Copy old version</div>
+    </div>
+  )
+}
+
+// --- Large diff gate ---
+
+const DIFF_LINE_LIMIT = 5000
+
+const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> = ({ lineCount, children }) => {
+  const [expanded, setExpanded] = useState(false)
+  if (lineCount <= DIFF_LINE_LIMIT || expanded) return <>{children}</>
+  return (
+    <div className="gm-diff-large-gate">
+      <div className="gm-diff-large-gate-text">File changes are very large ({lineCount.toLocaleString()} lines)</div>
+      <button className="gm-modal-btn gm-modal-btn-primary" onClick={() => setExpanded(true)}>Load diff</button>
     </div>
   )
 }

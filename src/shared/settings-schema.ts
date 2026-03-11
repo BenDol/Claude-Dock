@@ -40,6 +40,11 @@ export interface Settings {
     enabled: boolean
     messagingEnabled: boolean
   }
+  launcher: {
+    zoom: number
+    width: number
+    height: number
+  }
   advanced: {
     debugLogging: boolean
     disableGpuAcceleration: boolean
@@ -200,6 +205,11 @@ export const DEFAULT_SETTINGS: Settings = {
   linked: {
     enabled: false,
     messagingEnabled: false
+  },
+  launcher: {
+    zoom: 1.0,
+    width: 500,
+    height: 550
   },
   advanced: {
     debugLogging: false,
