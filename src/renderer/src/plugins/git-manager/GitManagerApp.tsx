@@ -238,7 +238,7 @@ const GitManagerApp: React.FC = () => {
   // Sidebar arrow key navigation
   const sidebarNavSelector = '.gm-sidebar-item, .gm-sidebar-header-toggle'
   const handleSidebarKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter') return
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
     const sidebar = sidebarRef.current
     if (!sidebar) return
 
@@ -250,6 +250,39 @@ const GitManagerApp: React.FC = () => {
       e.preventDefault()
       if (sidebarFocusIdx >= 0 && sidebarFocusIdx < count) {
         items[sidebarFocusIdx].click()
+      }
+      return
+    }
+
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      if (sidebarFocusIdx < 0 || sidebarFocusIdx >= count) return
+      const item = items[sidebarFocusIdx]
+      const isCollapsible = item.hasAttribute('data-collapsible')
+
+      if (e.key === 'ArrowRight') {
+        if (isCollapsible && item.getAttribute('data-collapsed') === 'true') {
+          // Expand collapsed section
+          item.click()
+        } else if (isCollapsible && item.getAttribute('data-collapsed') === 'false') {
+          // Already expanded — move to first child
+          const newIdx = Math.min(count - 1, sidebarFocusIdx + 1)
+          setSidebarFocusIdx(newIdx)
+        }
+      } else {
+        if (isCollapsible && item.getAttribute('data-collapsed') === 'false') {
+          // Collapse expanded section
+          item.click()
+        } else {
+          // Move to parent collapsible header
+          for (let i = sidebarFocusIdx - 1; i >= 0; i--) {
+            const candidate = items[i]
+            if (candidate.hasAttribute('data-collapsible') && candidate.getAttribute('data-collapsed') === 'false') {
+              setSidebarFocusIdx(i)
+              break
+            }
+          }
+        }
       }
       return
     }
@@ -279,12 +312,15 @@ const GitManagerApp: React.FC = () => {
     }
   }, [sidebarFocusIdx])
 
+  const refreshGenRef = useRef(0)
   const refresh = useCallback(async () => {
     if (!activeDir) return
+    const gen = ++refreshGenRef.current
     const api = getDockApi()
     setLoading(true)
     try {
       const isRepo = await api.gitManager.isRepo(activeDir)
+      if (gen !== refreshGenRef.current) return // stale
       if (!isRepo) {
         setNotGitRepo(true)
         setLoading(false)
@@ -301,6 +337,7 @@ const GitManagerApp: React.FC = () => {
         api.gitManager.getCommitCount(activeDir),
         api.gitManager.getTags(activeDir)
       ])
+      if (gen !== refreshGenRef.current) return // stale
       setCommits(logData)
       setTotalCommitCount(commitCount)
       setBranches(branchData)
@@ -314,6 +351,7 @@ const GitManagerApp: React.FC = () => {
         setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
       }
     } catch (err) {
+      if (gen !== refreshGenRef.current) return // stale
       setError(err instanceof Error ? err.message : 'Failed to load git data')
     }
     setLoading(false)
@@ -2316,9 +2354,15 @@ const WorkingChanges: React.FC<{
             <div className="gm-batch-progress">{batchProgress}</div>
           )}
           <div className="gm-commit-input-wrap">
+            {generating && !commitMsg && (
+              <div className="gm-commit-generating-overlay">
+                <span className="gm-toolbar-spinner" />
+                <span>Generating commit message from your staged changes...</span>
+              </div>
+            )}
             <textarea
               className="gm-commit-input"
-              placeholder={generating ? 'Generating commit message from your staged changes...' : 'Commit message...'}
+              placeholder={generating ? '' : 'Commit message...'}
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
               disabled={generating}
@@ -3072,7 +3116,7 @@ const CollapsibleSection: React.FC<{
   return (
     <div className="gm-sidebar-section">
       <div className="gm-sidebar-header-wrap">
-        <button className="gm-sidebar-header gm-sidebar-header-toggle" onClick={() => setCollapsed(!collapsed)}>
+        <button className="gm-sidebar-header gm-sidebar-header-toggle" data-collapsible data-collapsed={collapsed} onClick={() => setCollapsed(!collapsed)}>
           <SectionChevron collapsed={collapsed} />
           <span>{title}</span>
         </button>
@@ -3158,6 +3202,8 @@ const RemoteBranchGroup: React.FC<{
     <>
       <div
         className="gm-sidebar-item gm-sidebar-item-remote gm-sidebar-remote-group"
+        data-collapsible
+        data-collapsed={collapsed}
         onClick={() => setCollapsed((p) => !p)}
         onContextMenu={handleCtx}
       >
@@ -3275,6 +3321,8 @@ const LocalBranchNode: React.FC<{
       <div
         className="gm-sidebar-item gm-branch-group"
         style={{ paddingLeft: 22 + depth * 14 }}
+        data-collapsible
+        data-collapsed={collapsed}
         onClick={() => setCollapsed((p) => !p)}
       >
         <span className="gm-branch-group-header">
@@ -5050,6 +5098,8 @@ const SubmoduleTreeNodeView: React.FC<{
     <>
       <div
         className="gm-sidebar-item gm-submodule-folder"
+        data-collapsible
+        data-collapsed={collapsed}
         onClick={() => setCollapsed((p) => !p)}
         style={{ paddingLeft: 22 + depth * 14 }}
       >

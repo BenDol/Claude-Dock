@@ -2142,6 +2142,20 @@
   min-height: 0;
 }
 
+.gm-commit-generating-overlay {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  right: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  pointer-events: none;
+  z-index: 1;
+}
+
 .gm-commit-input-wrap .gm-commit-input {
   margin-bottom: 0;
   padding-right: 32px;
