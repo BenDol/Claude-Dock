@@ -13,6 +13,7 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - 'electron.vite.config.*'
+      - 'vitest.config.*'
       - '.github/workflows/build.yml'
   pull_request:
     branches: [main]
@@ -23,8 +24,14 @@ on:
       - 'package-lock.json'
       - 'tsconfig*.json'
       - 'electron.vite.config.*'
+      - 'vitest.config.*'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -75,6 +82,10 @@ jobs:
       - name: Install dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Run tests
+        if: inputs.skip_tests != true
+        run: npx vitest run
 
       - name: Build app
         run: npx electron-vite build
