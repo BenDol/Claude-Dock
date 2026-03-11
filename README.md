@@ -1,6 +1,6 @@
 <p align="center">
   <img src="assets/launcher.png" alt="Claude Dock" width="300" />
-</p>
+</p> 
 
 <h1 align="center">Claude Dock</h1>
 
