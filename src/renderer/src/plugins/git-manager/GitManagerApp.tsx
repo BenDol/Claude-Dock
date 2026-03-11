@@ -2124,8 +2124,20 @@ const VirtualFileList: React.FC<{
     if (containerRef.current) setScrollTop(containerRef.current.scrollTop)
   }, [])
 
-  // Arrow key navigation
+  // Arrow key navigation + S/U hotkeys for stage/unstage
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // S = stage (in unstaged list) or U = unstage (in staged list)
+    const key = e.key.toLowerCase()
+    if ((key === 's' || key === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (selectedFile && selectedFile.staged === isStaged) {
+        if ((key === 's' && !isStaged) || (key === 'u' && isStaged)) {
+          e.preventDefault()
+          onAction(selectedFile.path)
+          return
+        }
+      }
+    }
+
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
 
@@ -2155,7 +2167,7 @@ const VirtualFileList: React.FC<{
         }
       }
     }
-  }, [files, selectedFile, isStaged, onSelect])
+  }, [files, selectedFile, isStaged, onSelect, onAction])
 
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
@@ -2860,9 +2872,9 @@ const FileContextMenu: React.FC<{
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       {section === 'unstaged' ? (
-        <div className="gm-ctx-item" onClick={doStage}>Stage</div>
+        <div className="gm-ctx-item" onClick={doStage}><span>Stage</span><span className="gm-ctx-shortcut">S</span></div>
       ) : (
-        <div className="gm-ctx-item" onClick={doUnstage}>Unstage</div>
+        <div className="gm-ctx-item" onClick={doUnstage}><span>Unstage</span><span className="gm-ctx-shortcut">U</span></div>
       )}
       {section === 'unstaged' && (
         <div className="gm-ctx-item gm-ctx-danger" onClick={doDiscard}>
@@ -3351,10 +3363,13 @@ const FileStatusBadge: React.FC<{ status: string }> = ({ status }) => {
     deleted: '#f7768e',
     renamed: '#7aa2f7',
     copied: '#7dcfff',
-    untracked: '#565f89',
+    untracked: '#9ece6a',
     unmerged: '#f7768e'
   }
-  const label = status.charAt(0).toUpperCase()
+  const labels: Record<string, string> = {
+    untracked: 'N'
+  }
+  const label = labels[status] || status.charAt(0).toUpperCase()
   return (
     <span className="gm-status-badge" style={{ color: colors[status] || 'var(--text-secondary)' }}>
       {label}

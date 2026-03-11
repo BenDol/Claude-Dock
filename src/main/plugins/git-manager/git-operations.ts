@@ -382,15 +382,50 @@ function parseDiffOutput(output: string): GitFileDiff[] {
   return files
 }
 
-export async function getDiff(cwd: string, path?: string, staged?: boolean): Promise<GitFileDiff[]> {
+export async function getDiff(cwd: string, filePath?: string, staged?: boolean): Promise<GitFileDiff[]> {
   const args = ['diff']
   if (staged) args.push('--cached')
   args.push('--no-color', '--unified=5')
-  if (path) args.push('--', path)
+  if (filePath) args.push('--', filePath)
 
   try {
     const { stdout } = await gitExec(cwd, args, 15000)
-    return parseDiffOutput(stdout)
+    const diffs = parseDiffOutput(stdout)
+    // If no diff returned for a specific file, it may be untracked or newly added —
+    // synthesize a full-content diff so the viewer can display it
+    if (diffs.length === 0 && filePath) {
+      const fsP = require('fs/promises') as typeof import('fs/promises')
+      const pathMod = require('path') as typeof import('path')
+      try {
+        const absPath = pathMod.join(cwd, filePath)
+        const stat = await fsP.stat(absPath)
+        if (stat.isFile() && stat.size < 512 * 1024) { // skip files > 512KB
+          const content = await fsP.readFile(absPath, 'utf-8')
+          const lines = content.split('\n')
+          // Remove trailing empty line from final newline
+          if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+          const diffLines: GitDiffLine[] = lines.map((line, i) => ({
+            type: 'add' as const,
+            content: line,
+            newLineNo: i + 1
+          }))
+          diffs.push({
+            path: filePath,
+            status: 'added',
+            isBinary: false,
+            hunks: [{
+              oldStart: 0,
+              oldLines: 0,
+              newStart: 1,
+              newLines: lines.length,
+              header: 'new file',
+              lines: diffLines
+            }]
+          })
+        }
+      } catch { /* file unreadable — leave empty */ }
+    }
+    return diffs
   } catch (err) {
     logError('[git-manager] getDiff failed:', err)
     return []
