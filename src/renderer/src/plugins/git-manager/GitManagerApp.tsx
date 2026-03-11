@@ -236,12 +236,13 @@ const GitManagerApp: React.FC = () => {
   }, [])
 
   // Sidebar arrow key navigation
+  const sidebarNavSelector = '.gm-sidebar-item, .gm-sidebar-header-toggle'
   const handleSidebarKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter') return
     const sidebar = sidebarRef.current
     if (!sidebar) return
 
-    const items = sidebar.querySelectorAll<HTMLElement>('.gm-sidebar-item')
+    const items = sidebar.querySelectorAll<HTMLElement>(sidebarNavSelector)
     const count = items.length
     if (count === 0) return
 
@@ -269,7 +270,7 @@ const GitManagerApp: React.FC = () => {
       el.classList.remove('gm-sidebar-item-kb-focus')
     )
     if (sidebarFocusIdx >= 0) {
-      const items = sidebar.querySelectorAll('.gm-sidebar-item')
+      const items = sidebar.querySelectorAll(sidebarNavSelector)
       const item = items[sidebarFocusIdx]
       if (item) {
         item.classList.add('gm-sidebar-item-kb-focus')
@@ -545,6 +546,9 @@ const GitManagerApp: React.FC = () => {
         </div>
         <div className="gm-titlebar-center" />
         <div className="gm-titlebar-right">
+          <button className="gm-toolbar-btn" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
+            {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
+          </button>
           <PullSplitButton
             activeDir={activeDir}
             onError={handleSmartError}
@@ -554,9 +558,6 @@ const GitManagerApp: React.FC = () => {
               setPullDialogOpen(true)
             }}
           />
-          <button className="gm-toolbar-btn" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
-            {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
-          </button>
           <button className="gm-toolbar-btn" onClick={handlePush} title="Push" disabled={pushing}>
             {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push
           </button>
@@ -783,6 +784,7 @@ const GitManagerApp: React.FC = () => {
             <div className="gm-detail" ref={detailRef}>
               <CommitDetailPanel
                 detail={selectedCommit}
+                projectDir={activeDir}
                 onClose={() => setSelectedCommit(null)}
               />
             </div>
@@ -1585,8 +1587,10 @@ const GraphToggleIcon: React.FC = () => (
 
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
+  projectDir: string
   onClose: () => void
-}> = ({ detail, onClose }) => {
+}> = ({ detail, projectDir, onClose }) => {
+  const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
   const [dragStart, setDragStart] = useState<string | null>(null)
@@ -1739,6 +1743,16 @@ const CommitDetailPanel: React.FC<{
             <div className="gm-diff-file-header">
               <FileStatusBadge status={f.status} />
               <span>{f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path}</span>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
+                title="Open file"
+              ><OpenFileIcon /></button>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
+                title="Show in folder"
+              ><ShowInFolderIcon /></button>
               <span className="gm-diff-file-stats">
                 {(() => {
                   let adds = 0, dels = 0
@@ -1860,13 +1874,15 @@ const VirtualFileList: React.FC<{
   section: 'staged' | 'unstaged'
   selectedFile: { path: string; staged: boolean } | null
   stagingPaths: Set<string>
+  projectDir: string
   onSelect: (path: string, staged: boolean) => void
   onAction: (path: string) => void
   onDoubleClick: (path: string) => void
   onContextMenu: (e: React.MouseEvent, file: GitFileStatusEntry, section: 'staged' | 'unstaged') => void
   actionLabel: string
   actionTitle: string
-}> = ({ files, section, selectedFile, stagingPaths, onSelect, onAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
+}> = ({ files, section, selectedFile, stagingPaths, projectDir, onSelect, onAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
+  const api = getDockApi()
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(400)
@@ -1957,6 +1973,16 @@ const VirtualFileList: React.FC<{
               {f.isSubmodule && <SubmoduleIcon />}
               <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
               <span className="gm-file-path">{f.path}</span>
+              <button
+                className="gm-file-hover-btn"
+                onClick={(e) => { e.stopPropagation(); api.app.openInExplorer(projectDir + '/' + f.path) }}
+                title="Open file"
+              ><OpenFileIcon /></button>
+              <button
+                className="gm-file-hover-btn"
+                onClick={(e) => { e.stopPropagation(); api.gitManager.showInFolder(projectDir, f.path) }}
+                title="Show in folder"
+              ><ShowInFolderIcon /></button>
               {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
               <button
                 className="gm-file-action"
@@ -2103,7 +2129,6 @@ const WorkingChanges: React.FC<{
     setStagingPaths(new Set())
     setBusy(false)
     scrollToTop()
-    onRefresh()
     if (autoGen) triggerAutoGenerate()
   }
 
@@ -2123,7 +2148,6 @@ const WorkingChanges: React.FC<{
     setStagingPaths(new Set())
     setBusy(false)
     scrollToTop()
-    onRefresh()
   }
 
   const handleCommit = async () => {
@@ -2242,6 +2266,7 @@ const WorkingChanges: React.FC<{
               section="unstaged"
               selectedFile={selectedFile}
               stagingPaths={stagingPaths}
+              projectDir={projectDir}
               onSelect={handleSelectFile}
               onAction={handleStageFile}
               onDoubleClick={handleStageFile}
@@ -2273,6 +2298,7 @@ const WorkingChanges: React.FC<{
               section="staged"
               selectedFile={selectedFile}
               stagingPaths={stagingPaths}
+              projectDir={projectDir}
               onSelect={handleSelectFile}
               onAction={handleUnstageFile}
               onDoubleClick={handleUnstageFile}
@@ -2736,6 +2762,16 @@ const WorkingDiffViewer: React.FC<{
       <div className="gm-changes-diff-header">
         <span className="gm-changes-diff-title">
           {staged ? 'Staged' : 'Unstaged'}: {filePath}
+          <button
+            className="gm-file-hover-btn"
+            onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
+            title="Open file"
+          ><OpenFileIcon /></button>
+          <button
+            className="gm-file-hover-btn"
+            onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
+            title="Show in folder"
+          ><ShowInFolderIcon /></button>
         </span>
         <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
       </div>
@@ -3076,7 +3112,8 @@ const RemoteBranchTree: React.FC<{
     const map = new Map<string, GitBranchInfo[]>()
     for (const b of branches) {
       const slashIdx = b.name.indexOf('/')
-      const remote = slashIdx > 0 ? b.name.slice(0, slashIdx) : 'other'
+      if (slashIdx <= 0) continue // skip entries without a remote prefix
+      const remote = b.name.slice(0, slashIdx)
       if (!map.has(remote)) map.set(remote, [])
       map.get(remote)!.push(b)
     }
@@ -4851,7 +4888,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
         <SettingsIcon />
       </button>
       {open && (
-        <div className="gm-settings-menu" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="gm-settings-menu" onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
           <div className="gm-settings-title">Git Manager Settings</div>
           {PLUGIN_SETTINGS.map((s) => (
             s.type === 'boolean' ? (
@@ -5204,6 +5241,22 @@ const OpenFolderIcon: React.FC = () => (
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <line x1="12" y1="11" x2="12" y2="17" />
     <polyline points="9 14 12 11 15 14" />
+  </svg>
+)
+
+const OpenFileIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+)
+
+const ShowInFolderIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+    <polyline points="9 14 12 17 15 14" />
+    <line x1="12" y1="10" x2="12" y2="17" />
   </svg>
 )
 

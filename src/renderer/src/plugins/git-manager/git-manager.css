@@ -46,6 +46,29 @@
   padding-right: 0;
 }
 
+.gm-titlebar-right > .gm-toolbar-btn,
+.gm-titlebar-right > .gm-pull-split,
+.gm-titlebar-right > .gm-settings-dropdown {
+  align-self: stretch;
+}
+
+.gm-titlebar-right > .gm-toolbar-btn {
+  border-radius: 0;
+}
+
+.gm-titlebar-right > .gm-pull-split .gm-toolbar-btn,
+.gm-titlebar-right > .gm-pull-split .gm-pull-split-arrow {
+  border-radius: 0;
+}
+
+.gm-titlebar-right > .gm-settings-dropdown {
+  display: flex;
+}
+
+.gm-titlebar-right > .gm-settings-dropdown > .gm-toolbar-btn {
+  border-radius: 0;
+}
+
 .gm-titlebar-right .toolbar-separator {
   align-self: stretch;
   height: auto;
@@ -1959,6 +1982,34 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gm-file-hover-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  flex-shrink: 0;
+  padding: 0;
+  transition: opacity 0.1s, color 0.12s, background 0.12s;
+}
+
+.gm-file-entry:hover .gm-file-hover-btn,
+.gm-diff-file-header:hover .gm-file-hover-btn,
+.gm-changes-diff-title:hover .gm-file-hover-btn {
+  opacity: 1;
+}
+
+.gm-file-hover-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
 }
 
 .gm-file-action {
