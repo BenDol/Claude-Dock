@@ -2251,11 +2251,11 @@ const VirtualFileList: React.FC<{
                 {f.isSubmodule && (
                   <span className="gm-submodule-icon-wrap">
                     <SubmoduleIcon />
-                    {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-badge gm-submodule-ahead">&#x2191;</span>}
-                    {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-badge gm-submodule-behind">&#x2193;</span>}
+                    {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-arrow gm-submodule-ahead"><SubmoduleArrowUp /></span>}
+                    {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-arrow gm-submodule-behind"><SubmoduleArrowDown /></span>}
                   </span>
                 )}
-                <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
+                {!f.isSubmodule && <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />}
                 <span className="gm-file-path">{f.path}</span>
                 <button
                   className="gm-file-hover-btn"
@@ -6048,6 +6048,20 @@ const SubmoduleIcon: React.FC = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <circle cx="12" cy="14" r="2" strokeWidth="1.5" />
+  </svg>
+)
+
+const SubmoduleArrowUp: React.FC = () => (
+  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="19" x2="12" y2="5" />
+    <polyline points="5 12 12 5 19 12" />
+  </svg>
+)
+
+const SubmoduleArrowDown: React.FC = () => (
+  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <polyline points="19 12 12 19 5 12" />
   </svg>
 )
 
