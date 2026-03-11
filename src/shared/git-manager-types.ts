@@ -27,6 +27,8 @@ export interface GitFileStatusEntry {
   workTreeStatus: string // unstaged status char (Y)
   oldPath?: string // for renames
   isSubmodule?: boolean // true if this entry is a submodule
+  submoduleAhead?: number // commits ahead of the recorded submodule commit
+  submoduleBehind?: number // commits behind the recorded submodule commit
 }
 
 /** Stash entry */

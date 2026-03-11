@@ -895,6 +895,23 @@
   flex-shrink: 0;
 }
 
+.gm-submodule-counts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.gm-submodule-ahead {
+  color: #9ece6a;
+}
+
+.gm-submodule-behind {
+  color: #f7768e;
+}
+
 .gm-branch-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2113,6 +2130,11 @@
   background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
   border-left: 2px solid var(--accent-color, #7aa2f7);
   padding-left: 10px;
+}
+
+.gm-file-entry.gm-file-range-selected {
+  background: var(--accent-color-10, rgba(122, 162, 247, 0.10));
+  border-left: 2px solid var(--accent-color-50, rgba(122, 162, 247, 0.5));
 }
 
 .gm-file-path {

@@ -2094,20 +2094,25 @@ const VirtualFileList: React.FC<{
   files: GitFileStatusEntry[]
   section: 'staged' | 'unstaged'
   selectedFile: { path: string; staged: boolean } | null
+  selectedPaths: Set<string>
   stagingPaths: Set<string>
   projectDir: string
   onSelect: (path: string, staged: boolean) => void
+  onShiftSelect: (paths: string[], activePath: string, staged: boolean) => void
+  onCtrlSelect: (path: string, staged: boolean) => void
   onAction: (path: string) => void
+  onBatchAction: (paths: string[]) => void
   onDoubleClick: (path: string) => void
   onContextMenu: (e: React.MouseEvent, file: GitFileStatusEntry, section: 'staged' | 'unstaged') => void
   actionLabel: string
   actionTitle: string
-}> = ({ files, section, selectedFile, stagingPaths, projectDir, onSelect, onAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
+}> = ({ files, section, selectedFile, selectedPaths, stagingPaths, projectDir, onSelect, onShiftSelect, onCtrlSelect, onAction, onBatchAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
   const api = getDockApi()
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(400)
   const isStaged = section === 'staged'
+  const anchorIdxRef = useRef(0)
 
   useLayoutEffect(() => {
     const el = containerRef.current
@@ -2135,15 +2140,36 @@ const VirtualFileList: React.FC<{
     if (containerRef.current) setScrollTop(containerRef.current.scrollTop)
   }, [])
 
+  const getRangePaths = useCallback((fromIdx: number, toIdx: number): string[] => {
+    const lo = Math.min(fromIdx, toIdx)
+    const hi = Math.max(fromIdx, toIdx)
+    return files.slice(lo, hi + 1).map(f => f.path)
+  }, [files])
+
+  const scrollIntoView = useCallback((idx: number) => {
+    if (!containerRef.current) return
+    const targetTop = idx * FILE_ROW_HEIGHT
+    const targetBottom = targetTop + FILE_ROW_HEIGHT
+    const st = containerRef.current.scrollTop
+    const sb = st + containerRef.current.clientHeight
+    if (targetTop < st) containerRef.current.scrollTop = targetTop
+    else if (targetBottom > sb) containerRef.current.scrollTop = targetBottom - containerRef.current.clientHeight
+  }, [])
+
   // Arrow key navigation + S/U hotkeys for stage/unstage
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // S = stage (in unstaged list) or U = unstage (in staged list)
     const key = e.key.toLowerCase()
     if ((key === 's' || key === 'u') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (selectedFile && selectedFile.staged === isStaged) {
+      const activeInThisList = selectedFile && selectedFile.staged === isStaged
+      if (activeInThisList) {
         if ((key === 's' && !isStaged) || (key === 'u' && isStaged)) {
           e.preventDefault()
-          onAction(selectedFile.path)
+          if (selectedPaths.size > 1) {
+            onBatchAction([...selectedPaths])
+          } else {
+            onAction(selectedFile!.path)
+          }
           return
         }
       }
@@ -2162,23 +2188,37 @@ const VirtualFileList: React.FC<{
       : Math.max(0, currentIdx - 1)
 
     if (newIdx >= 0 && newIdx < files.length) {
-      onSelect(files[newIdx].path, isStaged)
-
-      // Scroll into view
-      if (containerRef.current) {
-        const targetTop = newIdx * FILE_ROW_HEIGHT
-        const targetBottom = targetTop + FILE_ROW_HEIGHT
-        const st = containerRef.current.scrollTop
-        const sb = st + containerRef.current.clientHeight
-
-        if (targetTop < st) {
-          containerRef.current.scrollTop = targetTop
-        } else if (targetBottom > sb) {
-          containerRef.current.scrollTop = targetBottom - containerRef.current.clientHeight
-        }
+      if (e.shiftKey) {
+        const paths = getRangePaths(anchorIdxRef.current, newIdx)
+        onShiftSelect(paths, files[newIdx].path, isStaged)
+      } else if (e.ctrlKey || e.metaKey) {
+        onCtrlSelect(files[newIdx].path, isStaged)
+      } else {
+        anchorIdxRef.current = newIdx
+        onSelect(files[newIdx].path, isStaged)
       }
+      scrollIntoView(newIdx)
     }
-  }, [files, selectedFile, isStaged, onSelect, onAction])
+  }, [files, selectedFile, selectedPaths, isStaged, onSelect, onShiftSelect, onCtrlSelect, onAction, onBatchAction, getRangePaths, scrollIntoView])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent, f: GitFileStatusEntry) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return
+    const idx = files.findIndex(x => x.path === f.path)
+    if (idx === -1) return
+
+    if (e.shiftKey) {
+      e.preventDefault() // prevent text selection
+      const paths = getRangePaths(anchorIdxRef.current, idx)
+      onShiftSelect(paths, f.path, isStaged)
+    } else if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      anchorIdxRef.current = idx
+      onCtrlSelect(f.path, isStaged)
+    } else {
+      anchorIdxRef.current = idx
+      onSelect(f.path, isStaged)
+    }
+  }, [files, isStaged, onSelect, onShiftSelect, onCtrlSelect, getRangePaths])
 
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
@@ -2196,37 +2236,49 @@ const VirtualFileList: React.FC<{
     <div ref={containerRef} className="gm-virtual-file-list" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0}>
       <div style={{ height: totalHeight, position: 'relative' }}>
         <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
-          {visibleFiles.map((f) => (
-            <div
-              key={f.path}
-              className={`gm-file-entry${isStaged ? ' gm-file-staged' : ' gm-file-unstaged'}${f.isSubmodule ? ' gm-file-submodule' : ''}${selectedFile?.path === f.path && selectedFile?.staged === isStaged ? ' gm-file-selected' : ''}`}
-              style={{ height: FILE_ROW_HEIGHT }}
-              onMouseDown={(e) => { if (e.button === 0 && !(e.target as HTMLElement).closest('button')) onSelect(f.path, isStaged) }}
-              onDoubleClick={() => onDoubleClick(f.path)}
-              onContextMenu={(e) => onContextMenu(e, f, section)}
-            >
-              {f.isSubmodule && <SubmoduleIcon />}
-              <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
-              <span className="gm-file-path">{f.path}</span>
-              <button
-                className="gm-file-hover-btn"
-                onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
-                title="Open file"
-              ><OpenFileIcon /></button>
-              <button
-                className="gm-file-hover-btn"
-                onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
-                title="Show in folder"
-              ><ShowInFolderIcon /></button>
-              {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
-              <button
-                className="gm-file-action"
-                onClick={() => onAction(f.path)}
-                title={actionTitle}
-                disabled={stagingPaths.has(f.path)}
-              >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : actionLabel}</button>
-            </div>
-          ))}
+          {visibleFiles.map((f) => {
+            const isActive = selectedFile?.path === f.path && selectedFile?.staged === isStaged
+            const isInSelection = selectedPaths.has(f.path) && selectedFile?.staged === isStaged
+            return (
+              <div
+                key={f.path}
+                className={`gm-file-entry${isStaged ? ' gm-file-staged' : ' gm-file-unstaged'}${f.isSubmodule ? ' gm-file-submodule' : ''}${isActive ? ' gm-file-selected' : isInSelection ? ' gm-file-selected gm-file-range-selected' : ''}`}
+                style={{ height: FILE_ROW_HEIGHT }}
+                onMouseDown={(e) => handleMouseDown(e, f)}
+                onDoubleClick={() => onDoubleClick(f.path)}
+                onContextMenu={(e) => onContextMenu(e, f, section)}
+              >
+                {f.isSubmodule && <SubmoduleIcon />}
+                <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
+                <span className="gm-file-path">{f.path}</span>
+                <button
+                  className="gm-file-hover-btn"
+                  onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
+                  title="Open file"
+                ><OpenFileIcon /></button>
+                <button
+                  className="gm-file-hover-btn"
+                  onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
+                  title="Show in folder"
+                ><ShowInFolderIcon /></button>
+                {f.isSubmodule && (
+                  (f.submoduleAhead != null || f.submoduleBehind != null)
+                    ? <span className="gm-submodule-counts">
+                        {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-ahead">&#x2191;{f.submoduleAhead}</span>}
+                        {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-behind">&#x2193;{f.submoduleBehind}</span>}
+                        {(f.submoduleAhead ?? 0) === 0 && (f.submoduleBehind ?? 0) === 0 && <span className="gm-file-submodule-label">submodule</span>}
+                      </span>
+                    : <span className="gm-file-submodule-label">submodule</span>
+                )}
+                <button
+                  className="gm-file-action"
+                  onClick={() => onAction(f.path)}
+                  title={actionTitle}
+                  disabled={stagingPaths.has(f.path)}
+                >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : actionLabel}</button>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -2388,6 +2440,7 @@ const WorkingChanges: React.FC<{
   const [autoGen, setAutoGen] = useState(false)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [selectedFile, setSelectedFile] = useState<{ path: string; staged: boolean } | null>(null)
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [fileDiffs, setFileDiffs] = useState<GitFileDiff[]>([])
   const [diffLoading, setDiffLoading] = useState(false)
   const fileListRef = useRef<HTMLDivElement>(null)
@@ -2623,10 +2676,63 @@ const WorkingChanges: React.FC<{
   }
 
   const handleSelectFile = (path: string, staged: boolean) => {
-    if (selectedFile?.path === path && selectedFile?.staged === staged) {
+    if (selectedFile?.path === path && selectedFile?.staged === staged && selectedPaths.size <= 1) {
       return
     }
     setSelectedFile({ path, staged })
+    setSelectedPaths(new Set([path]))
+  }
+
+  const handleShiftSelect = (paths: string[], activePath: string, staged: boolean) => {
+    setSelectedFile({ path: activePath, staged })
+    setSelectedPaths(new Set(paths))
+  }
+
+  const handleCtrlSelect = (path: string, staged: boolean) => {
+    // If switching sections, start fresh selection
+    if (selectedFile && selectedFile.staged !== staged) {
+      setSelectedFile({ path, staged })
+      setSelectedPaths(new Set([path]))
+      return
+    }
+    setSelectedPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+        // If we removed the active file, pick another active from the set
+        if (selectedFile?.path === path) {
+          const remaining = [...next]
+          if (remaining.length > 0) {
+            setSelectedFile({ path: remaining[remaining.length - 1], staged })
+          } else {
+            setSelectedFile(null)
+          }
+        }
+      } else {
+        next.add(path)
+        setSelectedFile({ path, staged })
+      }
+      return next
+    })
+  }
+
+  const handleBatchStage = async (paths: string[]) => {
+    setStagingPaths(new Set(paths))
+    await api.gitManager.stage(projectDir, paths)
+    await refreshStatus()
+    setStagingPaths(new Set())
+    setSelectedPaths(new Set())
+    setSelectedFile(null)
+    if (autoGen) triggerAutoGenerate()
+  }
+
+  const handleBatchUnstage = async (paths: string[]) => {
+    setStagingPaths(new Set(paths))
+    await api.gitManager.unstage(projectDir, paths)
+    await refreshStatus()
+    setStagingPaths(new Set())
+    setSelectedPaths(new Set())
+    setSelectedFile(null)
   }
 
   const handleStashUnstaged = async () => {
@@ -2682,10 +2788,14 @@ const WorkingChanges: React.FC<{
               files={allUnstaged}
               section="unstaged"
               selectedFile={selectedFile}
+              selectedPaths={selectedPaths}
               stagingPaths={stagingPaths}
               projectDir={projectDir}
               onSelect={handleSelectFile}
+              onShiftSelect={handleShiftSelect}
+              onCtrlSelect={handleCtrlSelect}
               onAction={handleStageFile}
+              onBatchAction={handleBatchStage}
               onDoubleClick={handleStageFile}
               onContextMenu={handleFileContext}
               actionLabel="+"
@@ -2712,10 +2822,14 @@ const WorkingChanges: React.FC<{
               files={status.staged}
               section="staged"
               selectedFile={selectedFile}
+              selectedPaths={selectedPaths}
               stagingPaths={stagingPaths}
               projectDir={projectDir}
               onSelect={handleSelectFile}
+              onShiftSelect={handleShiftSelect}
+              onCtrlSelect={handleCtrlSelect}
               onAction={handleUnstageFile}
+              onBatchAction={handleBatchUnstage}
               onDoubleClick={handleUnstageFile}
               onContextMenu={handleFileContext}
               actionLabel="-"

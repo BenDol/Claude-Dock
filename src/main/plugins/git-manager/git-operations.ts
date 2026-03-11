@@ -297,7 +297,52 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
     } catch { /* ignore */ }
   }
 
+  // Compute ahead/behind commit counts for submodule entries
+  const stagedSubs = result.staged.filter(f => f.isSubmodule)
+  const unstagedSubs = result.unstaged.filter(f => f.isSubmodule)
+  if (stagedSubs.length > 0 || unstagedSubs.length > 0) {
+    const promises: Promise<void>[] = []
+    if (stagedSubs.length > 0) {
+      promises.push(
+        gitExec(cwd, ['diff', '--cached', '--submodule=log'], 5000)
+          .then(({ stdout }) => applySubmoduleCounts(stdout, stagedSubs))
+          .catch(() => {})
+      )
+    }
+    if (unstagedSubs.length > 0) {
+      promises.push(
+        gitExec(cwd, ['diff', '--submodule=log'], 5000)
+          .then(({ stdout }) => applySubmoduleCounts(stdout, unstagedSubs))
+          .catch(() => {})
+      )
+    }
+    await Promise.all(promises)
+  }
+
   return result
+}
+
+/** Parse `git diff --submodule=log` output and attach ahead/behind counts */
+function applySubmoduleCounts(output: string, entries: GitFileStatusEntry[]): void {
+  // Format: "Submodule <path> <old>..<new>:\n  > msg\n  > msg\n"
+  // Or rewind: "Submodule <path> <new>..<old> (rewind):\n  < msg\n"
+  const blocks = output.split(/^(?=Submodule )/m)
+  for (const block of blocks) {
+    const headerMatch = block.match(/^Submodule (\S+)/)
+    if (!headerMatch) continue
+    const subPath = headerMatch[1]
+    const entry = entries.find(e => e.path === subPath)
+    if (!entry) continue
+
+    let ahead = 0
+    let behind = 0
+    for (const line of block.split('\n')) {
+      if (/^\s+>/.test(line)) ahead++
+      else if (/^\s+</.test(line)) behind++
+    }
+    entry.submoduleAhead = ahead
+    entry.submoduleBehind = behind
+  }
 }
 
 // --- Diff ---
