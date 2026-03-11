@@ -2248,7 +2248,13 @@ const VirtualFileList: React.FC<{
                 onDoubleClick={() => onDoubleClick(f.path)}
                 onContextMenu={(e) => onContextMenu(e, f, section)}
               >
-                {f.isSubmodule && <SubmoduleIcon />}
+                {f.isSubmodule && (
+                  <span className="gm-submodule-icon-wrap">
+                    <SubmoduleIcon />
+                    {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-badge gm-submodule-ahead">&#x2191;</span>}
+                    {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-badge gm-submodule-behind">&#x2193;</span>}
+                  </span>
+                )}
                 <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
                 <span className="gm-file-path">{f.path}</span>
                 <button
@@ -2261,15 +2267,7 @@ const VirtualFileList: React.FC<{
                   onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                   title="Show in folder"
                 ><ShowInFolderIcon /></button>
-                {f.isSubmodule && (
-                  (f.submoduleAhead != null || f.submoduleBehind != null)
-                    ? <span className="gm-submodule-counts">
-                        {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-ahead">&#x2191;{f.submoduleAhead}</span>}
-                        {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-behind">&#x2193;{f.submoduleBehind}</span>}
-                        {(f.submoduleAhead ?? 0) === 0 && (f.submoduleBehind ?? 0) === 0 && <span className="gm-file-submodule-label">submodule</span>}
-                      </span>
-                    : <span className="gm-file-submodule-label">submodule</span>
-                )}
+                {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
                 <button
                   className="gm-file-action"
                   onClick={() => onAction(f.path)}

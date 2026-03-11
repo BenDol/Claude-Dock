@@ -895,21 +895,32 @@
   flex-shrink: 0;
 }
 
-.gm-submodule-counts {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.gm-submodule-icon-wrap {
+  position: relative;
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.gm-submodule-badge {
+  position: absolute;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .gm-submodule-ahead {
   color: #9ece6a;
+  top: -3px;
+  right: -5px;
 }
 
 .gm-submodule-behind {
   color: #f7768e;
+  bottom: -3px;
+  right: -5px;
 }
 
 .gm-branch-name {
