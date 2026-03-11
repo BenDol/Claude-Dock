@@ -1,5 +1,5 @@
 import './git-manager.css'
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { getDockApi } from '../../lib/ipc-bridge'
 import { useSettingsStore } from '../../stores/settings-store'
 import { applyThemeToDocument } from '../../lib/theme'
@@ -16,6 +16,7 @@ import type {
   GitConflictFileContent,
   GitConflictChunk
 } from '../../../../shared/git-manager-types'
+import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../../../shared/remote-url'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
@@ -177,6 +178,7 @@ const GitManagerApp: React.FC = () => {
   const [notGitRepo, setNotGitRepo] = useState(false)
   const [sidebarModal, setSidebarModal] = useState<'addSubmodule' | 'addSubmodulePath' | 'addRemote' | null>(null)
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
+  const [switchBranchSubPath, setSwitchBranchSubPath] = useState<string | null>(null)
   const [selectedSubmodule, setSelectedSubmodule] = useState<string | null>(null)
   const [tagSidebarCtx, setTagSidebarCtx] = useState<{ x: number; y: number; tag: { name: string; hash: string; date: string } } | null>(null)
   const [scrollToHash, setScrollToHash] = useState<string | null>(null)
@@ -686,6 +688,7 @@ const GitManagerApp: React.FC = () => {
               onSelect={setSelectedSubmodule}
               onNavigate={navigateToSubmodule}
               onAddInFolder={(basePath) => { setAddSubmoduleBasePath(basePath); setSidebarModal('addSubmodulePath') }}
+              onSwitchBranch={(subPath) => setSwitchBranchSubPath(subPath)}
               onRemove={(subPath) => {
                 setConfirmModal({
                   title: 'Remove submodule',
@@ -851,6 +854,15 @@ const GitManagerApp: React.FC = () => {
         <AddRemoteModal
           projectDir={activeDir}
           onClose={() => setSidebarModal(null)}
+          onDone={refresh}
+          onError={handleSmartError}
+        />
+      )}
+      {switchBranchSubPath && (
+        <SwitchSubmoduleBranchModal
+          subPath={switchBranchSubPath}
+          projectDir={activeDir}
+          onClose={() => setSwitchBranchSubPath(null)}
           onDone={refresh}
           onError={handleSmartError}
         />
@@ -1641,9 +1653,28 @@ const CommitDetailPanel: React.FC<{
   const [dragStart, setDragStart] = useState<string | null>(null)
   const lastClickedRef = useRef<string | null>(null)
   const isDragging = useRef(false)
+  const [commitUrl, setCommitUrl] = useState<string | null>(null)
+  const [provider, setProvider] = useState<GitProvider>('generic')
 
   // Clear selection on new commit
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [detail.hash])
+
+  // Resolve commit web URL from remote origin
+  useEffect(() => {
+    let cancelled = false
+    api.gitManager.getRemotes(projectDir).then((remotes) => {
+      if (cancelled) return
+      const origin = remotes.find((r) => r.name === 'origin') || remotes[0]
+      if (origin) {
+        setCommitUrl(remoteUrlToCommitUrl(origin.fetchUrl, detail.hash))
+        setProvider(detectProvider(origin.fetchUrl))
+      } else {
+        setCommitUrl(null)
+        setProvider('generic')
+      }
+    }).catch(() => { if (!cancelled) { setCommitUrl(null); setProvider('generic') } })
+    return () => { cancelled = true }
+  }, [projectDir, detail.hash, api])
 
   // Build flat key list per file for range selection
   const allLineKeysByFile = useMemo(() => {
@@ -1767,8 +1798,28 @@ const CommitDetailPanel: React.FC<{
   return (
     <div className="gm-commit-detail">
       <div className="gm-detail-header">
-        <span className="gm-detail-hash">{detail.shortHash}</span>
-        <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
+        <span className="gm-detail-hash">
+          {detail.shortHash}
+          <button
+            className="gm-detail-copy-hash"
+            onClick={() => navigator.clipboard.writeText(detail.hash)}
+            title="Copy full hash"
+          >
+            <CopyIcon />
+          </button>
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {commitUrl && (
+            <button
+              className="gm-detail-web-link"
+              onClick={() => api.app.openExternal(commitUrl)}
+              title={`View on ${providerLabel(provider)}`}
+            >
+              <ProviderIcon provider={provider} />
+            </button>
+          )}
+          <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
+        </span>
       </div>
       <div className="gm-detail-meta">
         <div className="gm-detail-author-row">
@@ -1933,7 +1984,7 @@ const VirtualFileList: React.FC<{
   const [containerHeight, setContainerHeight] = useState(400)
   const isStaged = section === 'staged'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
     const obs = new ResizeObserver((entries) => {
@@ -1994,9 +2045,11 @@ const VirtualFileList: React.FC<{
 
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
+  // Skip virtualization when container hasn't been measured yet or all files fit
+  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight
   const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
-  const startIdx = Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan)
-  const endIdx = Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan)
+  const startIdx = shouldVirtualize ? Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan) : 0
+  const endIdx = shouldVirtualize ? Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan) : files.length
   const visibleFiles = files.slice(startIdx, endIdx)
   const offsetY = startIdx * FILE_ROW_HEIGHT
 
@@ -5018,10 +5071,11 @@ const SubmoduleTree: React.FC<{
   onSelect?: (path: string) => void
   onNavigate: (sub: GitSubmoduleInfo) => void
   onAddInFolder?: (basePath: string) => void
+  onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
-}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onRemove }) => {
+}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove }) => {
   const tree = useMemo(() => buildSubmoduleTree(submodules), [submodules])
-  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={0} parentPath="" />)}</>
+  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} depth={0} parentPath="" />)}</>
 }
 
 const SubmoduleTreeNodeView: React.FC<{
@@ -5031,10 +5085,11 @@ const SubmoduleTreeNodeView: React.FC<{
   onSelect?: (path: string) => void
   onNavigate: (sub: GitSubmoduleInfo) => void
   onAddInFolder?: (basePath: string) => void
+  onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
   depth: number
   parentPath: string
-}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onRemove, depth, parentPath }) => {
+}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, depth, parentPath }) => {
   const [collapsed, setCollapsed] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -5093,6 +5148,7 @@ const SubmoduleTreeNodeView: React.FC<{
             y={ctxMenu.y}
             subPath={sub.path}
             projectDir={projectDir}
+            onSwitchBranch={onSwitchBranch}
             onRemove={onRemove}
             onClose={() => setCtxMenu(null)}
           />
@@ -5123,7 +5179,7 @@ const SubmoduleTreeNodeView: React.FC<{
         )}
       </div>
       {!collapsed && node.children.map((child) => (
-        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={depth + 1} parentPath={folderPath} />
+        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} depth={depth + 1} parentPath={folderPath} />
       ))}
     </>
   )
@@ -5215,9 +5271,10 @@ const SubmoduleContextMenu: React.FC<{
   x: number; y: number
   subPath: string
   projectDir: string
+  onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
   onClose: () => void
-}> = ({ x, y, subPath, projectDir, onRemove, onClose }) => {
+}> = ({ x, y, subPath, projectDir, onSwitchBranch, onRemove, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -5230,6 +5287,12 @@ const SubmoduleContextMenu: React.FC<{
 
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div
+        className="gm-ctx-item"
+        onClick={() => { onSwitchBranch(subPath); onClose() }}
+      >
+        Switch branch...
+      </div>
       <div
         className="gm-ctx-item"
         onClick={() => { getDockApi().app.openInExplorer(projectDir + '/' + subPath); onClose() }}
@@ -5247,6 +5310,126 @@ const SubmoduleContextMenu: React.FC<{
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+const SwitchSubmoduleBranchModal: React.FC<{
+  subPath: string
+  projectDir: string
+  onClose: () => void
+  onDone: () => void
+  onError: (msg: string) => void
+}> = ({ subPath, projectDir, onClose, onDone, onError }) => {
+  const [branches, setBranches] = useState<GitBranchInfo[]>([])
+  const [filter, setFilter] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const subDir = projectDir + '/' + subPath
+
+  useEffect(() => {
+    let cancelled = false
+    getDockApi().gitManager.getBranches(subDir).then((b) => {
+      if (!cancelled) { setBranches(b); setLoading(false) }
+    }).catch(() => {
+      if (!cancelled) { setLoading(false) }
+    })
+    return () => { cancelled = true }
+  }, [subDir])
+
+  useEffect(() => { if (!loading) inputRef.current?.focus() }, [loading])
+
+  const filtered = useMemo(() => {
+    const q = filter.toLowerCase()
+    return branches.filter((b) => b.name.toLowerCase().includes(q))
+  }, [branches, filter])
+
+  const localBranches = filtered.filter((b) => !b.remote)
+  const remoteBranches = filtered.filter((b) => b.remote)
+
+  const handleCheckout = async (name: string, isRemote: boolean) => {
+    if (busy) return
+    const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
+    setBusy(true)
+    try {
+      const r = await getDockApi().gitManager.checkoutBranch(subDir, checkoutName)
+      if (r.success) { onDone(); onClose() }
+      else onError(`Switch branch failed: ${r.error || 'Unknown error'}`)
+    } catch (e) {
+      onError('Switch branch error: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const currentBranch = branches.find((b) => b.current)
+
+  return (
+    <div className="gm-modal-overlay" onClick={onClose}>
+      <div className="gm-modal" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '70vh' }}>
+        <div className="gm-modal-header">
+          <span>Switch branch — {subPath}</span>
+          <button className="gm-modal-close" onClick={onClose}>&#10005;</button>
+        </div>
+        <div className="gm-modal-body" style={{ padding: '8px 12px', gap: 6 }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter branches..."
+            className="gm-modal-input"
+          />
+          {loading ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '12px 0' }}>Loading branches...</div>
+          ) : branches.length === 0 ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '12px 0' }}>No branches found</div>
+          ) : (
+            <div style={{ overflow: 'auto', maxHeight: 'calc(70vh - 140px)' }}>
+              {localBranches.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', padding: '6px 0 2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Local</div>
+                  {localBranches.map((b) => (
+                    <div
+                      key={b.name}
+                      className={`gm-ctx-item${b.current ? ' gm-ctx-item-disabled' : ''}`}
+                      style={{ fontSize: 12, fontFamily: 'var(--term-font-family)', opacity: b.current ? 0.5 : 1 }}
+                      onClick={() => !b.current && handleCheckout(b.name, false)}
+                    >
+                      {b.name}{b.current ? ' (current)' : ''}
+                    </div>
+                  ))}
+                </>
+              )}
+              {remoteBranches.length > 0 && (
+                <>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', padding: '6px 0 2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Remote</div>
+                  {remoteBranches.map((b) => (
+                    <div
+                      key={b.name}
+                      className="gm-ctx-item"
+                      style={{ fontSize: 12, fontFamily: 'var(--term-font-family)' }}
+                      onClick={() => handleCheckout(b.name, true)}
+                    >
+                      {b.name}
+                    </div>
+                  ))}
+                </>
+              )}
+              {filtered.length === 0 && (
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, padding: '8px 0' }}>No matching branches</div>
+              )}
+            </div>
+          )}
+        </div>
+        {busy && (
+          <div className="gm-modal-footer" style={{ justifyContent: 'center', fontSize: 12, color: 'var(--text-secondary)' }}>
+            Switching...
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -5314,6 +5497,91 @@ const OpenFolderIcon: React.FC = () => (
     <polyline points="9 14 12 11 15 14" />
   </svg>
 )
+
+const CopyIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+  </svg>
+)
+
+// --- Provider icons for "View on web" ---
+
+const GitHubIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+  </svg>
+)
+
+const GitLabIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z" />
+  </svg>
+)
+
+const BitbucketIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M.778 1.213a.768.768 0 00-.768.892l3.263 19.81c.084.5.515.868 1.022.873H19.95a.772.772 0 00.77-.646l3.27-20.03a.768.768 0 00-.768-.891zM14.52 15.53H9.522L8.17 8.466h7.561z" />
+  </svg>
+)
+
+const AzureDevOpsIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M0 8.877L2.247 5.91l8.405-3.416V.022l7.37 5.393L2.966 8.338v8.225L0 15.707zm24-4.45v14.651l-5.753 4.9-9.303-3.057v3.056l-5.978-7.416 15.057 1.39V2.476z" />
+  </svg>
+)
+
+const SourceHutIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <circle cx="12" cy="12" r="11" />
+  </svg>
+)
+
+const CodebergIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 1C5.925 1 1 5.925 1 12s4.925 11 11 11 11-4.925 11-11S18.075 1 12 1zm4.834 17.09L12 14.156 7.166 18.09 8.834 12 4 8.91l5.834-.001L12 3l2.166 5.91L20 8.91 15.166 12z" />
+  </svg>
+)
+
+const GiteaIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4.186 2.592C3.07 3.636 2.49 5.04 2.49 6.906c0 3.24 1.89 5.448 5.466 6.544l.09.028c1.456.445 2.42.834 2.89 1.167.456.322.684.764.684 1.324 0 .624-.256 1.106-.765 1.452-.518.35-1.278.526-2.274.526-1.18 0-2.174-.255-2.987-.762a4.98 4.98 0 01-1.68-1.858l-.026-.048-2.32 1.652.026.05c.594 1.12 1.474 2.014 2.634 2.68 1.162.665 2.574 1.002 4.23 1.002 2.094 0 3.78-.504 5.04-1.506 1.264-1.004 1.9-2.368 1.9-4.088 0-1.476-.434-2.642-1.298-3.492-.862-.85-2.224-1.558-4.074-2.126l-.09-.028c-1.512-.466-2.524-.866-3.028-1.2-.488-.326-.732-.756-.732-1.29 0-.556.226-.994.68-1.316.458-.326 1.112-.49 1.96-.49 1.83 0 3.19.738 4.078 2.214l.028.046 2.164-1.526-.028-.048C14.35 4.056 12.534 2.8 10.286 2.42L12 .588 10.012.002 8.06 2.098c-.448-.042-.88-.064-1.282-.064-1.856 0-3.396.516-4.592 1.558z" />
+  </svg>
+)
+
+const GenericWebIcon: React.FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="2" y1="12" x2="22" y2="12" />
+    <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
+  </svg>
+)
+
+const ProviderIcon: React.FC<{ provider: GitProvider }> = ({ provider }) => {
+  switch (provider) {
+    case 'github': return <GitHubIcon />
+    case 'gitlab': return <GitLabIcon />
+    case 'bitbucket': return <BitbucketIcon />
+    case 'azure': return <AzureDevOpsIcon />
+    case 'sourcehut': return <SourceHutIcon />
+    case 'codeberg': return <CodebergIcon />
+    case 'gitea': return <GiteaIcon />
+    default: return <GenericWebIcon />
+  }
+}
+
+function providerLabel(provider: GitProvider): string {
+  switch (provider) {
+    case 'github': return 'GitHub'
+    case 'gitlab': return 'GitLab'
+    case 'bitbucket': return 'Bitbucket'
+    case 'azure': return 'Azure DevOps'
+    case 'sourcehut': return 'SourceHut'
+    case 'codeberg': return 'Codeberg'
+    case 'gitea': return 'Gitea'
+    default: return 'web'
+  }
+}
 
 const OpenFileIcon: React.FC = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

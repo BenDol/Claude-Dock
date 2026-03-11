@@ -1566,6 +1566,31 @@
   font-family: var(--term-font-family);
   font-size: 12px;
   color: var(--accent-color);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gm-detail-copy-hash {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.12s, background 0.12s;
+}
+
+.gm-commit-detail:hover .gm-detail-copy-hash {
+  opacity: 1;
+}
+
+.gm-detail-copy-hash:hover {
+  color: var(--accent-color);
+  background: var(--bg-tertiary);
 }
 
 .gm-detail-close {
@@ -1580,6 +1605,28 @@
 
 .gm-detail-close:hover {
   color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.gm-detail-web-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.12s, background 0.12s;
+}
+
+.gm-commit-detail:hover .gm-detail-web-link {
+  opacity: 1;
+}
+
+.gm-detail-web-link:hover {
+  color: var(--accent-color);
   background: var(--bg-tertiary);
 }
 
