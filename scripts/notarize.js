@@ -14,14 +14,31 @@ exports.default = async function notarizing(context) {
   }
 
   const appName = context.packager.appInfo.productFilename
-  console.log(`Notarizing ${appName}...`)
+  const appPath = `${appOutDir}/${appName}.app`
+  const maxRetries = 3
 
-  await notarize({
-    appPath: `${appOutDir}/${appName}.app`,
-    appleId: process.env.APPLE_ID,
-    appleIdPassword: appleIdPassword,
-    teamId: process.env.APPLE_TEAM_ID
-  })
-
-  console.log('Notarization complete')
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Notarizing ${appName} (attempt ${attempt}/${maxRetries})...`)
+      await notarize({
+        appPath,
+        appleId: process.env.APPLE_ID,
+        appleIdPassword: appleIdPassword,
+        teamId: process.env.APPLE_TEAM_ID
+      })
+      console.log('Notarization complete')
+      return
+    } catch (err) {
+      const msg = err.message || ''
+      const isTransient = /offline|network|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED/i.test(msg)
+      if (isTransient && attempt < maxRetries) {
+        const delay = attempt * 30
+        console.log(`Notarization failed (transient): ${msg}`)
+        console.log(`Retrying in ${delay}s...`)
+        await new Promise((r) => setTimeout(r, delay * 1000))
+      } else {
+        throw err
+      }
+    }
+  }
 }
