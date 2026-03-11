@@ -2364,6 +2364,34 @@
   height: 14px;
 }
 
+.gm-generate-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gm-generate-btn-cancel {
+  display: none;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.gm-generate-btn-active:hover .gm-generate-btn-icon {
+  display: none;
+}
+
+.gm-generate-btn-active:hover .gm-generate-btn-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f7768e;
+}
+
+.gm-generate-btn-active:hover {
+  border-color: #f7768e;
+  background: rgba(247, 118, 142, 0.1);
+}
+
 .gm-generate-spinner {
   display: inline-block;
   width: 12px;

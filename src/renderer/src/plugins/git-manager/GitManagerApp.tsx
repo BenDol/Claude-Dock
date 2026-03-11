@@ -2552,6 +2552,12 @@ const WorkingChanges: React.FC<{
     setGenerating(false)
   }
 
+  const cancelGenerate = () => {
+    ++autoGenRef.current // invalidate in-flight result
+    pendingActionRef.current = null
+    setGenerating(false)
+  }
+
   const [batchProgress, setBatchProgress] = useState<string | null>(null)
 
   const scrollToTop = () => {
@@ -2868,12 +2874,13 @@ const WorkingChanges: React.FC<{
               disabled={generating}
             />
             <button
-              className="gm-generate-btn"
-              onClick={handleGenerateMsg}
-              disabled={generating || status.staged.length === 0}
-              title="Generate commit message with AI"
+              className={`gm-generate-btn${generating ? ' gm-generate-btn-active' : ''}`}
+              onClick={generating ? cancelGenerate : handleGenerateMsg}
+              disabled={!generating && status.staged.length === 0}
+              title={generating ? 'Cancel generation' : 'Generate commit message with AI'}
             >
-              {generating ? <span className="gm-generate-spinner" /> : <SparkleIcon />}
+              <span className="gm-generate-btn-icon">{generating ? <span className="gm-generate-spinner" /> : <SparkleIcon />}</span>
+              {generating && <span className="gm-generate-btn-cancel">&#10005;</span>}
             </button>
           </div>
           {genError && (
