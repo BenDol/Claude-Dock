@@ -2064,7 +2064,7 @@ const VirtualFileList: React.FC<{
               key={f.path}
               className={`gm-file-entry${isStaged ? ' gm-file-staged' : ' gm-file-unstaged'}${f.isSubmodule ? ' gm-file-submodule' : ''}${selectedFile?.path === f.path && selectedFile?.staged === isStaged ? ' gm-file-selected' : ''}`}
               style={{ height: FILE_ROW_HEIGHT }}
-              onMouseDown={(e) => { if (e.button === 0) onSelect(f.path, isStaged) }}
+              onMouseDown={(e) => { if (e.button === 0 && !(e.target as HTMLElement).closest('button')) onSelect(f.path, isStaged) }}
               onDoubleClick={() => onDoubleClick(f.path)}
               onContextMenu={(e) => onContextMenu(e, f, section)}
             >
@@ -2073,18 +2073,18 @@ const VirtualFileList: React.FC<{
               <span className="gm-file-path">{f.path}</span>
               <button
                 className="gm-file-hover-btn"
-                onClick={(e) => { e.stopPropagation(); api.app.openInExplorer(projectDir + '/' + f.path) }}
+                onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
                 title="Open file"
               ><OpenFileIcon /></button>
               <button
                 className="gm-file-hover-btn"
-                onClick={(e) => { e.stopPropagation(); api.gitManager.showInFolder(projectDir, f.path) }}
+                onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                 title="Show in folder"
               ><ShowInFolderIcon /></button>
               {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
               <button
                 className="gm-file-action"
-                onClick={(e) => { e.stopPropagation(); onAction(f.path) }}
+                onClick={() => onAction(f.path)}
                 title={actionTitle}
                 disabled={stagingPaths.has(f.path)}
               >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : actionLabel}</button>
@@ -2302,10 +2302,9 @@ const WorkingChanges: React.FC<{
 
   const handleSelectFile = (path: string, staged: boolean) => {
     if (selectedFile?.path === path && selectedFile?.staged === staged) {
-      setSelectedFile(null)
-    } else {
-      setSelectedFile({ path, staged })
+      return
     }
+    setSelectedFile({ path, staged })
   }
 
   const handleStashUnstaged = async () => {
