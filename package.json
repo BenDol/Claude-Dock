@@ -24,6 +24,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@electron/rebuild": "^3.7.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -67,12 +68,20 @@
     "portable": {
       "artifactName": "${productName}-${version}.Portable.${ext}"
     },
+    "afterSign": "scripts/notarize.js",
     "mac": {
       "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal", "arm64"]
+          "arch": [
+            "universal",
+            "arm64"
+          ]
         }
       ]
     },
