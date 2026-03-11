@@ -171,6 +171,8 @@ export interface DockApi {
     getBehindCount: (projectDir: string) => Promise<number>
     getSetting: (projectDir: string, key: string) => Promise<unknown>
     removeLockFile: (projectDir: string) => Promise<{ success: boolean; error?: string }>
+    getIdentity: (projectDir: string) => Promise<{ name: string; email: string }>
+    setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -329,7 +331,9 @@ const dockApi: DockApi = {
     mergeBranch: (projectDir, branchName) => ipcRenderer.invoke(IPC.GIT_MGR_MERGE_BRANCH, projectDir, branchName),
     getBehindCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BEHIND_COUNT, projectDir),
     getSetting: (projectDir, key) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SETTING, projectDir, key),
-    removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir)
+    removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir),
+    getIdentity: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_IDENTITY, projectDir),
+    setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

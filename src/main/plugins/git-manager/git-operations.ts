@@ -468,6 +468,21 @@ export async function unstageFiles(cwd: string, paths: string[]): Promise<void> 
   }
 }
 
+// --- Git identity ---
+
+export async function getGitIdentity(cwd: string): Promise<{ name: string; email: string }> {
+  let name = '', email = ''
+  try { name = (await gitExec(cwd, ['config', 'user.name'], 5000)).stdout.trim() } catch { /* not set */ }
+  try { email = (await gitExec(cwd, ['config', 'user.email'], 5000)).stdout.trim() } catch { /* not set */ }
+  return { name, email }
+}
+
+export async function setGitIdentity(cwd: string, name: string, email: string, global: boolean): Promise<void> {
+  const scope = global ? '--global' : '--local'
+  await gitExec(cwd, ['config', scope, 'user.name', name], 5000)
+  await gitExec(cwd, ['config', scope, 'user.email', email], 5000)
+}
+
 // --- Commit ---
 
 export async function createCommit(cwd: string, message: string): Promise<{ hash: string }> {

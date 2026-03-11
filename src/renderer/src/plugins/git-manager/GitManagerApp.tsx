@@ -174,6 +174,15 @@ function parseGitError(action: string, errorMsg: string, context: {
     })
   }
 
+  // Author identity unknown
+  if (/author identity unknown|please tell me who you are|unable to auto-detect email/i.test(msg)) {
+    return {
+      title: 'Git identity not configured',
+      message: 'Git needs your name and email address to create commits. Please configure your identity.',
+      resolutions
+    }
+  }
+
   // Better title/message for push rejection
   if (action.toLowerCase() === 'push' && /non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
     return {
@@ -203,6 +212,7 @@ const GitManagerApp: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
   const actionBusyRef = useRef(false)
+  const [identitySetup, setIdentitySetup] = useState<{ retry?: () => Promise<void> } | null>(null)
   const [notGitRepo, setNotGitRepo] = useState(false)
   const [sidebarModal, setSidebarModal] = useState<'addSubmodule' | 'addSubmodulePath' | 'addRemote' | null>(null)
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
@@ -471,6 +481,11 @@ const GitManagerApp: React.FC = () => {
 
   // Smart error handler for child components — parses git errors and offers resolutions
   const handleSmartError = useCallback((msg: string, retry?: () => Promise<void>) => {
+    // Identity error — show setup dialog instead of generic error
+    if (/author identity unknown|please tell me who you are|unable to auto-detect email/i.test(msg)) {
+      setIdentitySetup({ retry })
+      return
+    }
     // Try to extract an action name from the error prefix
     const actionMatch = msg.match(/^([\w\s]+) failed[:\s]*/i)
     const action = actionMatch ? actionMatch[1].trim() : 'Git operation'
@@ -914,6 +929,21 @@ const GitManagerApp: React.FC = () => {
           onClose={() => setActionError(null)}
           onResolved={() => { setActionError(null); refresh() }}
           onError={(msg) => { setActionError(null); handleSmartError(msg) }}
+        />
+      )}
+      {identitySetup && (
+        <IdentitySetupModal
+          projectDir={activeDir}
+          onClose={() => setIdentitySetup(null)}
+          onSaved={async () => {
+            setIdentitySetup(null)
+            if (identitySetup.retry) {
+              try { await identitySetup.retry() } catch (err) {
+                handleSmartError(err instanceof Error ? err.message : 'Retry failed')
+              }
+            }
+            refresh()
+          }}
         />
       )}
       {tagSidebarCtx && (
@@ -4939,6 +4969,107 @@ const ErrorDialog: React.FC<{
         </div>
         <div className="gm-modal-footer">
           <button className="gm-modal-btn" onClick={onClose} disabled={busy !== null}>Dismiss</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Identity setup modal ---
+
+const IdentitySetupModal: React.FC<{
+  projectDir: string
+  onClose: () => void
+  onSaved: () => void
+}> = ({ projectDir, onClose, onSaved }) => {
+  const api = getDockApi()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [scope, setScope] = useState<'global' | 'local'>('global')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    api.gitManager.getIdentity(projectDir).then((id) => {
+      if (id.name) setName(id.name)
+      if (id.email) setEmail(id.email)
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
+  }, [])
+
+  const handleSave = async () => {
+    if (!name.trim() || !email.trim()) return
+    setBusy(true)
+    setError(null)
+    const result = await api.gitManager.setIdentity(projectDir, name.trim(), email.trim(), scope === 'global')
+    if (result.success) {
+      onSaved()
+    } else {
+      setError(result.error || 'Failed to save identity')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="gm-modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="gm-modal gm-modal-sm">
+        <div className="gm-modal-header">
+          <span>Set Up Git Identity</span>
+          <button className="gm-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="gm-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--gm-text-secondary)', lineHeight: 1.5 }}>
+            Git needs your name and email to create commits. This is stored in your git config and attached to each commit you make.
+          </div>
+          {!loaded ? (
+            <div style={{ textAlign: 'center', padding: 10, fontSize: 12 }}>Loading...</div>
+          ) : (
+            <>
+              <label style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span>Name</span>
+                <input
+                  className="gm-modal-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your Name"
+                  autoFocus
+                />
+              </label>
+              <label style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span>Email</span>
+                <input
+                  className="gm-modal-input"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && email.trim()) handleSave() }}
+                />
+              </label>
+              <div style={{ fontSize: 11, display: 'flex', gap: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input type="radio" name="scope" checked={scope === 'global'} onChange={() => setScope('global')} />
+                  <span>Global</span>
+                  <span style={{ color: 'var(--gm-text-secondary)' }}>(all repositories)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input type="radio" name="scope" checked={scope === 'local'} onChange={() => setScope('local')} />
+                  <span>This repo only</span>
+                </label>
+              </div>
+            </>
+          )}
+          {error && <div style={{ fontSize: 12, color: 'var(--gm-danger)' }}>{error}</div>}
+        </div>
+        <div className="gm-modal-footer">
+          <button className="gm-modal-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            className="gm-modal-btn gm-modal-btn-primary"
+            onClick={handleSave}
+            disabled={busy || !loaded || !name.trim() || !email.trim()}
+          >
+            {busy ? 'Saving...' : 'Save & Retry'}
+          </button>
         </div>
       </div>
     </div>

@@ -481,5 +481,19 @@ export function registerGitManagerIpc(): void {
     shell.openPath(projectDir)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GET_IDENTITY, async (_event, projectDir: string) => {
+    return gitOps.getGitIdentity(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_SET_IDENTITY, async (_event, projectDir: string, name: string, email: string, global: boolean) => {
+    try {
+      await gitOps.setGitIdentity(projectDir, name, email, global)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] set identity failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to set identity' }
+    }
+  })
+
   log('[git-manager] IPC handlers registered')
 }
