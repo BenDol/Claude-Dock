@@ -47,6 +47,8 @@ jobs:
             platform: linux
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +122,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SKIP_NOTARIZE: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
       - name: Zip win-unpacked directory
         if: matrix.platform == 'win'
@@ -138,25 +141,8 @@ jobs:
             dist/Claude-Dock-win-unpacked.zip
           if-no-files-found: error
 
-  release:
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: List artifacts
-        run: find artifacts -type f
-
-      - name: Create or update bleeding edge release
+      - name: Publish to bleeding-edge release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: ncipollo/release-action@v1
         with:
           tag: bleeding-edge
@@ -169,6 +155,6 @@ jobs:
             Commit: ${{ github.sha }}
           prerelease: true
           allowUpdates: true
-          removeArtifacts: true
-          artifacts: "artifacts/**/*"
+          replacesArtifacts: true
+          artifacts: "dist/*.exe,dist/*.dmg,dist/*.AppImage,dist/Claude-Dock-win-unpacked.zip"
           token: ${{ secrets.GITHUB_TOKEN }}
