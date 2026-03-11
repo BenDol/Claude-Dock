@@ -393,6 +393,7 @@ const GitManagerApp: React.FC = () => {
   }, [sidebarFocusIdx])
 
   const refreshGenRef = useRef(0)
+  const submoduleGenRef = useRef(0)
   const refresh = useCallback(async () => {
     if (!activeDir) return
     const gen = ++refreshGenRef.current
@@ -425,8 +426,9 @@ const GitManagerApp: React.FC = () => {
       setTags(tagData)
       setMergeState(mergeData)
       // Submodules are slow — load them without blocking the UI
+      const subGen = ++submoduleGenRef.current
       api.gitManager.getSubmodules(activeDir).then((data) => {
-        if (gen === refreshGenRef.current) setSubmodules(data)
+        if (subGen === submoduleGenRef.current) setSubmodules(data)
       }).catch(() => {})
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
