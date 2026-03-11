@@ -95,7 +95,7 @@ jobs:
           UPDATE_PROFILE: bleeding-edge
 
       - name: Import macOS signing certificate
-        if: matrix.platform == 'mac'
+        if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
         env:
           MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
@@ -122,6 +122,7 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # ${{ vars.SKIP_MAC_SIGNING == 'true' && 'false' || 'true' }}
           SKIP_NOTARIZE: 'true' # ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
       - name: Zip win-unpacked directory
