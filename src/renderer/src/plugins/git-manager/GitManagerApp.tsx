@@ -79,23 +79,42 @@ function parseGitError(action: string, errorMsg: string, context: {
   // Push rejected — non-fast-forward
   if (/non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
     resolutions.push({
-      label: 'Pull then push',
-      description: 'Fetch and merge remote changes, then push again',
+      label: 'Pull with the default pull action (rebase)',
+      description: 'Pull with rebase and autostash, then push again',
       action: async () => {
-        const pr = await api.gitManager.pull(context.projectDir)
-        if (!pr.success) throw new Error(pr.error || 'Pull failed')
+        const pr = await api.gitManager.pull(context.projectDir, 'rebase')
+        if (!pr.success) throw new Error(pr.error || 'Pull rebase failed')
         const ps = await api.gitManager.push(context.projectDir)
         if (!ps.success) throw new Error(ps.error || 'Push failed after pull')
       }
     })
     resolutions.push({
-      label: 'Pull (rebase) then push',
-      description: 'Rebase local commits on top of remote, then push',
+      label: 'Pull with rebase',
+      description: 'Rebase local commits on top of remote changes, then push',
       action: async () => {
         const pr = await api.gitManager.pull(context.projectDir, 'rebase')
         if (!pr.success) throw new Error(pr.error || 'Pull rebase failed')
         const ps = await api.gitManager.push(context.projectDir)
         if (!ps.success) throw new Error(ps.error || 'Push failed after rebase')
+      }
+    })
+    resolutions.push({
+      label: 'Pull with merge',
+      description: 'Merge remote changes into local branch, then push',
+      action: async () => {
+        const pr = await api.gitManager.pull(context.projectDir, 'merge')
+        if (!pr.success) throw new Error(pr.error || 'Pull merge failed')
+        const ps = await api.gitManager.push(context.projectDir)
+        if (!ps.success) throw new Error(ps.error || 'Push failed after merge')
+      }
+    })
+    resolutions.push({
+      label: 'Force push with lease',
+      description: 'Force push safely — fails if remote has new commits from others',
+      danger: true,
+      action: async () => {
+        const ps = await api.gitManager.pushForceWithLease(context.projectDir)
+        if (!ps.success) throw new Error(ps.error || 'Force push failed')
       }
     })
   }
@@ -153,6 +172,15 @@ function parseGitError(action: string, errorMsg: string, context: {
         await api.gitManager.abortMerge(context.projectDir)
       }
     })
+  }
+
+  // Better title/message for push rejection
+  if (action.toLowerCase() === 'push' && /non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
+    return {
+      title: 'Pull latest changes from remote repository',
+      message: 'The push was rejected because the tip of your current branch is behind its remote counterpart. Merge the remote changes before pushing again.',
+      resolutions
+    }
   }
 
   return { title: `${action} failed`, message: msg, resolutions }
@@ -2326,8 +2354,17 @@ const WorkingChanges: React.FC<{
           if (commitResult.success) {
             setCommitMsg('')
             if (queued === 'commit-push') {
-              await api.gitManager.push(projectDir)
+              const pushResult = await api.gitManager.push(projectDir)
+              if (!pushResult.success) {
+                onRefresh()
+                setBusy(false)
+                setGenerating(false)
+                onError(`Push failed: ${pushResult.error || 'Unknown error'}`)
+                return
+              }
             }
+          } else {
+            onError(`Commit failed: ${commitResult.error || 'Unknown error'}`)
           }
           onRefresh()
           setBusy(false)
@@ -2393,6 +2430,8 @@ const WorkingChanges: React.FC<{
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
+    } else {
+      onError(`Commit failed: ${result.error || 'Unknown error'}`)
     }
     onRefresh()
     setBusy(false)
@@ -2405,7 +2444,15 @@ const WorkingChanges: React.FC<{
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
-      await api.gitManager.push(projectDir)
+      const pushResult = await api.gitManager.push(projectDir)
+      if (!pushResult.success) {
+        onRefresh()
+        setBusy(false)
+        onError(`Push failed: ${pushResult.error || 'Unknown error'}`)
+        return
+      }
+    } else {
+      onError(`Commit failed: ${result.error || 'Unknown error'}`)
     }
     onRefresh()
     setBusy(false)

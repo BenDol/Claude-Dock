@@ -612,6 +612,11 @@ export async function push(cwd: string): Promise<string> {
   return (stdout + stderr).trim()
 }
 
+export async function pushForceWithLease(cwd: string): Promise<string> {
+  const { stdout, stderr } = await gitExec(cwd, ['push', '--force-with-lease'], 60000)
+  return (stdout + stderr).trim()
+}
+
 export async function fetch(cwd: string): Promise<string> {
   const { stdout, stderr } = await gitExec(cwd, ['fetch', '--all', '--prune'], 30000)
   return (stdout + stderr).trim()

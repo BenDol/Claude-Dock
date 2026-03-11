@@ -167,6 +167,16 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, async (_event, projectDir: string) => {
+    try {
+      const output = await gitOps.pushForceWithLease(projectDir)
+      return { success: true, output }
+    } catch (err) {
+      logError('[git-manager] push --force-with-lease failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Force push failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_FETCH, async (_event, projectDir: string) => {
     try {
       const output = await gitOps.fetch(projectDir)

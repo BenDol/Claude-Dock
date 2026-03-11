@@ -133,6 +133,7 @@ export interface DockApi {
     pull: (projectDir: string, mode?: 'merge' | 'rebase') => Promise<{ success: boolean; output?: string; error?: string }>
     pullAdvanced: (projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
     push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    pushForceWithLease: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetch: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetchSimple: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetchAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
@@ -291,6 +292,7 @@ const dockApi: DockApi = {
     pull: (projectDir, mode) => ipcRenderer.invoke(IPC.GIT_MGR_PULL, projectDir, mode),
     pullAdvanced: (projectDir, remote, branch, rebase, autostash, tags, prune) => ipcRenderer.invoke(IPC.GIT_MGR_PULL_ADVANCED, projectDir, remote, branch, rebase, autostash, tags, prune),
     push: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH, projectDir),
+    pushForceWithLease: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, projectDir),
     fetch: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH, projectDir),
     fetchSimple: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_SIMPLE, projectDir),
     fetchAll: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_ALL, projectDir),
