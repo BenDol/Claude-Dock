@@ -3877,7 +3877,7 @@ const PullSplitButton: React.FC<{
         &#9662;
       </button>
       {dropdownOpen && (
-        <div className="gm-pull-dropdown">
+        <div className="gm-pull-dropdown" onMouseDown={(e) => e.stopPropagation()}>
           <div className="gm-pull-dropdown-item" onClick={() => { setDropdownOpen(false); onOpenDialog() }}>
             Open pull dialog...
             <span className="gm-pull-dropdown-shortcut">Ctrl+Down</span>
@@ -4179,7 +4179,7 @@ const BranchDropdown: React.FC<{
         <ChevronIcon open={open} />
       </button>
       {open && (
-        <div className="gm-branch-dropdown-menu">
+        <div className="gm-branch-dropdown-menu" onMouseDown={(e) => e.stopPropagation()}>
           <div className="gm-branch-dropdown-search">
             <input
               ref={inputRef}
