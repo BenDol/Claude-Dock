@@ -25,6 +25,139 @@ interface NavEntry {
   label: string
 }
 
+// --- Action error with resolutions ---
+
+interface ActionErrorResolution {
+  label: string
+  description?: string
+  danger?: boolean
+  action: () => Promise<void>
+}
+
+interface ActionError {
+  title: string
+  message: string
+  resolutions: ActionErrorResolution[]
+}
+
+function parseGitError(action: string, errorMsg: string, context: {
+  projectDir: string
+  refresh: () => void
+  branchName?: string
+  retry?: () => Promise<void>
+}): ActionError {
+  const api = getDockApi()
+  const msg = errorMsg || `${action} failed`
+  const resolutions: ActionErrorResolution[] = []
+
+  const stashThenRetry = async (flags?: string) => {
+    const sr = await api.gitManager.stashSave(context.projectDir, `Auto-stash before ${action.toLowerCase()}`, flags)
+    if (!sr.success) throw new Error('Stash failed: ' + (sr.error || 'Unknown error'))
+    if (context.retry) await context.retry()
+  }
+
+  // Dirty working tree — checkout, rebase, merge, pull
+  if (/local changes.*would be overwritten|uncommitted changes|unstaged changes|please.*(stash|commit)|cannot.*checkout.*with.*uncommitted|your local changes/i.test(msg)) {
+    resolutions.push({
+      label: 'Stash & retry',
+      description: 'Save your changes to the stash, then retry the operation',
+      action: () => stashThenRetry()
+    })
+    resolutions.push({
+      label: 'Stash (keep index) & retry',
+      description: 'Stash only unstaged changes, keep staged files, then retry',
+      action: () => stashThenRetry('--keep-index')
+    })
+    resolutions.push({
+      label: 'Stash (include untracked) & retry',
+      description: 'Stash all changes including untracked files, then retry',
+      action: () => stashThenRetry('--include-untracked')
+    })
+  }
+
+  // Push rejected — non-fast-forward
+  if (/non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
+    resolutions.push({
+      label: 'Pull then push',
+      description: 'Fetch and merge remote changes, then push again',
+      action: async () => {
+        const pr = await api.gitManager.pull(context.projectDir)
+        if (!pr.success) throw new Error(pr.error || 'Pull failed')
+        const ps = await api.gitManager.push(context.projectDir)
+        if (!ps.success) throw new Error(ps.error || 'Push failed after pull')
+      }
+    })
+    resolutions.push({
+      label: 'Pull (rebase) then push',
+      description: 'Rebase local commits on top of remote, then push',
+      action: async () => {
+        const pr = await api.gitManager.pull(context.projectDir, 'rebase')
+        if (!pr.success) throw new Error(pr.error || 'Pull rebase failed')
+        const ps = await api.gitManager.push(context.projectDir)
+        if (!ps.success) throw new Error(ps.error || 'Push failed after rebase')
+      }
+    })
+  }
+
+  // Merge conflicts
+  if (/conflict|merge.*failed|automatic merge failed|could not apply/i.test(msg) && !/non-fast-forward/i.test(msg)) {
+    resolutions.push({
+      label: 'Open conflict resolver',
+      description: 'Switch to the conflicts tab to resolve manually',
+      action: async () => { /* handled by caller setting tab */ }
+    })
+  }
+
+  // Branch already exists
+  if (/already exists|branch.*already/i.test(msg)) {
+    // No automatic resolution — user needs to choose a different name
+  }
+
+  // Cannot delete current branch
+  if (/cannot delete.*checked out|cannot delete branch.*currently on/i.test(msg)) {
+    resolutions.push({
+      label: 'Switch to another branch first',
+      description: 'Checkout a different branch before deleting',
+      action: async () => { /* informational — user picks branch */ }
+    })
+  }
+
+  // Lock file exists — stale .git/index.lock from crashed process
+  if (/index\.lock.*file exists|unable to create.*index\.lock|another git process/i.test(msg)) {
+    resolutions.push({
+      label: 'Remove lock file & retry',
+      description: 'Delete the stale .git/index.lock file, then retry the operation',
+      action: async () => {
+        const lr = await api.gitManager.removeLockFile(context.projectDir)
+        if (!lr.success) throw new Error(lr.error || 'Failed to remove lock file')
+        if (context.retry) await context.retry()
+      }
+    })
+    resolutions.push({
+      label: 'Remove lock file only',
+      description: 'Delete the stale .git/index.lock file without retrying',
+      action: async () => {
+        const lr = await api.gitManager.removeLockFile(context.projectDir)
+        if (!lr.success) throw new Error(lr.error || 'Failed to remove lock file')
+      }
+    })
+  }
+
+  // Unmerged paths — need to resolve or abort
+  if (/unmerged|fix conflicts and run|fix them up/i.test(msg)) {
+    resolutions.push({
+      label: 'Abort operation',
+      description: 'Cancel the current merge/rebase/cherry-pick',
+      action: async () => {
+        await api.gitManager.abortMerge(context.projectDir)
+      }
+    })
+  }
+
+  return { title: `${action} failed`, message: msg, resolutions }
+}
+
+
 const GitManagerApp: React.FC = () => {
   const loadSettings = useSettingsStore((s) => s.load)
   const [commits, setCommits] = useState<GitCommitInfo[]>([])
@@ -39,6 +172,8 @@ const GitManagerApp: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts'>('log')
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<ActionError | null>(null)
+  const actionBusyRef = useRef(false)
   const [notGitRepo, setNotGitRepo] = useState(false)
   const [sidebarModal, setSidebarModal] = useState<'addSubmodule' | 'addSubmodulePath' | 'addRemote' | null>(null)
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
@@ -103,7 +238,6 @@ const GitManagerApp: React.FC = () => {
     if (!activeDir) return
     const api = getDockApi()
     setLoading(true)
-    setError(null)
     try {
       const isRepo = await api.gitManager.isRepo(activeDir)
       if (!isRepo) {
@@ -152,6 +286,8 @@ const GitManagerApp: React.FC = () => {
 
     const doAutoFetch = async () => {
       try {
+        // Skip auto-fetch when a resolution action is running to avoid index.lock races
+        if (actionBusyRef.current) return
         const enabled = await api.gitManager.getSetting(activeDir, 'autoFetchAll')
         if (!enabled) return
         await api.gitManager.fetchAll(activeDir)
@@ -200,6 +336,29 @@ const GitManagerApp: React.FC = () => {
     } catch { /* ignore */ }
   }, [activeDir, navigateToCommit])
 
+  const showActionError = useCallback((action: string, errorMsg: string, opts?: { branchName?: string; retry?: () => Promise<void> }) => {
+    const parsed = parseGitError(action, errorMsg, {
+      projectDir: activeDir,
+      refresh: () => {},
+      branchName: opts?.branchName,
+      retry: opts?.retry
+    })
+    if (parsed.resolutions.length > 0) {
+      setActionError(parsed)
+    } else {
+      setActionError({ title: `${action} failed`, message: errorMsg, resolutions: [] })
+    }
+  }, [activeDir])
+
+  // Smart error handler for child components — parses git errors and offers resolutions
+  const handleSmartError = useCallback((msg: string, retry?: () => Promise<void>) => {
+    // Try to extract an action name from the error prefix
+    const actionMatch = msg.match(/^([\w\s]+) failed[:\s]*/i)
+    const action = actionMatch ? actionMatch[1].trim() : 'Git operation'
+    const errorMsg = actionMatch ? msg.slice(actionMatch[0].length) || msg : msg
+    showActionError(action, errorMsg, { retry })
+  }, [showActionError])
+
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
   const [pushing, setPushing] = useState(false)
@@ -212,13 +371,19 @@ const GitManagerApp: React.FC = () => {
       const api = getDockApi()
       const result = await api.gitManager.push(activeDir)
       if (!result.success) {
-        setError(result.error || 'Push failed')
+        showActionError('Push', result.error || 'Push failed', {
+          retry: async () => {
+            const r2 = await api.gitManager.push(activeDir)
+            if (!r2.success) throw new Error(r2.error || 'Push still failed')
+          }
+        })
+        return
       }
       refresh()
     } finally {
       setPushing(false)
     }
-  }, [activeDir, refresh, pushing])
+  }, [activeDir, refresh, pushing, showActionError])
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
@@ -232,13 +397,49 @@ const GitManagerApp: React.FC = () => {
 
   const handleCheckoutBranch = useCallback(async (name: string) => {
     const api = getDockApi()
+    // If name matches a remote branch (e.g. "origin/feature/x"), strip remote prefix
+    // so git creates a local tracking branch instead of detaching HEAD
+    const isRemote = branches.some((b) => b.remote && b.name === name)
+    const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
     setError(null)
-    const result = await api.gitManager.checkoutBranch(activeDir, name)
-    if (!result.success) {
-      setError(result.error || 'Checkout failed')
+    actionBusyRef.current = true
+    try {
+      const result = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+      if (result.success) { setError(null); refresh(); return }
+
+      const errMsg = result.error || 'Checkout failed'
+      // Dirty working tree — auto-stash and retry inline
+      if (/local changes|uncommitted|unstaged|please.*(stash|commit)|your local changes/i.test(errMsg)) {
+        const sr = await api.gitManager.stashSave(activeDir, `Auto-stash before checkout ${checkoutName}`)
+        if (!sr.success) {
+          const sr2 = await api.gitManager.stashSave(activeDir, `Auto-stash before checkout ${checkoutName}`, '--include-untracked')
+          if (!sr2.success) {
+            setError('Stash failed: ' + (sr2.error || sr.error || 'Unknown error'))
+            return
+          }
+        }
+        const r2 = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+        if (!r2.success) {
+          setError('Checkout failed after stash: ' + (r2.error || 'Unknown error'))
+          return
+        }
+        setError(null)
+        refresh()
+      } else {
+        showActionError('Checkout branch', errMsg, {
+          branchName: checkoutName,
+          retry: async () => {
+            const r = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+            if (!r.success) throw new Error(r.error || 'Checkout still failed')
+          }
+        })
+      }
+    } catch (e) {
+      setError('Checkout error: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      actionBusyRef.current = false
     }
-    refresh()
-  }, [activeDir, refresh])
+  }, [activeDir, branches, refresh, showActionError])
 
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
@@ -302,7 +503,7 @@ const GitManagerApp: React.FC = () => {
         <div className="gm-titlebar-right">
           <PullSplitButton
             activeDir={activeDir}
-            onError={setError}
+            onError={handleSmartError}
             onRefresh={refresh}
             onOpenDialog={() => {
               getDockApi().gitManager.getRemotes(activeDir).then(setRemotes)
@@ -438,7 +639,7 @@ const GitManagerApp: React.FC = () => {
                 key={s.index}
                 stash={s}
                 projectDir={activeDir}
-                onError={setError}
+                onError={handleSmartError}
                 onRefresh={refresh}
                 onConfirm={setConfirmModal}
               />
@@ -511,20 +712,22 @@ const GitManagerApp: React.FC = () => {
               onScrollToHandled={() => setScrollToHash(null)}
               onSelect={handleSelectCommit}
               onAction={refresh}
-              onError={setError}
+              onError={handleSmartError}
+              onCheckout={handleCheckoutBranch}
             />
           ) : activeTab === 'changes' ? (
             <WorkingChanges
               status={status}
               projectDir={activeDir}
               onRefresh={refresh}
+              onError={handleSmartError}
             />
           ) : activeTab === 'conflicts' && mergeState ? (
             <MergeConflictsPanel
               mergeState={mergeState}
               projectDir={activeDir}
               onRefresh={refresh}
-              onError={setError}
+              onError={handleSmartError}
             />
           ) : null}
         </div>
@@ -550,7 +753,7 @@ const GitManagerApp: React.FC = () => {
           projectDir={activeDir}
           onClose={() => setSidebarModal(null)}
           onDone={refresh}
-          onError={setError}
+          onError={handleSmartError}
         />
       )}
       {sidebarModal === 'addRemote' && (
@@ -558,7 +761,7 @@ const GitManagerApp: React.FC = () => {
           projectDir={activeDir}
           onClose={() => setSidebarModal(null)}
           onDone={refresh}
-          onError={setError}
+          onError={handleSmartError}
         />
       )}
       {confirmModal && (
@@ -571,6 +774,15 @@ const GitManagerApp: React.FC = () => {
           onClose={() => setConfirmModal(null)}
         />
       )}
+      {actionError && (
+        <ErrorDialog
+          error={actionError}
+          busyRef={actionBusyRef}
+          onClose={() => setActionError(null)}
+          onResolved={() => { setActionError(null); refresh() }}
+          onError={(msg) => { setActionError(null); handleSmartError(msg) }}
+        />
+      )}
       {tagSidebarCtx && (
         <TagContextMenu
           x={tagSidebarCtx.x}
@@ -580,7 +792,8 @@ const GitManagerApp: React.FC = () => {
           projectDir={activeDir}
           onClose={() => setTagSidebarCtx(null)}
           onAction={refresh}
-          onError={setError}
+          onError={handleSmartError}
+          onCheckout={handleCheckoutBranch}
         />
       )}
       {pullDialogOpen && (
@@ -589,7 +802,7 @@ const GitManagerApp: React.FC = () => {
           remotes={remotes}
           remoteBranches={remoteBranches}
           onClose={() => setPullDialogOpen(false)}
-          onError={setError}
+          onError={handleSmartError}
           onRefresh={refresh}
         />
       )}
@@ -758,8 +971,9 @@ const CommitLog: React.FC<{
   onScrollToHandled?: () => void
   onSelect: (hash: string) => void
   onAction: () => void
-  onError: (msg: string) => void
-}> = ({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError }) => {
+  onError: (msg: string, retry?: () => Promise<void>) => void
+  onCheckout: (name: string) => void
+}> = ({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError, onCheckout }) => {
   const [showGraph, setShowGraph] = useState(() => localStorage.getItem('gm-show-graph') !== 'false')
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; commit: GitCommitInfo } | null>(null)
   const [stashCtxMenu, setStashCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
@@ -1141,7 +1355,7 @@ const CommitLog: React.FC<{
           )}
         </span>
         <span className="gm-col-message">
-          {c.refs.length > 0 && c.refs.map((r) => {
+          {c.refs.length > 0 && c.refs.filter((r) => r !== 'HEAD' && !r.endsWith('/HEAD')).map((r) => {
             const isTag = r.startsWith('tag: ')
             const isRemote = r.includes('/')
             const label = r.replace(/^HEAD -> /, '').replace(/^tag: /, '')
@@ -1214,6 +1428,7 @@ const CommitLog: React.FC<{
           onClose={() => setCtxMenu(null)}
           onAction={onAction}
           onError={onError}
+          onCheckout={onCheckout}
           onReset={(c) => { setCtxMenu(null); setModal({ type: 'reset', commit: c }) }}
           onCreateBranch={(c) => { setCtxMenu(null); setModal({ type: 'createBranch', commit: c }) }}
           onCreateTag={(c) => { setCtxMenu(null); setModal({ type: 'createTag', commit: c }) }}
@@ -1240,6 +1455,7 @@ const CommitLog: React.FC<{
           onClose={() => setTagCtxMenu(null)}
           onAction={onAction}
           onError={onError}
+          onCheckout={onCheckout}
         />
       )}
       {modal?.type === 'reset' && (
@@ -1644,7 +1860,8 @@ const WorkingChanges: React.FC<{
   status: GitStatusResult | null
   projectDir: string
   onRefresh: () => void
-}> = ({ status: parentStatus, projectDir, onRefresh }) => {
+  onError: (msg: string) => void
+}> = ({ status: parentStatus, projectDir, onRefresh, onError }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -1853,6 +2070,36 @@ const WorkingChanges: React.FC<{
     }
   }
 
+  const handleStashUnstaged = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await api.gitManager.stashSave(projectDir, undefined, '--include-untracked --keep-index')
+      if (!r.success) onError(`Stash failed: ${r.error || 'Unknown error'}`)
+      refreshStatus()
+      onRefresh()
+    } catch {
+      onError('Stash failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleStashStaged = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await api.gitManager.stashSave(projectDir)
+      if (!r.success) onError(`Stash failed: ${r.error || 'Unknown error'}`)
+      refreshStatus()
+      onRefresh()
+    } catch {
+      onError('Stash failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="gm-changes">
       <div className="gm-changes-panel" ref={fileListRef}>
@@ -1861,11 +2108,18 @@ const WorkingChanges: React.FC<{
           <div className="gm-changes-section">
             <div className="gm-changes-section-header">
               <span>Unstaged ({allUnstaged.length})</span>
-              {allUnstaged.length > 0 && (
-                <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
-                  Stage All
-                </button>
-              )}
+              <div className="gm-section-actions">
+                {allUnstaged.length > 0 && (
+                  <button className="gm-section-icon-btn" onClick={handleStashUnstaged} disabled={busy} title="Stash unstaged & untracked changes (keep staged)">
+                    <StashIcon />
+                  </button>
+                )}
+                {allUnstaged.length > 0 && (
+                  <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
+                    Stage All
+                  </button>
+                )}
+              </div>
             </div>
             <VirtualFileList
               files={allUnstaged}
@@ -1885,11 +2139,18 @@ const WorkingChanges: React.FC<{
           <div className="gm-changes-section">
             <div className="gm-changes-section-header">
               <span>Staged ({status.staged.length})</span>
-              {status.staged.length > 0 && (
-                <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
-                  Unstage All
-                </button>
-              )}
+              <div className="gm-section-actions">
+                {(allUnstaged.length > 0 || status.staged.length > 0) && (
+                  <button className="gm-section-icon-btn" onClick={handleStashStaged} disabled={busy} title="Stash all changes">
+                    <StashIcon />
+                  </button>
+                )}
+                {status.staged.length > 0 && (
+                  <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
+                    Unstage All
+                  </button>
+                )}
+              </div>
             </div>
             <VirtualFileList
               files={status.staged}
@@ -2947,7 +3208,10 @@ const PullSplitButton: React.FC<{
         case 'fetch-all': result = await api.gitManager.fetchAll(activeDir); break
         case 'fetch-prune-all': result = await api.gitManager.fetchPruneAll(activeDir); break
       }
-      if (!result.success) onError(result.error || 'Operation failed')
+      if (!result.success) {
+        const actionName = action.startsWith('fetch') ? 'Fetch' : 'Pull'
+        onError(`${actionName} failed: ${result.error || 'Unknown error'}`)
+      }
       onRefresh()
     } finally {
       setBusy(false)
@@ -3066,12 +3330,12 @@ const PullDialog: React.FC<{
       const api = getDockApi()
       const result = await api.gitManager.pullAdvanced(projectDir, remote, branch, rebase, autostash, tags, prune)
       if (!result.success) {
-        onError(result.error || 'Pull failed')
+        onError(`Pull failed: ${result.error || 'Unknown error'}`)
       }
       onRefresh()
       onClose()
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Pull failed')
+      onError(`Pull failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
       setPulling(false)
     }
@@ -3307,11 +3571,12 @@ const CommitContextMenu: React.FC<{
   projectDir: string
   onClose: () => void
   onAction: () => void
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
+  onCheckout: (name: string) => void
   onReset: (c: GitCommitInfo) => void
   onCreateBranch: (c: GitCommitInfo) => void
   onCreateTag: (c: GitCommitInfo) => void
-}> = ({ x, y, commit, currentBranch, branches, projectDir, onClose, onAction, onError, onReset, onCreateBranch, onCreateTag }) => {
+}> = ({ x, y, commit, currentBranch, branches, projectDir, onClose, onAction, onError, onCheckout, onReset, onCreateBranch, onCreateTag }) => {
   const ref = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
@@ -3360,30 +3625,34 @@ const CommitContextMenu: React.FC<{
 
   const api = getDockApi()
 
-  const doCheckout = async () => {
+  const doCheckout = () => {
     onClose()
-    const r = await api.gitManager.checkoutBranch(projectDir, commit.hash)
-    if (!r.success) onError(r.error || 'Checkout failed')
-    onAction()
+    onCheckout(commit.hash)
   }
 
   const doRevert = async () => {
     onClose()
     const r = await api.gitManager.revert(projectDir, commit.hash)
-    if (!r.success) onError(r.error || 'Revert failed')
-    onAction()
+    if (!r.success) onError(`Revert failed: ${r.error || 'Unknown error'}`, async () => {
+      const r2 = await api.gitManager.revert(projectDir, commit.hash)
+      if (!r2.success) throw new Error(r2.error || 'Revert still failed')
+    })
+    else onAction()
   }
 
   const doCherryPick = async () => {
     onClose()
     const r = await api.gitManager.cherryPick(projectDir, commit.hash)
-    if (!r.success) onError(r.error || 'Cherry pick failed')
-    onAction()
+    if (!r.success) onError(`Cherry-pick failed: ${r.error || 'Unknown error'}`, async () => {
+      const r2 = await api.gitManager.cherryPick(projectDir, commit.hash)
+      if (!r2.success) throw new Error(r2.error || 'Cherry-pick still failed')
+    })
+    else onAction()
   }
 
   // Branches that point at this commit
   const commitBranches = commit.refs
-    .filter((r) => !r.startsWith('tag:'))
+    .filter((r) => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD'))
     .map((r) => r.replace(/^HEAD -> /, ''))
     .filter(Boolean)
 
@@ -3449,11 +3718,9 @@ const CommitContextMenu: React.FC<{
                 {checkoutSubmenu && (
                   <div className={`gm-ctx-submenu${subFlip ? ' gm-ctx-submenu-left' : ''}`}>
                     {checkoutableBranches.map((bName) => (
-                      <div key={bName} className="gm-ctx-item" onClick={async () => {
+                      <div key={bName} className="gm-ctx-item" onClick={() => {
                         onClose()
-                        const r = await api.gitManager.checkoutBranch(projectDir, bName)
-                        if (!r.success) onError(r.error || 'Checkout failed')
-                        onAction()
+                        onCheckout(bName)
                       }}>
                         {bName}
                       </div>
@@ -3476,8 +3743,11 @@ const CommitContextMenu: React.FC<{
                       <div key={bName} className="gm-ctx-item" onClick={async () => {
                         onClose()
                         const r = await api.gitManager.mergeBranch(projectDir, bName)
-                        if (!r.success) onError(r.error || 'Merge failed')
-                        onAction()
+                        if (!r.success) onError(`Merge failed: ${r.error || 'Unknown error'}`, async () => {
+                          const r2 = await api.gitManager.mergeBranch(projectDir, bName)
+                          if (!r2.success) throw new Error(r2.error || 'Merge still failed')
+                        })
+                        else onAction()
                       }}>
                         Merge {bName} into {currentBranch || 'HEAD'}
                       </div>
@@ -3485,8 +3755,11 @@ const CommitContextMenu: React.FC<{
                       <div className="gm-ctx-item" onClick={async () => {
                         onClose()
                         const r = await api.gitManager.mergeBranch(projectDir, commit.hash)
-                        if (!r.success) onError(r.error || 'Merge failed')
-                        onAction()
+                        if (!r.success) onError(`Merge failed: ${r.error || 'Unknown error'}`, async () => {
+                          const r2 = await api.gitManager.mergeBranch(projectDir, commit.hash)
+                          if (!r2.success) throw new Error(r2.error || 'Merge still failed')
+                        })
+                        else onAction()
                       }}>
                         Merge {commit.shortHash} into {currentBranch || 'HEAD'}
                       </div>
@@ -3547,21 +3820,21 @@ const StashContextMenu: React.FC<{
   const doApply = async () => {
     onClose()
     const r = await api.gitManager.stashApply(projectDir, stash.index)
-    if (!r.success) onError(r.error || 'Stash apply failed')
+    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`)
     onAction()
   }
 
   const doPop = async () => {
     onClose()
     const r = await api.gitManager.stashPop(projectDir, stash.index)
-    if (!r.success) onError(r.error || 'Stash pop failed')
+    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`)
     onAction()
   }
 
   const doDrop = async () => {
     onClose()
     const r = await api.gitManager.stashDrop(projectDir, stash.index)
-    if (!r.success) onError(r.error || 'Stash drop failed')
+    if (!r.success) onError(`Stash drop failed: ${r.error || 'Unknown error'}`)
     onAction()
   }
 
@@ -3602,8 +3875,9 @@ const TagContextMenu: React.FC<{
   projectDir: string
   onClose: () => void
   onAction: () => void
-  onError: (msg: string) => void
-}> = ({ x, y, tagName, commitHash, projectDir, onClose, onAction, onError }) => {
+  onError: (msg: string, retry?: () => Promise<void>) => void
+  onCheckout?: (name: string) => void
+}> = ({ x, y, tagName, commitHash, projectDir, onClose, onAction, onError, onCheckout }) => {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -3629,15 +3903,20 @@ const TagContextMenu: React.FC<{
   const doDelete = async () => {
     onClose()
     const r = await api.gitManager.deleteTag(projectDir, tagName)
-    if (!r.success) onError(r.error || 'Delete tag failed')
+    if (!r.success) onError(`Delete tag failed: ${r.error || 'Unknown error'}`)
     onAction()
   }
 
-  const doCheckout = async () => {
+  const doCheckout = () => {
     onClose()
-    const r = await api.gitManager.checkoutBranch(projectDir, `tags/${tagName}`)
-    if (!r.success) onError(r.error || 'Checkout tag failed')
-    onAction()
+    if (onCheckout) {
+      onCheckout(`tags/${tagName}`)
+    } else {
+      api.gitManager.checkoutBranch(projectDir, `tags/${tagName}`).then((r) => {
+        if (!r.success) onError(`Checkout failed: ${r.error || 'Unknown error'}`)
+        onAction()
+      })
+    }
   }
 
   return (
@@ -3685,7 +3964,7 @@ const ResetModal: React.FC<{
     setBusy(true)
     const r = await getDockApi().gitManager.reset(projectDir, commit.hash, mode)
     setBusy(false)
-    if (!r.success) { onError(r.error || 'Reset failed'); onClose(); return }
+    if (!r.success) { onError(`Reset failed: ${r.error || 'Unknown error'}`); onClose(); return }
     onAction()
     onClose()
   }
@@ -3705,7 +3984,7 @@ const ResetModal: React.FC<{
               <div className="gm-reset-subject">{commit.subject}</div>
               <div className="gm-reset-meta">Author: {commit.author}</div>
               <div className="gm-reset-meta">Commit date: {new Date(commit.date).toLocaleString()}</div>
-              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:')).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
+              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD')).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
             </div>
           </div>
           <div className="gm-reset-type-label">Reset type</div>
@@ -3753,7 +4032,7 @@ const CreateBranchModal: React.FC<{
     setBusy(true)
     const r = await getDockApi().gitManager.createBranch(projectDir, name.trim(), commit.hash)
     setBusy(false)
-    if (!r.success) { onError(r.error || 'Create branch failed'); onClose(); return }
+    if (!r.success) { onError(`Create branch failed: ${r.error || 'Unknown error'}`); onClose(); return }
     onAction()
     onClose()
   }
@@ -3813,7 +4092,7 @@ const CreateTagModal: React.FC<{
     setBusy(true)
     const r = await getDockApi().gitManager.createTag(projectDir, tagName.trim(), commit.hash, message.trim() || undefined)
     setBusy(false)
-    if (!r.success) { onError(r.error || 'Create tag failed'); onClose(); return }
+    if (!r.success) { onError(`Create tag failed: ${r.error || 'Unknown error'}`); onClose(); return }
     onAction()
     onClose()
   }
@@ -3891,7 +4170,7 @@ const MergeConflictsPanel: React.FC<{
     if (!selectedFile) return
     setBusy(true)
     const r = await getDockApi().gitManager.resolveConflict(projectDir, selectedFile, resolution, chunkIndex)
-    if (!r.success) onError(r.error || 'Resolve failed')
+    if (!r.success) onError(`Resolve conflict failed: ${r.error || 'Unknown error'}`)
     // Reload the file content
     try {
       const content = await getDockApi().gitManager.getConflictContent(projectDir, selectedFile)
@@ -3904,7 +4183,7 @@ const MergeConflictsPanel: React.FC<{
     if (!selectedFile) return
     setBusy(true)
     const r = await getDockApi().gitManager.resolveConflict(projectDir, selectedFile, resolution)
-    if (!r.success) onError(r.error || 'Resolve failed')
+    if (!r.success) onError(`Resolve conflict failed: ${r.error || 'Unknown error'}`)
     try {
       const content = await getDockApi().gitManager.getConflictContent(projectDir, selectedFile)
       setConflictContent(content)
@@ -3916,7 +4195,7 @@ const MergeConflictsPanel: React.FC<{
     if (!selectedFile) return
     setBusy(true)
     const r = await getDockApi().gitManager.stage(projectDir, [selectedFile])
-    if (!r.success) onError(r.error || 'Stage failed')
+    if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`)
     onRefresh()
     setBusy(false)
   }, [selectedFile, projectDir, onRefresh, onError])
@@ -3924,7 +4203,7 @@ const MergeConflictsPanel: React.FC<{
   const handleAbort = useCallback(async () => {
     setBusy(true)
     const r = await getDockApi().gitManager.abortMerge(projectDir)
-    if (!r.success) onError(r.error || 'Abort failed')
+    if (!r.success) onError(`Abort merge failed: ${r.error || 'Unknown error'}`)
     onRefresh()
     setBusy(false)
   }, [projectDir, onRefresh, onError])
@@ -3932,7 +4211,7 @@ const MergeConflictsPanel: React.FC<{
   const handleContinue = useCallback(async () => {
     setBusy(true)
     const r = await getDockApi().gitManager.continueMerge(projectDir)
-    if (!r.success) onError(r.error || 'Continue failed')
+    if (!r.success) onError(`Continue merge failed: ${r.error || 'Unknown error'}`)
     onRefresh()
     setBusy(false)
   }, [projectDir, onRefresh, onError])
@@ -4093,6 +4372,66 @@ const ConflictChunkView: React.FC<{
   )
 }
 
+// --- Error dialog with resolutions ---
+
+const ErrorDialog: React.FC<{
+  error: ActionError
+  busyRef?: React.MutableRefObject<boolean>
+  onClose: () => void
+  onResolved: () => void
+  onError: (msg: string) => void
+}> = ({ error, busyRef, onClose, onResolved, onError }) => {
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const handleResolution = async (r: ActionErrorResolution) => {
+    setBusy(r.label)
+    if (busyRef) busyRef.current = true
+    try {
+      await r.action()
+      onResolved()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Resolution failed')
+    } finally {
+      if (busyRef) busyRef.current = false
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="gm-modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="gm-modal gm-modal-sm">
+        <div className="gm-modal-header gm-error-dialog-header">
+          <WarningIcon />
+          <span>{error.title}</span>
+          <button className="gm-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="gm-modal-body">
+          <div className="gm-error-dialog-message">{error.message}</div>
+          {error.resolutions.length > 0 && (
+            <div className="gm-error-dialog-resolutions">
+              <div className="gm-error-dialog-resolutions-label">Suggested actions:</div>
+              {error.resolutions.map((r) => (
+                <button
+                  key={r.label}
+                  className={`gm-error-dialog-resolution${r.danger ? ' gm-error-dialog-resolution-danger' : ''}`}
+                  onClick={() => handleResolution(r)}
+                  disabled={busy !== null}
+                >
+                  <span className="gm-error-resolution-label">{busy === r.label ? 'Running...' : r.label}</span>
+                  {r.description && <span className="gm-error-resolution-desc">{r.description}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="gm-modal-footer">
+          <button className="gm-modal-btn" onClick={onClose} disabled={busy !== null}>Dismiss</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Confirmation modal ---
 
 const ConfirmModal: React.FC<{
@@ -4155,7 +4494,7 @@ const AddSubmoduleModal: React.FC<{
     )
     setBusy(false)
     if (r.success) { onDone(); onClose() }
-    else onError(r.error || 'Add submodule failed')
+    else onError(`Add submodule failed: ${r.error || 'Unknown error'}`)
   }
 
   return (
@@ -4232,7 +4571,7 @@ const AddRemoteModal: React.FC<{
     const r = await getDockApi().gitManager.addRemote(projectDir, name.trim(), url.trim())
     setBusy(false)
     if (r.success) { onDone(); onClose() }
-    else onError(r.error || 'Add remote failed')
+    else onError(`Add remote failed: ${r.error || 'Unknown error'}`)
   }
 
   return (
@@ -4548,14 +4887,14 @@ const StashSidebarEntry: React.FC<{
   const doApply = async () => {
     setCtxMenu(null)
     const r = await api.gitManager.stashApply(projectDir, stash.index)
-    if (!r.success) onError(r.error || 'Stash apply failed')
+    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`)
     onRefresh()
   }
 
   const doPop = async () => {
     setCtxMenu(null)
     const r = await api.gitManager.stashPop(projectDir, stash.index)
-    if (!r.success) onError(r.error || 'Stash pop failed')
+    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`)
     onRefresh()
   }
 
@@ -4568,7 +4907,7 @@ const StashSidebarEntry: React.FC<{
       danger: true,
       onConfirm: async () => {
         const r = await api.gitManager.stashDrop(projectDir, stash.index)
-        if (!r.success) onError(r.error || 'Stash drop failed')
+        if (!r.success) onError(`Stash drop failed: ${r.error || 'Unknown error'}`)
         onRefresh()
       }
     })
@@ -4657,6 +4996,14 @@ const SubmoduleCommitIcon: React.FC = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="17 1 21 5 17 9" />
     <path d="M3 11V9a4 4 0 014-4h14" />
+  </svg>
+)
+
+const StashIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+    <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
+    <line x1="12" y1="22" x2="12" y2="6.81" />
   </svg>
 )
 

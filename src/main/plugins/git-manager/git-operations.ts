@@ -24,8 +24,16 @@ import { log, logError } from '../../logger'
 function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout: stdout || '', stderr: stderr || '' })
+      if (err) {
+        // Ensure stderr is included in error message — execFile may omit it
+        // depending on Node.js version, but IPC handlers rely on err.message
+        if (stderr && !err.message.includes(stderr.trim().slice(0, 50))) {
+          err.message += '\n' + stderr
+        }
+        reject(err)
+      } else {
+        resolve({ stdout: stdout || '', stderr: stderr || '' })
+      }
     })
   })
 }
@@ -33,8 +41,14 @@ function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout
 function gitExecStdin(cwd: string, args: string[], stdin: string, timeout = 30000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const proc = execFile('git', args, { cwd, timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(err)
-      else resolve({ stdout: stdout || '', stderr: stderr || '' })
+      if (err) {
+        if (stderr && !err.message.includes(stderr.trim().slice(0, 50))) {
+          err.message += '\n' + stderr
+        }
+        reject(err)
+      } else {
+        resolve({ stdout: stdout || '', stderr: stderr || '' })
+      }
     })
     if (proc.stdin) {
       proc.stdin.write(stdin)
@@ -493,6 +507,14 @@ export async function deleteUntrackedFiles(cwd: string, paths: string[]): Promis
   }
 }
 
+/** Remove .git/index.lock if it exists (stale lock from crashed git process) */
+export async function removeLockFile(cwd: string): Promise<void> {
+  const fsP = require('fs/promises') as typeof import('fs/promises')
+  const pathMod = require('path') as typeof import('path')
+  const lockPath = pathMod.join(cwd, '.git', 'index.lock')
+  await fsP.rm(lockPath, { force: true })
+}
+
 // --- Partial staging (apply patch) ---
 
 export async function applyPatch(cwd: string, patch: string, cached: boolean, reverse: boolean): Promise<void> {
@@ -655,8 +677,9 @@ export async function getStashList(cwd: string): Promise<GitStashEntry[]> {
   }
 }
 
-export async function stashSave(cwd: string, message?: string): Promise<void> {
+export async function stashSave(cwd: string, message?: string, flags?: string): Promise<void> {
   const args = ['stash', 'push']
+  if (flags) args.push(...flags.split(/\s+/).filter(Boolean))
   if (message) args.push('-m', message)
   await gitExec(cwd, args, 15000)
 }

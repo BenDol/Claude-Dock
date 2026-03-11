@@ -137,7 +137,7 @@ export interface DockApi {
     fetchAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetchPruneAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     stashList: (projectDir: string) => Promise<GitStashEntry[]>
-    stashSave: (projectDir: string, message?: string) => Promise<{ success: boolean; error?: string }>
+    stashSave: (projectDir: string, message?: string, flags?: string) => Promise<{ success: boolean; error?: string }>
     stashApply: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
     stashPop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
     stashDrop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
@@ -168,6 +168,7 @@ export interface DockApi {
     mergeBranch: (projectDir: string, branchName: string) => Promise<{ success: boolean; error?: string }>
     getBehindCount: (projectDir: string) => Promise<number>
     getSetting: (projectDir: string, key: string) => Promise<unknown>
+    removeLockFile: (projectDir: string) => Promise<{ success: boolean; error?: string }>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -293,7 +294,7 @@ const dockApi: DockApi = {
     fetchAll: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_ALL, projectDir),
     fetchPruneAll: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_FETCH_PRUNE_ALL, projectDir),
     stashList: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_LIST, projectDir),
-    stashSave: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_SAVE, projectDir, message),
+    stashSave: (projectDir, message, flags) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_SAVE, projectDir, message, flags),
     stashApply: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_APPLY, projectDir, index),
     stashPop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_POP, projectDir, index),
     stashDrop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_DROP, projectDir, index),
@@ -323,7 +324,8 @@ const dockApi: DockApi = {
     continueMerge: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_CONTINUE_MERGE, projectDir),
     mergeBranch: (projectDir, branchName) => ipcRenderer.invoke(IPC.GIT_MGR_MERGE_BRANCH, projectDir, branchName),
     getBehindCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BEHIND_COUNT, projectDir),
-    getSetting: (projectDir, key) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SETTING, projectDir, key)
+    getSetting: (projectDir, key) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SETTING, projectDir, key),
+    removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

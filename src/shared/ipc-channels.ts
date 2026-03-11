@@ -102,6 +102,7 @@ export const IPC = {
   GIT_MGR_FETCH_PRUNE_ALL: 'gitMgr:fetchPruneAll',
   GIT_MGR_GET_BEHIND_COUNT: 'gitMgr:getBehindCount',
   GIT_MGR_GET_SETTING: 'gitMgr:getSetting',
+  GIT_MGR_REMOVE_LOCK_FILE: 'gitMgr:removeLockFile',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',

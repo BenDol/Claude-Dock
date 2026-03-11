@@ -181,9 +181,9 @@ export function registerGitManagerIpc(): void {
     return gitOps.getStashList(projectDir)
   })
 
-  ipcMain.handle(IPC.GIT_MGR_STASH_SAVE, async (_event, projectDir: string, message?: string) => {
+  ipcMain.handle(IPC.GIT_MGR_STASH_SAVE, async (_event, projectDir: string, message?: string, flags?: string) => {
     try {
-      await gitOps.stashSave(projectDir, message)
+      await gitOps.stashSave(projectDir, message, flags)
       return { success: true }
     } catch (err) {
       logError('[git-manager] stash save failed:', err)
@@ -306,6 +306,16 @@ export function registerGitManagerIpc(): void {
     } catch (err) {
       logError('[git-manager] discard failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Discard failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_REMOVE_LOCK_FILE, async (_event, projectDir: string) => {
+    try {
+      await gitOps.removeLockFile(projectDir)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] remove lock file failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Remove lock file failed' }
     }
   })
 

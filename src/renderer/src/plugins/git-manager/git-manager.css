@@ -509,6 +509,91 @@
   font-size: 14px;
 }
 
+/* Error dialog */
+.gm-error-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f7768e;
+}
+
+.gm-error-dialog-header svg {
+  flex-shrink: 0;
+}
+
+.gm-error-dialog-header span:first-of-type {
+  flex: 1;
+}
+
+.gm-error-dialog-message {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-family: var(--term-font-family);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.gm-error-dialog-resolutions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gm-error-dialog-resolutions-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+
+.gm-error-dialog-resolution {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.gm-error-dialog-resolution:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-color);
+}
+
+.gm-error-dialog-resolution:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.gm-error-dialog-resolution-danger:hover:not(:disabled) {
+  border-color: #f7768e;
+}
+
+.gm-error-resolution-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gm-error-resolution-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* Body layout */
 .gm-body {
   display: flex;
@@ -1773,6 +1858,38 @@
   z-index: 3;
 }
 
+.gm-section-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.gm-section-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.gm-section-icon-btn:hover {
+  color: #bb9af7;
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.gm-section-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .gm-small-btn {
   font-size: 10px;
   background: var(--bg-tertiary);
@@ -1801,11 +1918,9 @@
   padding: 4px 12px;
   font-size: 12px;
   font-family: var(--term-font-family);
-  transition: background 0.08s;
-}
-
-.gm-file-entry {
   cursor: pointer;
+  user-select: none;
+  transition: background 0.08s;
 }
 
 .gm-file-entry:hover {
