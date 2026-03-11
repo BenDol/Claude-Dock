@@ -146,8 +146,9 @@ jobs:
         id: collect
         shell: bash
         run: |
+          echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
           files=""
-          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip dist/*-sha.txt; do
             [ -f "$f" ] && files="${files:+$files,}$f"
           done
           echo "files=$files" >> "$GITHUB_OUTPUT"

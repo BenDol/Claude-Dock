@@ -112,6 +112,28 @@ function findPlatformAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
   }
 }
 
+function getPlatformShaAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
+  const prefix = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux'
+  return assets.find((a) => a.name === `${prefix}-sha.txt`)
+}
+
+function fetchText(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, { headers: { 'User-Agent': 'Claude-Dock-Updater', Accept: 'application/octet-stream' } }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          return fetchText(res.headers.location!).then(resolve, reject)
+        }
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+        let data = ''
+        res.on('data', (chunk) => { data += chunk })
+        res.on('end', () => resolve(data.trim()))
+        res.on('error', reject)
+      })
+      .on('error', reject)
+  })
+}
+
 function parseVersion(tag: string): number[] | null {
   const m = tag.match(/v?(\d+)\.(\d+)\.(\d+)/)
   if (!m) return null
@@ -132,9 +154,24 @@ export async function checkForUpdate(profile: string): Promise<UpdateInfo> {
     const release = releases.find((r) => r.tag_name === 'bleeding-edge')
     if (!release) return noUpdate
 
-    // Extract commit SHA from release body
-    const shaMatch = release.body.match(/Commit:\s*([a-f0-9]+)/i)
-    const remoteSha = shaMatch ? shaMatch[1] : ''
+    const asset = findPlatformAsset(release.assets)
+    if (!asset) return noUpdate
+
+    // Check platform-specific SHA file to avoid false updates when other platforms
+    // have published to the release but this platform's asset is still from an older build
+    const shaAsset = getPlatformShaAsset(release.assets)
+    let remoteSha = ''
+    if (shaAsset) {
+      try {
+        remoteSha = await fetchText(shaAsset.browser_download_url)
+      } catch {
+        // Fallback to release body SHA
+      }
+    }
+    if (!remoteSha) {
+      const shaMatch = release.body.match(/Commit:\s*([a-f0-9]+)/i)
+      remoteSha = shaMatch ? shaMatch[1] : ''
+    }
 
     if (
       !remoteSha ||
@@ -143,9 +180,6 @@ export async function checkForUpdate(profile: string): Promise<UpdateInfo> {
     ) {
       return noUpdate
     }
-
-    const asset = findPlatformAsset(release.assets)
-    if (!asset) return noUpdate
 
     return {
       available: true,
