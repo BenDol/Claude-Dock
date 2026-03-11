@@ -682,6 +682,7 @@ const GitManagerApp: React.FC = () => {
             <SubmoduleTree
               submodules={submodules}
               selectedPath={selectedSubmodule}
+              projectDir={activeDir}
               onSelect={setSelectedSubmodule}
               onNavigate={navigateToSubmodule}
               onAddInFolder={(basePath) => { setAddSubmoduleBasePath(basePath); setSidebarModal('addSubmodulePath') }}
@@ -2811,7 +2812,7 @@ const WorkingDiffViewer: React.FC<{
     <div className="gm-changes-diff">
       <div className="gm-changes-diff-header">
         <span className="gm-changes-diff-title">
-          {staged ? 'Staged' : 'Unstaged'}: {filePath}
+          <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {filePath}</span>
           <button
             className="gm-file-hover-btn"
             onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
@@ -5013,25 +5014,27 @@ function buildSubmoduleTree(submodules: GitSubmoduleInfo[]): SubmoduleTreeNode[]
 const SubmoduleTree: React.FC<{
   submodules: GitSubmoduleInfo[]
   selectedPath?: string | null
+  projectDir: string
   onSelect?: (path: string) => void
   onNavigate: (sub: GitSubmoduleInfo) => void
   onAddInFolder?: (basePath: string) => void
   onRemove?: (subPath: string) => void
-}> = ({ submodules, selectedPath, onSelect, onNavigate, onAddInFolder, onRemove }) => {
+}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onRemove }) => {
   const tree = useMemo(() => buildSubmoduleTree(submodules), [submodules])
-  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={0} parentPath="" />)}</>
+  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={0} parentPath="" />)}</>
 }
 
 const SubmoduleTreeNodeView: React.FC<{
   node: SubmoduleTreeNode
   selectedPath?: string | null
+  projectDir: string
   onSelect?: (path: string) => void
   onNavigate: (sub: GitSubmoduleInfo) => void
   onAddInFolder?: (basePath: string) => void
   onRemove?: (subPath: string) => void
   depth: number
   parentPath: string
-}> = ({ node, selectedPath, onSelect, onNavigate, onAddInFolder, onRemove, depth, parentPath }) => {
+}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onRemove, depth, parentPath }) => {
   const [collapsed, setCollapsed] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -5052,7 +5055,6 @@ const SubmoduleTreeNodeView: React.FC<{
           onDoubleClick={() => onNavigate(sub)}
           onContextMenu={(e) => {
             e.preventDefault()
-            if (!onRemove) return
             const zoom = parseFloat(document.documentElement.style.zoom) || 1
             setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
           }}
@@ -5085,11 +5087,12 @@ const SubmoduleTreeNodeView: React.FC<{
             )}
           </span>
         </div>
-        {ctxMenu && onRemove && (
+        {ctxMenu && (
           <SubmoduleContextMenu
             x={ctxMenu.x}
             y={ctxMenu.y}
             subPath={sub.path}
+            projectDir={projectDir}
             onRemove={onRemove}
             onClose={() => setCtxMenu(null)}
           />
@@ -5120,7 +5123,7 @@ const SubmoduleTreeNodeView: React.FC<{
         )}
       </div>
       {!collapsed && node.children.map((child) => (
-        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={depth + 1} parentPath={folderPath} />
+        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onRemove={onRemove} depth={depth + 1} parentPath={folderPath} />
       ))}
     </>
   )
@@ -5211,9 +5214,10 @@ const StashSidebarEntry: React.FC<{
 const SubmoduleContextMenu: React.FC<{
   x: number; y: number
   subPath: string
-  onRemove: (subPath: string) => void
+  projectDir: string
+  onRemove?: (subPath: string) => void
   onClose: () => void
-}> = ({ x, y, subPath, onRemove, onClose }) => {
+}> = ({ x, y, subPath, projectDir, onRemove, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -5227,11 +5231,22 @@ const SubmoduleContextMenu: React.FC<{
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       <div
-        className="gm-ctx-item gm-ctx-danger"
-        onClick={() => { onRemove(subPath); onClose() }}
+        className="gm-ctx-item"
+        onClick={() => { getDockApi().app.openInExplorer(projectDir + '/' + subPath); onClose() }}
       >
-        Remove submodule
+        Open in Explorer
       </div>
+      {onRemove && (
+        <>
+          <div className="gm-ctx-separator" />
+          <div
+            className="gm-ctx-item gm-ctx-danger"
+            onClick={() => { onRemove(subPath); onClose() }}
+          >
+            Remove submodule
+          </div>
+        </>
+      )}
     </div>
   )
 }

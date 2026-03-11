@@ -10,6 +10,14 @@
   --grid-gap: 1px;
   --term-header-height: 18px;
   --term-header-font: 10px;
+  /* Default UI variables (dark) so loading text is visible before applyThemeToDocument runs */
+  --bg-primary: #0f0f14;
+  --bg-secondary: #1a1b26;
+  --bg-tertiary: #24283b;
+  --text-primary: #c0caf5;
+  --text-secondary: #565f89;
+  --border-color: #292e42;
+  --hover-color: #33467c;
 }
 
 [data-theme='dark'] {

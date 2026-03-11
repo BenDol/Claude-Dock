@@ -1725,7 +1725,7 @@
 }
 
 .gm-diff-line-no {
-  width: 60px;
+  width: 40px;
   flex-shrink: 0;
   color: var(--text-secondary);
   opacity: 0.5;
@@ -1806,11 +1806,18 @@
 
 .gm-changes-diff-title {
   font-family: var(--term-font-family);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.gm-changes-diff-title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  color: var(--text-secondary);
+  flex-shrink: 1;
 }
 
 .gm-changes-diff-content {
@@ -1991,6 +1998,7 @@
   cursor: pointer;
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
   border-radius: 3px;
   display: flex;
   align-items: center;
