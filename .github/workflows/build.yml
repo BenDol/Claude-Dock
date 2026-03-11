@@ -141,32 +141,33 @@ jobs:
             dist/Claude-Dock-win-unpacked.zip
           if-no-files-found: error
 
-      - name: Collect release artifacts
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        id: collect
-        shell: bash
-        run: |
-          echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
-          files=""
-          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip dist/*-sha.txt; do
-            [ -f "$f" ] && files="${files:+$files,}$f"
-          done
-          echo "files=$files" >> "$GITHUB_OUTPUT"
-
       - name: Publish to bleeding-edge release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.collect.outputs.files != ''
-        uses: ncipollo/release-action@v1
-        with:
-          tag: bleeding-edge
-          name: Bleeding Edge Build
-          body: |
-            Automated build from the latest commit on `main`.
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Ensure the release exists
+          gh release view bleeding-edge &>/dev/null || \
+            gh release create bleeding-edge --prerelease \
+              --title "Bleeding Edge Build" \
+              --notes "Automated build from the latest commit on \`main\`."
 
-            **This is a pre-release and may be unstable.**
+          # Write platform SHA file
+          echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
 
-            Commit: ${{ github.sha }}
-          prerelease: true
-          allowUpdates: true
-          replacesArtifacts: true
-          artifacts: ${{ steps.collect.outputs.files }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Upload all platform artifacts (--clobber overwrites existing)
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip dist/*-sha.txt; do
+            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+          done
+
+          # Update release notes
+          gh release edit bleeding-edge --prerelease \
+            --notes "$(cat <<'EOF'
+          Automated build from the latest commit on \`main\`.
+
+          **This is a pre-release and may be unstable.**
+
+          Commit: ${{ github.sha }}
+          EOF
+          )"
