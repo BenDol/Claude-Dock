@@ -361,6 +361,13 @@
   border-color: var(--border-color);
 }
 
+.gm-dropdown-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  -webkit-app-region: no-drag;
+}
+
 .gm-pull-dropdown {
   position: absolute;
   top: 100%;

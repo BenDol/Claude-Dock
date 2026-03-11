@@ -3822,12 +3822,7 @@ const PullSplitButton: React.FC<{
   })
 
   useEffect(() => {
-    if (!dropdownOpen) { setDefaultSub(false); return }
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setDropdownOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    if (!dropdownOpen) setDefaultSub(false)
   }, [dropdownOpen])
 
   const runActionOnce = useCallback(async (action: PullAction) => {
@@ -3877,7 +3872,9 @@ const PullSplitButton: React.FC<{
         &#9662;
       </button>
       {dropdownOpen && (
-        <div className="gm-pull-dropdown" onMouseDown={(e) => e.stopPropagation()}>
+        <>
+        <div className="gm-dropdown-backdrop" onClick={() => setDropdownOpen(false)} />
+        <div className="gm-pull-dropdown">
           <div className="gm-pull-dropdown-item" onClick={() => { setDropdownOpen(false); onOpenDialog() }}>
             Open pull dialog...
             <span className="gm-pull-dropdown-shortcut">Ctrl+Down</span>
@@ -3925,6 +3922,7 @@ const PullSplitButton: React.FC<{
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   )
