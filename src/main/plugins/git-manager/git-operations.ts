@@ -326,9 +326,11 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
 function applySubmoduleCounts(output: string, entries: GitFileStatusEntry[]): void {
   // Format: "Submodule <path> <old>..<new>:\n  > msg\n  > msg\n"
   // Or rewind: "Submodule <path> <new>..<old> (rewind):\n  < msg\n"
+  // Only match header lines that end with a colon (commit log blocks),
+  // not "Submodule <path> contains modified/untracked content" lines.
   const blocks = output.split(/^(?=Submodule )/m)
   for (const block of blocks) {
-    const headerMatch = block.match(/^Submodule (\S+)/)
+    const headerMatch = block.match(/^Submodule (\S+) [0-9a-f]+\.\.[0-9a-f]+.*:/)
     if (!headerMatch) continue
     const subPath = headerMatch[1]
     const entry = entries.find(e => e.path === subPath)
@@ -336,9 +338,12 @@ function applySubmoduleCounts(output: string, entries: GitFileStatusEntry[]): vo
 
     let ahead = 0
     let behind = 0
-    for (const line of block.split('\n')) {
-      if (/^\s+>/.test(line)) ahead++
-      else if (/^\s+</.test(line)) behind++
+    const lines = block.split('\n')
+    // Skip the header line, only count commit log lines (indented > or <)
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (/^\s+> /.test(line)) ahead++
+      else if (/^\s+< /.test(line)) behind++
     }
     entry.submoduleAhead = ahead
     entry.submoduleBehind = behind
