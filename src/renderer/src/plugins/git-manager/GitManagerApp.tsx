@@ -32,6 +32,7 @@ interface ActionErrorResolution {
   label: string
   description?: string
   danger?: boolean
+  keepOpen?: boolean
   action: () => Promise<void>
 }
 
@@ -179,6 +180,39 @@ function parseGitError(action: string, errorMsg: string, context: {
     return {
       title: 'Git identity not configured',
       message: 'Git needs your name and email address to create commits. Please configure your identity.',
+      resolutions
+    }
+  }
+
+  // Authentication / credential errors
+  if (/authentication failed|invalid username or password|could not read username|permission denied.*publickey|requested url returned error: 40[13]|could not read from remote repository|correct access rights|support for password authentication was removed|terminal prompts disabled|host key verification failed/i.test(msg)) {
+    resolutions.push({
+      label: 'Open Git Bash to authenticate',
+      description: 'Opens a terminal where Git will prompt you to sign in',
+      keepOpen: true,
+      action: async () => {
+        await api.gitManager.openBash(context.projectDir)
+      }
+    })
+    if (context.retry) {
+      resolutions.push({
+        label: 'Retry',
+        description: 'Retry the operation after authenticating',
+        action: context.retry
+      })
+    }
+    // Determine friendly message based on error type
+    let detail = 'Git could not authenticate with the remote repository.'
+    if (/permission denied.*publickey|host key verification/i.test(msg)) {
+      detail = 'SSH authentication failed. You may need to set up or add your SSH key.'
+    } else if (/support for password authentication was removed/i.test(msg)) {
+      detail = 'Password authentication is no longer supported by this remote. Use a personal access token or SSH key instead.'
+    } else if (/could not read username|terminal prompts disabled/i.test(msg)) {
+      detail = 'Git could not prompt for credentials. Open Git Bash to authenticate interactively.'
+    }
+    return {
+      title: 'Authentication required',
+      message: detail,
       resolutions
     }
   }
@@ -859,6 +893,7 @@ const GitManagerApp: React.FC = () => {
               onRefresh={refresh}
               onError={handleSmartError}
               onConfirm={setConfirmModal}
+              onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
             />
           ) : activeTab === 'conflicts' && mergeState ? (
             <MergeConflictsPanel
@@ -2295,9 +2330,10 @@ const WorkingChanges: React.FC<{
   stashes: GitStashEntry[]
   projectDir: string
   onRefresh: () => void
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
-}> = ({ status: parentStatus, stashes, projectDir, onRefresh, onError, onConfirm }) => {
+  onCommitted?: (hash: string) => void
+}> = ({ status: parentStatus, stashes, projectDir, onRefresh, onError, onConfirm, onCommitted }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -2386,18 +2422,27 @@ const WorkingChanges: React.FC<{
             if (queued === 'commit-push') {
               const pushResult = await api.gitManager.push(projectDir)
               if (!pushResult.success) {
-                onRefresh()
                 setBusy(false)
                 setGenerating(false)
-                onError(`Push failed: ${pushResult.error || 'Unknown error'}`)
+                if (onCommitted && commitResult.hash) { onCommitted(commitResult.hash) } else { onRefresh() }
+                onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
+                  const r = await api.gitManager.push(projectDir)
+                  if (!r.success) throw new Error(r.error || 'Push still failed')
+                })
                 return
               }
             }
+            setBusy(false)
+            if (onCommitted && commitResult.hash) { onCommitted(commitResult.hash) } else { onRefresh() }
           } else {
-            onError(`Commit failed: ${commitResult.error || 'Unknown error'}`)
+            onError(`Commit failed: ${commitResult.error || 'Unknown error'}`, async () => {
+              const r = await api.gitManager.commit(projectDir, result.message!)
+              if (!r.success) throw new Error(r.error || 'Commit still failed')
+              setCommitMsg('')
+            })
+            onRefresh()
+            setBusy(false)
           }
-          onRefresh()
-          setBusy(false)
         }
       } else {
         pendingActionRef.current = null
@@ -2460,11 +2505,17 @@ const WorkingChanges: React.FC<{
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
+      setBusy(false)
+      if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
-      onError(`Commit failed: ${result.error || 'Unknown error'}`)
+      onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
+        const r = await api.gitManager.commit(projectDir, commitMsg)
+        if (!r.success) throw new Error(r.error || 'Commit still failed')
+        setCommitMsg('')
+      })
+      setBusy(false)
     }
     onRefresh()
-    setBusy(false)
   }
 
   const handleCommitPush = async () => {
@@ -2476,16 +2527,26 @@ const WorkingChanges: React.FC<{
       setCommitMsg('')
       const pushResult = await api.gitManager.push(projectDir)
       if (!pushResult.success) {
-        onRefresh()
         setBusy(false)
-        onError(`Push failed: ${pushResult.error || 'Unknown error'}`)
+        // Commit succeeded but push failed — still navigate to the commit
+        if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
+        onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
+          const r = await api.gitManager.push(projectDir)
+          if (!r.success) throw new Error(r.error || 'Push still failed')
+        })
         return
       }
+      setBusy(false)
+      if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
-      onError(`Commit failed: ${result.error || 'Unknown error'}`)
+      onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
+        const r = await api.gitManager.commit(projectDir, commitMsg)
+        if (!r.success) throw new Error(r.error || 'Commit still failed')
+        setCommitMsg('')
+      })
+      setBusy(false)
     }
     onRefresh()
-    setBusy(false)
   }
 
   const handleStageFile = async (filePath: string) => {
@@ -3656,7 +3717,7 @@ const PULL_DEFAULT_KEY = 'gm-default-pull-action'
 
 const PullSplitButton: React.FC<{
   activeDir: string
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onOpenDialog: () => void
 }> = ({ activeDir, onError, onRefresh, onOpenDialog }) => {
@@ -3678,28 +3739,34 @@ const PullSplitButton: React.FC<{
     return () => document.removeEventListener('mousedown', handler)
   }, [dropdownOpen])
 
+  const runActionOnce = useCallback(async (action: PullAction) => {
+    const api = getDockApi()
+    switch (action) {
+      case 'pull-merge': return api.gitManager.pull(activeDir, 'merge')
+      case 'pull-rebase': return api.gitManager.pull(activeDir, 'rebase')
+      case 'fetch': return api.gitManager.fetchSimple(activeDir)
+      case 'fetch-all': return api.gitManager.fetchAll(activeDir)
+      case 'fetch-prune-all': return api.gitManager.fetchPruneAll(activeDir)
+    }
+  }, [activeDir])
+
   const runAction = useCallback(async (action: PullAction) => {
     if (busy) return
     setBusy(true)
     try {
-      const api = getDockApi()
-      let result: { success: boolean; output?: string; error?: string }
-      switch (action) {
-        case 'pull-merge': result = await api.gitManager.pull(activeDir, 'merge'); break
-        case 'pull-rebase': result = await api.gitManager.pull(activeDir, 'rebase'); break
-        case 'fetch': result = await api.gitManager.fetchSimple(activeDir); break
-        case 'fetch-all': result = await api.gitManager.fetchAll(activeDir); break
-        case 'fetch-prune-all': result = await api.gitManager.fetchPruneAll(activeDir); break
-      }
+      const result = await runActionOnce(action)
       if (!result.success) {
         const actionName = action.startsWith('fetch') ? 'Fetch' : 'Pull'
-        onError(`${actionName} failed: ${result.error || 'Unknown error'}`)
+        onError(`${actionName} failed: ${result.error || 'Unknown error'}`, async () => {
+          const r = await runActionOnce(action)
+          if (!r.success) throw new Error(r.error || `${actionName} still failed`)
+        })
       }
       onRefresh()
     } finally {
       setBusy(false)
     }
-  }, [activeDir, onError, onRefresh, busy])
+  }, [runActionOnce, onError, onRefresh, busy])
 
   const setDefault = (action: PullAction) => {
     setDefaultAction(action)
@@ -3779,7 +3846,7 @@ const PullDialog: React.FC<{
   remotes: { name: string; fetchUrl: string; pushUrl: string }[]
   remoteBranches: GitBranchInfo[]
   onClose: () => void
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
 }> = ({ projectDir, remotes, remoteBranches, onClose, onError, onRefresh }) => {
   const [remote, setRemote] = useState(remotes[0]?.name || 'origin')
@@ -3813,7 +3880,11 @@ const PullDialog: React.FC<{
       const api = getDockApi()
       const result = await api.gitManager.pullAdvanced(projectDir, remote, branch, rebase, autostash, tags, prune)
       if (!result.success) {
-        onError(`Pull failed: ${result.error || 'Unknown error'}`)
+        const retryPull = async () => {
+          const r = await api.gitManager.pullAdvanced(projectDir, remote, branch, rebase, autostash, tags, prune)
+          if (!r.success) throw new Error(r.error || 'Pull still failed')
+        }
+        onError(`Pull failed: ${result.error || 'Unknown error'}`, retryPull)
       }
       onRefresh()
       onClose()
@@ -4931,7 +5002,7 @@ const ErrorDialog: React.FC<{
     if (busyRef) busyRef.current = true
     try {
       await r.action()
-      onResolved()
+      if (!r.keepOpen) onResolved()
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Resolution failed')
     } finally {
