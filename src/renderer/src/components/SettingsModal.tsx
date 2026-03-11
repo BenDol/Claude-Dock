@@ -478,6 +478,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <option value="bleeding-edge">Bleeding Edge</option>
                   </select>
                 </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.updater?.autoUpdate ?? false}
+                    onChange={(e) => updateUpdater({ autoUpdate: e.target.checked })}
+                  />
+                  Automatically update
+                </label>
+                <div className="settings-description">
+                  When enabled, updates are downloaded and installed automatically on launch.
+                </div>
                 <div>
                   <button
                     className="settings-check-update-btn"

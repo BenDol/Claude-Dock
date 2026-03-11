@@ -1,7 +1,7 @@
 {
   "name": "claude-dock",
   "version": "1.0.0",
-  "description": "Terminal dock for managing multiple Claude Code CLI instances",
+  "description": "Claude Dock",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",

@@ -74,7 +74,7 @@ export class DockManager {
     return dock
   }
 
-  async showLauncher(): Promise<void> {
+  async showLauncher(autoOpenDir?: string): Promise<void> {
     // If launcher already open, focus it
     if (this.launcherWindow && !this.launcherWindow.isDestroyed()) {
       this.launcherWindow.focus()
@@ -122,7 +122,10 @@ export class DockManager {
       this.launcherWindow = null
     })
 
-    const queryParam = '?launcher=true'
+    let queryParam = '?launcher=true'
+    if (autoOpenDir) {
+      queryParam += `&autoOpen=${encodeURIComponent(autoOpenDir)}`
+    }
 
     if (process.env.ELECTRON_RENDERER_URL) {
       await this.launcherWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}${queryParam}`)

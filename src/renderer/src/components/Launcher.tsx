@@ -35,6 +35,13 @@ const Launcher: React.FC = () => {
   const [pluginPanelPath, setPluginPanelPath] = useState<string | null>(null)
   const [pluginSetupPath, setPluginSetupPath] = useState<string | null>(null)
 
+  // Auto-open from taskbar jump list (--launch flag)
+  const [autoOpenDir] = useState<string | null>(() => {
+    const p = new URLSearchParams(window.location.search)
+    const v = p.get('autoOpen')
+    return v ? decodeURIComponent(v) : null
+  })
+
   // Clone state
   const [clonePhase, setClonePhase] = useState<ClonePhase>('idle')
   const [cloneUrl, setCloneUrl] = useState('')
@@ -48,6 +55,7 @@ const Launcher: React.FC = () => {
   const [downloadProgress, setDownloadProgress] = useState({ downloaded: 0, total: 0 })
   const [updateError, setUpdateError] = useState('')
   const progressCleanup = useRef<(() => void) | null>(null)
+  const [autoUpdating, setAutoUpdating] = useState(false)
 
   // Git install state
   const [gitPhase, setGitPhase] = useState<GitPhase>('checking')
@@ -58,12 +66,15 @@ const Launcher: React.FC = () => {
   const [claudeError, setClaudeError] = useState('')
   const [claudeVersion, setClaudeVersion] = useState('')
 
+  const autoUpdateRef = useRef(false)
+
   useEffect(() => {
     const api = getDockApi()
 
     // Start update check
     api.settings.get().then((settings) => {
       const profile = settings.updater?.profile || 'latest'
+      autoUpdateRef.current = settings.updater?.autoUpdate ?? false
       api.updater
         .check(profile)
         .then((info) => {
@@ -95,6 +106,24 @@ const Launcher: React.FC = () => {
       progressCleanup.current?.()
     }
   }, [])
+
+  // Auto-update: when update is available and autoUpdate is enabled, start automatically
+  useEffect(() => {
+    if (updatePhase === 'available' && autoUpdateRef.current && updateInfo) {
+      setAutoUpdating(true)
+      startDownload()
+    }
+    if (updatePhase === 'error' && autoUpdating) {
+      setAutoUpdating(false)
+    }
+  }, [updatePhase])
+
+  // Auto-update: when download completes, install automatically
+  useEffect(() => {
+    if (updatePhase === 'ready' && autoUpdating) {
+      doInstall()
+    }
+  }, [updatePhase, autoUpdating])
 
   // When git is resolved (installed or skipped), trigger Claude CLI check
   useEffect(() => {
@@ -367,6 +396,16 @@ const Launcher: React.FC = () => {
 
   const isBlocked = gitPhase === 'checking' || gitPhase === 'not-installed' || gitPhase === 'installing'
     || claudePhase === 'checking' || claudePhase === 'not-installed' || claudePhase === 'installing'
+    || autoUpdating
+
+  // Auto-open project from taskbar jump list once checks finish
+  const autoOpenFired = useRef(false)
+  useEffect(() => {
+    if (autoOpenDir && !isBlocked && !loading && !autoOpenFired.current) {
+      autoOpenFired.current = true
+      openPath(autoOpenDir)
+    }
+  }, [isBlocked, loading, autoOpenDir])
 
   if (loading && updatePhase === 'checking') {
     return (
@@ -421,12 +460,20 @@ const Launcher: React.FC = () => {
                   </span>
                 </div>
                 <div className="updater-actions">
-                  <button className="updater-btn updater-btn-primary" onClick={startDownload}>
-                    Download & Update
-                  </button>
-                  <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
-                    Skip
-                  </button>
+                  {autoUpdating ? (
+                    <button className="updater-btn updater-btn-secondary" onClick={() => { setAutoUpdating(false); skipUpdate() }}>
+                      Cancel
+                    </button>
+                  ) : (
+                    <>
+                      <button className="updater-btn updater-btn-primary" onClick={startDownload}>
+                        Download & Update
+                      </button>
+                      <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
+                        Skip
+                      </button>
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -435,7 +482,7 @@ const Launcher: React.FC = () => {
               <>
                 <div className="updater-row">
                   <span className="updater-text">
-                    Downloading update... {progressPercent}%
+                    {autoUpdating ? 'Automatically updating' : 'Downloading update'}... {progressPercent}%
                     <span className="updater-size">
                       {formatBytes(downloadProgress.downloaded)} / {formatBytes(downloadProgress.total)}
                     </span>
@@ -444,6 +491,13 @@ const Launcher: React.FC = () => {
                 <div className="updater-progress-track">
                   <div className="updater-progress-bar" style={{ width: `${progressPercent}%` }} />
                 </div>
+                {autoUpdating && (
+                  <div className="updater-actions">
+                    <button className="updater-btn updater-btn-secondary" onClick={() => { setAutoUpdating(false); skipUpdate() }}>
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </>
             )}
 
@@ -453,15 +507,25 @@ const Launcher: React.FC = () => {
                   <svg className="updater-icon updater-icon-success" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm3.78-9.72a.75.75 0 00-1.06-1.06L6.75 9.19 5.28 7.72a.75.75 0 00-1.06 1.06l2 2a.75.75 0 001.06 0l4.5-4.5z" />
                   </svg>
-                  <span className="updater-text">Download complete. Ready to install.</span>
+                  <span className="updater-text">
+                    {autoUpdating ? 'Installing update...' : 'Download complete. Ready to install.'}
+                  </span>
                 </div>
                 <div className="updater-actions">
-                  <button className="updater-btn updater-btn-primary" onClick={doInstall}>
-                    Install & Restart
-                  </button>
-                  <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
-                    Later
-                  </button>
+                  {autoUpdating ? (
+                    <button className="updater-btn updater-btn-secondary" onClick={() => { setAutoUpdating(false); skipUpdate() }}>
+                      Cancel
+                    </button>
+                  ) : (
+                    <>
+                      <button className="updater-btn updater-btn-primary" onClick={doInstall}>
+                        Install & Restart
+                      </button>
+                      <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
+                        Later
+                      </button>
+                    </>
+                  )}
                 </div>
               </>
             )}

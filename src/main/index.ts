@@ -9,6 +9,7 @@ import { migrateIfNeeded } from './linked-mode'
 import { registerPlugins, PluginManager } from './plugins'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
+import { updateJumpList } from './recent-store'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -60,6 +61,19 @@ function getProjectDirFromArgs(argv: string[]): string | undefined {
   return undefined
 }
 
+/** Extract --launch <path> from argv (used by taskbar jump list) */
+function getLaunchDirFromArgs(argv: string[]): string | undefined {
+  const args = argv.slice(app.isPackaged ? 1 : 2)
+  const idx = args.indexOf('--launch')
+  if (idx >= 0 && idx + 1 < args.length) {
+    const resolved = path.resolve(args[idx + 1])
+    try {
+      if (fs.statSync(resolved).isDirectory()) return resolved
+    } catch { /* invalid path */ }
+  }
+  return undefined
+}
+
 // Single-instance lock: if already running, open a new dock in the existing instance
 const gotLock = app.requestSingleInstanceLock()
 
@@ -68,14 +82,20 @@ if (!gotLock) {
 } else {
   app.on('second-instance', async (_event, argv, _workingDirectory) => {
     log('second-instance event, argv:', argv.slice(1).join(' '))
-    const dir = getProjectDirFromArgs(argv)
     const manager = DockManager.getInstance()
-    if (dir) {
-      log('second-instance: creating dock for', dir)
-      await manager.createDock(dir)
+    const launchDir = getLaunchDirFromArgs(argv)
+    if (launchDir) {
+      log('second-instance: launching with primed dir', launchDir)
+      await manager.showLauncher(launchDir)
     } else {
-      log('second-instance: showing launcher')
-      await manager.showLauncher()
+      const dir = getProjectDirFromArgs(argv)
+      if (dir) {
+        log('second-instance: creating dock for', dir)
+        await manager.createDock(dir)
+      } else {
+        log('second-instance: showing launcher')
+        await manager.showLauncher()
+      }
     }
     log('second-instance: handler complete')
   })
@@ -99,14 +119,20 @@ if (!gotLock) {
     registerIpcHandlers()
     registerPlugins()
     installCli()
+    updateJumpList()
     try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
 
     const manager = DockManager.getInstance()
-    const dir = getProjectDirFromArgs(process.argv)
-    if (dir) {
-      await manager.createDock(dir)
+    const launchDir = getLaunchDirFromArgs(process.argv)
+    if (launchDir) {
+      await manager.showLauncher(launchDir)
     } else {
-      await manager.showLauncher()
+      const dir = getProjectDirFromArgs(process.argv)
+      if (dir) {
+        await manager.createDock(dir)
+      } else {
+        await manager.showLauncher()
+      }
     }
 
     // macOS: re-create window when dock icon clicked

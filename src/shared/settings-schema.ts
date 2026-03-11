@@ -26,6 +26,7 @@ export interface Settings {
   }
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
+    autoUpdate: boolean
   }
   keybindings: {
     focusUp: string
@@ -191,7 +192,8 @@ export const DEFAULT_SETTINGS: Settings = {
     autoSpawnFirstTerminal: true
   },
   updater: {
-    profile: 'latest'
+    profile: 'latest',
+    autoUpdate: false
   },
   keybindings: {
     focusUp: 'Ctrl+Shift+ArrowUp',
