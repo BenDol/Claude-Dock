@@ -1886,7 +1886,8 @@ const CommitDetailPanel: React.FC<{
                           onContextMenu={(e) => handleContextMenu(fi, e)}
                         >
                           <span className="gm-diff-line-no">
-                            {l.oldLineNo ?? ' '} {l.newLineNo ?? ' '}
+                            <span>{l.oldLineNo ?? ' '}</span>
+                            <span>{l.newLineNo ?? ' '}</span>
                           </span>
                           <span className="gm-diff-line-prefix">
                             {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
@@ -3048,7 +3049,8 @@ const WorkingDiffViewer: React.FC<{
                           onContextMenu={handleContextMenu}
                         >
                           <span className="gm-diff-line-no">
-                            {l.oldLineNo ?? ' '} {l.newLineNo ?? ' '}
+                            <span>{l.oldLineNo ?? ' '}</span>
+                            <span>{l.newLineNo ?? ' '}</span>
                           </span>
                           <span className="gm-diff-line-prefix">
                             {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
