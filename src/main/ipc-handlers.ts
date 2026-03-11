@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../shared/ipc-channels'
@@ -219,6 +220,50 @@ export function registerIpcHandlers(): void {
       return await installGit()
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Git installation failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_CLONE, async (_event, url: string, destDir: string) => {
+    log(`GIT_CLONE: url=${url} destDir=${destDir}`)
+    try {
+      // Derive repo name from URL to build full cloned path
+      const repoName = url.replace(/\.git$/, '').replace(/\/+$/, '').split(/[/:]/).pop() || 'repo'
+      const clonedPath = path.join(destDir, repoName)
+
+      await new Promise<void>((resolve, reject) => {
+        execFile('git', ['clone', url], { cwd: destDir, timeout: 300000 }, (err, _stdout, stderr) => {
+          if (err) {
+            // Git clone progress goes to stderr — only treat as error if exit code is non-zero
+            const msg = stderr?.trim() || err.message
+            reject(new Error(msg))
+          } else {
+            resolve()
+          }
+        })
+      })
+
+      // Verify the directory was actually created
+      if (!fs.existsSync(clonedPath)) {
+        // Fallback: scan destDir for newly created directory
+        const entries = fs.readdirSync(destDir, { withFileTypes: true })
+        const gitDirs = entries.filter(e => e.isDirectory() && fs.existsSync(path.join(destDir, e.name, '.git')))
+        if (gitDirs.length > 0) {
+          // Use the most recently modified git directory
+          const sorted = gitDirs.sort((a, b) => {
+            const aStat = fs.statSync(path.join(destDir, a.name))
+            const bStat = fs.statSync(path.join(destDir, b.name))
+            return bStat.mtimeMs - aStat.mtimeMs
+          })
+          return { success: true, clonedPath: path.join(destDir, sorted[0].name) }
+        }
+        return { success: false, error: 'Clone completed but could not find the cloned directory' }
+      }
+
+      log(`GIT_CLONE: success -> ${clonedPath}`)
+      return { success: true, clonedPath }
+    } catch (err) {
+      logError('GIT_CLONE failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Clone failed' }
     }
   })
 

@@ -24,6 +24,7 @@ export const IPC = {
   UPDATER_INSTALL: 'updater:install',
   GIT_CHECK: 'git:check',
   GIT_INSTALL: 'git:install',
+  GIT_CLONE: 'git:clone',
   CLAUDE_CHECK_INSTALL: 'claude:checkInstall',
   CLAUDE_INSTALL: 'claude:install',
   CLAUDE_VERSION: 'claude:version',

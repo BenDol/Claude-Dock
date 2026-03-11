@@ -1065,6 +1065,7 @@ body {
   padding-top: 16px;
   display: flex;
   justify-content: center;
+  gap: 8px;
 }
 
 .launcher-browse-btn {
@@ -1083,6 +1084,181 @@ body {
 }
 
 .launcher-browse-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.launcher-clone-btn {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.launcher-clone-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--text-secondary);
+}
+
+.launcher-clone-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Clone modal */
+.clone-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  width: 460px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.clone-modal-title {
+  padding: 14px 16px 10px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.clone-modal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.clone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clone-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.clone-input {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: var(--term-font-family);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.clone-input:focus {
+  border-color: var(--accent-color);
+}
+
+.clone-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.clone-dest-row {
+  display: flex;
+  gap: 6px;
+}
+
+.clone-dest-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.clone-browse-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.clone-browse-btn:hover:not(:disabled) {
+  background: var(--hover-color);
+}
+
+.clone-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.clone-error {
+  font-size: 12px;
+  color: #f7768e;
+  background: rgba(247, 118, 142, 0.08);
+  border-radius: 4px;
+  padding: 6px 10px;
+  word-break: break-word;
+}
+
+.clone-modal-footer {
+  padding: 10px 16px 14px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-color);
+}
+
+.clone-submit-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 7px 20px;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.clone-submit-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.clone-submit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.clone-cancel-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  padding: 7px 16px;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.clone-cancel-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.clone-cancel-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

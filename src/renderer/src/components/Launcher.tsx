@@ -23,11 +23,20 @@ type ClaudePhase = 'checking' | 'not-installed' | 'installing' | 'installed' | '
 
 const CLAUDE_DOCS_URL = 'https://code.claude.com/docs/en/overview'
 
+type ClonePhase = 'idle' | 'input' | 'cloning' | 'error'
+
 const Launcher: React.FC = () => {
   const [recentPaths, setRecentPaths] = useState<RecentPath[]>([])
   const [loading, setLoading] = useState(true)
   const [pluginPanelPath, setPluginPanelPath] = useState<string | null>(null)
   const [pluginSetupPath, setPluginSetupPath] = useState<string | null>(null)
+
+  // Clone state
+  const [clonePhase, setClonePhase] = useState<ClonePhase>('idle')
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneDest, setCloneDest] = useState('')
+  const [cloneError, setCloneError] = useState('')
+  const cloneInputRef = useRef<HTMLInputElement>(null)
 
   // Updater state
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('checking')
@@ -240,6 +249,38 @@ const Launcher: React.FC = () => {
     const dir = await getDockApi().app.pickDirectory()
     if (dir) {
       openPath(dir)
+    }
+  }
+
+  const openCloneModal = () => {
+    setCloneUrl('')
+    setCloneDest('')
+    setCloneError('')
+    setClonePhase('input')
+    setTimeout(() => cloneInputRef.current?.focus(), 50)
+  }
+
+  const pickCloneDest = async () => {
+    const dir = await getDockApi().app.pickDirectory()
+    if (dir) setCloneDest(dir)
+  }
+
+  const startClone = async () => {
+    if (!cloneUrl.trim() || !cloneDest.trim()) return
+    setClonePhase('cloning')
+    setCloneError('')
+    try {
+      const result = await getDockApi().git.clone(cloneUrl.trim(), cloneDest.trim())
+      if (result.success && result.clonedPath) {
+        setClonePhase('idle')
+        openPath(result.clonedPath)
+      } else {
+        setCloneError(result.error || 'Clone failed')
+        setClonePhase('error')
+      }
+    } catch (err) {
+      setCloneError(err instanceof Error ? err.message : 'Clone failed')
+      setClonePhase('error')
     }
   }
 
@@ -607,6 +648,16 @@ const Launcher: React.FC = () => {
           >
             Browse Folder...
           </button>
+          <button
+            className="launcher-clone-btn"
+            onClick={openCloneModal}
+            disabled={isBlocked}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style={{ marginRight: 5, verticalAlign: -2 }}>
+              <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 010-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1h-8a1 1 0 00-1 1v6.708A2.486 2.486 0 014.5 9h8V1.5zm-8 11a1 1 0 100-2 1 1 0 000 2z" />
+            </svg>
+            Clone Repository...
+          </button>
         </div>
       </div>
       <div className="launcher-bottom-bar">
@@ -635,6 +686,75 @@ const Launcher: React.FC = () => {
             <div className="plugin-setup-footer">
               <button className="plugin-setup-done" onClick={finishPluginSetup}>
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clonePhase !== 'idle' && (
+        <div className="modal-overlay" onClick={() => clonePhase !== 'cloning' && setClonePhase('idle')}>
+          <div className="clone-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="clone-modal-title">Clone Repository</h3>
+            <div className="clone-modal-body">
+              <label className="clone-field">
+                <span className="clone-label">Repository URL</span>
+                <input
+                  ref={cloneInputRef}
+                  type="text"
+                  className="clone-input"
+                  value={cloneUrl}
+                  onChange={(e) => setCloneUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && cloneDest) startClone() }}
+                  placeholder="https://github.com/user/repo.git"
+                  disabled={clonePhase === 'cloning'}
+                />
+              </label>
+              <label className="clone-field">
+                <span className="clone-label">Clone into</span>
+                <div className="clone-dest-row">
+                  <input
+                    type="text"
+                    className="clone-input clone-dest-input"
+                    value={cloneDest}
+                    onChange={(e) => setCloneDest(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && cloneUrl.trim()) startClone() }}
+                    placeholder="Select destination folder..."
+                    disabled={clonePhase === 'cloning'}
+                  />
+                  <button
+                    className="clone-browse-btn"
+                    onClick={pickCloneDest}
+                    disabled={clonePhase === 'cloning'}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+              {clonePhase === 'cloning' && (
+                <div className="clone-progress">
+                  <div className="updater-spinner" />
+                  <span>Cloning repository...</span>
+                </div>
+              )}
+              {clonePhase === 'error' && (
+                <div className="clone-error">{cloneError}</div>
+              )}
+            </div>
+            <div className="clone-modal-footer">
+              <button
+                className="clone-submit-btn"
+                onClick={startClone}
+                disabled={clonePhase === 'cloning' || !cloneUrl.trim() || !cloneDest.trim()}
+              >
+                {clonePhase === 'cloning' ? 'Cloning...' : 'Clone'}
+              </button>
+              <button
+                className="clone-cancel-btn"
+                onClick={() => setClonePhase('idle')}
+                disabled={clonePhase === 'cloning'}
+              >
+                Cancel
               </button>
             </div>
           </div>

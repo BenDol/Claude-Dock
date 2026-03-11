@@ -82,6 +82,7 @@ export interface DockApi {
   git: {
     check: () => Promise<GitStatus>
     install: () => Promise<GitInstallResult>
+    clone: (url: string, destDir: string) => Promise<{ success: boolean; clonedPath?: string; error?: string }>
   }
   claude: {
     checkInstall: () => Promise<ClaudeCliStatus>
@@ -238,7 +239,8 @@ const dockApi: DockApi = {
   },
   git: {
     check: () => ipcRenderer.invoke(IPC.GIT_CHECK),
-    install: () => ipcRenderer.invoke(IPC.GIT_INSTALL)
+    install: () => ipcRenderer.invoke(IPC.GIT_INSTALL),
+    clone: (url, destDir) => ipcRenderer.invoke(IPC.GIT_CLONE, url, destDir)
   },
   claude: {
     checkInstall: () => ipcRenderer.invoke(IPC.CLAUDE_CHECK_INSTALL),
