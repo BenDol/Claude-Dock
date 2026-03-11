@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock.Setup.1.0.0.exe">Windows</a> |
   <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock-1.0.0.AppImage">Linux</a> |
-  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock-1.0.0-arm64.dmg">MacOS</a>
+  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock-1.0.0-universal.dmg">MacOS</a>
 </p>
 
 ---

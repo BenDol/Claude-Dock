@@ -103,8 +103,18 @@ function findPlatformAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
       if (unpacked) return unpacked
       return findPortableExeAsset(assets)
     }
-    case 'darwin':
+    case 'darwin': {
+      if (process.arch === 'arm64') {
+        // Prefer native arm64 build, fallback to universal
+        const arm64 = assets.find((a) => a.name.endsWith('.dmg') && a.name.includes('arm64') && !a.name.includes('universal'))
+        if (arm64) return arm64
+      }
+      // For x64 or fallback: prefer universal build
+      const universal = assets.find((a) => a.name.endsWith('.dmg') && a.name.includes('universal'))
+      if (universal) return universal
+      // Final fallback: any dmg
       return assets.find((a) => a.name.endsWith('.dmg'))
+    }
     case 'linux':
       return assets.find((a) => a.name.endsWith('.AppImage'))
     default:

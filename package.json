@@ -70,7 +70,10 @@
     "mac": {
       "icon": "assets/icon.png",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": ["universal", "arm64"]
+        }
       ]
     },
     "linux": {
