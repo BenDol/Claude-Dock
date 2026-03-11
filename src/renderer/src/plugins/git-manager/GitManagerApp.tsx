@@ -188,6 +188,7 @@ const GitManagerApp: React.FC = () => {
   const [navStack, setNavStack] = useState<NavEntry[]>([])
   const sidebarRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
+  const [sidebarFocusIdx, setSidebarFocusIdx] = useState(-1)
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -233,6 +234,49 @@ const GitManagerApp: React.FC = () => {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [])
+
+  // Sidebar arrow key navigation
+  const handleSidebarKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Enter') return
+    const sidebar = sidebarRef.current
+    if (!sidebar) return
+
+    const items = sidebar.querySelectorAll<HTMLElement>('.gm-sidebar-item')
+    const count = items.length
+    if (count === 0) return
+
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (sidebarFocusIdx >= 0 && sidebarFocusIdx < count) {
+        items[sidebarFocusIdx].click()
+      }
+      return
+    }
+
+    e.preventDefault()
+    const newIdx = e.key === 'ArrowDown'
+      ? Math.min(count - 1, sidebarFocusIdx + 1)
+      : Math.max(0, sidebarFocusIdx - 1)
+
+    setSidebarFocusIdx(newIdx)
+  }, [sidebarFocusIdx])
+
+  // Sync sidebar kb-focus class to DOM
+  useEffect(() => {
+    const sidebar = sidebarRef.current
+    if (!sidebar) return
+    sidebar.querySelectorAll('.gm-sidebar-item-kb-focus').forEach(el =>
+      el.classList.remove('gm-sidebar-item-kb-focus')
+    )
+    if (sidebarFocusIdx >= 0) {
+      const items = sidebar.querySelectorAll('.gm-sidebar-item')
+      const item = items[sidebarFocusIdx]
+      if (item) {
+        item.classList.add('gm-sidebar-item-kb-focus')
+        item.scrollIntoView({ block: 'nearest' })
+      }
+    }
+  }, [sidebarFocusIdx])
 
   const refresh = useCallback(async () => {
     if (!activeDir) return
@@ -557,7 +601,7 @@ const GitManagerApp: React.FC = () => {
 
       <div className="gm-body">
         {/* Branch sidebar */}
-        <div className="gm-sidebar" ref={sidebarRef}>
+        <div className="gm-sidebar" ref={sidebarRef} tabIndex={0} onKeyDown={handleSidebarKeyDown} onMouseDown={() => setSidebarFocusIdx(-1)}>
           <CollapsibleSection title="Branches" count={localBranches.length}>
             <LocalBranchTree branches={localBranches} onCheckout={handleCheckoutBranch} onNavigate={navigateToBranch} />
           </CollapsibleSection>
@@ -1206,6 +1250,45 @@ const CommitLog: React.FC<{
     if (el) setScrollTop(el.scrollTop)
   }, [])
 
+  // Arrow key navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+
+    let currentIdx = selectedHash ? globalIndexMap.get(selectedHash) ?? -1 : -1
+    if (currentIdx === -1 && e.key === 'ArrowUp') return
+
+    const newIdx = e.key === 'ArrowDown'
+      ? Math.min(effectiveTotal - 1, currentIdx + 1)
+      : Math.max(0, currentIdx - 1)
+
+    if (newIdx === currentIdx) return
+
+    const page = Math.floor(newIdx / COMMIT_PAGE_SIZE)
+    const pageOffset = newIdx % COMMIT_PAGE_SIZE
+    const pageData = pageCacheRef.current.get(page)
+    const commit = pageData?.[pageOffset]
+
+    if (commit) {
+      onSelect(commit.hash)
+    }
+
+    // Scroll into view
+    if (scrollContainerRef.current) {
+      const targetTop = newIdx * COMMIT_ROW_HEIGHT
+      const targetBottom = targetTop + COMMIT_ROW_HEIGHT
+      const st = scrollContainerRef.current.scrollTop
+      const sb = st + scrollContainerRef.current.clientHeight
+
+      if (targetTop < st) {
+        scrollContainerRef.current.scrollTop = targetTop
+      } else if (targetBottom > sb) {
+        scrollContainerRef.current.scrollTop = targetBottom - scrollContainerRef.current.clientHeight
+      }
+      setScrollTop(scrollContainerRef.current.scrollTop)
+    }
+  }, [selectedHash, globalIndexMap, effectiveTotal, onSelect])
+
   const handleContextMenu = useCallback((e: React.MouseEvent, commit: GitCommitInfo) => {
     e.preventDefault()
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
@@ -1396,7 +1479,7 @@ const CommitLog: React.FC<{
         <span className="gm-col-date">Date</span>
         <span className="gm-col-hash">Hash</span>
       </div>
-      <div className="gm-commit-list-body" ref={scrollContainerRef} onScroll={handleScroll}>
+      <div className="gm-commit-list-body" ref={scrollContainerRef} onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0}>
         <div style={{ height: totalHeight, position: 'relative' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${startIdx * COMMIT_ROW_HEIGHT}px)` }}>
             {visibleEntries.map((entry) => {
@@ -1815,6 +1898,39 @@ const VirtualFileList: React.FC<{
     if (containerRef.current) setScrollTop(containerRef.current.scrollTop)
   }, [])
 
+  // Arrow key navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+
+    const currentIdx = selectedFile && selectedFile.staged === isStaged
+      ? files.findIndex(f => f.path === selectedFile.path)
+      : -1
+    if (currentIdx === -1 && e.key === 'ArrowUp') return
+
+    const newIdx = e.key === 'ArrowDown'
+      ? Math.min(files.length - 1, currentIdx + 1)
+      : Math.max(0, currentIdx - 1)
+
+    if (newIdx >= 0 && newIdx < files.length) {
+      onSelect(files[newIdx].path, isStaged)
+
+      // Scroll into view
+      if (containerRef.current) {
+        const targetTop = newIdx * FILE_ROW_HEIGHT
+        const targetBottom = targetTop + FILE_ROW_HEIGHT
+        const st = containerRef.current.scrollTop
+        const sb = st + containerRef.current.clientHeight
+
+        if (targetTop < st) {
+          containerRef.current.scrollTop = targetTop
+        } else if (targetBottom > sb) {
+          containerRef.current.scrollTop = targetBottom - containerRef.current.clientHeight
+        }
+      }
+    }
+  }, [files, selectedFile, isStaged, onSelect])
+
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
   const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
@@ -1826,7 +1942,7 @@ const VirtualFileList: React.FC<{
   if (files.length === 0) return null
 
   return (
-    <div ref={containerRef} className="gm-virtual-file-list" onScroll={handleScroll}>
+    <div ref={containerRef} className="gm-virtual-file-list" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0}>
       <div style={{ height: totalHeight, position: 'relative' }}>
         <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
           {visibleFiles.map((f) => (
@@ -3434,14 +3550,20 @@ const BranchDropdown: React.FC<{
     }
   }, [open])
 
+  const [focusIdx, setFocusIdx] = useState(-1)
+
   // Focus search on open, reset on close
   useEffect(() => {
     if (open) {
       setFilter('')
       setVisibleCount(PAGE_SIZE)
+      setFocusIdx(-1)
       setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [open])
+
+  // Reset focus when filter changes
+  useEffect(() => { setFocusIdx(-1) }, [filter])
 
   // Filter branches
   const lowerFilter = filter.toLowerCase()
@@ -3477,6 +3599,42 @@ const BranchDropdown: React.FC<{
     }
   }
 
+  // Arrow key navigation in dropdown
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (focusIdx >= 0 && focusIdx < visible.length) {
+        const b = visible[focusIdx]
+        handleSelect(b.name, b.section === 'remote')
+      }
+      return
+    }
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+
+    const newIdx = e.key === 'ArrowDown'
+      ? Math.min(visible.length - 1, focusIdx + 1)
+      : Math.max(0, focusIdx - 1)
+
+    setFocusIdx(newIdx)
+
+    // Ensure enough items are loaded for scrolling
+    if (newIdx >= visibleCount - 5 && hasMore) {
+      setVisibleCount((prev) => prev + PAGE_SIZE)
+    }
+
+    // Scroll focused item into view
+    if (listRef.current) {
+      const items = listRef.current.querySelectorAll('.gm-branch-dropdown-item')
+      items[newIdx]?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusIdx, visible, visibleCount, hasMore])
+
   // Find where remote section starts in the visible list
   const firstRemoteIdx = visible.findIndex((b) => b.section === 'remote')
 
@@ -3500,6 +3658,7 @@ const BranchDropdown: React.FC<{
               placeholder="Filter branches..."
               value={filter}
               onChange={(e) => { setFilter(e.target.value); setVisibleCount(PAGE_SIZE) }}
+              onKeyDown={handleDropdownKeyDown}
               className="gm-branch-dropdown-filter"
             />
           </div>
@@ -3513,7 +3672,7 @@ const BranchDropdown: React.FC<{
                   <div className="gm-branch-dropdown-section-label">Remote</div>
                 )}
                 <button
-                  className={`gm-branch-dropdown-item${b.name === currentBranch && b.section === 'local' ? ' gm-branch-dropdown-item-active' : ''}${b.section === 'remote' ? ' gm-branch-dropdown-item-remote' : ''}`}
+                  className={`gm-branch-dropdown-item${b.name === currentBranch && b.section === 'local' ? ' gm-branch-dropdown-item-active' : ''}${b.section === 'remote' ? ' gm-branch-dropdown-item-remote' : ''}${i === focusIdx ? ' gm-branch-dropdown-item-focused' : ''}`}
                   onClick={() => handleSelect(b.name, b.section === 'remote')}
                 >
                   <span className="gm-branch-dropdown-name">{b.name}</span>
@@ -4154,6 +4313,23 @@ const MergeConflictsPanel: React.FC<{
   const [loadingContent, setLoadingContent] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  // Arrow key navigation for conflict files
+  const handleConflictsKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+
+    const currentIdx = selectedFile ? mergeState.conflicts.findIndex(c => c.path === selectedFile) : -1
+    if (currentIdx === -1 && e.key === 'ArrowUp') return
+
+    const newIdx = e.key === 'ArrowDown'
+      ? Math.min(mergeState.conflicts.length - 1, currentIdx + 1)
+      : Math.max(0, currentIdx - 1)
+
+    if (newIdx >= 0 && newIdx < mergeState.conflicts.length) {
+      setSelectedFile(mergeState.conflicts[newIdx].path)
+    }
+  }, [selectedFile, mergeState.conflicts])
+
   // Load conflict content when file is selected
   useEffect(() => {
     if (!selectedFile) { setConflictContent(null); return }
@@ -4227,7 +4403,7 @@ const MergeConflictsPanel: React.FC<{
           <span>Conflicted Files</span>
           <span className="gm-conflicts-count">{mergeState.conflicts.length}</span>
         </div>
-        <div className="gm-conflicts-file-list">
+        <div className="gm-conflicts-file-list" tabIndex={0} onKeyDown={handleConflictsKeyDown}>
           {mergeState.conflicts.map((c) => (
             <div
               key={c.path}

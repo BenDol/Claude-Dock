@@ -33,6 +33,7 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
       ...prev,
       [pluginId]: { ...prev[pluginId], enabled }
     }))
+    window.dispatchEvent(new CustomEvent('plugin-state-changed'))
   }
 
   const updateSetting = async (pluginId: string, key: string, value: unknown) => {

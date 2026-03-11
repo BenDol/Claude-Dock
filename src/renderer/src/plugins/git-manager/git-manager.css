@@ -12,6 +12,14 @@
   overflow: hidden;
 }
 
+/* Remove default focus outline for keyboard-navigable containers */
+.gm-commit-list-body:focus,
+.gm-virtual-file-list:focus,
+.gm-conflicts-file-list:focus,
+.gm-sidebar:focus {
+  outline: none;
+}
+
 /* Titlebar */
 .gm-titlebar {
   display: flex;
@@ -237,6 +245,12 @@
 .gm-branch-dropdown-item-active {
   color: var(--accent-color);
   font-weight: 600;
+}
+
+.gm-branch-dropdown-item-focused {
+  background: var(--bg-tertiary);
+  outline: 1px solid var(--accent-color, #7aa2f7);
+  outline-offset: -1px;
 }
 
 .gm-branch-dropdown-item-remote {
@@ -716,6 +730,12 @@
   border-radius: 2px;
   margin-right: 6px;
   flex-shrink: 0;
+}
+
+.gm-sidebar-item-kb-focus {
+  background: var(--bg-tertiary);
+  outline: 1px solid var(--accent-color, #7aa2f7);
+  outline-offset: -1px;
 }
 
 .gm-sidebar-item-remote {

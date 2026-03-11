@@ -40,6 +40,13 @@ export class GitManagerPlugin implements DockPlugin {
       GitManagerWindowManager.getInstance().close(projectDir)
     })
 
+    // Close git manager window when this plugin is disabled for a project
+    bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
+      if (pluginId === this.id) {
+        GitManagerWindowManager.getInstance().close(projectDir)
+      }
+    })
+
     log('[git-manager] plugin registered')
   }
 

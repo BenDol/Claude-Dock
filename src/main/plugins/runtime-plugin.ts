@@ -60,6 +60,13 @@ export class RuntimePlugin implements DockPlugin {
       PluginWindowManager.getInstance().close(this.id, projectDir)
     })
 
+    // Close plugin windows when this plugin is disabled for a project
+    bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
+      if (pluginId === this.id) {
+        PluginWindowManager.getInstance().close(this.id, projectDir)
+      }
+    })
+
     log(`[runtime-plugin] ${this.id} registered`)
   }
 

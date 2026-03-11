@@ -66,6 +66,24 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const rcBufsRef = useRef<Map<string, string>>(new Map())
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
+  const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
+
+  // Fetch plugin enabled states, re-fetch when toggled via settings
+  useEffect(() => {
+    if (!projectDir) return
+    const fetchStates = () => {
+      getDockApi().plugins.getStates(projectDir).then((states) => {
+        const enabled = new Set<string>()
+        for (const [id, state] of Object.entries(states)) {
+          if (state.enabled) enabled.add(id)
+        }
+        setEnabledPlugins(enabled)
+      }).catch(() => {})
+    }
+    fetchStates()
+    window.addEventListener('plugin-state-changed', fetchStates)
+    return () => window.removeEventListener('plugin-state-changed', fetchStates)
+  }, [projectDir])
 
   // Load runtime plugin toolbar actions on mount, sanitizing SVG icons
   useEffect(() => {
@@ -77,7 +95,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   // Poll badges for toolbar actions that provide getBadge
   useEffect(() => {
     if (!projectDir) return
-    const actions = getToolbarActions().filter((a) => a.getBadge)
+    const actions = getToolbarActions().filter((a) => a.getBadge && (enabledPlugins === null || enabledPlugins.has(a.id)))
     if (actions.length === 0) return
 
     const poll = () => {
@@ -100,7 +118,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     poll()
     const interval = setInterval(poll, 10000)
     return () => clearInterval(interval)
-  }, [projectDir])
+  }, [projectDir, enabledPlugins])
 
   // Listen for RC disconnect only while RC terminals exist
   useEffect(() => {
@@ -221,7 +239,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         <button className="toolbar-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
           +
         </button>
-        {getToolbarActions().map((action) => (
+        {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
             key={action.id}
             className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap"
@@ -234,7 +252,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             )}
           </button>
         ))}
-        {runtimeActions.map((action) => (
+        {runtimeActions.filter((a) => enabledPlugins === null || enabledPlugins.has(a.pluginId)).map((action) => (
           <button
             key={action.pluginId}
             className="toolbar-btn toolbar-btn-icon"
