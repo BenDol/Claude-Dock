@@ -896,7 +896,17 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
 
 export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
   try {
-    const { stdout } = await gitExec(cwd, ['submodule', 'status'], 10000)
+    // Use lenient execution: git submodule status may exit non-zero
+    // (e.g., conflicting or partially-initialized submodules) while still
+    // printing valid data to stdout. gitExec rejects on non-zero exit and
+    // discards stdout, so we call execFile directly here.
+    const stdout = await new Promise<string>((resolve) => {
+      execFile('git', ['submodule', 'status'], { cwd, timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (err, out) => {
+        if (err) log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])
+        resolve(out || '')
+      })
+    })
+
     const submodules: GitSubmoduleInfo[] = []
 
     for (const line of stdout.split('\n')) {
@@ -926,6 +936,28 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
       })
     }
 
+    // Fallback: if git submodule status returned nothing, try parsing .gitmodules
+    if (submodules.length === 0) {
+      try {
+        const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'], 5000)
+        for (const cfgLine of cfgOut.split('\n')) {
+          const match = cfgLine.match(/^submodule\.(.+)\.path\s+(.+)$/)
+          if (match) {
+            const subPath = match[2].trim()
+            submodules.push({
+              name: subPath.split('/').pop() || subPath,
+              path: subPath,
+              hash: '????????',
+              status: 'uninitialized'
+            })
+          }
+        }
+        if (submodules.length > 0) log(`[git-manager] getSubmodules: recovered ${submodules.length} submodule(s) from .gitmodules fallback`)
+      } catch {
+        // No .gitmodules or config parse failed — truly no submodules
+      }
+    }
+
     // Check dirty working tree, change count, and current branch for each initialized submodule
     const pathMod = require('path') as typeof import('path')
     await Promise.allSettled(
@@ -952,7 +984,8 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
     )
 
     return submodules
-  } catch {
+  } catch (err) {
+    logError('[git-manager] getSubmodules failed:', err)
     return []
   }
 }
