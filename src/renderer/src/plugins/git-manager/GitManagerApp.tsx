@@ -2248,14 +2248,8 @@ const VirtualFileList: React.FC<{
                 onDoubleClick={() => onDoubleClick(f.path)}
                 onContextMenu={(e) => onContextMenu(e, f, section)}
               >
-                {f.isSubmodule && (
-                  <span className="gm-submodule-icon-wrap">
-                    <SubmoduleIcon />
-                    {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-arrow gm-submodule-ahead"><SubmoduleArrowUp /></span>}
-                    {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-arrow gm-submodule-behind"><SubmoduleArrowDown /></span>}
-                  </span>
-                )}
-                {!f.isSubmodule && <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />}
+                {f.isSubmodule && <SubmoduleIcon />}
+                <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
                 <span className="gm-file-path">{f.path}</span>
                 <button
                   className="gm-file-hover-btn"
@@ -2267,7 +2261,14 @@ const VirtualFileList: React.FC<{
                   onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                   title="Show in folder"
                 ><ShowInFolderIcon /></button>
-                {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
+                {f.isSubmodule && (
+                  (f.submoduleAhead != null || f.submoduleBehind != null) && ((f.submoduleAhead ?? 0) > 0 || (f.submoduleBehind ?? 0) > 0)
+                    ? <span className="gm-submodule-counts">
+                        {(f.submoduleAhead ?? 0) > 0 && <span className="gm-submodule-ahead"><SubmoduleArrowUp />{f.submoduleAhead}</span>}
+                        {(f.submoduleBehind ?? 0) > 0 && <span className="gm-submodule-behind"><SubmoduleArrowDown />{f.submoduleBehind}</span>}
+                      </span>
+                    : <span className="gm-file-submodule-label">submodule</span>
+                )}
                 <button
                   className="gm-file-action"
                   onClick={() => onAction(f.path)}

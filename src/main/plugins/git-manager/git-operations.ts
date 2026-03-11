@@ -904,13 +904,14 @@ async function generateViaOllama(stat: string, diff: string): Promise<string> {
   if (Date.now() < ollamaUnavailableUntil) throw new Error('ollama_unavailable')
   try {
     const model = await pickOllamaModel()
-    const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${diff}`
+    const shortDiff = diff.length > 2000 ? diff.slice(0, 2000) + '\n... (truncated)' : diff
+    const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
     const result = await ollamaRequest('/api/generate', {
       model,
       prompt,
       stream: false,
-      options: { temperature: 0.3, num_predict: 100 }
-    }, 30000)
+      options: { temperature: 0.3, num_predict: 60 }
+    }, 15000)
     const msg = cleanCommitMessage(result?.response || '')
     if (!msg) throw new Error('Empty response from Ollama')
     return msg
@@ -924,12 +925,13 @@ async function generateViaOllama(stat: string, diff: string): Promise<string> {
 
 async function generateViaClaude(stat: string, diff: string): Promise<string> {
   const { spawn } = require('child_process') as typeof import('child_process')
-  // Use stat + compact diff for Claude — stat is usually enough context
-  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${diff}`
+  // Stat-only keeps tokens minimal; include a small diff slice for extra context
+  const shortDiff = diff.length > 1500 ? diff.slice(0, 1500) + '\n... (truncated)' : diff
+  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
 
   const stdout = await new Promise<string>((resolve, reject) => {
-    const proc = spawn('claude', ['-p', '--model', 'haiku', '--max-turns', '1'], {
-      timeout: 30000,
+    const proc = spawn('claude', ['-p', '--model', 'haiku', '--max-turns', '1', '--output-format', 'text'], {
+      timeout: 15000,
       stdio: ['pipe', 'pipe', 'pipe']
     })
     let out = ''
@@ -951,19 +953,16 @@ async function generateViaClaude(stat: string, diff: string): Promise<string> {
 }
 
 export async function generateCommitMessage(cwd: string): Promise<string> {
-  // Get staged diff with minimal context (--unified=2) for speed
+  // Get staged diff with minimal context for speed
   const [statResult, diffResult] = await Promise.all([
     gitExec(cwd, ['diff', '--cached', '--stat', '--no-color'], 10000),
-    gitExec(cwd, ['diff', '--cached', '--no-color', '--unified=2'], 10000)
+    gitExec(cwd, ['diff', '--cached', '--no-color', '--unified=1'], 10000)
   ])
 
   const stat = statResult.stdout.trim()
   if (!stat) throw new Error('No staged changes to describe')
 
-  const maxLen = 4000
-  const diff = diffResult.stdout.length > maxLen
-    ? diffResult.stdout.slice(0, maxLen) + '\n... (truncated)'
-    : diffResult.stdout
+  const diff = diffResult.stdout
 
   log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars`)
   const t0 = Date.now()
