@@ -554,6 +554,9 @@ const GitManagerApp: React.FC = () => {
               setPullDialogOpen(true)
             }}
           />
+          <button className="gm-toolbar-btn" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
+            {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
+          </button>
           <button className="gm-toolbar-btn" onClick={handlePush} title="Push" disabled={pushing}>
             {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push
           </button>
@@ -729,9 +732,6 @@ const GitManagerApp: React.FC = () => {
               </button>
             )}
             <span className="gm-tabs-spacer" />
-            <button className="gm-tab-refresh" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
-              {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
-            </button>
           </div>
 
           {notGitRepo ? (
@@ -4821,7 +4821,10 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
-    const blurHandler = () => setOpen(false)
+    const blurHandler = () => {
+      // Only close if the window actually lost focus (not just internal focus changes)
+      setTimeout(() => { if (!document.hasFocus()) setOpen(false) }, 100)
+    }
     document.addEventListener('mousedown', handler)
     window.addEventListener('blur', blurHandler)
     return () => {
@@ -4848,7 +4851,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
         <SettingsIcon />
       </button>
       {open && (
-        <div className="gm-settings-menu">
+        <div className="gm-settings-menu" onMouseDown={(e) => e.stopPropagation()}>
           <div className="gm-settings-title">Git Manager Settings</div>
           {PLUGIN_SETTINGS.map((s) => (
             s.type === 'boolean' ? (
