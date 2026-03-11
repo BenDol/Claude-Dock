@@ -407,11 +407,10 @@ const GitManagerApp: React.FC = () => {
         return
       }
       setNotGitRepo(false)
-      const [logData, branchData, statusData, submoduleData, stashData, mergeData, commitCount, tagData] = await Promise.all([
+      const [logData, branchData, statusData, stashData, mergeData, commitCount, tagData] = await Promise.all([
         api.gitManager.getLog(activeDir, { maxCount: 200 }),
         api.gitManager.getBranches(activeDir),
         api.gitManager.getStatus(activeDir),
-        api.gitManager.getSubmodules(activeDir),
         api.gitManager.stashList(activeDir),
         api.gitManager.getMergeState(activeDir),
         api.gitManager.getCommitCount(activeDir),
@@ -422,10 +421,13 @@ const GitManagerApp: React.FC = () => {
       setTotalCommitCount(commitCount)
       setBranches(branchData)
       setStatus(statusData)
-      setSubmodules(submoduleData)
       setStashes(stashData)
       setTags(tagData)
       setMergeState(mergeData)
+      // Submodules are slow — load them without blocking the UI
+      api.gitManager.getSubmodules(activeDir).then((data) => {
+        if (gen === refreshGenRef.current) setSubmodules(data)
+      }).catch(() => {})
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
         setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
@@ -475,14 +477,22 @@ const GitManagerApp: React.FC = () => {
     return () => { if (timer) clearInterval(timer) }
   }, [activeDir, refresh])
 
-  const handleSelectCommit = useCallback(async (hash: string) => {
-    const api = getDockApi()
-    try {
-      const detail = await api.gitManager.getCommitDetail(activeDir, hash)
-      setSelectedCommit(detail)
-    } catch {
-      setSelectedCommit(null)
-    }
+  const selectCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selectCommitGen = useRef(0)
+
+  const handleSelectCommit = useCallback((hash: string) => {
+    // Debounce rapid selections (arrow keys) — only fetch the last one
+    if (selectCommitTimer.current) clearTimeout(selectCommitTimer.current)
+    const gen = ++selectCommitGen.current
+    selectCommitTimer.current = setTimeout(async () => {
+      const api = getDockApi()
+      try {
+        const detail = await api.gitManager.getCommitDetail(activeDir, hash)
+        if (gen === selectCommitGen.current) setSelectedCommit(detail)
+      } catch {
+        if (gen === selectCommitGen.current) setSelectedCommit(null)
+      }
+    }, 50)
   }, [activeDir])
 
   const navigateToCommit = useCallback((hash: string) => {

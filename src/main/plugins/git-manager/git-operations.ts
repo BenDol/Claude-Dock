@@ -112,11 +112,8 @@ export async function getLog(cwd: string, opts: GitLogOptions = {}): Promise<Git
 
 export async function getCommitCount(cwd: string): Promise<number> {
   try {
-    // Use 'git log --all --oneline' instead of 'git rev-list --all --count'
-    // because rev-list can count differently than log paginates (merge traversal)
-    const { stdout } = await gitExec(cwd, ['log', '--all', '--oneline'], 15000)
-    if (!stdout.trim()) return 0
-    return stdout.trim().split('\n').length
+    const { stdout } = await gitExec(cwd, ['rev-list', '--all', '--count'], 5000)
+    return parseInt(stdout.trim(), 10) || 0
   } catch {
     return 0
   }
@@ -404,10 +401,18 @@ export async function getDiff(cwd: string, path?: string, staged?: boolean): Pro
 
 export async function getCommitDetail(cwd: string, hash: string): Promise<GitCommitDetail | null> {
   try {
-    // Get commit metadata
-    const { stdout: metaOut } = await gitExec(cwd, [
+    // Run metadata and diff in parallel for speed
+    const metaPromise = gitExec(cwd, [
       'log', '-1', `--format=${LOG_FORMAT}%n%b`, hash
     ], 10000)
+
+    // For the diff, we need to know if it's a root commit (no parents).
+    // Use --root flag speculatively — git ignores it for non-root commits.
+    const diffPromise = gitExec(cwd, [
+      'diff-tree', '--root', '-p', '--no-color', '--unified=5', '-r', hash
+    ], 15000)
+
+    const [{ stdout: metaOut }, { stdout: diffOut }] = await Promise.all([metaPromise, diffPromise])
 
     const lines = metaOut.split('\n')
     if (lines.length < 7) return null
@@ -425,17 +430,8 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
       parents: lines[6] ? lines[6].split(' ').filter(Boolean) : [],
       refs: lines[7] ? lines[7].split(',').map((r) => r.trim()).filter(Boolean) : [],
       body: bodyLines.join('\n').trim(),
-      files: []
+      files: parseDiffOutput(diffOut)
     }
-
-    // Get diff for this commit
-    const diffArgs = ['diff-tree', '-p', '--no-color', '--unified=5', '-r', hash]
-    if (commit.parents.length === 0) {
-      // Root commit — diff against empty tree
-      diffArgs.splice(1, 0, '--root')
-    }
-    const { stdout: diffOut } = await gitExec(cwd, diffArgs, 15000)
-    commit.files = parseDiffOutput(diffOut)
 
     return commit
   } catch (err) {
