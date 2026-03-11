@@ -196,6 +196,12 @@ const GitManagerApp: React.FC = () => {
     })
   }, [loadSettings])
 
+  // Set window title based on active directory
+  useEffect(() => {
+    const name = activeDir.split(/[/\\]/).pop() || activeDir
+    document.title = `Git - ${name}`
+  }, [activeDir])
+
   // Zoom: Ctrl+MWB and Ctrl++/- with persistence
   useEffect(() => {
     const ZOOM_KEY = 'gm-zoom'
