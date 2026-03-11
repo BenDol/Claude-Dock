@@ -28,18 +28,23 @@ interface NavEntry {
 const GitManagerApp: React.FC = () => {
   const loadSettings = useSettingsStore((s) => s.load)
   const [commits, setCommits] = useState<GitCommitInfo[]>([])
+  const [totalCommitCount, setTotalCommitCount] = useState(0)
   const [branches, setBranches] = useState<GitBranchInfo[]>([])
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [submodules, setSubmodules] = useState<GitSubmoduleInfo[]>([])
   const [stashes, setStashes] = useState<GitStashEntry[]>([])
+  const [tags, setTags] = useState<{ name: string; hash: string; date: string }[]>([])
   const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts'>('log')
   const [error, setError] = useState<string | null>(null)
+  const [notGitRepo, setNotGitRepo] = useState(false)
   const [sidebarModal, setSidebarModal] = useState<'addSubmodule' | 'addSubmodulePath' | 'addRemote' | null>(null)
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
   const [selectedSubmodule, setSelectedSubmodule] = useState<string | null>(null)
+  const [tagSidebarCtx, setTagSidebarCtx] = useState<{ x: number; y: number; tag: { name: string; hash: string; date: string } } | null>(null)
+  const [scrollToHash, setScrollToHash] = useState<string | null>(null)
   const [confirmModal, setConfirmModal] = useState<{
     title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void
   } | null>(null)
@@ -100,19 +105,30 @@ const GitManagerApp: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const [logData, branchData, statusData, submoduleData, stashData, mergeData] = await Promise.all([
+      const isRepo = await api.gitManager.isRepo(activeDir)
+      if (!isRepo) {
+        setNotGitRepo(true)
+        setLoading(false)
+        return
+      }
+      setNotGitRepo(false)
+      const [logData, branchData, statusData, submoduleData, stashData, mergeData, commitCount, tagData] = await Promise.all([
         api.gitManager.getLog(activeDir, { maxCount: 200 }),
         api.gitManager.getBranches(activeDir),
         api.gitManager.getStatus(activeDir),
         api.gitManager.getSubmodules(activeDir),
         api.gitManager.stashList(activeDir),
-        api.gitManager.getMergeState(activeDir)
+        api.gitManager.getMergeState(activeDir),
+        api.gitManager.getCommitCount(activeDir),
+        api.gitManager.getTags(activeDir)
       ])
       setCommits(logData)
+      setTotalCommitCount(commitCount)
       setBranches(branchData)
       setStatus(statusData)
       setSubmodules(submoduleData)
       setStashes(stashData)
+      setTags(tagData)
       setMergeState(mergeData)
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
@@ -128,6 +144,38 @@ const GitManagerApp: React.FC = () => {
     refresh()
   }, [refresh])
 
+  // Auto Fetch All: fetch on load + recurring timer based on plugin settings
+  useEffect(() => {
+    if (!activeDir) return
+    const api = getDockApi()
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const doAutoFetch = async () => {
+      try {
+        const enabled = await api.gitManager.getSetting(activeDir, 'autoFetchAll')
+        if (!enabled) return
+        await api.gitManager.fetchAll(activeDir)
+        refresh()
+      } catch { /* ignore fetch errors silently */ }
+    }
+
+    const setupTimer = async () => {
+      try {
+        const enabled = await api.gitManager.getSetting(activeDir, 'autoFetchAll')
+        if (!enabled) return
+        // Fetch on load
+        doAutoFetch()
+        const minutes = (await api.gitManager.getSetting(activeDir, 'autoRecheckMinutes') as number) ?? 15
+        if (minutes > 0) {
+          timer = setInterval(doAutoFetch, minutes * 60 * 1000)
+        }
+      } catch { /* ignore */ }
+    }
+
+    setupTimer()
+    return () => { if (timer) clearInterval(timer) }
+  }, [activeDir, refresh])
+
   const handleSelectCommit = useCallback(async (hash: string) => {
     const api = getDockApi()
     try {
@@ -137,6 +185,20 @@ const GitManagerApp: React.FC = () => {
       setSelectedCommit(null)
     }
   }, [activeDir])
+
+  const navigateToCommit = useCallback((hash: string) => {
+    setActiveTab('log')
+    handleSelectCommit(hash)
+    setScrollToHash(hash)
+  }, [handleSelectCommit])
+
+  const navigateToBranch = useCallback(async (branchName: string) => {
+    const api = getDockApi()
+    try {
+      const log = await api.gitManager.getLog(activeDir, { maxCount: 1, branch: branchName })
+      if (log.length > 0) navigateToCommit(log[0].hash)
+    } catch { /* ignore */ }
+  }, [activeDir, navigateToCommit])
 
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
@@ -204,7 +266,7 @@ const GitManagerApp: React.FC = () => {
   return (
     <div className="gm-app">
       {/* Titlebar */}
-      <div className="gm-titlebar">
+      <div className="gm-titlebar" onPointerDown={() => document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))}>
         <div className="gm-titlebar-left">
           <GitIcon />
           {navStack.length > 0 && (
@@ -250,9 +312,6 @@ const GitManagerApp: React.FC = () => {
           <button className="gm-toolbar-btn" onClick={handlePush} title="Push" disabled={pushing}>
             {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push
           </button>
-          <button className="gm-toolbar-btn" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
-            {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
-          </button>
           <button className="gm-toolbar-btn" onClick={() => api.gitManager.openBash(activeDir)} title="Open Git Bash">
             <BashIcon />
           </button>
@@ -261,9 +320,11 @@ const GitManagerApp: React.FC = () => {
           </button>
           <SettingsDropdown projectDir={activeDir} />
           <div className="toolbar-separator" />
-          <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
-          <button className="win-btn win-maximize" onClick={() => api.win.maximize()}>&#9744;</button>
-          <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
+          <div className="gm-win-controls">
+            <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
+            <button className="win-btn win-maximize" onClick={() => api.win.maximize()}>&#9744;</button>
+            <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
+          </div>
         </div>
       </div>
 
@@ -297,7 +358,7 @@ const GitManagerApp: React.FC = () => {
         {/* Branch sidebar */}
         <div className="gm-sidebar" ref={sidebarRef}>
           <CollapsibleSection title="Branches" count={localBranches.length}>
-            <LocalBranchTree branches={localBranches} onCheckout={handleCheckoutBranch} />
+            <LocalBranchTree branches={localBranches} onCheckout={handleCheckoutBranch} onNavigate={navigateToBranch} />
           </CollapsibleSection>
           <CollapsibleSection title="Remotes" count={remoteBranches.length} defaultCollapsed onAdd={() => setSidebarModal('addRemote')} addTitle="Add remote">
             <RemoteBranchTree
@@ -345,6 +406,31 @@ const GitManagerApp: React.FC = () => {
                 })
               }}
             />
+          </CollapsibleSection>
+          <CollapsibleSection title="Tags" count={tags.length} defaultCollapsed>
+            {tags.map((t) => (
+              <div
+                key={t.name}
+                className="gm-sidebar-item gm-sidebar-item-tag"
+                onClick={() => navigateToCommit(t.hash)}
+                onDoubleClick={() => {
+                  setActiveTab('log')
+                  handleSelectCommit(t.hash)
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  const zoom = parseFloat(document.documentElement.style.zoom) || 1
+                  setTagSidebarCtx({ x: e.clientX / zoom, y: e.clientY / zoom, tag: t })
+                }}
+                title={`${t.name} — ${t.hash}`}
+              >
+                <TagSidebarIcon />
+                <span className="gm-sidebar-item-label">{t.name}</span>
+              </div>
+            ))}
+            {tags.length === 0 && (
+              <div className="gm-sidebar-empty">No tags</div>
+            )}
           </CollapsibleSection>
           <CollapsibleSection title="Stashes" count={stashes.length} defaultCollapsed>
             {stashes.map((s) => (
@@ -397,9 +483,20 @@ const GitManagerApp: React.FC = () => {
                 )}
               </button>
             )}
+            <span className="gm-tabs-spacer" />
+            <button className="gm-tab-refresh" onClick={handleRefresh} title="Refresh" disabled={refreshing}>
+              {refreshing ? <span className="gm-toolbar-spinner" /> : <RefreshIcon />}
+            </button>
           </div>
 
-          {loading ? (
+          {notGitRepo ? (
+            <div className="gm-not-repo">
+              <div className="gm-not-repo-icon"><GitIcon /></div>
+              <div className="gm-not-repo-title">Not a Git Repository</div>
+              <div className="gm-not-repo-desc">The directory <strong>{activeDir.split(/[/\\]/).pop()}</strong> is not a git repository.</div>
+              <div className="gm-not-repo-hint">Run <code>git init</code> to initialize a repository here.</div>
+            </div>
+          ) : loading ? (
             <div className="gm-loading">Loading...</div>
           ) : activeTab === 'log' ? (
             <CommitLog
@@ -409,6 +506,9 @@ const GitManagerApp: React.FC = () => {
               selectedHash={selectedCommit?.hash}
               currentBranch={currentBranch?.name}
               projectDir={activeDir}
+              totalCommitCount={totalCommitCount}
+              scrollToHash={scrollToHash}
+              onScrollToHandled={() => setScrollToHash(null)}
               onSelect={handleSelectCommit}
               onAction={refresh}
               onError={setError}
@@ -471,6 +571,18 @@ const GitManagerApp: React.FC = () => {
           onClose={() => setConfirmModal(null)}
         />
       )}
+      {tagSidebarCtx && (
+        <TagContextMenu
+          x={tagSidebarCtx.x}
+          y={tagSidebarCtx.y}
+          tagName={tagSidebarCtx.tag.name}
+          commitHash={tagSidebarCtx.tag.hash}
+          projectDir={activeDir}
+          onClose={() => setTagSidebarCtx(null)}
+          onAction={refresh}
+          onError={setError}
+        />
+      )}
       {pullDialogOpen && (
         <PullDialog
           projectDir={activeDir}
@@ -493,18 +605,23 @@ const GRAPH_COLORS = [
   '#7aa2f7', '#9ece6a', '#e0af68', '#f7768e', '#bb9af7',
   '#7dcfff', '#73daca', '#ff9e64', '#c0caf5', '#a9b1d6'
 ]
-const GRAPH_GREY = '#565f89'
 const LANE_W = 14
 const DOT_R = 4
+
+const GRAPH_GREY = '#3b4261'
 
 interface GraphRowData {
   col: number
   color: string
-  segments: { fromCol: number; toCol: number; color: string; half: 'full' | 'top' | 'bottom' }[]
+  onCurrentBranch: boolean
+  segments: { fromCol: number; toCol: number; color: string; half: 'full' | 'top' | 'bottom'; onCurrentBranch: boolean }[]
 }
 
-function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols: number } {
-  // Build the current branch set: HEAD commit + its first-parent chain
+function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols: number; currentBranchHashes: Set<string> } {
+  // Build two sets:
+  // 1. firstParentSet: first-parent chain from HEAD (for line/pass-through coloring)
+  // 2. currentSet: all commits reachable from HEAD via any parent (for dot/text coloring)
+  const firstParentSet = new Set<string>()
   const currentSet = new Set<string>()
   const hashMap = new Map<string, GitCommitInfo>()
   for (const c of commits) hashMap.set(c.hash, c)
@@ -512,19 +629,34 @@ function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols
   let headCommit = commits.find((c) => c.refs.some((r) => r === 'HEAD' || r.startsWith('HEAD -> ')))
   if (!headCommit && commits.length > 0) headCommit = commits[0]
   if (headCommit) {
+    // First-parent chain (for continuous line coloring)
     let cur: GitCommitInfo | undefined = headCommit
     while (cur) {
-      currentSet.add(cur.hash)
+      firstParentSet.add(cur.hash)
       cur = cur.parents[0] ? hashMap.get(cur.parents[0]) : undefined
+    }
+    // All-parent BFS (for dot/text coloring)
+    const queue: string[] = [headCommit.hash]
+    while (queue.length > 0) {
+      const h = queue.shift()!
+      if (currentSet.has(h)) continue
+      currentSet.add(h)
+      const c = hashMap.get(h)
+      if (c) {
+        for (const p of c.parents) {
+          if (hashMap.has(p) && !currentSet.has(p)) queue.push(p)
+        }
+      }
     }
   }
 
   const lanes: (string | null)[] = []
+  const laneOwned: boolean[] = [] // tracks if lane was last assigned by a reachable commit
   const colorOf = new Map<string, string>()
   let ci = 0
   const getColor = (h: string) => {
     if (!colorOf.has(h)) {
-      colorOf.set(h, currentSet.has(h) ? GRAPH_COLORS[ci++ % GRAPH_COLORS.length] : GRAPH_GREY)
+      colorOf.set(h, GRAPH_COLORS[ci++ % GRAPH_COLORS.length])
     }
     return colorOf.get(h)!
   }
@@ -533,21 +665,25 @@ function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols
   let maxCols = 0
 
   for (const commit of commits) {
+    const commitReachable = currentSet.has(commit.hash)
+
     // Find lane for this commit
     let col = lanes.indexOf(commit.hash)
     const wasExpected = col !== -1
     if (col === -1) {
       col = lanes.indexOf(null)
-      if (col === -1) { col = lanes.length; lanes.push(null) }
+      if (col === -1) { col = lanes.length; lanes.push(null); laneOwned.push(false) }
     }
-    while (lanes.length <= col) lanes.push(null)
+    while (lanes.length <= col) { lanes.push(null); laneOwned.push(false) }
     const color = getColor(commit.hash)
 
-    // Snapshot top edge
+    // Snapshot top edge (lanes + ownership)
     const top = [...lanes]
+    const topOwned = [...laneOwned]
 
     // Clear this commit's slot
     lanes[col] = null
+    laneOwned[col] = false
 
     // Assign parents
     const parents = commit.parents.filter((p) => hashSet.has(p))
@@ -555,14 +691,15 @@ function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols
       const p0Idx = lanes.indexOf(parents[0])
       if (p0Idx === -1) {
         lanes[col] = parents[0]
+        laneOwned[col] = commitReachable
         colorOf.set(parents[0], color) // first parent inherits color
       }
     }
     for (let i = 1; i < parents.length; i++) {
       if (lanes.indexOf(parents[i]) === -1) {
         const slot = lanes.indexOf(null)
-        if (slot !== -1) lanes[slot] = parents[i]
-        else lanes.push(parents[i])
+        if (slot !== -1) { lanes[slot] = parents[i]; laneOwned[slot] = commitReachable }
+        else { lanes.push(parents[i]); laneOwned.push(commitReachable) }
         getColor(parents[i])
       }
     }
@@ -573,71 +710,41 @@ function computeGraph(commits: GitCommitInfo[]): { rows: GraphRowData[]; maxCols
     // Compute segments: pass-through lanes + commit connections
     const segments: GraphRowData['segments'] = []
 
-    // Pass-through: lanes that existed before and still exist after (not this commit)
+    // Pass-through: colored only if the lane was set up by a reachable commit
     for (let i = 0; i < top.length; i++) {
       const h = top[i]
       if (!h || h === commit.hash) continue
       const j = bot.indexOf(h)
-      if (j !== -1) segments.push({ fromCol: i, toCol: j, color: getColor(h), half: 'full' })
+      if (j !== -1) segments.push({ fromCol: i, toCol: j, color: getColor(h), half: 'full', onCurrentBranch: topOwned[i] && currentSet.has(h) })
     }
 
-    // Incoming to commit (top half): only if expected from a previous row
+    // Incoming to commit (top half): colored if commit is reachable from HEAD
     if (wasExpected) {
-      segments.push({ fromCol: col, toCol: col, color, half: 'top' })
+      segments.push({ fromCol: col, toCol: col, color, half: 'top', onCurrentBranch: currentSet.has(commit.hash) })
     }
 
-    // Outgoing from commit to parents (bottom half)
+    // Outgoing from commit to parents (bottom half): colored if both commit and parent are reachable
     for (const p of parents) {
       const j = bot.indexOf(p)
       if (j !== -1) {
-        segments.push({ fromCol: col, toCol: j, color: j === col ? color : getColor(p), half: 'bottom' })
+        segments.push({ fromCol: col, toCol: j, color: j === col ? color : getColor(p), half: 'bottom', onCurrentBranch: currentSet.has(commit.hash) && currentSet.has(p) })
       }
     }
 
     // Trim trailing nulls
-    while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop()
+    while (lanes.length > 0 && lanes[lanes.length - 1] === null) { lanes.pop(); laneOwned.pop() }
     maxCols = Math.max(maxCols, top.filter(Boolean).length, lanes.length, col + 1)
 
-    rows.push({ col, color, segments })
+    rows.push({ col, color, onCurrentBranch: currentSet.has(commit.hash), segments })
   }
 
-  return { rows, maxCols }
+  return { rows, maxCols, currentBranchHashes: currentSet }
 }
 
-// --- Commit log with graph ---
+// --- Commit log with virtual scroll ---
 
-type LogEntry = { type: 'commit'; commit: GitCommitInfo; index: number } | { type: 'stash'; stash: GitStashEntry }
-
-function buildLogEntries(commits: GitCommitInfo[], stashes: GitStashEntry[]): LogEntry[] {
-  const entries: LogEntry[] = commits.map((c, i) => ({ type: 'commit' as const, commit: c, index: i }))
-  // Insert stash entries after their parent commit in the timeline
-  for (const stash of stashes) {
-    if (!stash.parentHash || !stash.date) {
-      // No parent info — insert at the top
-      entries.unshift({ type: 'stash', stash })
-      continue
-    }
-    const parentIdx = entries.findIndex((e) => e.type === 'commit' && e.commit.hash === stash.parentHash)
-    if (parentIdx !== -1) {
-      entries.splice(parentIdx, 0, { type: 'stash', stash })
-    } else {
-      // Parent not in visible log — insert at top sorted by date
-      const stashTime = new Date(stash.date).getTime()
-      let inserted = false
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i]
-        const entryDate = entry.type === 'commit' ? entry.commit.date : entry.stash.date
-        if (entryDate && new Date(entryDate).getTime() <= stashTime) {
-          entries.splice(i, 0, { type: 'stash', stash })
-          inserted = true
-          break
-        }
-      }
-      if (!inserted) entries.push({ type: 'stash', stash })
-    }
-  }
-  return entries
-}
+const COMMIT_ROW_HEIGHT = 28
+const COMMIT_PAGE_SIZE = 200
 
 const CommitLog: React.FC<{
   commits: GitCommitInfo[]
@@ -646,14 +753,41 @@ const CommitLog: React.FC<{
   selectedHash?: string
   currentBranch?: string
   projectDir: string
+  totalCommitCount: number
+  scrollToHash?: string | null
+  onScrollToHandled?: () => void
   onSelect: (hash: string) => void
   onAction: () => void
   onError: (msg: string) => void
-}> = ({ commits, branches, stashes, selectedHash, currentBranch, projectDir, onSelect, onAction, onError }) => {
+}> = ({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError }) => {
   const [showGraph, setShowGraph] = useState(() => localStorage.getItem('gm-show-graph') !== 'false')
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; commit: GitCommitInfo } | null>(null)
   const [stashCtxMenu, setStashCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
+  const [tagCtxMenu, setTagCtxMenu] = useState<{ x: number; y: number; tagName: string; commitHash: string } | null>(null)
   const [modal, setModal] = useState<{ type: 'reset' | 'createBranch' | 'createTag'; commit: GitCommitInfo } | null>(null)
+
+  // Virtual scroll state
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const pageCacheRef = useRef(new Map<number, GitCommitInfo[]>())
+  const loadingPagesRef = useRef(new Set<number>())
+  const [cacheVersion, setCacheVersion] = useState(0)
+  const prevProjectDirRef = useRef(projectDir)
+
+  // Seed page cache with initial commits (page 0) from parent
+  useEffect(() => {
+    // On projectDir change, clear cache
+    if (prevProjectDirRef.current !== projectDir) {
+      pageCacheRef.current.clear()
+      loadingPagesRef.current.clear()
+      prevProjectDirRef.current = projectDir
+    }
+    if (commits.length > 0) {
+      pageCacheRef.current.set(0, commits)
+      setCacheVersion((v) => v + 1)
+    }
+  }, [commits, projectDir])
 
   const toggleGraph = useCallback(() => {
     setShowGraph((prev) => {
@@ -663,20 +797,200 @@ const CommitLog: React.FC<{
     })
   }, [])
 
-  const { rows, maxCols } = useMemo(() =>
-    showGraph ? computeGraph(commits) : { rows: [], maxCols: 0 }
-  , [commits, showGraph])
+  // Collect all loaded commits in order for graph computation
+  const allLoadedCommits = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _v = cacheVersion // depend on cache version
+    const result: GitCommitInfo[] = []
+    const pageKeys = [...pageCacheRef.current.keys()].sort((a, b) => a - b)
+    for (const pk of pageKeys) {
+      const page = pageCacheRef.current.get(pk)
+      if (page) result.push(...page)
+    }
+    return result
+  }, [cacheVersion])
+
+  // Global index map: commitHash → global index across all loaded pages
+  const globalIndexMap = useMemo(() => {
+    const m = new Map<string, number>()
+    const pageKeys = [...pageCacheRef.current.keys()].sort((a, b) => a - b)
+    for (const pk of pageKeys) {
+      const page = pageCacheRef.current.get(pk)
+      if (page) {
+        const baseIdx = pk * COMMIT_PAGE_SIZE
+        page.forEach((c, i) => m.set(c.hash, baseIdx + i))
+      }
+    }
+    return m
+  }, [allLoadedCommits])
+
+  const { rows: graphRows, maxCols, currentBranchHashes } = useMemo(() =>
+    showGraph ? computeGraph(allLoadedCommits) : { rows: [], maxCols: 0, currentBranchHashes: new Set<string>() }
+  , [allLoadedCommits, showGraph])
+
+  // Map global commit index → graph row index
+  const graphRowMap = useMemo(() => {
+    const m = new Map<number, number>()
+    const pageKeys = [...pageCacheRef.current.keys()].sort((a, b) => a - b)
+    let graphIdx = 0
+    for (const pk of pageKeys) {
+      const page = pageCacheRef.current.get(pk)
+      if (page) {
+        for (let i = 0; i < page.length; i++) {
+          m.set(pk * COMMIT_PAGE_SIZE + i, graphIdx++)
+        }
+      }
+    }
+    return m
+  }, [allLoadedCommits])
+
+  const branchHashes = useMemo(() => {
+    if (showGraph) return currentBranchHashes
+    const hashMap = new Map<string, GitCommitInfo>()
+    for (const c of allLoadedCommits) hashMap.set(c.hash, c)
+    const set = new Set<string>()
+    let head = allLoadedCommits.find((c) => c.refs.some((r) => r === 'HEAD' || r.startsWith('HEAD -> ')))
+    if (!head && allLoadedCommits.length > 0) head = allLoadedCommits[0]
+    if (head) {
+      const queue: string[] = [head.hash]
+      while (queue.length > 0) {
+        const h = queue.shift()!
+        if (set.has(h)) continue
+        set.add(h)
+        const c = hashMap.get(h)
+        if (c) {
+          for (const p of c.parents) {
+            if (hashMap.has(p) && !set.has(p)) queue.push(p)
+          }
+        }
+      }
+    }
+    return set
+  }, [allLoadedCommits, showGraph, currentBranchHashes])
 
   const graphW = Math.max(24, maxCols * LANE_W + 8)
 
-  const logEntries = useMemo(() => buildLogEntries(commits, stashes), [commits, stashes])
-
-  // Build a hash→commit-index map for graph row lookup
-  const commitIndexMap = useMemo(() => {
-    const m = new Map<string, number>()
-    commits.forEach((c, i) => m.set(c.hash, i))
+  // Build stash-to-parent map for interleaving
+  const stashByParent = useMemo(() => {
+    const m = new Map<string, GitStashEntry[]>()
+    for (const s of stashes) {
+      if (s.parentHash) {
+        const arr = m.get(s.parentHash) || []
+        arr.push(s)
+        m.set(s.parentHash, arr)
+      }
+    }
     return m
-  }, [commits])
+  }, [stashes])
+
+  // Orphan stashes (no parent in visible commits)
+  const orphanStashes = useMemo(() => {
+    return stashes.filter((s) => !s.parentHash)
+  }, [stashes])
+
+  // Compute effective total: if a page returned fewer than COMMIT_PAGE_SIZE, we know the real end
+  const effectiveTotal = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _v = cacheVersion
+    const pageKeys = [...pageCacheRef.current.keys()].sort((a, b) => a - b)
+    for (const pk of pageKeys) {
+      const page = pageCacheRef.current.get(pk)
+      if (page && page.length < COMMIT_PAGE_SIZE) {
+        return pk * COMMIT_PAGE_SIZE + page.length
+      }
+    }
+    return totalCommitCount
+  }, [cacheVersion, totalCommitCount])
+
+  // Virtual scroll calculations
+  const totalHeight = effectiveTotal * COMMIT_ROW_HEIGHT
+  const OVERSCAN = 10
+  const firstVisible = Math.floor(scrollTop / COMMIT_ROW_HEIGHT)
+  const visibleCount = Math.ceil(viewportHeight / COMMIT_ROW_HEIGHT)
+  const startIdx = Math.max(0, firstVisible - OVERSCAN)
+  const endIdx = Math.min(effectiveTotal - 1, firstVisible + visibleCount + OVERSCAN)
+
+  // Determine which pages are needed
+  const startPage = Math.floor(startIdx / COMMIT_PAGE_SIZE)
+  const endPage = Math.floor(endIdx / COMMIT_PAGE_SIZE)
+
+  // Load missing pages on demand
+  useEffect(() => {
+    const api = getDockApi()
+    for (let p = startPage; p <= endPage; p++) {
+      if (!pageCacheRef.current.has(p) && !loadingPagesRef.current.has(p)) {
+        loadingPagesRef.current.add(p)
+        api.gitManager.getLog(projectDir, { maxCount: COMMIT_PAGE_SIZE, skip: p * COMMIT_PAGE_SIZE })
+          .then((data) => {
+            pageCacheRef.current.set(p, data)
+            loadingPagesRef.current.delete(p)
+            setCacheVersion((v) => v + 1)
+          })
+          .catch(() => {
+            pageCacheRef.current.set(p, [])
+            loadingPagesRef.current.delete(p)
+            setCacheVersion((v) => v + 1)
+          })
+      }
+    }
+  }, [startPage, endPage, projectDir])
+
+  // Highlight animation state
+  const [highlightHash, setHighlightHash] = useState<string | null>(null)
+
+  // Scroll to a specific commit hash
+  useEffect(() => {
+    if (!scrollToHash || !scrollContainerRef.current) return
+    const doScroll = async () => {
+      // First check loaded pages
+      let targetIdx = -1
+      const pageKeys = [...pageCacheRef.current.keys()].sort((a, b) => a - b)
+      for (const pk of pageKeys) {
+        const page = pageCacheRef.current.get(pk)
+        if (page) {
+          const localIdx = page.findIndex((c) => c.hash === scrollToHash || c.hash.startsWith(scrollToHash))
+          if (localIdx !== -1) {
+            targetIdx = pk * COMMIT_PAGE_SIZE + localIdx
+            break
+          }
+        }
+      }
+      // If not found in loaded pages, look up via IPC
+      if (targetIdx === -1) {
+        const api = getDockApi()
+        targetIdx = await api.gitManager.getCommitIndex(projectDir, scrollToHash)
+      }
+      if (targetIdx >= 0 && scrollContainerRef.current) {
+        const targetTop = targetIdx * COMMIT_ROW_HEIGHT
+        const center = targetTop - scrollContainerRef.current.clientHeight / 2 + COMMIT_ROW_HEIGHT / 2
+        scrollContainerRef.current.scrollTop = Math.max(0, center)
+        setScrollTop(Math.max(0, center))
+        setHighlightHash(scrollToHash)
+        setTimeout(() => setHighlightHash(null), 1200)
+      }
+      onScrollToHandled?.()
+    }
+    doScroll()
+  }, [scrollToHash, projectDir, onScrollToHandled])
+
+  // Viewport height tracking
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setViewportHeight(entry.contentRect.height)
+      }
+    })
+    obs.observe(el)
+    setViewportHeight(el.clientHeight)
+    return () => obs.disconnect()
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (el) setScrollTop(el.scrollTop)
+  }, [])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, commit: GitCommitInfo) => {
     e.preventDefault()
@@ -688,8 +1002,175 @@ const CommitLog: React.FC<{
     return c.refs.some((r) => r.startsWith('HEAD'))
   }, [])
 
+  const listRef = useRef<HTMLDivElement>(null)
+  const [compactLevel, setCompactLevel] = useState(0)
+
+  useEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width
+        if (w < 500) setCompactLevel(2)
+        else if (w < 700) setCompactLevel(1)
+        else setCompactLevel(0)
+      }
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  // Build visible entries: commits + interleaved stashes
+  const visibleEntries = useMemo(() => {
+    const entries: ({ type: 'commit'; commit: GitCommitInfo; globalIdx: number } | { type: 'stash'; stash: GitStashEntry; globalIdx: number } | { type: 'placeholder'; globalIdx: number })[] = []
+
+    // Orphan stashes at the top (only if viewing near the top)
+    if (startIdx === 0) {
+      for (const s of orphanStashes) {
+        entries.push({ type: 'stash', stash: s, globalIdx: -1 })
+      }
+    }
+
+    for (let i = startIdx; i <= endIdx && i < effectiveTotal; i++) {
+      const page = Math.floor(i / COMMIT_PAGE_SIZE)
+      const pageOffset = i % COMMIT_PAGE_SIZE
+      const pageData = pageCacheRef.current.get(page)
+      const commit = pageData?.[pageOffset]
+
+      if (commit) {
+        // Insert stashes before their parent commit
+        const stashesHere = stashByParent.get(commit.hash)
+        if (stashesHere) {
+          for (const s of stashesHere) {
+            entries.push({ type: 'stash', stash: s, globalIdx: i })
+          }
+        }
+        entries.push({ type: 'commit', commit, globalIdx: i })
+      } else {
+        entries.push({ type: 'placeholder', globalIdx: i })
+      }
+    }
+    return entries
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startIdx, endIdx, totalCommitCount, cacheVersion, stashByParent, orphanStashes])
+
+  const renderStashRow = (s: GitStashEntry, parentGlobalIdx: number) => {
+    const graphRowIdx = parentGlobalIdx >= 0 ? graphRowMap.get(parentGlobalIdx) : undefined
+    const parentRow = graphRowIdx !== undefined ? graphRows[graphRowIdx] : undefined
+    return (
+      <div key={`stash-${s.index}`} className="gm-commit-row gm-stash-row" style={{ height: COMMIT_ROW_HEIGHT }} onContextMenu={(e) => {
+        e.preventDefault()
+        const zoom = parseFloat(document.documentElement.style.zoom) || 1
+        setStashCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, stash: s })
+      }}>
+        <span className="gm-col-graph gm-col-graph-lines" style={{ width: showGraph ? graphW : 24 }}>
+          {showGraph && parentRow ? (
+            <svg width={graphW} height="100%" viewBox={`0 0 ${graphW} 100`} preserveAspectRatio="none" className="gm-graph-svg">
+              <line
+                x1={parentRow.col * LANE_W + LANE_W / 2 + 4} y1={-1}
+                x2={parentRow.col * LANE_W + LANE_W / 2 + 4} y2={101}
+                stroke="#565f89" strokeWidth={2} vectorEffect="non-scaling-stroke"
+              />
+              {parentRow.segments.filter((seg) => seg.half === 'top' || seg.half === 'full').map((seg, si) => {
+                const x = seg.fromCol * LANE_W + LANE_W / 2 + 4
+                if (seg.fromCol === parentRow.col) return null
+                return <line key={si} x1={x} y1={-1} x2={x} y2={101} stroke="#565f89" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+              })}
+            </svg>
+          ) : null}
+          <span
+            className="gm-stash-dot"
+            style={showGraph && parentRow ? { left: parentRow.col * LANE_W + LANE_W / 2 + 4 } : undefined}
+          />
+        </span>
+        <span className="gm-col-message">
+          <span className="gm-stash-badge">stash@{'{' + s.index + '}'}</span>
+          <span className="gm-commit-subject">{s.message}</span>
+        </span>
+        <span className="gm-col-author" />
+        <span className="gm-col-date">{s.date ? formatDate(s.date) : ''}</span>
+        <span className="gm-col-hash">{s.hash.slice(0, 7)}</span>
+      </div>
+    )
+  }
+
+  const renderCommitRow = (c: GitCommitInfo, globalIdx: number) => {
+    const graphRowIdx = graphRowMap.get(globalIdx)
+    const row = graphRowIdx !== undefined ? graphRows[graphRowIdx] : undefined
+    const head = isHead(c)
+    const branchTip = !head && c.refs.length > 0
+    const onCurrentBranch = branchHashes.has(c.hash)
+    return (
+      <div
+        key={c.hash}
+        className={`gm-commit-row${selectedHash === c.hash ? ' gm-commit-row-selected' : ''}${head ? ' gm-commit-row-head' : ''}${!onCurrentBranch ? ' gm-commit-row-dimmed' : ''}${highlightHash === c.hash ? ' gm-commit-row-highlight' : ''}`}
+        style={{ height: COMMIT_ROW_HEIGHT }}
+        onClick={() => onSelect(c.hash)}
+        onContextMenu={(e) => handleContextMenu(e, c)}
+      >
+        <span className="gm-col-graph gm-col-graph-lines" style={{ width: showGraph ? graphW : 24 }}>
+          {showGraph && row ? (
+            <svg width={graphW} height="100%" viewBox={`0 0 ${graphW} 100`} preserveAspectRatio="none" className="gm-graph-svg">
+              {row.segments.map((s, si) => {
+                const x1 = s.fromCol * LANE_W + LANE_W / 2 + 4
+                const x2 = s.toCol * LANE_W + LANE_W / 2 + 4
+                const y1 = s.half === 'bottom' ? 50 : -1
+                const y2 = s.half === 'top' ? 50 : 101
+                const strokeColor = s.onCurrentBranch ? s.color : GRAPH_GREY
+                if (s.fromCol === s.toCol) {
+                  return <line key={si} x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeColor} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                }
+                const my = (y1 + y2) / 2
+                return <path key={si} d={`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`} fill="none" stroke={strokeColor} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+              })}
+            </svg>
+          ) : null}
+          {showGraph && row ? (
+            <span
+              className={`gm-graph-dot-node${head ? ' gm-graph-dot-head' : branchTip ? ' gm-graph-dot-tip' : ''}`}
+              style={{
+                left: row.col * LANE_W + LANE_W / 2 + 4,
+                backgroundColor: row.onCurrentBranch ? row.color : GRAPH_GREY
+              }}
+            />
+          ) : (
+            <span
+              className={`gm-graph-dot${head ? ' gm-graph-dot-head' : branchTip ? ' gm-graph-dot-tip' : ''}`}
+              style={{ backgroundColor: c.parents.length > 1 ? '#bb9af7' : 'var(--accent-color)' }}
+            />
+          )}
+        </span>
+        <span className="gm-col-message">
+          {c.refs.length > 0 && c.refs.map((r) => {
+            const isTag = r.startsWith('tag: ')
+            const isRemote = r.includes('/')
+            const label = r.replace(/^HEAD -> /, '').replace(/^tag: /, '')
+            return (
+              <span
+                key={r}
+                className={`gm-ref-badge${isTag ? ' gm-ref-tag' : isRemote ? ' gm-ref-remote' : ''}`}
+                onContextMenu={isTag ? (e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const zoom = parseFloat(document.documentElement.style.zoom) || 1
+                  setTagCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, tagName: label, commitHash: c.hash })
+                } : undefined}
+              >
+                {isTag && <TagIcon />}{label}
+              </span>
+            )
+          })}
+          <span className="gm-commit-subject">{c.subject}</span>
+        </span>
+        <span className="gm-col-author"><AuthorAvatar name={c.author} />{c.author}</span>
+        <span className="gm-col-date">{formatDate(c.date)}</span>
+        <span className="gm-col-hash">{c.shortHash}</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="gm-commit-list">
+    <div className={`gm-commit-list${compactLevel >= 1 ? ' gm-hide-hash' : ''}${compactLevel >= 2 ? ' gm-hide-date' : ''}`} ref={listRef}>
       <div className="gm-commit-list-header">
         <span className="gm-col-graph" style={{ width: showGraph ? graphW : 24 }}>
           <button className="gm-graph-toggle" onClick={toggleGraph} title={showGraph ? 'Hide graph' : 'Show graph'}>
@@ -701,106 +1182,26 @@ const CommitLog: React.FC<{
         <span className="gm-col-date">Date</span>
         <span className="gm-col-hash">Hash</span>
       </div>
-      <div className="gm-commit-list-body">
-        {logEntries.map((entry) => {
-          if (entry.type === 'stash') {
-            const s = entry.stash
-            // Find parent commit's graph row for pass-through lines
-            const parentIdx = s.parentHash ? commitIndexMap.get(s.parentHash) : undefined
-            const parentRow = parentIdx !== undefined ? rows[parentIdx] : undefined
-            return (
-              <div key={`stash-${s.index}`} className="gm-commit-row gm-stash-row" onContextMenu={(e) => {
-                e.preventDefault()
-                const zoom = parseFloat(document.documentElement.style.zoom) || 1
-                setStashCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, stash: s })
-              }}>
-                <span className="gm-col-graph gm-col-graph-lines" style={{ width: showGraph ? graphW : 24 }}>
-                  {showGraph && parentRow ? (
-                    <svg width={graphW} height="100%" viewBox={`0 0 ${graphW} 100`} preserveAspectRatio="none" className="gm-graph-svg">
-                      {/* Vertical pass-through line at parent column */}
-                      <line
-                        x1={parentRow.col * LANE_W + LANE_W / 2 + 4} y1={-1}
-                        x2={parentRow.col * LANE_W + LANE_W / 2 + 4} y2={101}
-                        stroke="#565f89" strokeWidth={2} vectorEffect="non-scaling-stroke"
-                      />
-                      {/* Any other active pass-through lanes */}
-                      {parentRow.segments.filter((seg) => seg.half === 'top' || seg.half === 'full').map((seg, si) => {
-                        const x = seg.fromCol * LANE_W + LANE_W / 2 + 4
-                        if (seg.fromCol === parentRow.col) return null
-                        return <line key={si} x1={x} y1={-1} x2={x} y2={101} stroke="#565f89" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                      })}
-                    </svg>
-                  ) : null}
-                  <span
-                    className="gm-stash-dot"
-                    style={showGraph && parentRow ? { left: parentRow.col * LANE_W + LANE_W / 2 + 4 } : undefined}
-                  />
-                </span>
-                <span className="gm-col-message">
-                  <span className="gm-stash-badge">stash@{'{' + s.index + '}'}</span>
-                  <span className="gm-commit-subject">{s.message}</span>
-                </span>
-                <span className="gm-col-author" />
-                <span className="gm-col-date">{s.date ? formatDate(s.date) : ''}</span>
-                <span className="gm-col-hash">{s.hash.slice(0, 7)}</span>
-              </div>
-            )
-          }
-          const c = entry.commit
-          const row = rows[entry.index]
-          const head = isHead(c)
-          return (
-            <div
-              key={c.hash}
-              className={`gm-commit-row${selectedHash === c.hash ? ' gm-commit-row-selected' : ''}`}
-              onClick={() => onSelect(c.hash)}
-              onContextMenu={(e) => handleContextMenu(e, c)}
-            >
-              <span className="gm-col-graph gm-col-graph-lines" style={{ width: showGraph ? graphW : 24 }}>
-                {showGraph && row ? (
-                  <svg width={graphW} height="100%" viewBox={`0 0 ${graphW} 100`} preserveAspectRatio="none" className="gm-graph-svg">
-                    {row.segments.map((s, si) => {
-                      const x1 = s.fromCol * LANE_W + LANE_W / 2 + 4
-                      const x2 = s.toCol * LANE_W + LANE_W / 2 + 4
-                      const y1 = s.half === 'bottom' ? 50 : -1
-                      const y2 = s.half === 'top' ? 50 : 101
-                      if (s.fromCol === s.toCol) {
-                        return <line key={si} x1={x1} y1={y1} x2={x2} y2={y2} stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                      }
-                      const my = (y1 + y2) / 2
-                      return <path key={si} d={`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`} fill="none" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                    })}
-                  </svg>
-                ) : null}
-                {showGraph && row ? (
-                  <span
-                    className={`gm-graph-dot-node${head ? ' gm-graph-dot-head' : ''}`}
-                    style={{
-                      left: row.col * LANE_W + LANE_W / 2 + 4,
-                      backgroundColor: row.color
-                    }}
-                  />
-                ) : (
-                  <span
-                    className={`gm-graph-dot${head ? ' gm-graph-dot-head' : ''}`}
-                    style={{ backgroundColor: c.parents.length > 1 ? '#bb9af7' : 'var(--accent-color)' }}
-                  />
-                )}
-              </span>
-              <span className="gm-col-message">
-                {c.refs.length > 0 && c.refs.map((r) => (
-                  <span key={r} className={`gm-ref-badge${r.includes('/') ? ' gm-ref-remote' : ''}`}>
-                    {r.replace(/^HEAD -> /, '')}
-                  </span>
-                ))}
-                <span className="gm-commit-subject">{c.subject}</span>
-              </span>
-              <span className="gm-col-author"><AuthorAvatar name={c.author} />{c.author}</span>
-              <span className="gm-col-date">{formatDate(c.date)}</span>
-              <span className="gm-col-hash">{c.shortHash}</span>
-            </div>
-          )
-        })}
+      <div className="gm-commit-list-body" ref={scrollContainerRef} onScroll={handleScroll}>
+        <div style={{ height: totalHeight, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${startIdx * COMMIT_ROW_HEIGHT}px)` }}>
+            {visibleEntries.map((entry) => {
+              if (entry.type === 'stash') return renderStashRow(entry.stash, entry.globalIdx)
+              if (entry.type === 'placeholder') {
+                return (
+                  <div key={`ph-${entry.globalIdx}`} className="gm-commit-row gm-commit-row-placeholder" style={{ height: COMMIT_ROW_HEIGHT }}>
+                    <span className="gm-col-graph" style={{ width: showGraph ? graphW : 24 }} />
+                    <span className="gm-col-message"><span className="gm-placeholder-bar" /></span>
+                    <span className="gm-col-author"><span className="gm-placeholder-bar gm-placeholder-short" /></span>
+                    <span className="gm-col-date"><span className="gm-placeholder-bar gm-placeholder-short" /></span>
+                    <span className="gm-col-hash"><span className="gm-placeholder-bar gm-placeholder-short" /></span>
+                  </div>
+                )
+              }
+              return renderCommitRow(entry.commit, entry.globalIdx)
+            })}
+          </div>
+        </div>
       </div>
       {ctxMenu && (
         <CommitContextMenu
@@ -825,6 +1226,18 @@ const CommitLog: React.FC<{
           stash={stashCtxMenu.stash}
           projectDir={projectDir}
           onClose={() => setStashCtxMenu(null)}
+          onAction={onAction}
+          onError={onError}
+        />
+      )}
+      {tagCtxMenu && (
+        <TagContextMenu
+          x={tagCtxMenu.x}
+          y={tagCtxMenu.y}
+          tagName={tagCtxMenu.tagName}
+          commitHash={tagCtxMenu.commitHash}
+          projectDir={projectDir}
+          onClose={() => setTagCtxMenu(null)}
           onAction={onAction}
           onError={onError}
         />
@@ -1027,36 +1440,53 @@ const CommitDetailPanel: React.FC<{
             <div className="gm-diff-file-header">
               <FileStatusBadge status={f.status} />
               <span>{f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path}</span>
+              <span className="gm-diff-file-stats">
+                {(() => {
+                  let adds = 0, dels = 0
+                  for (const h of f.hunks) for (const l of h.lines) {
+                    if (l.type === 'add') adds++
+                    else if (l.type === 'delete') dels++
+                  }
+                  return (
+                    <>
+                      {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
+                      {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
+                    </>
+                  )
+                })()}
+              </span>
             </div>
             {f.isBinary ? (
               <div className="gm-diff-binary">Binary file</div>
             ) : (
-              f.hunks.map((h, hi) => (
-                <div key={hi} className="gm-diff-hunk">
-                  <div className="gm-diff-hunk-header">{h.header}</div>
-                  {h.lines.map((l, li) => {
-                    const key = `${fi}:${hi}:${li}`
-                    const isSelected = selectedLines.has(key)
-                    return (
-                      <div
-                        key={li}
-                        data-linekey={key}
-                        className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
-                        onMouseDown={(e) => handleLineMouseDown(key, e)}
-                        onContextMenu={(e) => handleContextMenu(fi, e)}
-                      >
-                        <span className="gm-diff-line-no">
-                          {l.oldLineNo ?? ' '} {l.newLineNo ?? ' '}
-                        </span>
-                        <span className="gm-diff-line-prefix">
-                          {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
-                        </span>
-                        <span className="gm-diff-line-content">{l.content}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              ))
+              <div className="gm-diff-file-body">
+                {f.hunks.map((h, hi) => (
+                  <div key={hi} className="gm-diff-hunk">
+                    <div className="gm-diff-hunk-header">{h.header}</div>
+                    {h.lines.map((l, li) => {
+                      const key = `${fi}:${hi}:${li}`
+                      const isSelected = selectedLines.has(key)
+                      return (
+                        <div
+                          key={li}
+                          data-linekey={key}
+                          className={`gm-diff-line gm-diff-line-${l.type}${isSelected ? ' gm-diff-line-selected' : ''}`}
+                          onMouseDown={(e) => handleLineMouseDown(key, e)}
+                          onContextMenu={(e) => handleContextMenu(fi, e)}
+                        >
+                          <span className="gm-diff-line-no">
+                            {l.oldLineNo ?? ' '} {l.newLineNo ?? ' '}
+                          </span>
+                          <span className="gm-diff-line-prefix">
+                            {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
+                          </span>
+                          <span className="gm-diff-line-content">{l.content}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         ))}
@@ -1124,6 +1554,92 @@ const CommitDiffContextMenu: React.FC<{
   )
 }
 
+const FILE_ROW_HEIGHT = 28
+
+const VirtualFileList: React.FC<{
+  files: GitFileStatusEntry[]
+  section: 'staged' | 'unstaged'
+  selectedFile: { path: string; staged: boolean } | null
+  stagingPaths: Set<string>
+  onSelect: (path: string, staged: boolean) => void
+  onAction: (path: string) => void
+  onDoubleClick: (path: string) => void
+  onContextMenu: (e: React.MouseEvent, file: GitFileStatusEntry, section: 'staged' | 'unstaged') => void
+  actionLabel: string
+  actionTitle: string
+}> = ({ files, section, selectedFile, stagingPaths, onSelect, onAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(400)
+  const isStaged = section === 'staged'
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const obs = new ResizeObserver((entries) => {
+      for (const e of entries) setContainerHeight(e.contentRect.height)
+    })
+    obs.observe(el)
+    setContainerHeight(el.clientHeight)
+    return () => obs.disconnect()
+  }, [])
+
+  // Clamp scroll when file count changes to prevent blank space
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const maxScroll = Math.max(0, files.length * FILE_ROW_HEIGHT - el.clientHeight)
+    if (el.scrollTop > maxScroll) {
+      el.scrollTop = maxScroll
+      setScrollTop(maxScroll)
+    }
+  }, [files.length])
+
+  const handleScroll = useCallback(() => {
+    if (containerRef.current) setScrollTop(containerRef.current.scrollTop)
+  }, [])
+
+  const totalHeight = files.length * FILE_ROW_HEIGHT
+  const overscan = 5
+  const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
+  const startIdx = Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan)
+  const endIdx = Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan)
+  const visibleFiles = files.slice(startIdx, endIdx)
+  const offsetY = startIdx * FILE_ROW_HEIGHT
+
+  if (files.length === 0) return null
+
+  return (
+    <div ref={containerRef} className="gm-virtual-file-list" onScroll={handleScroll}>
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
+          {visibleFiles.map((f) => (
+            <div
+              key={f.path}
+              className={`gm-file-entry${isStaged ? ' gm-file-staged' : ' gm-file-unstaged'}${f.isSubmodule ? ' gm-file-submodule' : ''}${selectedFile?.path === f.path && selectedFile?.staged === isStaged ? ' gm-file-selected' : ''}`}
+              style={{ height: FILE_ROW_HEIGHT }}
+              onMouseDown={(e) => { if (e.button === 0) onSelect(f.path, isStaged) }}
+              onDoubleClick={() => onDoubleClick(f.path)}
+              onContextMenu={(e) => onContextMenu(e, f, section)}
+            >
+              {f.isSubmodule && <SubmoduleIcon />}
+              <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
+              <span className="gm-file-path">{f.path}</span>
+              {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
+              <button
+                className="gm-file-action"
+                onClick={(e) => { e.stopPropagation(); onAction(f.path) }}
+                title={actionTitle}
+                disabled={stagingPaths.has(f.path)}
+              >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : actionLabel}</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const WorkingChanges: React.FC<{
   status: GitStatusResult | null
   projectDir: string
@@ -1144,6 +1660,8 @@ const WorkingChanges: React.FC<{
   const [fileDiffs, setFileDiffs] = useState<GitFileDiff[]>([])
   const [diffLoading, setDiffLoading] = useState(false)
   const fileListRef = useRef<HTMLDivElement>(null)
+  const scrollListRef = useRef<HTMLDivElement>(null)
+  const commitBoxRef = useRef<HTMLDivElement>(null)
 
   // Sync localStatus when parentStatus changes (from full refresh)
   useEffect(() => { setLocalStatus(null) }, [parentStatus])
@@ -1194,30 +1712,65 @@ const WorkingChanges: React.FC<{
   const api = getDockApi()
   const allUnstaged = [...status.unstaged, ...status.untracked]
 
+  const pendingActionRef = useRef<'commit' | 'commit-push' | null>(null)
+
   const triggerAutoGenerate = async () => {
     setGenerating(true)
     setGenError(null)
+    setCommitMsg('')
     try {
       const result = await api.gitManager.generateCommitMsg(projectDir)
       if (result.success && result.message) {
         setCommitMsg(result.message)
+        // Execute queued action if any
+        const queued = pendingActionRef.current
+        pendingActionRef.current = null
+        if (queued) {
+          setBusy(true)
+          const commitResult = await api.gitManager.commit(projectDir, result.message)
+          if (commitResult.success) {
+            setCommitMsg('')
+            if (queued === 'commit-push') {
+              await api.gitManager.push(projectDir)
+            }
+          }
+          onRefresh()
+          setBusy(false)
+        }
       } else {
+        pendingActionRef.current = null
         setGenError(result.error || 'Failed to generate')
       }
     } catch (err) {
+      pendingActionRef.current = null
       setGenError(err instanceof Error ? err.message : 'Failed to generate')
     }
     setGenerating(false)
+  }
+
+  const [batchProgress, setBatchProgress] = useState<string | null>(null)
+
+  const scrollToTop = () => {
+    if (scrollListRef.current) scrollListRef.current.scrollTop = 0
   }
 
   const handleStageAll = async () => {
     setBusy(true)
     const paths = allUnstaged.map((f) => f.path)
     setStagingPaths(new Set(paths))
-    await api.gitManager.stage(projectDir, paths)
+    const BATCH = 50
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const chunk = paths.slice(i, i + BATCH)
+      setBatchProgress(`Staging ${Math.min(i + BATCH, paths.length)}/${paths.length}...`)
+      await api.gitManager.stage(projectDir, chunk)
+      if (paths.length > BATCH) await refreshStatus()
+    }
+    setBatchProgress(null)
     await refreshStatus()
     setStagingPaths(new Set())
     setBusy(false)
+    scrollToTop()
+    onRefresh()
     if (autoGen) triggerAutoGenerate()
   }
 
@@ -1225,18 +1778,41 @@ const WorkingChanges: React.FC<{
     setBusy(true)
     const paths = status.staged.map((f) => f.path)
     setStagingPaths(new Set(paths))
-    await api.gitManager.unstage(projectDir, paths)
+    const BATCH = 50
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const chunk = paths.slice(i, i + BATCH)
+      setBatchProgress(`Unstaging ${Math.min(i + BATCH, paths.length)}/${paths.length}...`)
+      await api.gitManager.unstage(projectDir, chunk)
+      if (paths.length > BATCH) await refreshStatus()
+    }
+    setBatchProgress(null)
     await refreshStatus()
     setStagingPaths(new Set())
     setBusy(false)
+    scrollToTop()
+    onRefresh()
   }
 
   const handleCommit = async () => {
+    if (generating) { pendingActionRef.current = 'commit'; return }
     if (!commitMsg.trim()) return
     setBusy(true)
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
+    }
+    onRefresh()
+    setBusy(false)
+  }
+
+  const handleCommitPush = async () => {
+    if (generating) { pendingActionRef.current = 'commit-push'; return }
+    if (!commitMsg.trim()) return
+    setBusy(true)
+    const result = await api.gitManager.commit(projectDir, commitMsg)
+    if (result.success) {
+      setCommitMsg('')
+      await api.gitManager.push(projectDir)
     }
     onRefresh()
     setBusy(false)
@@ -1264,6 +1840,7 @@ const WorkingChanges: React.FC<{
 
   const handleFileContext = (e: React.MouseEvent, file: GitFileStatusEntry, section: 'staged' | 'unstaged') => {
     e.preventDefault()
+    e.stopPropagation()
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
     setFileCtx({ x: e.clientX / zoom, y: e.clientY / zoom, file, section })
   }
@@ -1278,80 +1855,70 @@ const WorkingChanges: React.FC<{
 
   return (
     <div className="gm-changes">
-      <div className="gm-changes-file-list" ref={fileListRef}>
-        {/* Unstaged / untracked */}
-        <div className="gm-changes-section">
-          <div className="gm-changes-section-header">
-            <span>Unstaged ({allUnstaged.length})</span>
-            {allUnstaged.length > 0 && (
-              <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
-                Stage All
-              </button>
-            )}
-          </div>
-          {allUnstaged.map((f) => (
-            <div
-              key={f.path}
-              className={`gm-file-entry gm-file-unstaged${f.isSubmodule ? ' gm-file-submodule' : ''}${selectedFile?.path === f.path && !selectedFile?.staged ? ' gm-file-selected' : ''}`}
-              onClick={() => handleSelectFile(f.path, false)}
-              onDoubleClick={() => handleStageFile(f.path)}
-              onContextMenu={(e) => handleFileContext(e, f, 'unstaged')}
-            >
-              {f.isSubmodule && <SubmoduleIcon />}
-              <FileStatusBadge status={f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus} />
-              <span className="gm-file-path">{f.path}</span>
-              {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
-              <button
-                className="gm-file-action"
-                onClick={(e) => { e.stopPropagation(); handleStageFile(f.path) }}
-                title="Stage"
-                disabled={stagingPaths.has(f.path)}
-              >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : '+'}</button>
+      <div className="gm-changes-panel" ref={fileListRef}>
+        <div className="gm-changes-file-list" ref={scrollListRef}>
+          {/* Unstaged / untracked */}
+          <div className="gm-changes-section">
+            <div className="gm-changes-section-header">
+              <span>Unstaged ({allUnstaged.length})</span>
+              {allUnstaged.length > 0 && (
+                <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
+                  Stage All
+                </button>
+              )}
             </div>
-          ))}
+            <VirtualFileList
+              files={allUnstaged}
+              section="unstaged"
+              selectedFile={selectedFile}
+              stagingPaths={stagingPaths}
+              onSelect={handleSelectFile}
+              onAction={handleStageFile}
+              onDoubleClick={handleStageFile}
+              onContextMenu={handleFileContext}
+              actionLabel="+"
+              actionTitle="Stage"
+            />
+          </div>
+
+          {/* Staged files */}
+          <div className="gm-changes-section">
+            <div className="gm-changes-section-header">
+              <span>Staged ({status.staged.length})</span>
+              {status.staged.length > 0 && (
+                <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
+                  Unstage All
+                </button>
+              )}
+            </div>
+            <VirtualFileList
+              files={status.staged}
+              section="staged"
+              selectedFile={selectedFile}
+              stagingPaths={stagingPaths}
+              onSelect={handleSelectFile}
+              onAction={handleUnstageFile}
+              onDoubleClick={handleUnstageFile}
+              onContextMenu={handleFileContext}
+              actionLabel="-"
+              actionTitle="Unstage"
+            />
+          </div>
         </div>
 
-        {/* Staged files */}
-        <div className="gm-changes-section">
-          <div className="gm-changes-section-header">
-            <span>Staged ({status.staged.length})</span>
-            {status.staged.length > 0 && (
-              <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
-                Unstage All
-              </button>
-            )}
-          </div>
-          {status.staged.map((f) => (
-            <div
-              key={f.path}
-              className={`gm-file-entry gm-file-staged${f.isSubmodule ? ' gm-file-submodule' : ''}${selectedFile?.path === f.path && selectedFile?.staged ? ' gm-file-selected' : ''}`}
-              onClick={() => handleSelectFile(f.path, true)}
-              onDoubleClick={() => handleUnstageFile(f.path)}
-              onContextMenu={(e) => handleFileContext(e, f, 'staged')}
-            >
-              {f.isSubmodule && <SubmoduleIcon />}
-              <FileStatusBadge status={f.indexStatus} />
-              <span className="gm-file-path">{f.path}</span>
-              {f.isSubmodule && <span className="gm-file-submodule-label">submodule</span>}
-              <button
-                className="gm-file-action"
-                onClick={(e) => { e.stopPropagation(); handleUnstageFile(f.path) }}
-                title="Unstage"
-                disabled={stagingPaths.has(f.path)}
-              >{stagingPaths.has(f.path) ? <span className="gm-file-action-spinner" /> : '-'}</button>
-            </div>
-          ))}
-        </div>
-
-        {/* Commit box */}
-        <div className="gm-commit-box">
+        {/* Commit box — sticky footer */}
+        <VerticalResizeHandle targetRef={commitBoxRef} min={120} max={500} storageKey="gm-commit-box-height" />
+        <div className="gm-commit-box" ref={commitBoxRef}>
+          {batchProgress && (
+            <div className="gm-batch-progress">{batchProgress}</div>
+          )}
           <div className="gm-commit-input-wrap">
             <textarea
               className="gm-commit-input"
-              placeholder="Commit message..."
+              placeholder={generating ? 'Generating commit message from your staged changes...' : 'Commit message...'}
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
-              rows={3}
+              disabled={generating}
             />
             <button
               className="gm-generate-btn"
@@ -1368,13 +1935,22 @@ const WorkingChanges: React.FC<{
               <button onClick={() => setGenError(null)}>&#10005;</button>
             </div>
           )}
-          <button
-            className="gm-commit-btn"
-            onClick={handleCommit}
-            disabled={busy || !commitMsg.trim() || status.staged.length === 0}
-          >
-            Commit ({status.staged.length} staged)
-          </button>
+          <div className="gm-commit-btn-group">
+            <button
+              className="gm-commit-btn gm-commit-btn-left"
+              onClick={handleCommit}
+              disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
+            >
+              {pendingActionRef.current === 'commit' ? 'Waiting...' : `Commit (${status.staged.length} staged)`}
+            </button>
+            <button
+              className="gm-commit-btn gm-commit-btn-right"
+              onClick={handleCommitPush}
+              disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
+            >
+              {pendingActionRef.current === 'commit-push' ? 'Waiting...' : 'Commit & Push'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2021,6 +2597,53 @@ const ResizeHandle: React.FC<{
   return <div className={`gm-resize-handle gm-resize-${side}`} onMouseDown={handleMouseDown} />
 }
 
+const VerticalResizeHandle: React.FC<{
+  targetRef: React.RefObject<HTMLDivElement | null>
+  min?: number
+  max?: number
+  storageKey?: string
+}> = ({ targetRef, min = 120, max = 500, storageKey }) => {
+  useEffect(() => {
+    if (!storageKey || !targetRef.current) return
+    const saved = localStorage.getItem(storageKey)
+    if (saved) {
+      const h = parseInt(saved, 10)
+      if (h >= min && h <= max) targetRef.current.style.height = `${h}px`
+    }
+  }, [storageKey, targetRef, min, max])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const el = targetRef.current
+    if (!el) return
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const startY = e.clientY
+    const startH = el.getBoundingClientRect().height / zoom
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = (startY - ev.clientY) / zoom
+      const newH = Math.min(max, Math.max(min, startH + delta))
+      el.style.height = `${newH}px`
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (storageKey && el) {
+        const z = parseFloat(document.documentElement.style.zoom) || 1
+        localStorage.setItem(storageKey, String(Math.round(el.getBoundingClientRect().height / z)))
+      }
+    }
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [targetRef, min, max, storageKey])
+
+  return <div className="gm-resize-handle-vertical" onMouseDown={handleMouseDown} />
+}
+
 // --- Collapsible sidebar section ---
 
 const CollapsibleSection: React.FC<{
@@ -2187,13 +2810,14 @@ function buildBranchTree(branches: GitBranchInfo[]): BranchTreeNode {
 const LocalBranchTree: React.FC<{
   branches: GitBranchInfo[]
   onCheckout: (name: string) => void
-}> = ({ branches, onCheckout }) => {
+  onNavigate?: (branchName: string) => void
+}> = ({ branches, onCheckout, onNavigate }) => {
   const tree = useMemo(() => buildBranchTree(branches), [branches])
 
   return (
     <>
       {[...tree.children.values()].map((node) => (
-        <LocalBranchNode key={node.fullPath} node={node} depth={0} onCheckout={onCheckout} />
+        <LocalBranchNode key={node.fullPath} node={node} depth={0} onCheckout={onCheckout} onNavigate={onNavigate} />
       ))}
     </>
   )
@@ -2203,7 +2827,8 @@ const LocalBranchNode: React.FC<{
   node: BranchTreeNode
   depth: number
   onCheckout: (name: string) => void
-}> = ({ node, depth, onCheckout }) => {
+  onNavigate?: (branchName: string) => void
+}> = ({ node, depth, onCheckout, onNavigate }) => {
   const [collapsed, setCollapsed] = useState(false)
   const isLeaf = node.branch !== undefined && node.children.size === 0
   const isGroup = node.children.size > 0
@@ -2215,6 +2840,7 @@ const LocalBranchNode: React.FC<{
         className={`gm-sidebar-item${b.current ? ' gm-sidebar-item-active' : ''}`}
         style={{ paddingLeft: 22 + depth * 14 }}
         title={b.tracking ? `Tracking: ${b.tracking}` : undefined}
+        onClick={() => onNavigate?.(b.name)}
         onDoubleClick={() => { if (!b.current) onCheckout(b.name) }}
       >
         <span className="gm-branch-name">{node.name}</span>
@@ -2250,13 +2876,14 @@ const LocalBranchNode: React.FC<{
           className={`gm-sidebar-item${node.branch.current ? ' gm-sidebar-item-active' : ''}`}
           style={{ paddingLeft: 24 + (depth + 1) * 16 }}
           title={node.branch.tracking ? `Tracking: ${node.branch.tracking}` : undefined}
+          onClick={() => onNavigate?.(node.branch!.name)}
           onDoubleClick={() => { if (!node.branch!.current) onCheckout(node.branch!.name) }}
         >
           <span className="gm-branch-name">{node.name}</span>
         </div>
       )}
       {!collapsed && [...node.children.values()].map((child) => (
-        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} onCheckout={onCheckout} />
+        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} onCheckout={onCheckout} onNavigate={onNavigate} />
       ))}
     </>
   )
@@ -2966,6 +3593,73 @@ const StashContextMenu: React.FC<{
   )
 }
 
+// --- Tag context menu ---
+
+const TagContextMenu: React.FC<{
+  x: number; y: number
+  tagName: string
+  commitHash: string
+  projectDir: string
+  onClose: () => void
+  onAction: () => void
+  onError: (msg: string) => void
+}> = ({ x, y, tagName, commitHash, projectDir, onClose, onAction, onError }) => {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const vw = window.innerWidth / zoom
+    const vh = window.innerHeight / zoom
+    if (parseFloat(el.style.left) + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
+    if (parseFloat(el.style.top) + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
+  }, [])
+
+  const api = getDockApi()
+
+  const doDelete = async () => {
+    onClose()
+    const r = await api.gitManager.deleteTag(projectDir, tagName)
+    if (!r.success) onError(r.error || 'Delete tag failed')
+    onAction()
+  }
+
+  const doCheckout = async () => {
+    onClose()
+    const r = await api.gitManager.checkoutBranch(projectDir, `tags/${tagName}`)
+    if (!r.success) onError(r.error || 'Checkout tag failed')
+    onAction()
+  }
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div className="gm-ctx-item" onClick={doCheckout}>
+        Checkout tag
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(tagName); onClose() }}>
+        Copy tag name
+      </div>
+      <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(commitHash); onClose() }}>
+        Copy commit hash
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item gm-ctx-danger" onClick={doDelete}>
+        Delete tag
+      </div>
+    </div>
+  )
+}
+
 // --- Reset modal ---
 
 const RESET_MODES: { value: string; label: string; desc: string; color: string }[] = [
@@ -3585,8 +4279,10 @@ const AddRemoteModal: React.FC<{
 
 // --- Settings dropdown ---
 
-const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' }[] = [
-  { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean' }
+const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number'; default?: unknown }[] = [
+  { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean' },
+  { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean' },
+  { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 }
 ]
 
 const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
@@ -3600,7 +4296,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     Promise.all(
       PLUGIN_SETTINGS.map(async (s) => {
         const val = await api.plugins.getSetting(projectDir, 'git-manager', s.key)
-        return [s.key, val] as const
+        return [s.key, val ?? s.default] as const
       })
     ).then((entries) => setValues(Object.fromEntries(entries)))
   }, [open, projectDir])
@@ -3626,6 +4322,11 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, next)
   }
 
+  const setNumber = async (key: string, val: number) => {
+    setValues((prev) => ({ ...prev, [key]: val }))
+    await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, val)
+  }
+
   return (
     <div className="gm-settings-dropdown" ref={ref}>
       <button className="gm-toolbar-btn" onClick={() => setOpen(!open)} title="Settings">
@@ -3635,14 +4336,27 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
         <div className="gm-settings-menu">
           <div className="gm-settings-title">Git Manager Settings</div>
           {PLUGIN_SETTINGS.map((s) => (
-            <label key={s.key} className="gm-settings-item">
-              <input
-                type="checkbox"
-                checked={!!values[s.key]}
-                onChange={() => toggle(s.key)}
-              />
-              <span>{s.label}</span>
-            </label>
+            s.type === 'boolean' ? (
+              <label key={s.key} className="gm-settings-item">
+                <input
+                  type="checkbox"
+                  checked={!!values[s.key]}
+                  onChange={() => toggle(s.key)}
+                />
+                <span>{s.label}</span>
+              </label>
+            ) : (
+              <label key={s.key} className="gm-settings-item gm-settings-item-number">
+                <span>{s.label}</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="gm-settings-number-input"
+                  value={values[s.key] != null ? Number(values[s.key]) : ''}
+                  onChange={(e) => setNumber(s.key, Number(e.target.value))}
+                />
+              </label>
+            )
           ))}
         </div>
       )}
@@ -3911,6 +4625,13 @@ const SubmoduleContextMenu: React.FC<{
   )
 }
 
+const TagSidebarIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+    <line x1="7" y1="7" x2="7.01" y2="7" />
+  </svg>
+)
+
 // --- SVG Icons ---
 
 const BackIcon: React.FC = () => (
@@ -4003,6 +4724,13 @@ const PushIcon: React.FC = () => (
     <line x1="12" y1="12" x2="12" y2="21" />
     <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3" />
     <polyline points="16 16 12 12 8 16" />
+  </svg>
+)
+
+const TagIcon: React.FC = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 3, flexShrink: 0 }}>
+    <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+    <line x1="7" y1="7" x2="7.01" y2="7" />
   </svg>
 )
 

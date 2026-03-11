@@ -114,8 +114,11 @@ export interface DockApi {
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
   }
   gitManager: {
+    isRepo: (projectDir: string) => Promise<boolean>
     open: (projectDir: string) => Promise<void>
     getLog: (projectDir: string, opts?: GitLogOptions) => Promise<GitCommitInfo[]>
+    getCommitCount: (projectDir: string) => Promise<number>
+    getCommitIndex: (projectDir: string, hash: string) => Promise<number>
     getBranches: (projectDir: string) => Promise<GitBranchInfo[]>
     getStatus: (projectDir: string) => Promise<GitStatusResult>
     getDiff: (projectDir: string, filePath?: string, staged?: boolean) => Promise<GitFileDiff[]>
@@ -144,6 +147,8 @@ export interface DockApi {
     revert: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
     cherryPick: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
     createTag: (projectDir: string, name: string, hash: string, message?: string) => Promise<{ success: boolean; error?: string }>
+    deleteTag: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
+    getTags: (projectDir: string) => Promise<{ name: string; hash: string; date: string }[]>
     renameBranch: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
     discard: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     deleteFiles: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
@@ -161,6 +166,8 @@ export interface DockApi {
     abortMerge: (projectDir: string) => Promise<{ success: boolean; error?: string }>
     continueMerge: (projectDir: string) => Promise<{ success: boolean; error?: string }>
     mergeBranch: (projectDir: string, branchName: string) => Promise<{ success: boolean; error?: string }>
+    getBehindCount: (projectDir: string) => Promise<number>
+    getSetting: (projectDir: string, key: string) => Promise<unknown>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -263,8 +270,11 @@ const dockApi: DockApi = {
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
   },
   gitManager: {
+    isRepo: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_IS_REPO, projectDir),
     open: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN, projectDir),
     getLog: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_GET_LOG, projectDir, opts),
+    getCommitCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_COUNT, projectDir),
+    getCommitIndex: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_INDEX, projectDir, hash),
     getBranches: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BRANCHES, projectDir),
     getStatus: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_STATUS, projectDir),
     getDiff: (projectDir, filePath, staged) => ipcRenderer.invoke(IPC.GIT_MGR_GET_DIFF, projectDir, filePath, staged),
@@ -293,6 +303,8 @@ const dockApi: DockApi = {
     revert: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_REVERT, projectDir, hash),
     cherryPick: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_CHERRY_PICK, projectDir, hash),
     createTag: (projectDir, name, hash, message) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_TAG, projectDir, name, hash, message),
+    deleteTag: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_TAG, projectDir, name),
+    getTags: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_TAGS, projectDir),
     renameBranch: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName),
     discard: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DISCARD, projectDir, paths),
     deleteFiles: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_FILES, projectDir, paths),
@@ -309,7 +321,9 @@ const dockApi: DockApi = {
     resolveConflict: (projectDir, filePath, resolution, chunkIndex) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_CONFLICT, projectDir, filePath, resolution, chunkIndex),
     abortMerge: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_ABORT_MERGE, projectDir),
     continueMerge: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_CONTINUE_MERGE, projectDir),
-    mergeBranch: (projectDir, branchName) => ipcRenderer.invoke(IPC.GIT_MGR_MERGE_BRANCH, projectDir, branchName)
+    mergeBranch: (projectDir, branchName) => ipcRenderer.invoke(IPC.GIT_MGR_MERGE_BRANCH, projectDir, branchName),
+    getBehindCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BEHIND_COUNT, projectDir),
+    getSetting: (projectDir, key) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SETTING, projectDir, key)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

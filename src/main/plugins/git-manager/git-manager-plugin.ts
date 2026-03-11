@@ -17,6 +17,18 @@ export class GitManagerPlugin implements DockPlugin {
       label: 'Auto-generate commit message when staging files',
       type: 'boolean',
       defaultValue: true
+    },
+    {
+      key: 'autoFetchAll',
+      label: 'Auto Fetch All — automatically run git fetch --all on open and on interval',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
+      key: 'autoRecheckMinutes',
+      label: 'Auto recheck time (minutes) — 0 to disable recurring fetch',
+      type: 'number',
+      defaultValue: 15
     }
   ]
 

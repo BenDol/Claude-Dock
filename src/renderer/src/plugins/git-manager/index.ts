@@ -36,9 +36,16 @@ registerToolbarAction({
   order: 50,
   getBadge: async (projectDir) => {
     try {
-      const status = await getDockApi().gitManager.getStatus(projectDir)
-      const count = status.staged.length + status.unstaged.length + status.untracked.length
-      return count > 0 ? count : null
+      const api = getDockApi()
+      const [status, behind] = await Promise.all([
+        api.gitManager.getStatus(projectDir),
+        api.gitManager.getBehindCount(projectDir)
+      ])
+      const localChanges = status.staged.length + status.unstaged.length + status.untracked.length
+      if (behind > 0 && localChanges > 0) return `${localChanges}\u2193${behind}`
+      if (behind > 0) return `\u2193${behind}`
+      if (localChanges > 0) return localChanges
+      return null
     } catch {
       return null
     }

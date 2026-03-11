@@ -6,9 +6,14 @@ import { GitManagerWindowManager } from './git-manager-window'
 import * as gitOps from './git-operations'
 import type { GitLogOptions } from '../../../shared/git-manager-types'
 import { log, logError } from '../../logger'
+import { getPluginSetting } from '../plugin-store'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
+
+  ipcMain.handle(IPC.GIT_MGR_IS_REPO, async (_event, projectDir: string) => {
+    return gitOps.isGitRepo(projectDir)
+  })
 
   ipcMain.handle(IPC.GIT_MGR_OPEN, (_event, projectDir: string) => {
     return winManager.open(projectDir)
@@ -16,6 +21,14 @@ export function registerGitManagerIpc(): void {
 
   ipcMain.handle(IPC.GIT_MGR_GET_LOG, async (_event, projectDir: string, opts?: GitLogOptions) => {
     return gitOps.getLog(projectDir, opts)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_COMMIT_COUNT, async (_event, projectDir: string) => {
+    return gitOps.getCommitCount(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_COMMIT_INDEX, async (_event, projectDir: string, hash: string) => {
+    return gitOps.getCommitIndex(projectDir, hash)
   })
 
   ipcMain.handle(IPC.GIT_MGR_GET_BRANCHES, async (_event, projectDir: string) => {
@@ -262,6 +275,20 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GET_TAGS, async (_event, projectDir: string) => {
+    return gitOps.getTags(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_DELETE_TAG, async (_event, projectDir: string, name: string) => {
+    try {
+      await gitOps.deleteTag(projectDir, name)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] delete tag failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Delete tag failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_RENAME_BRANCH, async (_event, projectDir: string, oldName: string, newName: string) => {
     try {
       await gitOps.renameBranch(projectDir, oldName, newName)
@@ -396,6 +423,14 @@ export function registerGitManagerIpc(): void {
       logError('[git-manager] merge branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Merge failed' }
     }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_BEHIND_COUNT, async (_event, projectDir: string) => {
+    return gitOps.getBehindCount(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_SETTING, (_event, projectDir: string, key: string) => {
+    return getPluginSetting(projectDir, 'git-manager', key)
   })
 
   ipcMain.handle(IPC.GIT_MGR_OPEN_BASH, (_event, projectDir: string) => {

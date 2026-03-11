@@ -11,7 +11,9 @@
     "package:mac": "electron-vite build && electron-builder --mac",
     "package:linux": "electron-vite build && electron-builder --linux",
     "postinstall": "node scripts/fix-node-pty.js && electron-builder install-app-deps",
-    "rebuild": "node scripts/fix-node-pty.js && npx @electron/rebuild --force"
+    "rebuild": "node scripts/fix-node-pty.js && npx @electron/rebuild --force",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@xterm/addon-canvas": "^0.7.0",
@@ -36,7 +38,8 @@
     "electron-vite": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   },
   "build": {
     "appId": "com.claude.dock",

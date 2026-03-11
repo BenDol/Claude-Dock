@@ -58,21 +58,20 @@ const LOG_FORMAT = '%H%n%h%n%an%n%ae%n%aI%n%s%n%P%n%D%n---END---'
 
 function parseLogOutput(output: string): GitCommitInfo[] {
   const commits: GitCommitInfo[] = []
-  const blocks = output.split('---END---\n')
+  const blocks = output.split(/---END---\n?/)
   for (const block of blocks) {
-    const trimmed = block.trim()
-    if (!trimmed) continue
-    const lines = trimmed.split('\n')
-    if (lines.length < 7) continue
+    // Don't use trim() — it strips trailing empty lines (parents/refs on root commits)
+    const lines = block.split('\n')
+    if (lines.length < 6 || !lines[0]) continue
     commits.push({
       hash: lines[0],
-      shortHash: lines[1],
-      author: lines[2],
-      authorEmail: lines[3],
-      date: lines[4],
-      subject: lines[5],
-      parents: lines[6] ? lines[6].split(' ').filter(Boolean) : [],
-      refs: lines[7] ? lines[7].split(',').map((r) => r.trim()).filter(Boolean) : []
+      shortHash: lines[1] || '',
+      author: lines[2] || '',
+      authorEmail: lines[3] || '',
+      date: lines[4] || '',
+      subject: lines[5] || '',
+      parents: (lines[6] || '').split(' ').filter(Boolean),
+      refs: (lines[7] || '').split(',').map((r) => r.trim()).filter(Boolean)
     })
   }
   return commits
@@ -94,6 +93,30 @@ export async function getLog(cwd: string, opts: GitLogOptions = {}): Promise<Git
   } catch (err) {
     logError('[git-manager] getLog failed:', err)
     return []
+  }
+}
+
+export async function getCommitCount(cwd: string): Promise<number> {
+  try {
+    // Use 'git log --all --oneline' instead of 'git rev-list --all --count'
+    // because rev-list can count differently than log paginates (merge traversal)
+    const { stdout } = await gitExec(cwd, ['log', '--all', '--oneline'], 15000)
+    if (!stdout.trim()) return 0
+    return stdout.trim().split('\n').length
+  } catch {
+    return 0
+  }
+}
+
+export async function getCommitIndex(cwd: string, hash: string): Promise<number> {
+  try {
+    const { stdout } = await gitExec(cwd, ['log', '--all', '--format=%H'], 15000)
+    if (!stdout.trim()) return -1
+    const lines = stdout.trim().split('\n')
+    const idx = lines.findIndex((l) => l.startsWith(hash) || hash.startsWith(l))
+    return idx
+  } catch {
+    return -1
   }
 }
 
@@ -189,7 +212,7 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
   }
 
   try {
-    const { stdout } = await gitExec(cwd, ['status', '--porcelain=v2', '--branch', '-z'], 10000)
+    const { stdout } = await gitExec(cwd, ['status', '--porcelain=v2', '--branch', '-z', '-uall'], 10000)
     const entries = stdout.split('\0')
 
     for (let i = 0; i < entries.length; i++) {
@@ -411,12 +434,24 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
 
 export async function stageFiles(cwd: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return
-  await gitExec(cwd, ['add', '--', ...paths], 10000)
+  const BATCH = 50
+  for (let i = 0; i < paths.length; i += BATCH) {
+    await gitExec(cwd, ['add', '--', ...paths.slice(i, i + BATCH)], 10000)
+  }
 }
 
 export async function unstageFiles(cwd: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return
-  await gitExec(cwd, ['reset', 'HEAD', '--', ...paths], 10000)
+  const BATCH = 50
+  for (let i = 0; i < paths.length; i += BATCH) {
+    const chunk = paths.slice(i, i + BATCH)
+    try {
+      await gitExec(cwd, ['restore', '--staged', '--', ...chunk], 10000)
+    } catch {
+      // Fallback for older git without restore
+      await gitExec(cwd, ['reset', 'HEAD', '--', ...chunk], 10000)
+    }
+  }
 }
 
 // --- Commit ---
@@ -489,6 +524,32 @@ export async function createTag(cwd: string, name: string, hash: string, message
   }
 }
 
+export async function deleteTag(cwd: string, name: string): Promise<void> {
+  await gitExec(cwd, ['tag', '-d', name], 10000)
+}
+
+export interface GitTagInfo {
+  name: string
+  hash: string
+  date: string
+}
+
+export async function getTags(cwd: string): Promise<GitTagInfo[]> {
+  try {
+    const { stdout } = await gitExec(cwd, [
+      'tag', '-l', '--sort=-creatordate',
+      '--format=%(refname:short)%09%(objectname:short)%09%(creatordate:iso-strict)'
+    ], 10000)
+    if (!stdout.trim()) return []
+    return stdout.trim().split('\n').map((line) => {
+      const [name, hash, date] = line.split('\t')
+      return { name, hash, date }
+    })
+  } catch {
+    return []
+  }
+}
+
 export async function renameBranch(cwd: string, oldName: string, newName: string): Promise<void> {
   await gitExec(cwd, ['branch', '-m', oldName, newName], 10000)
 }
@@ -547,6 +608,24 @@ export async function fetchAll(cwd: string): Promise<string> {
 export async function fetchPruneAll(cwd: string): Promise<string> {
   const { stdout, stderr } = await gitExec(cwd, ['fetch', '--all', '--prune'], 30000)
   return (stdout + stderr).trim()
+}
+
+// --- Behind count (for badge) ---
+
+export async function getBehindCount(cwd: string): Promise<number> {
+  try {
+    const { stdout } = await gitExec(cwd, ['status', '--porcelain=v2', '--branch', '-z'], 5000)
+    const entries = stdout.split('\0')
+    for (const entry of entries) {
+      if (entry.startsWith('# branch.ab ')) {
+        const match = entry.match(/\+(\d+) -(\d+)/)
+        if (match) return parseInt(match[2], 10)
+      }
+    }
+    return 0
+  } catch {
+    return 0
+  }
 }
 
 // --- Stash ---

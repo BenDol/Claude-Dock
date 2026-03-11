@@ -48,8 +48,11 @@ export const IPC = {
   DEBUG_OPEN_LOGS: 'debug:openLogs',
 
   // Git Manager
+  GIT_MGR_IS_REPO: 'gitMgr:isRepo',
   GIT_MGR_OPEN: 'gitMgr:open',
   GIT_MGR_GET_LOG: 'gitMgr:getLog',
+  GIT_MGR_GET_COMMIT_COUNT: 'gitMgr:getCommitCount',
+  GIT_MGR_GET_COMMIT_INDEX: 'gitMgr:getCommitIndex',
   GIT_MGR_GET_BRANCHES: 'gitMgr:getBranches',
   GIT_MGR_GET_STATUS: 'gitMgr:getStatus',
   GIT_MGR_GET_DIFF: 'gitMgr:getDiff',
@@ -74,6 +77,8 @@ export const IPC = {
   GIT_MGR_REVERT: 'gitMgr:revert',
   GIT_MGR_CHERRY_PICK: 'gitMgr:cherryPick',
   GIT_MGR_CREATE_TAG: 'gitMgr:createTag',
+  GIT_MGR_DELETE_TAG: 'gitMgr:deleteTag',
+  GIT_MGR_GET_TAGS: 'gitMgr:getTags',
   GIT_MGR_RENAME_BRANCH: 'gitMgr:renameBranch',
   GIT_MGR_DISCARD: 'gitMgr:discard',
   GIT_MGR_DELETE_FILES: 'gitMgr:deleteFiles',
@@ -95,6 +100,8 @@ export const IPC = {
   GIT_MGR_FETCH_SIMPLE: 'gitMgr:fetchSimple',
   GIT_MGR_FETCH_ALL: 'gitMgr:fetchAll',
   GIT_MGR_FETCH_PRUNE_ALL: 'gitMgr:fetchPruneAll',
+  GIT_MGR_GET_BEHIND_COUNT: 'gitMgr:getBehindCount',
+  GIT_MGR_GET_SETTING: 'gitMgr:getSetting',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',
