@@ -198,6 +198,7 @@
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 100;
+  -webkit-app-region: no-drag;
 }
 
 .gm-branch-dropdown-search {
@@ -373,6 +374,7 @@
   z-index: 200;
   padding: 4px 0;
   font-size: 12px;
+  -webkit-app-region: no-drag;
 }
 
 .gm-pull-dropdown-item {

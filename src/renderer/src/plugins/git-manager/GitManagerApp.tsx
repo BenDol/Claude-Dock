@@ -904,6 +904,7 @@ const GitManagerApp: React.FC = () => {
               onError={handleSmartError}
               onConfirm={setConfirmModal}
               onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
+              onStatusRefreshed={setStatus}
             />
           ) : activeTab === 'conflicts' && mergeState ? (
             <MergeConflictsPanel
@@ -1414,12 +1415,18 @@ const CommitLog: React.FC<{
     if (el) setScrollTop(el.scrollTop)
   }, [])
 
+  // Track selected index in a ref so rapid key-repeat events see the latest value
+  const selectedIdxRef = useRef(-1)
+  useEffect(() => {
+    selectedIdxRef.current = selectedHash ? globalIndexMap.get(selectedHash) ?? -1 : -1
+  }, [selectedHash, globalIndexMap])
+
   // Arrow key navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
 
-    let currentIdx = selectedHash ? globalIndexMap.get(selectedHash) ?? -1 : -1
+    const currentIdx = selectedIdxRef.current
     if (currentIdx === -1 && e.key === 'ArrowUp') return
 
     const newIdx = e.key === 'ArrowDown'
@@ -1434,6 +1441,7 @@ const CommitLog: React.FC<{
     const commit = pageData?.[pageOffset]
 
     if (commit) {
+      selectedIdxRef.current = newIdx
       onSelect(commit.hash)
     }
 
@@ -1451,7 +1459,7 @@ const CommitLog: React.FC<{
       }
       setScrollTop(scrollContainerRef.current.scrollTop)
     }
-  }, [selectedHash, globalIndexMap, effectiveTotal, onSelect])
+  }, [effectiveTotal, onSelect])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, commit: GitCommitInfo) => {
     e.preventDefault()
@@ -2343,7 +2351,8 @@ const WorkingChanges: React.FC<{
   onError: (msg: string, retry?: () => Promise<void>) => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
   onCommitted?: (hash: string) => void
-}> = ({ status: parentStatus, stashes, projectDir, onRefresh, onError, onConfirm, onCommitted }) => {
+  onStatusRefreshed?: (status: GitStatusResult) => void
+}> = ({ status: parentStatus, stashes, projectDir, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -2370,8 +2379,9 @@ const WorkingChanges: React.FC<{
     try {
       const s = await getDockApi().gitManager.getStatus(projectDir)
       setLocalStatus(s)
+      if (onStatusRefreshed) onStatusRefreshed(s)
     } catch { /* ignore */ }
-  }, [projectDir])
+  }, [projectDir, onStatusRefreshed])
 
   // Persist commit message to localStorage
   useEffect(() => {
@@ -2413,12 +2423,15 @@ const WorkingChanges: React.FC<{
 
   const pendingActionRef = useRef<'commit' | 'commit-push' | null>(null)
 
+  const autoGenRef = useRef(0)
+
   const triggerAutoGenerate = async () => {
+    const gen = ++autoGenRef.current
     setGenerating(true)
     setGenError(null)
-    setCommitMsg('')
     try {
       const result = await api.gitManager.generateCommitMsg(projectDir)
+      if (gen !== autoGenRef.current) return // superseded by a newer generation
       if (result.success && result.message) {
         setCommitMsg(result.message)
         // Execute queued action if any
@@ -3121,6 +3134,30 @@ const WorkingDiffViewer: React.FC<{
     setSelectedLines(new Set())
     onRefresh()
   }
+
+  // Keyboard shortcuts: S=stage, U=unstage, R=discard
+  const stageRef = useRef(handleStageLines)
+  const unstageRef = useRef(handleUnstageLines)
+  const discardRef = useRef(handleDiscardLines)
+  stageRef.current = handleStageLines
+  unstageRef.current = handleUnstageLines
+  discardRef.current = handleDiscardLines
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      switch (e.key.toLowerCase()) {
+        case 's': stageRef.current(); break
+        case 'u': unstageRef.current(); break
+        case 'r': discardRef.current(); break
+        default: return
+      }
+      e.preventDefault()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   const getSelectedText = useCallback((mode: 'content' | 'patch' | 'new' | 'old') => {
     if (!diff) return ''
