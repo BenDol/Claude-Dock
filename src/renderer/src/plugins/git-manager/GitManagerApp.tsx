@@ -3144,9 +3144,10 @@ const WorkingDiffViewer: React.FC<{
   discardRef.current = handleDiscardLines
 
   useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       switch (e.key.toLowerCase()) {
         case 's': stageRef.current(); break
         case 'u': unstageRef.current(); break
@@ -3155,9 +3156,9 @@ const WorkingDiffViewer: React.FC<{
       }
       e.preventDefault()
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [])
+    el.addEventListener('keydown', handler)
+    return () => el.removeEventListener('keydown', handler)
+  }, [diffs])
 
   const getSelectedText = useCallback((mode: 'content' | 'patch' | 'new' | 'old') => {
     if (!diff) return ''
@@ -3208,7 +3209,7 @@ const WorkingDiffViewer: React.FC<{
         </span>
         <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
       </div>
-      <div className="gm-changes-diff-content" ref={contentRef}>
+      <div className="gm-changes-diff-content" ref={contentRef} tabIndex={0}>
         {loading ? (
           <div className="gm-loading">Loading diff...</div>
         ) : diffs.length === 0 ? (
