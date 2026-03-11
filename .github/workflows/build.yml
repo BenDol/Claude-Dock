@@ -141,8 +141,19 @@ jobs:
             dist/Claude-Dock-win-unpacked.zip
           if-no-files-found: error
 
-      - name: Publish to bleeding-edge release
+      - name: Collect release artifacts
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: collect
+        shell: bash
+        run: |
+          files=""
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
+            [ -f "$f" ] && files="${files:+$files,}$f"
+          done
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to bleeding-edge release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.collect.outputs.files != ''
         uses: ncipollo/release-action@v1
         with:
           tag: bleeding-edge
@@ -156,5 +167,5 @@ jobs:
           prerelease: true
           allowUpdates: true
           replacesArtifacts: true
-          artifacts: "dist/*.exe,dist/*.dmg,dist/*.AppImage,dist/Claude-Dock-win-unpacked.zip"
+          artifacts: ${{ steps.collect.outputs.files }}
           token: ${{ secrets.GITHUB_TOKEN }}
