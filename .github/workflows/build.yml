@@ -156,8 +156,11 @@ jobs:
           # Write platform SHA file
           echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
 
-          # Upload all platform artifacts (--clobber overwrites existing)
-          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip dist/*-sha.txt; do
+          # Upload main artifacts first, then SHA files last so they appear at the bottom
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
+            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+          done
+          for f in dist/*-sha.txt; do
             [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
           done
 
