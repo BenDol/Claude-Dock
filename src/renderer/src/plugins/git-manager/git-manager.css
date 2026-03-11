@@ -1941,6 +1941,77 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Stash section in Working Changes */
+.gm-stash-section-header {
+  user-select: none;
+}
+
+.gm-stash-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.gm-stash-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.gm-stash-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.gm-stash-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--term-font-family);
+  cursor: default;
+  user-select: none;
+  height: 28px;
+}
+
+.gm-stash-entry:hover {
+  background: var(--hover-color);
+}
+
+.gm-stash-entry-msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.gm-stash-entry-index {
+  font-size: 10px;
+  color: #bb9af7;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.gm-stash-entry .gm-file-hover-btn {
+  display: none;
+  flex-shrink: 0;
+}
+
+.gm-stash-entry:hover .gm-file-hover-btn {
+  display: flex;
+}
+
+.gm-stash-entry:hover .gm-stash-entry-index {
+  display: none;
+}
+
+.gm-stash-pop-btn:hover {
+  color: #9ece6a !important;
+}
+
+.gm-stash-drop-btn:hover {
+  color: #f7768e !important;
+}
+
 .gm-changes-section-header {
   display: flex;
   align-items: center;

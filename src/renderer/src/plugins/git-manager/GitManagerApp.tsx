@@ -811,9 +811,11 @@ const GitManagerApp: React.FC = () => {
           ) : activeTab === 'changes' ? (
             <WorkingChanges
               status={status}
+              stashes={stashes}
               projectDir={activeDir}
               onRefresh={refresh}
               onError={handleSmartError}
+              onConfirm={setConfirmModal}
             />
           ) : activeTab === 'conflicts' && mergeState ? (
             <MergeConflictsPanel
@@ -2096,12 +2098,147 @@ const VirtualFileList: React.FC<{
   )
 }
 
+const StashSection: React.FC<{
+  stashes: GitStashEntry[]
+  projectDir: string
+  onError: (msg: string) => void
+  onRefresh: () => void
+  onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
+}> = ({ stashes, projectDir, onError, onRefresh, onConfirm }) => {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('gm-stash-section-collapsed') === 'true' } catch { return false }
+  })
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
+  const ctxRef = useRef<HTMLDivElement>(null)
+  const api = getDockApi()
+
+  useEffect(() => {
+    try { localStorage.setItem('gm-stash-section-collapsed', String(collapsed)) } catch { /* ignore */ }
+  }, [collapsed])
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxMenu(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [ctxMenu])
+
+  const handleApply = async (stash: GitStashEntry) => {
+    setCtxMenu(null)
+    const r = await api.gitManager.stashApply(projectDir, stash.index)
+    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`)
+    onRefresh()
+  }
+
+  const handlePop = async (stash: GitStashEntry) => {
+    setCtxMenu(null)
+    const r = await api.gitManager.stashPop(projectDir, stash.index)
+    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`)
+    onRefresh()
+  }
+
+  const handleDrop = (stash: GitStashEntry) => {
+    setCtxMenu(null)
+    onConfirm({
+      title: 'Drop stash',
+      message: (<p>Are you sure you want to drop <strong>stash@&#123;{stash.index}&#125;</strong>?<br /><span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{stash.message}</span></p>),
+      confirmLabel: 'Drop',
+      danger: true,
+      onConfirm: async () => {
+        const r = await api.gitManager.stashDrop(projectDir, stash.index)
+        if (!r.success) onError(`Stash drop failed: ${r.error || 'Unknown error'}`)
+        onRefresh()
+      }
+    })
+  }
+
+  const handleCtx = (e: React.MouseEvent, stash: GitStashEntry) => {
+    e.preventDefault()
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, stash })
+  }
+
+  return (
+    <div className="gm-changes-section gm-stash-section">
+      <div className="gm-changes-section-header gm-stash-section-header" onClick={() => setCollapsed(!collapsed)} style={{ cursor: 'pointer' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <SectionChevron collapsed={collapsed} />
+          Stashes ({stashes.length})
+        </span>
+      </div>
+      {!collapsed && (
+        <div className="gm-stash-list">
+          {stashes.map((s) => (
+            <div
+              key={s.index}
+              className="gm-stash-entry"
+              title={`stash@{${s.index}}: ${s.message}`}
+              onContextMenu={(e) => handleCtx(e, s)}
+            >
+              <StashSidebarIcon />
+              <span className="gm-stash-entry-msg">{s.message || `stash@{${s.index}}`}</span>
+              <span className="gm-stash-entry-index">@{s.index}</span>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => handleApply(s)}
+                title="Apply stash (keep in stash list)"
+              ><StashApplyIcon /></button>
+              <button
+                className="gm-file-hover-btn gm-stash-pop-btn"
+                onClick={() => handlePop(s)}
+                title="Pop stash (apply & remove)"
+              ><StashPopIcon /></button>
+              <button
+                className="gm-file-hover-btn gm-stash-drop-btn"
+                onClick={() => handleDrop(s)}
+                title="Drop stash"
+              ><StashDropIcon /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {ctxMenu && (
+        <div className="gm-ctx-menu" ref={ctxRef} style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <div className="gm-ctx-item" onClick={() => handleApply(ctxMenu.stash)}>Apply stash</div>
+          <div className="gm-ctx-item" onClick={() => handlePop(ctxMenu.stash)}>Pop stash</div>
+          <div className="gm-ctx-separator" />
+          <div className="gm-ctx-item gm-ctx-danger" onClick={() => handleDrop(ctxMenu.stash)}>Drop stash</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const StashApplyIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="8 4 16 12 8 20" />
+  </svg>
+)
+
+const StashPopIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="17 11 12 6 7 11" />
+    <line x1="12" y1="6" x2="12" y2="18" />
+  </svg>
+)
+
+const StashDropIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+)
+
 const WorkingChanges: React.FC<{
   status: GitStatusResult | null
+  stashes: GitStashEntry[]
   projectDir: string
   onRefresh: () => void
   onError: (msg: string) => void
-}> = ({ status: parentStatus, projectDir, onRefresh, onError }) => {
+  onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
+}> = ({ status: parentStatus, stashes, projectDir, onRefresh, onError, onConfirm }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -2346,11 +2483,9 @@ const WorkingChanges: React.FC<{
             <div className="gm-changes-section-header">
               <span>Unstaged ({allUnstaged.length})</span>
               <div className="gm-section-actions">
-                {allUnstaged.length > 0 && (
-                  <button className="gm-section-icon-btn" onClick={handleStashUnstaged} disabled={busy} title="Stash unstaged & untracked changes (keep staged)">
-                    <StashIcon />
-                  </button>
-                )}
+                <button className="gm-section-icon-btn" onClick={handleStashUnstaged} disabled={busy || allUnstaged.length === 0} title="Stash unstaged & untracked changes (keep staged)">
+                  <StashIcon />
+                </button>
                 {allUnstaged.length > 0 && (
                   <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
                     Stage All
@@ -2378,11 +2513,9 @@ const WorkingChanges: React.FC<{
             <div className="gm-changes-section-header">
               <span>Staged ({status.staged.length})</span>
               <div className="gm-section-actions">
-                {(allUnstaged.length > 0 || status.staged.length > 0) && (
-                  <button className="gm-section-icon-btn" onClick={handleStashStaged} disabled={busy} title="Stash all changes">
-                    <StashIcon />
-                  </button>
-                )}
+                <button className="gm-section-icon-btn" onClick={handleStashStaged} disabled={busy || status.staged.length === 0} title="Stash all changes">
+                  <StashIcon />
+                </button>
                 {status.staged.length > 0 && (
                   <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
                     Unstage All
@@ -2404,6 +2537,17 @@ const WorkingChanges: React.FC<{
               actionTitle="Unstage"
             />
           </div>
+
+          {/* Stashes */}
+          {stashes.length > 0 && (
+            <StashSection
+              stashes={stashes}
+              projectDir={projectDir}
+              onError={onError}
+              onRefresh={onRefresh}
+              onConfirm={onConfirm}
+            />
+          )}
         </div>
 
         {/* Commit box — sticky footer */}
