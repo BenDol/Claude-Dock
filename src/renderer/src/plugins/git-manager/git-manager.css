@@ -2553,12 +2553,25 @@
   left: 10px;
   right: 32px;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 11px;
   color: var(--text-secondary);
   pointer-events: none;
   z-index: 1;
+}
+
+.gm-commit-generating-overlay > .gm-toolbar-spinner {
+  margin-top: 2px;
+}
+
+.gm-commit-generating-tip {
+  width: 100%;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-top: 2px;
 }
 
 .gm-commit-input-wrap .gm-commit-input {
@@ -2877,6 +2890,10 @@
 
 .gm-notif-item:hover {
   background: var(--bg-tertiary);
+}
+
+.gm-notif-item-clickable {
+  cursor: pointer;
 }
 
 .gm-notif-item-icon {

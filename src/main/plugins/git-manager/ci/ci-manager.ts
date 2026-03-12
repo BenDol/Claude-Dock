@@ -113,7 +113,8 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
       type: 'info',
       source: 'ci',
-      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined
+      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined,
+      data: { runId: run.id }
     })
   }
 
@@ -165,7 +166,8 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch} ${statusLabel}`,
       type: notifType,
       source: 'ci',
-      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined
+      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined,
+      data: { runId: run.id }
     })
   }
 }

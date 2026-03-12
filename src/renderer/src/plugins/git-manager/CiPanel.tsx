@@ -98,6 +98,7 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
   const [loadingRuns, setLoadingRuns] = useState(false)
+  const loadingRunsRef = useRef(false)
   const [expandedRun, setExpandedRun] = useState<number | null>(null)
   const [runJobs, setRunJobs] = useState<CiJob[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
@@ -197,13 +198,41 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     loadRuns(1, true)
   }, [selectedWorkflow, status])
 
-  // Poll active runs
+  // Poll active runs and update historical runs when completions are detected
+  const prevActiveIdsRef = useRef<Set<number>>(new Set())
+
   useEffect(() => {
     if (status !== 'ready') return
     let timer: ReturnType<typeof setInterval>
     const pollActive = async () => {
       try {
         const active = await api.ci.getActiveRuns(projectDir)
+        const activeIds = new Set(active.map((r) => r.id))
+
+        // Detect runs that were active but are now gone (completed)
+        const prevIds = prevActiveIdsRef.current
+        let anyCompleted = false
+        for (const id of prevIds) {
+          if (!activeIds.has(id)) {
+            anyCompleted = true
+            break
+          }
+        }
+
+        // Update runs list with latest active run data (keeps status in sync)
+        if (active.length > 0) {
+          setRuns((prev) => {
+            const activeMap = new Map(active.map((r) => [r.id, r]))
+            return prev.map((r) => activeMap.get(r.id) ?? r)
+          })
+        }
+
+        // If a run just completed, reload page 1 to get its final state
+        if (anyCompleted && prevIds.size > 0) {
+          loadRuns(1, true)
+        }
+
+        prevActiveIdsRef.current = activeIds
         setActiveRuns(active)
       } catch { /* ignore */ }
     }
@@ -213,7 +242,8 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   }, [status, projectDir])
 
   const loadRuns = useCallback(async (p: number, reset?: boolean) => {
-    if (loadingRuns) return
+    if (loadingRunsRef.current) return
+    loadingRunsRef.current = true
     setLoadingRuns(true)
     try {
       let newRuns: CiWorkflowRun[] = []
@@ -240,8 +270,9 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     } catch {
       setHasMore(false)
     }
+    loadingRunsRef.current = false
     setLoadingRuns(false)
-  }, [loadingRuns, selectedWorkflow, workflows, projectDir])
+  }, [selectedWorkflow, workflows, projectDir])
 
   // Infinite scroll
   const handleScroll = useCallback(() => {
@@ -330,6 +361,24 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     }
     window.dispatchEvent(new CustomEvent('ci-status-change', { detail: ciStatus }))
   }, [runs, filteredActiveRuns])
+
+  // Listen for navigate-to-run events from notifications
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const runId = (e as CustomEvent).detail as number
+      if (runId) {
+        setExpandedRun(runId)
+        setRunJobs([])
+        setLoadingJobs(true)
+        api.ci.getRunJobs(projectDir, runId)
+          .then((jobs) => setRunJobs(jobs))
+          .catch(() => {})
+          .finally(() => setLoadingJobs(false))
+      }
+    }
+    window.addEventListener('ci-navigate-run', handler)
+    return () => window.removeEventListener('ci-navigate-run', handler)
+  }, [projectDir])
 
   // Apply filters
   const filteredRuns = useMemo(() => {

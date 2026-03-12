@@ -327,6 +327,15 @@ const GitManagerApp: React.FC = () => {
     return () => window.removeEventListener('ci-status-change', handler)
   }, [])
 
+  // Navigate to CI tab when a notification is clicked
+  useEffect(() => {
+    const handler = () => {
+      setActiveTab('ci')
+    }
+    window.addEventListener('ci-navigate-run', handler)
+    return () => window.removeEventListener('ci-navigate-run', handler)
+  }, [])
+
   // Set window title based on active directory
   useEffect(() => {
     const name = activeDir.split(/[/\\]/).pop() || activeDir
@@ -2909,6 +2918,7 @@ const WorkingChanges: React.FC<{
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [autoGen, setAutoGen] = useState(false)
+  const userEditedMsgRef = useRef(false)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [selectedFile, setSelectedFile] = useState<{ path: string; staged: boolean } | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
@@ -3003,6 +3013,8 @@ const WorkingChanges: React.FC<{
 
   const triggerAutoGenerate = async () => {
     const gen = ++autoGenRef.current
+    userEditedMsgRef.current = false
+    setCommitMsg('')
     setGenerating(true)
     setGenError(null)
     try {
@@ -3086,7 +3098,7 @@ const WorkingChanges: React.FC<{
     setStagingPaths(new Set())
     setBusy(false)
     scrollToTop()
-    if (autoGen) triggerAutoGenerate()
+    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleUnstageAll = async () => {
@@ -3115,6 +3127,7 @@ const WorkingChanges: React.FC<{
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
+      userEditedMsgRef.current = false
       setBusy(false)
       setCommitting(null)
       if (onCommitted && result.hash) { onCommitted(result.hash); return }
@@ -3138,6 +3151,7 @@ const WorkingChanges: React.FC<{
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
+      userEditedMsgRef.current = false
       const pushResult = await api.gitManager.push(projectDir)
       if (!pushResult.success) {
         setBusy(false)
@@ -3170,7 +3184,7 @@ const WorkingChanges: React.FC<{
     await api.gitManager.stage(projectDir, [filePath])
     await refreshStatus()
     setStagingPaths((prev) => { const n = new Set(prev); n.delete(filePath); return n })
-    if (autoGen) triggerAutoGenerate()
+    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleUnstageFile = async (filePath: string) => {
@@ -3240,7 +3254,7 @@ const WorkingChanges: React.FC<{
     setStagingPaths(new Set())
     setSelectedPaths(new Set())
     setSelectedFile(null)
-    if (autoGen) triggerAutoGenerate()
+    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleBatchUnstage = async (paths: string[]) => {
@@ -3377,13 +3391,14 @@ const WorkingChanges: React.FC<{
               <div className="gm-commit-generating-overlay">
                 <span className="gm-toolbar-spinner" />
                 <span>Generating commit message from your staged changes...</span>
+                <span className="gm-commit-generating-tip">Pro Tip: You can commit & push now, it'll queue until generation finishes.</span>
               </div>
             )}
             <textarea
               className="gm-commit-input"
               placeholder={generating ? '' : 'Commit message...'}
               value={commitMsg}
-              onChange={(e) => setCommitMsg(e.target.value)}
+              onChange={(e) => { setCommitMsg(e.target.value); userEditedMsgRef.current = true }}
               disabled={generating}
             />
             <button
@@ -6256,7 +6271,16 @@ const NotificationPanel: React.FC = () => {
               <div className="gm-notif-empty">No notifications</div>
             ) : (
               notifications.map((n) => (
-                <div key={n.id} className={`gm-notif-item gm-notif-item-${n.type}`}>
+                <div
+                  key={n.id}
+                  className={`gm-notif-item gm-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
+                  onClick={() => {
+                    if (n.source === 'ci' && n.data?.runId) {
+                      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
+                      setOpen(false)
+                    }
+                  }}
+                >
                   <span className="gm-notif-item-icon">{notifIcon(n.type)}</span>
                   <div className="gm-notif-item-body">
                     <div className="gm-notif-item-title">{n.title}</div>
@@ -6265,7 +6289,7 @@ const NotificationPanel: React.FC = () => {
                   {n.action?.url && (
                     <button
                       className="gm-notif-item-action"
-                      onClick={() => getDockApi().app.openExternal(n.action!.url!)}
+                      onClick={(e) => { e.stopPropagation(); getDockApi().app.openExternal(n.action!.url!) }}
                       title={n.action.label}
                     >
                       <ExternalLinkMiniIcon />

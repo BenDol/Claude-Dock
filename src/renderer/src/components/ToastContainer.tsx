@@ -50,7 +50,13 @@ export default function ToastContainer() {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`toast toast-${toast.type}${toast.exiting ? ' toast-exit' : ''}`}
+          className={`toast toast-${toast.type}${toast.exiting ? ' toast-exit' : ''}${toast.source === 'ci' && toast.data?.runId ? ' toast-clickable' : ''}`}
+          onClick={() => {
+            if (toast.source === 'ci' && toast.data?.runId) {
+              window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: toast.data.runId }))
+              removeToast(toast.id)
+            }
+          }}
         >
           <div className="toast-icon">{typeIcon(toast.type)}</div>
           <div className="toast-body">

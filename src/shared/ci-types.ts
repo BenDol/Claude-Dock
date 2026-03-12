@@ -59,6 +59,7 @@ export interface DockNotification {
   timeout?: number
   action?: { label: string; url?: string }
   source?: string
+  data?: Record<string, unknown>
 }
 
 /** Group jobs by their matrix key for UI rendering */
