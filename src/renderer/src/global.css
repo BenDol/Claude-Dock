@@ -1845,7 +1845,7 @@ body {
 .ci-cancel-btn {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: #f7768e;
   padding: 3px;
   border-radius: 4px;
   cursor: pointer;
@@ -2101,8 +2101,12 @@ body {
   background: var(--bg-tertiary);
 }
 
-.ci-detail-icon-cancel:hover {
+.ci-detail-icon-cancel {
   color: #f7768e;
+}
+
+.ci-detail-icon-cancel:hover {
+  color: #ff99aa;
 }
 
 .ci-detail-close {
