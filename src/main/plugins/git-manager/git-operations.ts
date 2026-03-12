@@ -1,5 +1,6 @@
 import { execFile } from 'child_process'
 import * as http from 'http'
+import * as https from 'https'
 import * as fs from 'fs'
 import * as path from 'path'
 import type {
@@ -932,7 +933,8 @@ async function generateViaClaude(stat: string, diff: string): Promise<string> {
   const stdout = await new Promise<string>((resolve, reject) => {
     const proc = spawn('claude', ['-p', '--model', 'haiku', '--max-turns', '1', '--output-format', 'text'], {
       timeout: 15000,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: process.platform === 'win32'
     })
     let out = ''
     let err = ''
@@ -952,6 +954,55 @@ async function generateViaClaude(stat: string, diff: string): Promise<string> {
   return msg
 }
 
+async function generateViaAnthropicAPI(stat: string, diff: string): Promise<string> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set')
+
+  const shortDiff = diff.length > 1500 ? diff.slice(0, 1500) + '\n... (truncated)' : diff
+  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
+
+  const body = JSON.stringify({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 100,
+    messages: [{ role: 'user', content: prompt }]
+  })
+
+  const response = await new Promise<string>((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      }
+    }, (res) => {
+      let data = ''
+      res.on('data', (chunk) => data += chunk)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          if (res.statusCode !== 200) {
+            reject(new Error(json?.error?.message || `Anthropic API returned ${res.statusCode}`))
+            return
+          }
+          const text = json?.content?.[0]?.text || ''
+          resolve(text)
+        } catch { reject(new Error('Invalid JSON from Anthropic API')) }
+      })
+    })
+    req.on('error', (e) => reject(e))
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Anthropic API request timed out')) })
+    req.write(body)
+    req.end()
+  })
+
+  const msg = cleanCommitMessage(response)
+  if (!msg) throw new Error('Empty response from Anthropic API')
+  return msg
+}
+
 export async function generateCommitMessage(cwd: string): Promise<string> {
   // Get staged diff with minimal context for speed
   const [statResult, diffResult] = await Promise.all([
@@ -967,7 +1018,7 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
   log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars`)
   const t0 = Date.now()
 
-  // Race Ollama and Claude in parallel — use whichever responds first
+  // Race all available providers — use whichever responds first
   const ollamaSkipped = Date.now() < ollamaUnavailableUntil
   const providers: Promise<string>[] = []
 
@@ -981,6 +1032,12 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
     return r
   }))
+  if (process.env.ANTHROPIC_API_KEY) {
+    providers.push(generateViaAnthropicAPI(stat, diff).then((r) => {
+      log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
+      return r
+    }))
+  }
 
   // Promise.any resolves with the first successful result
   try {
@@ -989,7 +1046,7 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     const errors = agg instanceof AggregateError ? agg.errors : [agg]
     for (const e of errors) log(`[git-manager] provider failed: ${e instanceof Error ? e.message : e}`)
     throw new Error(
-      'Could not generate commit message. Install Ollama (https://ollama.com) or the Claude CLI.'
+      'Could not generate commit message. Ensure the Claude CLI is installed, Ollama is running, or ANTHROPIC_API_KEY is set.'
     )
   }
 }

@@ -2441,6 +2441,7 @@ const WorkingChanges: React.FC<{
     try { return localStorage.getItem(`gm-commit-msg:${projectDir}`) || '' } catch { return '' }
   })
   const [busy, setBusy] = useState(false)
+  const [committing, setCommitting] = useState<'commit' | 'commit-push' | null>(null)
   const [stagingPaths, setStagingPaths] = useState<Set<string>>(new Set())
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
@@ -2614,10 +2615,12 @@ const WorkingChanges: React.FC<{
     if (generating) { pendingActionRef.current = 'commit'; return }
     if (!commitMsg.trim()) return
     setBusy(true)
+    setCommitting('commit')
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
       setBusy(false)
+      setCommitting(null)
       if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
@@ -2626,6 +2629,7 @@ const WorkingChanges: React.FC<{
         setCommitMsg('')
       })
       setBusy(false)
+      setCommitting(null)
     }
     onRefresh()
   }
@@ -2634,12 +2638,14 @@ const WorkingChanges: React.FC<{
     if (generating) { pendingActionRef.current = 'commit-push'; return }
     if (!commitMsg.trim()) return
     setBusy(true)
+    setCommitting('commit-push')
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
       const pushResult = await api.gitManager.push(projectDir)
       if (!pushResult.success) {
         setBusy(false)
+        setCommitting(null)
         // Commit succeeded but push failed — still navigate to the commit
         if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
         onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
@@ -2649,6 +2655,7 @@ const WorkingChanges: React.FC<{
         return
       }
       setBusy(false)
+      setCommitting(null)
       if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
@@ -2657,6 +2664,7 @@ const WorkingChanges: React.FC<{
         setCommitMsg('')
       })
       setBusy(false)
+      setCommitting(null)
     }
     onRefresh()
   }
@@ -2904,14 +2912,18 @@ const WorkingChanges: React.FC<{
               onClick={handleCommit}
               disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
             >
-              {pendingActionRef.current === 'commit' ? 'Waiting...' : `Commit (${status.staged.length} staged)`}
+              {committing === 'commit'
+                ? <><span className="gm-commit-spinner" /> Committing...</>
+                : pendingActionRef.current === 'commit' ? 'Waiting...' : `Commit (${status.staged.length} staged)`}
             </button>
             <button
               className="gm-commit-btn gm-commit-btn-right"
               onClick={handleCommitPush}
               disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
             >
-              {pendingActionRef.current === 'commit-push' ? 'Waiting...' : 'Commit & Push'}
+              {committing === 'commit-push'
+                ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
+                : pendingActionRef.current === 'commit-push' ? 'Waiting...' : 'Commit & Push'}
             </button>
           </div>
         </div>
