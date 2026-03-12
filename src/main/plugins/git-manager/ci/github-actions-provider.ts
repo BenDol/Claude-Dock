@@ -206,6 +206,10 @@ export class GitHubActionsProvider implements CiProvider {
     await gh(['run', 'cancel', String(runId)], projectDir)
   }
 
+  async rerunFailedJobs(projectDir: string, runId: number): Promise<void> {
+    await gh(['run', 'rerun', String(runId), '--failed'], projectDir)
+  }
+
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
     try {
       const { stdout } = await execFileAsync(resolveGh(), [

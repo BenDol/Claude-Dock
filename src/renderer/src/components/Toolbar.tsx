@@ -3,6 +3,7 @@ import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
+import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
 import { sanitizeSvg } from '../lib/svg-sanitize'
 
 interface ToolbarProps {
@@ -272,6 +273,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         <button className="toolbar-btn" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           &#9881;
         </button>
+        <NotificationDropdown />
         <div className="toolbar-separator" />
         <button className="win-btn win-minimize" onClick={() => api.win.minimize()} title="Minimize">
           &#x2015;
@@ -283,6 +285,152 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
           &#10005;
         </button>
       </div>
+    </div>
+  )
+}
+
+const MAX_NOTIFICATIONS = 30
+
+function resolveActions(n: DockNotification): NotificationAction[] {
+  if (n.actions && n.actions.length > 0) return n.actions
+  if (n.action) return [n.action]
+  return []
+}
+
+function notifIcon(type: DockNotification['type']): string {
+  switch (type) {
+    case 'success': return '\u2713'
+    case 'error': return '\u2717'
+    case 'warning': return '\u26A0'
+    default: return '\u2139'
+  }
+}
+
+const NotifRepairIcon: React.FC = () => (
+  <svg className="tb-notif-repair-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+  </svg>
+)
+
+const BellIcon: React.FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+)
+
+const NotificationDropdown: React.FC = () => {
+  const [open, setOpen] = useState(false)
+  const [notifications, setNotifications] = useState<DockNotification[]>([])
+  const [readIds, setReadIds] = useState<Set<string>>(new Set())
+  const ref = useRef<HTMLDivElement>(null)
+
+  const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
+
+  useEffect(() => {
+    const api = getDockApi()
+    const cleanup = api.notifications.onShow((notification) => {
+      setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
+    })
+    return cleanup
+  }, [])
+
+  // Mark all as read when panel opens
+  useEffect(() => {
+    if (open) setReadIds(new Set(notifications.map((n) => n.id)))
+  }, [open])
+
+  // Listen for toast clicks marking individual notifications as read
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const id = (e as CustomEvent).detail as string
+      if (id) setReadIds((prev) => new Set(prev).add(id))
+    }
+    window.addEventListener('notification-read', handler)
+    return () => window.removeEventListener('notification-read', handler)
+  }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="tb-notif-dropdown" ref={ref}>
+      <button
+        className="toolbar-btn toolbar-btn-icon"
+        onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }}
+        title="Notifications"
+      >
+        <BellIcon />
+        {unreadCount > 0 && <span className="toolbar-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+      </button>
+      {open && (
+        <div className="tb-notif-panel" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="tb-notif-header">
+            <span>Notifications</span>
+            {notifications.length > 0 && (
+              <button className="tb-notif-clear" onClick={() => { setNotifications([]); setReadIds(new Set()) }}>Clear</button>
+            )}
+          </div>
+          <div className="tb-notif-list">
+            {notifications.length === 0 ? (
+              <div className="tb-notif-empty">No notifications</div>
+            ) : (
+              notifications.map((n) => (
+                <div
+                  key={n.id}
+                  className={`tb-notif-item tb-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' tb-notif-item-clickable' : ''}`}
+                  onClick={() => {
+                    if (n.source === 'ci' && n.data?.runId) {
+                      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
+                      setOpen(false)
+                    }
+                  }}
+                >
+                  <span className="tb-notif-icon">{notifIcon(n.type)}</span>
+                  <div className="tb-notif-body">
+                    <div className="tb-notif-title">{n.title}</div>
+                    <div className="tb-notif-msg">{n.message}</div>
+                    {resolveActions(n).filter((a) => a.event).map((a, i) => (
+                      <button
+                        key={i}
+                        className="tb-notif-event-action"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
+                          setOpen(false)
+                        }}
+                      >
+                        {a.event === 'ci-fix-with-claude' && <NotifRepairIcon />}
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                  {resolveActions(n).some((a) => a.url) && (
+                    <button
+                      className="tb-notif-link"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const urlAction = resolveActions(n).find((a) => a.url)
+                        if (urlAction?.url) getDockApi().app.openExternal(urlAction.url)
+                      }}
+                      title={resolveActions(n).find((a) => a.url)?.label ?? 'Open'}
+                    >
+                      &#8599;
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

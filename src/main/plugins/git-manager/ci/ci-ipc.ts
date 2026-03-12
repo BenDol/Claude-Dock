@@ -1,9 +1,10 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { IPC } from '../../../../shared/ipc-channels'
 import { GitHubActionsProvider, resolveGh } from './github-actions-provider'
 import { CiManager } from './ci-manager'
+import { DockManager } from '../../../dock-manager'
 import { log, logError } from '../../../logger'
 
 const execFileAsync = promisify(execFile)
@@ -136,6 +137,29 @@ export function registerCiIpc(): void {
 
   ipcMain.handle(IPC.CI_STOP_POLLING, async (_event, projectDir: string) => {
     getManager().stopPolling(projectDir)
+  })
+
+  ipcMain.handle(IPC.CI_RERUN_FAILED, async (_event, projectDir: string, runId: number) => {
+    try {
+      await provider.rerunFailedJobs(projectDir, runId)
+      return { success: true }
+    } catch (err) {
+      logError('[ci] rerunFailed failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Rerun failed' }
+    }
+  })
+
+  // Forward "Fix with Claude" from plugin window to the dock window and focus it
+  ipcMain.handle(IPC.CI_FIX_WITH_CLAUDE, async (_event, projectDir: string, data: Record<string, unknown>) => {
+    const docks = DockManager.getInstance().getAllDocks()
+    const dock = docks.find((d) => d.projectDir === projectDir)
+    if (dock && !dock.window.isDestroyed()) {
+      dock.window.webContents.send('ci-fix-with-claude', data)
+      if (dock.window.isMinimized()) dock.window.restore()
+      dock.window.focus()
+      return true
+    }
+    return false
   })
 
   log('[ci] IPC handlers registered')

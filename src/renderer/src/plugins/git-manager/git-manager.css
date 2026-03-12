@@ -2969,6 +2969,28 @@
   background: var(--bg-secondary);
 }
 
+.gm-notif-item-event-action {
+  background: none;
+  border: none;
+  color: var(--accent-color);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+  margin-top: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.gm-notif-repair-icon {
+  flex-shrink: 0;
+}
+
+.gm-notif-item-event-action:hover {
+  text-decoration: underline;
+}
+
 /* Context menu */
 .gm-ctx-menu {
   position: fixed;
@@ -3759,6 +3781,40 @@
 }
 
 .gm-search-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.gm-search-match-info {
+  position: absolute;
+  right: 60px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.gm-search-nav-btn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 8px;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 2px;
+}
+
+.gm-search-nav-btn:first-of-type { right: 38px; }
+.gm-search-nav-btn:last-of-type { right: 22px; }
+
+.gm-search-nav-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }

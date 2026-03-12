@@ -160,14 +160,55 @@ export class CiManager {
       statusLabel = conclusion ? conclusion : 'completed'
     }
 
+    // For failures, fetch job details to include failure context
+    let failureContext: Record<string, unknown> | undefined
+    if (conclusion === 'failure') {
+      try {
+        const jobs = await entry.provider.getRunJobs(entry.projectDir, run.id)
+        const failedJobs = jobs.filter((j) => j.conclusion === 'failure')
+        const failedJobSummaries = failedJobs.map((j) => {
+          const failedSteps = j.steps.filter((s) => s.conclusion === 'failure')
+          return {
+            id: j.id,
+            name: j.name,
+            failedSteps: failedSteps.map((s) => s.name)
+          }
+        })
+        if (failedJobSummaries.length > 0) {
+          failureContext = {
+            failedJobs: failedJobSummaries,
+            // Store the first failed job ID for log fetching
+            primaryFailedJobId: failedJobSummaries[0].id
+          }
+        }
+      } catch (err) {
+        log('[ci-manager] failed to fetch job details for failure context:', err)
+      }
+    }
+
     const nm = NotificationManager.getInstance()
+    const viewAction = run.url ? { label: 'View on GitHub', url: run.url } : undefined
+    const actions = conclusion === 'failure' && failureContext
+      ? [
+          ...(viewAction ? [viewAction] : []),
+          { label: 'Fix with Claude', event: 'ci-fix-with-claude' }
+        ]
+      : undefined
+
     nm.notify({
       title: `CI Run ${conclusion === 'success' ? 'Passed' : conclusion === 'failure' ? 'Failed' : conclusion === 'cancelled' ? 'Cancelled' : 'Completed'}`,
       message: `${run.name} #${run.runNumber} on ${run.headBranch} ${statusLabel}`,
       type: notifType,
       source: 'ci',
-      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined,
-      data: { runId: run.id }
+      action: actions ? undefined : viewAction,
+      actions,
+      data: {
+        runId: run.id,
+        runName: run.name,
+        runNumber: run.runNumber,
+        headBranch: run.headBranch,
+        ...(failureContext || {})
+      }
     })
   }
 }

@@ -11,6 +11,7 @@ interface DockState {
   unlockedTerminals: Set<string>
   rcTerminals: Set<string>
   loadingTerminals: Set<string>
+  ciFixTerminals: Set<string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -25,6 +26,7 @@ interface DockState {
   focusNextTerminal: () => void
   setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
+  setTerminalCiFix: (id: string, active: boolean) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -37,6 +39,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   unlockedTerminals: new Set<string>(),
   rcTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
+  ciFixTerminals: new Set<string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -65,7 +68,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       rcTerminals.delete(id)
       const unlockedTerminals = new Set(state.unlockedTerminals)
       unlockedTerminals.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals }
+      const ciFixTerminals = new Set(state.ciFixTerminals)
+      ciFixTerminals.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, ciFixTerminals }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -122,5 +127,13 @@ export const useDockStore = create<DockState>((set, get) => ({
       if (loading) next.add(id)
       else next.delete(id)
       return { loadingTerminals: next }
+    }),
+
+  setTerminalCiFix: (id, active) =>
+    set((state) => {
+      const next = new Set(state.ciFixTerminals)
+      if (active) next.add(id)
+      else next.delete(id)
+      return { ciFixTerminals: next }
     })
 }))

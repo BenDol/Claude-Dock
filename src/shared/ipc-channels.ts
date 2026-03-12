@@ -125,6 +125,8 @@ export const IPC = {
   CI_GET_JOB_LOG: 'ci:getJobLog',
   CI_START_POLLING: 'ci:startPolling',
   CI_STOP_POLLING: 'ci:stopPolling',
+  CI_FIX_WITH_CLAUDE: 'ci:fixWithClaude',
+  CI_RERUN_FAILED: 'ci:rerunFailed',
 
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',

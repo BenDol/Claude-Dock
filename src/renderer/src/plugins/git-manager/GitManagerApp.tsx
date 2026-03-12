@@ -22,7 +22,7 @@ import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../..
 import { highlightDiffHunks } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
-import type { DockNotification } from '../../../../shared/ci-types'
+import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
@@ -285,6 +285,11 @@ const GitManagerApp: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // CI log search state
+  const [ciLogOpen, setCiLogOpen] = useState(false)
+  const [ciLogMatchInfo, setCiLogMatchInfo] = useState<{ count: number; current: number }>({ count: 0, current: 0 })
+  const ciLogSearchMode = activeTab === 'ci' && ciLogOpen
+
   useEffect(() => {
     loadSettings().then(() => {
       applyThemeToDocument(useSettingsStore.getState().settings)
@@ -460,6 +465,7 @@ const GitManagerApp: React.FC = () => {
 
   const refreshGenRef = useRef(0)
   const submoduleGenRef = useRef(0)
+  const lastRefreshRef = useRef(0)
   const refresh = useCallback(async () => {
     if (!activeDir) return
     const gen = ++refreshGenRef.current
@@ -500,6 +506,7 @@ const GitManagerApp: React.FC = () => {
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
         setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
       }
+      lastRefreshRef.current = Date.now()
     } catch (err) {
       if (gen !== refreshGenRef.current) return // stale
       setError(err instanceof Error ? err.message : 'Failed to load git data')
@@ -667,6 +674,25 @@ const GitManagerApp: React.FC = () => {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // CI log view tracking
+  useEffect(() => {
+    const logViewHandler = (e: Event) => {
+      const isOpen = (e as CustomEvent).detail as boolean
+      setCiLogOpen(isOpen)
+      if (!isOpen) { setCiLogMatchInfo({ count: 0, current: 0 }) }
+    }
+    const matchHandler = (e: Event) => {
+      const info = (e as CustomEvent).detail as { count: number; current: number }
+      setCiLogMatchInfo(info)
+    }
+    window.addEventListener('ci-log-view', logViewHandler)
+    window.addEventListener('ci-log-search-matches', matchHandler)
+    return () => {
+      window.removeEventListener('ci-log-view', logViewHandler)
+      window.removeEventListener('ci-log-search-matches', matchHandler)
+    }
   }, [])
 
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
@@ -983,7 +1009,10 @@ const GitManagerApp: React.FC = () => {
             </button>
             <button
               className={`gm-tab${activeTab === 'changes' ? ' gm-tab-active' : ''}`}
-              onClick={() => setActiveTab('changes')}
+              onClick={() => {
+                setActiveTab('changes')
+                if (Date.now() - lastRefreshRef.current > 2000) refresh()
+              }}
             >
               Working Changes
               {status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 && (
@@ -1021,19 +1050,26 @@ const GitManagerApp: React.FC = () => {
               <input
                 ref={searchInputRef}
                 className="gm-search-input"
-                placeholder={activeTab === 'changes' ? 'Search working changes...' : 'Search commit history...'}
+                placeholder={ciLogSearchMode ? 'Find in log...' : activeTab === 'changes' ? 'Search working changes...' : 'Search commit history...'}
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value)
-                  setSearchOpen(true)
-                  triggerSearch(e.target.value)
+                  if (!ciLogSearchMode) {
+                    setSearchOpen(true)
+                    triggerSearch(e.target.value)
+                  }
                 }}
-                onFocus={() => { if (searchQuery) setSearchOpen(true) }}
+                onFocus={() => { if (searchQuery && !ciLogSearchMode) setSearchOpen(true) }}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     setSearchOpen(false)
                     setSearchFocusIdx(-1)
                     searchInputRef.current?.blur()
+                  } else if (ciLogSearchMode) {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      window.dispatchEvent(new CustomEvent('ci-log-search-nav', { detail: e.shiftKey ? 'prev' : 'next' }))
+                    }
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault()
                     if (searchResults.length > 0) {
@@ -1056,6 +1092,17 @@ const GitManagerApp: React.FC = () => {
                   }
                 }}
               />
+              {ciLogSearchMode && searchQuery && ciLogMatchInfo.count > 0 && (
+                <span className="gm-search-match-info">
+                  {ciLogMatchInfo.current + 1}/{ciLogMatchInfo.count}
+                </span>
+              )}
+              {ciLogSearchMode && searchQuery && (
+                <>
+                  <button className="gm-search-nav-btn" onClick={() => window.dispatchEvent(new CustomEvent('ci-log-search-nav', { detail: 'prev' }))} title="Previous match (Shift+Enter)">{'\u25B2'}</button>
+                  <button className="gm-search-nav-btn" onClick={() => window.dispatchEvent(new CustomEvent('ci-log-search-nav', { detail: 'next' }))} title="Next match (Enter)">{'\u25BC'}</button>
+                </>
+              )}
               {searchQuery && (
                 <button
                   className="gm-search-clear"
@@ -1064,7 +1111,7 @@ const GitManagerApp: React.FC = () => {
                   &times;
                 </button>
               )}
-              {searchOpen && searchQuery.trim() && (
+              {searchOpen && searchQuery.trim() && !ciLogSearchMode && (
                 <SearchDropdown
                   results={searchResults}
                   loading={searchLoading}
@@ -1127,7 +1174,7 @@ const GitManagerApp: React.FC = () => {
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
-              <CiPanel projectDir={activeDir} provider={repoProvider} />
+              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} />
             </div>
           )}
         </div>
@@ -6227,21 +6274,33 @@ const MAX_NOTIFICATIONS = 50
 const NotificationPanel: React.FC = () => {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<DockNotification[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
+  const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
+
+  const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
 
   useEffect(() => {
     const api = getDockApi()
     const cleanup = api.notifications.onShow((notification) => {
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
-      setUnreadCount((c) => c + 1)
     })
     return cleanup
   }, [])
 
+  // Mark all as read when panel opens
   useEffect(() => {
-    if (open) setUnreadCount(0)
+    if (open) setReadIds(new Set(notifications.map((n) => n.id)))
   }, [open])
+
+  // Listen for toast clicks marking individual notifications as read
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const id = (e as CustomEvent).detail as string
+      if (id) setReadIds((prev) => new Set(prev).add(id))
+    }
+    window.addEventListener('notification-read', handler)
+    return () => window.removeEventListener('notification-read', handler)
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -6254,7 +6313,7 @@ const NotificationPanel: React.FC = () => {
 
   return (
     <div className="gm-notif-dropdown" ref={ref}>
-      <button className="gm-toolbar-btn" onClick={() => setOpen(!open)} title="Notifications">
+      <button className="gm-toolbar-btn" onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }} title="Notifications">
         <NotificationBellIcon />
         {unreadCount > 0 && <span className="gm-notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
       </button>
@@ -6263,7 +6322,7 @@ const NotificationPanel: React.FC = () => {
           <div className="gm-notif-header">
             <span className="gm-notif-title">Notifications</span>
             {notifications.length > 0 && (
-              <button className="gm-notif-clear" onClick={() => setNotifications([])}>Clear all</button>
+              <button className="gm-notif-clear" onClick={() => { setNotifications([]); setReadIds(new Set()) }}>Clear all</button>
             )}
           </div>
           <div className="gm-notif-list">
@@ -6285,12 +6344,30 @@ const NotificationPanel: React.FC = () => {
                   <div className="gm-notif-item-body">
                     <div className="gm-notif-item-title">{n.title}</div>
                     <div className="gm-notif-item-msg">{n.message}</div>
+                    {resolveNotifActions(n).filter((a) => a.event).map((a, i) => (
+                      <button
+                        key={i}
+                        className="gm-notif-item-event-action"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
+                          setOpen(false)
+                        }}
+                      >
+                        {a.event === 'ci-fix-with-claude' && <NotifRepairIcon />}
+                        {a.label}
+                      </button>
+                    ))}
                   </div>
-                  {n.action?.url && (
+                  {resolveNotifActions(n).some((a) => a.url) && (
                     <button
                       className="gm-notif-item-action"
-                      onClick={(e) => { e.stopPropagation(); getDockApi().app.openExternal(n.action!.url!) }}
-                      title={n.action.label}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const urlAction = resolveNotifActions(n).find((a) => a.url)
+                        if (urlAction?.url) getDockApi().app.openExternal(urlAction.url)
+                      }}
+                      title={resolveNotifActions(n).find((a) => a.url)?.label ?? 'Open'}
                     >
                       <ExternalLinkMiniIcon />
                     </button>
@@ -6303,6 +6380,12 @@ const NotificationPanel: React.FC = () => {
       )}
     </div>
   )
+}
+
+function resolveNotifActions(n: DockNotification): NotificationAction[] {
+  if (n.actions && n.actions.length > 0) return n.actions
+  if (n.action) return [n.action]
+  return []
 }
 
 function notifIcon(type: DockNotification['type']): string {
@@ -6326,6 +6409,12 @@ const ExternalLinkMiniIcon: React.FC = () => (
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
     <polyline points="15 3 21 3 21 9" />
     <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+)
+
+const NotifRepairIcon: React.FC = () => (
+  <svg className="gm-notif-repair-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
   </svg>
 )
 

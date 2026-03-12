@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, Suspense } from 'react'
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import DockGrid from './components/DockGrid'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
@@ -126,6 +126,170 @@ function DockApp() {
     })
     return cleanup
   }, [setTerminalAlive])
+
+  // "Fix with Claude" — show terminal picker, then send prompt to chosen terminal
+  const [pendingFixData, setPendingFixData] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    const handler = (data: Record<string, unknown>) => {
+      if (data?.runId) setPendingFixData(data)
+    }
+    const domHandler = (e: Event) => handler((e as CustomEvent).detail as Record<string, unknown>)
+    window.addEventListener('ci-fix-with-claude', domHandler)
+    const api = getDockApi()
+    const ipcCleanup = api.ci.onFixWithClaude(handler)
+    return () => {
+      window.removeEventListener('ci-fix-with-claude', domHandler)
+      ipcCleanup()
+    }
+  }, [])
+
+  // Track active CI fix terminals for completion monitoring
+  const ciFixCleanups = useRef<Map<string, () => void>>(new Map())
+
+  const stripAnsi = useCallback((str: string) =>
+    str
+      .replace(/\x1b\][^\x07]*\x07/g, '')
+      .replace(/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g, ''),
+  [])
+
+  const monitorForCompletion = useCallback((termId: string, runId: number) => {
+    const api = getDockApi()
+    const dir = useDockStore.getState().projectDir
+    const MARKER = 'CI_FIX_COMPLETE'
+    let buf = ''
+
+    const cleanup = api.terminal.onData((id, chunk) => {
+      if (id !== termId) return
+      buf += stripAnsi(chunk)
+      // Keep buffer from growing unbounded
+      if (buf.length > 5000) buf = buf.slice(-3000)
+
+      if (buf.includes(MARKER)) {
+        // Claude signalled completion — wait a moment, then close and re-run
+        doCleanup()
+        setTimeout(async () => {
+          api.terminal.kill(termId)
+          removeTerminal(termId)
+          // Re-run the failed jobs
+          try {
+            await api.ci.rerunFailed(dir, runId)
+          } catch { /* re-run failed, notification will appear on next poll */ }
+        }, 2000)
+      }
+    })
+
+    const doCleanup = () => {
+      cleanup()
+      ciFixCleanups.current.delete(termId)
+    }
+
+    // Also clean up if the terminal is closed manually
+    const exitCleanup = api.terminal.onExit((id) => {
+      if (id !== termId) return
+      doCleanup()
+      exitCleanup()
+    })
+
+    ciFixCleanups.current.set(termId, () => { doCleanup(); exitCleanup() })
+  }, [removeTerminal, stripAnsi])
+
+  const handleFixTerminalSelected = useCallback(async (terminalId: string | null) => {
+    const data = pendingFixData
+    setPendingFixData(null)
+    if (!data) return
+
+    const api = getDockApi()
+    const dir = useDockStore.getState().projectDir
+    const runId = data.runId as number
+
+    // Build prompt from failure data
+    let failurePrompt = ''
+    try {
+      const runName = (data.runName as string) || 'CI Run'
+      const runNumber = (data.runNumber as number) || 0
+      const branch = (data.headBranch as string) || ''
+      const failedJobs = (data.failedJobs as Array<{ id: number; name: string; failedSteps: string[] }>) || []
+
+      let logSnippet = ''
+      if (failedJobs.length > 0 && failedJobs[0].id) {
+        try {
+          const fullLog = await api.ci.getJobLog(dir, failedJobs[0].id)
+          const lines = fullLog.split('\n')
+          logSnippet = lines.slice(-150).join('\n')
+        } catch { /* continue without log */ }
+      }
+
+      const jobList = failedJobs.map((j) => {
+        const steps = j.failedSteps.length > 0 ? ` (failed steps: ${j.failedSteps.join(', ')})` : ''
+        return `  - ${j.name}${steps}`
+      }).join('\n')
+
+      failurePrompt = `A CI build has failed and needs to be fixed.\n\n` +
+        `Workflow: ${runName} #${runNumber}\n` +
+        `Branch: ${branch}\n` +
+        (jobList ? `Failed jobs:\n${jobList}\n` : '') +
+        (logSnippet ? `\nLog output (last 150 lines):\n\`\`\`\n${logSnippet}\n\`\`\`\n` : '') +
+        `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
+        `IMPORTANT: When you have successfully fixed the issue and committed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
+        `If you cannot fix the issue or need more information, do NOT output this marker.`
+    } catch {
+      failurePrompt = 'A CI build has failed. Please check the CI logs and fix the issue.\n\n' +
+        'IMPORTANT: When you have successfully fixed the issue and committed the changes, output the exact text CI_FIX_COMPLETE on its own line.'
+    }
+
+    const sendToTerminal = (termId: string) => {
+      const paste = `\x1b[200~${failurePrompt}\x1b[201~`
+      api.terminal.write(termId, paste)
+      setTimeout(() => api.terminal.write(termId, '\x1b'), 400)
+      setTimeout(() => api.terminal.write(termId, '\r'), 700)
+    }
+
+    const startMonitoring = (termId: string) => {
+      // Start monitoring after prompt is submitted (give time for paste + submit)
+      setTimeout(() => monitorForCompletion(termId, runId), 1500)
+    }
+
+    if (terminalId) {
+      // Existing terminal — send prompt directly
+      useDockStore.getState().setFocusedTerminal(terminalId)
+      useDockStore.getState().setTerminalCiFix(terminalId, true)
+      sendToTerminal(terminalId)
+      startMonitoring(terminalId)
+    } else {
+      // New terminal — create, wait for Claude to start, then send
+      const termId = `term-${nextTermId++}-${Date.now()}`
+      addTerminal(termId)
+      useDockStore.getState().setTerminalCiFix(termId, true)
+
+      let sent = false
+      const send = () => {
+        if (sent) return
+        sent = true
+        sendToTerminal(termId)
+        startMonitoring(termId)
+      }
+
+      let dataLen = 0
+      const cleanup = api.terminal.onData((id, chunk) => {
+        if (id !== termId) return
+        dataLen += chunk.length
+        if (dataLen > 2000) {
+          cleanup()
+          setTimeout(send, 500)
+        }
+      })
+      setTimeout(() => { cleanup(); send() }, 8000)
+    }
+  }, [pendingFixData, addTerminal, monitorForCompletion])
+
+  // Cleanup CI fix monitors on unmount
+  useEffect(() => {
+    return () => {
+      for (const cleanup of ciFixCleanups.current.values()) cleanup()
+      ciFixCleanups.current.clear()
+    }
+  }, [])
 
   const DEFAULT_FONT_SIZE = 14
 
@@ -262,6 +426,94 @@ function DockApp() {
         <DockGrid />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {pendingFixData && (
+        <TerminalPicker
+          onSelect={handleFixTerminalSelected}
+          onClose={() => setPendingFixData(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function TerminalPicker({ onSelect, onClose }: {
+  onSelect: (terminalId: string | null) => void
+  onClose: () => void
+}) {
+  const terminals = useDockStore((s) => s.terminals)
+  const maxCols = useSettingsStore((s) => s.settings.grid.maxColumns)
+  const [selected, setSelected] = useState<string | null>(null) // null = new terminal
+
+  const backdropRef = useRef<HTMLDivElement>(null)
+
+  // Compute grid layout including a "new" cell
+  const allIds = [...terminals.map((t) => t.id), '__new__']
+  const { cols, layout } = computeAutoLayout(allIds, maxCols)
+  const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y)) + 1 : 1
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'Enter') onSelect(selected)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selected, onSelect, onClose])
+
+  return (
+    <div
+      className="tp-backdrop"
+      ref={backdropRef}
+      onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
+    >
+      <div className="tp-modal">
+        <div className="tp-header">
+          <span className="tp-title">Send to terminal</span>
+          <button className="tp-close" onClick={onClose}>{'\u2715'}</button>
+        </div>
+        <div
+          className="tp-grid"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, 1fr)`
+          }}
+        >
+          {layout.map((cell) => {
+            const isNew = cell.i === '__new__'
+            const term = isNew ? null : terminals.find((t) => t.id === cell.i)
+            const isSelected = isNew ? selected === null : selected === cell.i
+            const isAlive = term ? term.isAlive : true
+            return (
+              <button
+                key={cell.i}
+                className={`tp-cell${isSelected ? ' tp-cell-selected' : ''}${isNew ? ' tp-cell-new' : ''}${!isAlive ? ' tp-cell-dead' : ''}`}
+                style={{ gridColumn: cell.x + 1, gridRow: cell.y + 1 }}
+                onClick={() => setSelected(isNew ? null : cell.i)}
+                disabled={!isNew && !isAlive}
+                title={isNew ? 'Create new terminal' : term?.title || ''}
+              >
+                {isNew ? (
+                  <>
+                    <span className="tp-cell-icon">+</span>
+                    <span className="tp-cell-label">New</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="tp-cell-num">{term?.title?.replace(/\D/g, '') || '?'}</span>
+                    <span className="tp-cell-label">{term?.title || 'Terminal'}</span>
+                  </>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <div className="tp-footer">
+          <button className="tp-cancel" onClick={onClose}>Cancel</button>
+          <button className="tp-confirm" onClick={() => onSelect(selected)}>
+            {selected === null ? 'Create & Send' : 'Send'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -8,6 +8,8 @@ import { ProviderIcon, providerLabel } from './ProviderIcons'
 interface CiPanelProps {
   projectDir: string
   provider: GitProvider
+  searchQuery?: string
+  currentBranch?: string
 }
 
 type CiStatus = 'loading' | 'setup' | 'ready' | 'error'
@@ -24,7 +26,7 @@ type ConclusionFilter = 'success' | 'failure' | 'cancelled' | 'in_progress' | 'q
 
 interface CiFilters {
   status: Set<ConclusionFilter>
-  branch: string | null
+  branches: Set<string>
   event: string | null
   showStaleQueued: boolean
 }
@@ -87,7 +89,7 @@ function getStatusColor(run: CiWorkflowRun): string {
   return 'var(--text-secondary)' // cancelled
 }
 
-export default function CiPanel({ projectDir, provider }: CiPanelProps) {
+export default function CiPanel({ projectDir, provider, searchQuery, currentBranch }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [setup, setSetup] = useState<SetupState>({ ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false, loginOpened: false })
@@ -102,8 +104,14 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const [expandedRun, setExpandedRun] = useState<number | null>(null)
   const [runJobs, setRunJobs] = useState<CiJob[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
+  const [runProgress, setRunProgress] = useState<Map<number, number>>(new Map())
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => loadExpandedGroups())
-  const [filters, setFilters] = useState<CiFilters>({ status: new Set(), branch: null, event: null, showStaleQueued: false })
+  const [filters, setFilters] = useState<CiFilters>(() => ({
+    status: new Set(),
+    branches: currentBranch ? new Set([currentBranch]) : new Set(),
+    event: null,
+    showStaleQueued: false
+  }))
   const [filtersExpanded, setFiltersExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
@@ -232,6 +240,28 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
           loadRuns(1, true)
         }
 
+        // Fetch job progress for active runs
+        const progressMap = new Map<number, number>()
+        await Promise.all(active.map(async (run) => {
+          try {
+            const jobs = await api.ci.getRunJobs(projectDir, run.id)
+            if (jobs.length === 0) return
+            const totalSteps = jobs.reduce((sum, j) => sum + Math.max(j.steps.length, 1), 0)
+            const doneSteps = jobs.reduce((sum, j) => {
+              if (j.status === 'completed') return sum + Math.max(j.steps.length, 1)
+              return sum + j.steps.filter((s) => s.status === 'completed').length
+            }, 0)
+            progressMap.set(run.id, Math.round((doneSteps / totalSteps) * 100))
+          } catch { /* ignore */ }
+        }))
+        setRunProgress((prev) => {
+          const next = new Map(prev)
+          for (const [id, pct] of progressMap) next.set(id, pct)
+          // Clean up runs no longer active
+          for (const id of next.keys()) { if (!activeIds.has(id)) next.delete(id) }
+          return next
+        })
+
         prevActiveIdsRef.current = activeIds
         setActiveRuns(active)
       } catch { /* ignore */ }
@@ -306,6 +336,24 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     setActiveRuns(active)
   }, [projectDir])
 
+  const handleFixRunWithClaude = useCallback(async (run: CiWorkflowRun) => {
+    const jobs = await api.ci.getRunJobs(projectDir, run.id)
+    const failedJobs = jobs.filter((j) => j.conclusion === 'failure')
+    const failedJobSummaries = failedJobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      failedSteps: j.steps.filter((s) => s.conclusion === 'failure').map((s) => s.name)
+    }))
+    api.ci.fixWithClaude(projectDir, {
+      runId: run.id,
+      runName: run.name,
+      runNumber: run.runNumber,
+      headBranch: run.headBranch,
+      failedJobs: failedJobSummaries,
+      primaryFailedJobId: failedJobSummaries[0]?.id
+    })
+  }, [projectDir])
+
   const handleRefresh = useCallback(() => {
     setPage(1)
     setRuns([])
@@ -324,7 +372,11 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   }, [])
 
   // Derive unique branches and events from loaded runs
-  const availableBranches = useMemo(() => [...new Set(runs.map((r) => r.headBranch))].sort(), [runs])
+  const availableBranches = useMemo(() => {
+    const set = new Set(runs.map((r) => r.headBranch))
+    if (currentBranch) set.add(currentBranch)
+    return [...set].sort()
+  }, [runs, currentBranch])
   const availableEvents = useMemo(() => [...new Set(runs.map((r) => r.event))].sort(), [runs])
 
   // Filter active runs to exclude stale queued
@@ -388,7 +440,7 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
       // Status filter
       if (filters.status.size > 0 && !filters.status.has(getEffectiveStatus(run))) return false
       // Branch filter
-      if (filters.branch && run.headBranch !== filters.branch) return false
+      if (filters.branches.size > 0 && !filters.branches.has(run.headBranch)) return false
       // Event filter
       if (filters.event && run.event !== filters.event) return false
       return true
@@ -404,7 +456,16 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     })
   }, [])
 
-  const hasActiveFilters = filters.status.size > 0 || filters.branch !== null || filters.event !== null
+  const toggleBranchFilter = useCallback((branch: string) => {
+    setFilters((prev) => {
+      const next = new Set(prev.branches)
+      if (next.has(branch)) next.delete(branch)
+      else next.add(branch)
+      return { ...prev, branches: next }
+    })
+  }, [])
+
+  const hasActiveFilters = filters.status.size > 0 || filters.branches.size > 0 || filters.event !== null
 
   if (status === 'loading') {
     return <div className="ci-panel-center"><div className="ci-spinner" /> Checking CI availability...</div>
@@ -499,15 +560,19 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
                   </button>
                 ))}
               </div>
-              {availableBranches.length > 1 && (
-                <select
-                  className="ci-filter-select"
-                  value={filters.branch ?? ''}
-                  onChange={(e) => setFilters((p) => ({ ...p, branch: e.target.value || null }))}
-                >
-                  <option value="">All branches</option>
-                  {availableBranches.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
+              {availableBranches.length > 0 && (
+                <div className="ci-filter-group ci-filter-branches">
+                  {availableBranches.map((b) => (
+                    <button
+                      key={b}
+                      className={`ci-filter-chip ci-filter-chip-branch${filters.branches.has(b) ? ' ci-filter-chip-on' : ''}${b === currentBranch ? ' ci-filter-chip-current' : ''}`}
+                      onClick={() => toggleBranchFilter(b)}
+                    >
+                      {b === currentBranch && <span className="ci-filter-current-dot" />}
+                      {b}
+                    </button>
+                  ))}
+                </div>
               )}
               {availableEvents.length > 1 && (
                 <select
@@ -528,7 +593,7 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
                 Show stale queued{staleQueuedCount > 0 ? ` (${staleQueuedCount})` : ''}
               </label>
               {hasActiveFilters && (
-                <button className="ci-filter-clear" onClick={() => setFilters((p) => ({ ...p, status: new Set(), branch: null, event: null }))}>
+                <button className="ci-filter-clear" onClick={() => setFilters((p) => ({ ...p, status: new Set(), branches: new Set(), event: null }))}>
                   Clear
                 </button>
               )}
@@ -537,8 +602,8 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
           {!filtersExpanded && hasActiveFilters && (
             <span className="ci-filter-summary">
               {filters.status.size > 0 && [...filters.status].map((s) => s === 'in_progress' ? 'running' : s).join(', ')}
-              {filters.branch && `${filters.status.size > 0 ? ' · ' : ''}${filters.branch}`}
-              {filters.event && `${filters.status.size > 0 || filters.branch ? ' · ' : ''}${filters.event}`}
+              {filters.branches.size > 0 && `${filters.status.size > 0 ? ' · ' : ''}${[...filters.branches].join(', ')}`}
+              {filters.event && `${filters.status.size > 0 || filters.branches.size > 0 ? ' · ' : ''}${filters.event}`}
             </span>
           )}
         </div>
@@ -555,7 +620,10 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
               >
                 <StatusDot color={getStatusColor(run)} animated={run.status === 'in_progress' || run.status === 'queued'} />
                 <div className="ci-run-info">
-                  <span className="ci-run-name">{run.name}</span>
+                  <span className="ci-run-name">
+                    {run.name}
+                    {runProgress.has(run.id) && <span className="ci-run-pct">{runProgress.get(run.id)}%</span>}
+                  </span>
                   <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span></span>
                 </div>
                 <button className="ci-cancel-btn" onClick={(e) => { e.stopPropagation(); handleCancel(run.id) }} title="Cancel run">
@@ -576,13 +644,21 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
               className={`ci-run-row${expandedRun === run.id ? ' ci-run-row-selected' : ''}`}
               onClick={() => handleExpandRun(run.id)}
             >
-              <StatusDot color={getStatusColor(run)} />
+              <StatusDot color={getStatusColor(run)} animated={run.status === 'in_progress'} />
               <div className="ci-run-info">
-                <span className="ci-run-name">{run.name}</span>
+                <span className="ci-run-name">
+                  {run.name}
+                  {runProgress.has(run.id) && <span className="ci-run-pct">{runProgress.get(run.id)}%</span>}
+                </span>
                 <span className="ci-run-meta">
                   #{run.runNumber} · <span className="ci-run-branch">{run.headBranch}</span> · {run.event} · {formatTime(run.createdAt)}
                 </span>
               </div>
+              {run.conclusion === 'failure' && (
+                <button className="ci-run-fix-btn" onClick={(e) => { e.stopPropagation(); handleFixRunWithClaude(run) }} title="Fix with Claude">
+                  <ClaudeFixIcon />
+                </button>
+              )}
             </div>
           ))}
           {filteredRuns.length === 0 && !loadingRuns && runs.length > 0 && (
@@ -606,6 +682,8 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
               expandedGroups={expandedGroups}
               provider={provider}
               projectDir={projectDir}
+              searchQuery={searchQuery}
+              progress={runProgress.get(selectedRun.id)}
               onToggleGroup={toggleGroup}
               onClose={() => setExpandedRun(null)}
               onCancel={handleCancel}
@@ -618,7 +696,7 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   )
 }
 
-function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, onToggleGroup, onClose, onCancel, onOpenUrl }: {
+function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, onOpenUrl }: {
   run: CiWorkflowRun
   jobs: CiJob[]
   jobGroups: CiJobGroup[]
@@ -626,6 +704,8 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
   expandedGroups: Set<string>
   provider: GitProvider
   projectDir: string
+  searchQuery?: string
+  progress?: number
   onToggleGroup: (key: string) => void
   onClose: () => void
   onCancel: (runId: number) => void
@@ -646,6 +726,7 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
     setLogStepFilter(stepName ?? null)
     setLogLoading(true)
     setLogText('')
+    window.dispatchEvent(new CustomEvent('ci-log-view', { detail: true }))
     try {
       const text = await api.ci.getJobLog(projectDir, jobId)
       setLogText(text || 'No log output available.')
@@ -659,6 +740,7 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
     setLogJobId(null)
     setLogText('')
     setLogStepFilter(null)
+    window.dispatchEvent(new CustomEvent('ci-log-view', { detail: false }))
   }, [])
 
   // Filter log text to a specific step if requested
@@ -695,13 +777,11 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
           <span className="ci-detail-title">{logStepFilter || 'Job Log'}</span>
           <button className="ci-detail-close" onClick={onClose}>{'\u2715'}</button>
         </div>
-        <div className="ci-log-viewer">
-          {logLoading ? (
-            <div className="ci-jobs-loading"><div className="ci-spinner" /> Loading logs...</div>
-          ) : (
-            <pre className="ci-log-content">{displayLog}</pre>
-          )}
-        </div>
+        {logLoading ? (
+          <div className="ci-log-viewer"><div className="ci-jobs-loading"><div className="ci-spinner" /> Loading logs...</div></div>
+        ) : (
+          <CiLogViewer log={displayLog} searchQuery={searchQuery} />
+        )}
       </div>
     )
   }
@@ -732,6 +812,7 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
         <div className={`ci-detail-status ci-detail-status-${effectiveStatus}`}>
           <StatusDot color={getStatusColor(run)} animated={effectiveStatus === 'in_progress' || effectiveStatus === 'queued'} />
           <span className="ci-detail-status-label">{statusLabel}</span>
+          {progress !== undefined && effectiveStatus === 'in_progress' && <span className="ci-detail-pct">{progress}%</span>}
           {totalDuration && <span className="ci-detail-duration">{totalDuration}</span>}
         </div>
 
@@ -778,6 +859,20 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
                 expanded={expandedGroups.has(group.key)}
                 onToggle={() => onToggleGroup(group.key)}
                 onViewLog={viewJobLog}
+                onFixWithClaude={(jobId) => {
+                  const job = jobs.find((j) => j.id === jobId)
+                  if (!job) return
+                  const failedSteps = job.steps.filter((s) => s.conclusion === 'failure').map((s) => s.name)
+                  const data = {
+                    runId: run.id,
+                    runName: run.name,
+                    runNumber: run.runNumber,
+                    headBranch: run.headBranch,
+                    failedJobs: [{ id: job.id, name: job.name, failedSteps }],
+                    primaryFailedJobId: job.id
+                  }
+                  api.ci.fixWithClaude(projectDir, data)
+                }}
               />
             ))
           )}
@@ -798,9 +893,18 @@ function LogIcon() {
   )
 }
 
-function DetailJobGroup({ group, expanded, onToggle, onViewLog }: {
+function ClaudeFixIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  )
+}
+
+function DetailJobGroup({ group, expanded, onToggle, onViewLog, onFixWithClaude }: {
   group: CiJobGroup; expanded: boolean; onToggle: () => void
   onViewLog: (jobId: number, stepName?: string) => void
+  onFixWithClaude: (jobId: number) => void
 }) {
   const [expandedJobs, setExpandedJobs] = useState<Set<number>>(() => loadExpandedJobs())
 
@@ -828,6 +932,11 @@ function DetailJobGroup({ group, expanded, onToggle, onViewLog }: {
           <button className="ci-detail-log-btn" onClick={(e) => { e.stopPropagation(); onViewLog(job.id) }} title="View log">
             <LogIcon />
           </button>
+          {job.conclusion === 'failure' && (
+            <button className="ci-detail-fix-btn" onClick={(e) => { e.stopPropagation(); onFixWithClaude(job.id) }} title="Fix with Claude">
+              <ClaudeFixIcon />
+            </button>
+          )}
         </div>
         {hasSteps && jobExpanded && (
           <div className="ci-detail-steps">
@@ -1133,4 +1242,160 @@ function formatDuration(start: string, end: string): string {
   const hr = Math.floor(min / 60)
   const remMin = min % 60
   return `${hr}h ${remMin}m`
+}
+
+// --- Structured log viewer ---
+
+type LogLineType = 'error' | 'warning' | 'notice' | 'group' | 'command' | 'debug' | 'normal'
+
+interface ParsedLogLine {
+  type: LogLineType
+  timestamp: string | null
+  text: string
+  raw: string
+}
+
+const TIMESTAMP_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+/
+const ANNOTATION_RE = /^##\[(error|warning|notice|debug|group|endgroup|command)\]/
+
+function parseLogLine(line: string): ParsedLogLine {
+  let text = line
+  let timestamp: string | null = null
+
+  // Extract leading timestamp
+  const tsMatch = text.match(TIMESTAMP_RE)
+  if (tsMatch) {
+    timestamp = tsMatch[1]
+    text = text.slice(tsMatch[0].length)
+  }
+
+  // Check for GitHub Actions annotations
+  const annoMatch = text.match(ANNOTATION_RE)
+  if (annoMatch) {
+    const kind = annoMatch[1]
+    const content = text.slice(annoMatch[0].length)
+    if (kind === 'endgroup') return { type: 'normal', timestamp, text: '', raw: line }
+    if (kind === 'group') return { type: 'group', timestamp, text: content, raw: line }
+    if (kind === 'command') return { type: 'command', timestamp, text: content, raw: line }
+    return { type: kind as LogLineType, timestamp, text: content, raw: line }
+  }
+
+  // Heuristic classification for lines without annotations
+  const lower = text.toLowerCase()
+  if (/\berror\b/i.test(lower) && !/\b0 errors?\b/i.test(lower)) {
+    return { type: 'error', timestamp, text, raw: line }
+  }
+  if (/\bwarn(ing)?\b/i.test(lower) && !/\b0 warnings?\b/i.test(lower)) {
+    return { type: 'warning', timestamp, text, raw: line }
+  }
+
+  return { type: 'normal', timestamp, text, raw: line }
+}
+
+function CiLogViewer({ log, searchQuery }: { log: string; searchQuery?: string }) {
+  const viewerRef = useRef<HTMLDivElement>(null)
+  const [currentMatch, setCurrentMatch] = useState(0)
+  const matchRefs = useRef<(HTMLSpanElement | null)[]>([])
+
+  const lines = useMemo(() => log.split('\n').map(parseLogLine), [log])
+
+  // Build search match index
+  const query = searchQuery?.trim().toLowerCase() || ''
+  const matchCount = useMemo(() => {
+    if (!query) return 0
+    let count = 0
+    for (const line of lines) {
+      let idx = 0
+      const lower = line.text.toLowerCase()
+      while (idx < lower.length) {
+        const found = lower.indexOf(query, idx)
+        if (found === -1) break
+        count++
+        idx = found + query.length
+      }
+    }
+    return count
+  }, [lines, query])
+
+  // Emit match count to parent
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('ci-log-search-matches', { detail: { count: matchCount, current: currentMatch } }))
+  }, [matchCount, currentMatch])
+
+  // Reset current match when query changes
+  useEffect(() => {
+    setCurrentMatch(0)
+  }, [query])
+
+  // Scroll current match into view
+  useEffect(() => {
+    if (matchCount > 0 && matchRefs.current[currentMatch]) {
+      matchRefs.current[currentMatch]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [currentMatch, matchCount])
+
+  // Listen for next/prev match events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const dir = (e as CustomEvent).detail as 'next' | 'prev'
+      if (matchCount === 0) return
+      setCurrentMatch((c) => dir === 'next' ? (c + 1) % matchCount : (c - 1 + matchCount) % matchCount)
+    }
+    window.addEventListener('ci-log-search-nav', handler)
+    return () => window.removeEventListener('ci-log-search-nav', handler)
+  }, [matchCount])
+
+  // Render line text with search highlights
+  let globalMatchIdx = 0
+  matchRefs.current = []
+
+  function renderText(text: string): React.ReactNode {
+    if (!query) return text
+    const parts: React.ReactNode[] = []
+    let idx = 0
+    const lower = text.toLowerCase()
+    while (idx < text.length) {
+      const found = lower.indexOf(query, idx)
+      if (found === -1) {
+        parts.push(text.slice(idx))
+        break
+      }
+      if (found > idx) parts.push(text.slice(idx, found))
+      const matchIdx = globalMatchIdx++
+      const isCurrent = matchIdx === currentMatch
+      parts.push(
+        <span
+          key={matchIdx}
+          ref={(el) => { matchRefs.current[matchIdx] = el }}
+          className={`ci-log-search-match${isCurrent ? ' ci-log-search-match-current' : ''}`}
+        >
+          {text.slice(found, found + query.length)}
+        </span>
+      )
+      idx = found + query.length
+    }
+    return parts
+  }
+
+  return (
+    <div className="ci-log-viewer" ref={viewerRef}>
+      <div className="ci-log-structured">
+        {lines.map((line, i) => {
+          if (line.type === 'normal' && !line.text && !line.timestamp) {
+            return <div key={i} className="ci-log-line ci-log-line-blank">{'\n'}</div>
+          }
+          return (
+            <div key={i} className={`ci-log-line ci-log-line-${line.type}`}>
+              <span className="ci-log-lineno">{i + 1}</span>
+              {line.type === 'group' && <span className="ci-log-group-marker">{'\u25BC'}</span>}
+              {line.type === 'error' && <span className="ci-log-level-badge ci-log-level-error">ERR</span>}
+              {line.type === 'warning' && <span className="ci-log-level-badge ci-log-level-warning">WRN</span>}
+              {line.type === 'notice' && <span className="ci-log-level-badge ci-log-level-notice">NTC</span>}
+              <span className="ci-log-text">{renderText(line.text)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }

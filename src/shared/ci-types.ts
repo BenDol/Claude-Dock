@@ -51,13 +51,20 @@ export interface CiJobGroup {
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error'
 
+export interface NotificationAction {
+  label: string
+  url?: string
+  event?: string // dispatches a CustomEvent with notification data as detail
+}
+
 export interface DockNotification {
   id: string
   title: string
   message: string
   type: NotificationType
   timeout?: number
-  action?: { label: string; url?: string }
+  action?: NotificationAction
+  actions?: NotificationAction[]
   source?: string
   data?: Record<string, unknown>
 }

@@ -8,7 +8,7 @@ vi.mock('../../../logger', () => ({
   logError: () => {}
 }))
 
-import { createTestRepo, commitFile, writeFile, type TestRepo } from './setup'
+import { createTestRepo, commitFile, run, writeFile, type TestRepo } from './setup'
 import {
   stageFiles,
   unstageFiles,
@@ -146,12 +146,13 @@ describe('unstageFiles', () => {
     const paths: string[] = []
     for (let i = 0; i < count; i++) {
       const name = `file-${String(i).padStart(3, '0')}.txt`
-      commitFile(repo.cwd, name, `original-${i}`, `add ${name}`)
-    }
-    for (let i = 0; i < count; i++) {
-      const name = `file-${String(i).padStart(3, '0')}.txt`
-      writeFile(repo.cwd, name, `modified-${i}`)
+      writeFile(repo.cwd, name, `original-${i}`)
       paths.push(name)
+    }
+    await stageFiles(repo.cwd, paths)
+    run(repo.cwd, 'git', ['commit', '-m', 'add all files'])
+    for (let i = 0; i < count; i++) {
+      writeFile(repo.cwd, paths[i], `modified-${i}`)
     }
     await stageFiles(repo.cwd, paths)
     let status = await getStatus(repo.cwd)
@@ -160,7 +161,7 @@ describe('unstageFiles', () => {
     status = await getStatus(repo.cwd)
     expect(status.staged.length).toBe(0)
     expect(status.unstaged.length).toBe(count)
-  })
+  }, 60_000)
 })
 
 describe('discardFiles', () => {

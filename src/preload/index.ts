@@ -206,6 +206,9 @@ export interface DockApi {
     getJobLog: (projectDir: string, jobId: number) => Promise<string>
     startPolling: (projectDir: string) => Promise<void>
     stopPolling: (projectDir: string) => Promise<void>
+    fixWithClaude: (projectDir: string, data: Record<string, unknown>) => Promise<boolean>
+    onFixWithClaude: (callback: (data: Record<string, unknown>) => void) => () => void
+    rerunFailed: (projectDir: string, runId: number) => Promise<{ success: boolean; error?: string }>
   }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
@@ -396,7 +399,14 @@ const dockApi: DockApi = {
     cancelRun: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_CANCEL_RUN, projectDir, runId),
     getJobLog: (projectDir, jobId) => ipcRenderer.invoke(IPC.CI_GET_JOB_LOG, projectDir, jobId),
     startPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_START_POLLING, projectDir),
-    stopPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_STOP_POLLING, projectDir)
+    stopPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_STOP_POLLING, projectDir),
+    fixWithClaude: (projectDir, data) => ipcRenderer.invoke(IPC.CI_FIX_WITH_CLAUDE, projectDir, data),
+    onFixWithClaude: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: Record<string, unknown>) => callback(data)
+      ipcRenderer.on('ci-fix-with-claude', handler)
+      return () => ipcRenderer.removeListener('ci-fix-with-claude', handler)
+    },
+    rerunFailed: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_RERUN_FAILED, projectDir, runId)
   },
   notifications: {
     onShow: (callback) => {

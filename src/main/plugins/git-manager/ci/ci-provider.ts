@@ -9,5 +9,6 @@ export interface CiProvider {
   getRun(projectDir: string, runId: number): Promise<CiWorkflowRun | null>
   getRunJobs(projectDir: string, runId: number): Promise<CiJob[]>
   cancelRun(projectDir: string, runId: number): Promise<void>
+  rerunFailedJobs(projectDir: string, runId: number): Promise<void>
   getRunUrl(projectDir: string, runId: number): Promise<string>
 }
