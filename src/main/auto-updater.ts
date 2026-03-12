@@ -407,23 +407,60 @@ function installMacOS(dmgPath: string, currentExe: string): void {
   const appNameNoExt = appName.replace(/\.app$/, '')
   const appParent = path.dirname(appBundle)
   const mountPoint = path.join(os.tmpdir(), 'claude-dock-dmg')
+  const updateLogPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.log')
 
   const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.sh')
   const script = [
     '#!/bin/bash',
+    `LOG="${updateLogPath}"`,
+    'log() { echo "$(date +%H:%M:%S) $1" | tee -a "$LOG"; }',
+    '',
+    'log "=== Claude Dock macOS update ==="',
+    `log "App bundle: ${appBundle}"`,
+    `log "DMG path: ${dmgPath}"`,
+    '',
     // Gracefully close ALL instances
+    `log "Killing ${appNameNoExt}..."`,
     `pkill -x "${appNameNoExt}" 2>/dev/null || true`,
     'sleep 3',
     // Force kill any remaining instances
     `pkill -9 -x "${appNameNoExt}" 2>/dev/null || true`,
     'sleep 1',
+    '',
+    // Mount DMG — abort if this fails (don't delete the old app!)
     `mkdir -p "${mountPoint}"`,
-    `hdiutil attach "${dmgPath}" -mountpoint "${mountPoint}" -nobrowse -quiet`,
+    `log "Mounting DMG..."`,
+    `if ! hdiutil attach "${dmgPath}" -mountpoint "${mountPoint}" -nobrowse -quiet 2>>"$LOG"; then`,
+    '  log "ERROR: Failed to mount DMG — aborting update"',
+    `  open "${appBundle}" 2>/dev/null`,
+    '  exit 1',
+    'fi',
+    '',
+    // Verify the app exists inside the DMG before deleting the old one
+    `if [ ! -d "${mountPoint}/${appName}" ]; then`,
+    `  log "ERROR: ${appName} not found in DMG — aborting"`,
+    `  hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
+    `  open "${appBundle}" 2>/dev/null`,
+    '  exit 1',
+    'fi',
+    '',
+    // Now safe to replace
+    `log "Removing old app bundle..."`,
     `rm -rf "${appBundle}"`,
+    `log "Copying new app from DMG..."`,
     `cp -R "${mountPoint}/${appName}" "${appParent}/"`,
-    `hdiutil detach "${mountPoint}" -quiet`,
+    '',
+    // Remove quarantine attribute so Gatekeeper doesn't block the updated app
+    `log "Removing quarantine attribute..."`,
+    `xattr -cr "${appBundle}" 2>/dev/null || true`,
+    '',
+    `log "Unmounting DMG..."`,
+    `hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
     `rm -f "${dmgPath}"`,
+    '',
+    `log "Launching updated app..."`,
     `open "${appBundle}"`,
+    `log "Update complete."`,
     `rm -f "$0"`
   ].join('\n')
 

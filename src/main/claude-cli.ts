@@ -275,15 +275,25 @@ export async function detectClaudeCli(): Promise<ClaudeCliStatus> {
 /** Use `where` (Windows) or `which` (Unix) to find claude in PATH */
 function findViaWhich(): Promise<string | null> {
   return new Promise((resolve) => {
-    const cmd = process.platform === 'win32' ? 'where' : 'which'
-    execFile(cmd, ['claude'], { timeout: 5000 }, (err, stdout) => {
-      if (err || !stdout.trim()) {
-        resolve(null)
-        return
-      }
-      // `where` on Windows may return multiple lines — take the first
-      resolve(stdout.trim().split(/\r?\n/)[0])
-    })
+    if (process.platform === 'win32') {
+      execFile('where', ['claude'], { timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout.trim()) {
+          resolve(null)
+          return
+        }
+        // `where` on Windows may return multiple lines — take the first
+        resolve(stdout.trim().split(/\r?\n/)[0])
+      })
+    } else {
+      // Use a login shell so freshly-installed PATH entries (e.g. from ~/.zshrc) are picked up
+      exec('bash -l -c "which claude"', { timeout: 5000 }, (err, stdout) => {
+        if (err || !stdout.trim()) {
+          resolve(null)
+          return
+        }
+        resolve(stdout.trim().split(/\r?\n/)[0])
+      })
+    }
   })
 }
 
@@ -382,7 +392,11 @@ function checkKnownLocations(): string | null {
 /** Get the Claude CLI version string via shell — called separately to avoid slowing detection */
 export function getClaudeVersion(): Promise<string | null> {
   return new Promise((resolve) => {
-    exec('claude --version', { timeout: 10000 }, (err, stdout) => {
+    // Use login shell on Unix so freshly-installed PATH entries are picked up
+    const cmd = process.platform === 'win32'
+      ? 'claude --version'
+      : 'bash -l -c "claude --version"'
+    exec(cmd, { timeout: 10000 }, (err, stdout) => {
       if (err || !stdout.trim()) {
         resolve(null)
         return
@@ -569,13 +583,16 @@ function pollForClaude(onDone?: () => void): Promise<ClaudeInstallResult> {
 
     const check = async (): Promise<void> => {
       attempts++
+      log(`pollForClaude: attempt ${attempts}/${maxAttempts}`)
       const status = await detectClaudeCli()
       if (status.installed) {
+        log(`pollForClaude: detected after ${attempts} attempts`)
         onDone?.()
         resolve({ success: true })
         return
       }
       if (attempts >= maxAttempts) {
+        log('pollForClaude: timed out')
         onDone?.()
         resolve({ success: false, error: 'Timed out waiting for installation. Check the installer window.' })
         return
