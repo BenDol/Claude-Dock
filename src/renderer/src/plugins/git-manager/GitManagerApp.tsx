@@ -3055,17 +3055,26 @@ const WorkingChanges: React.FC<{
       .then((val) => { setAutoGen(typeof val === 'boolean' ? val : true) })
   }, [projectDir])
 
-  // Load diff when a file is selected
+  // Load diffs for all selected files (multi-select aware)
   useEffect(() => {
     if (!selectedFile) { setFileDiffs([]); return }
+    const staged = selectedFile.staged
+    const paths = selectedPaths.size > 0 ? [...selectedPaths] : [selectedFile.path]
     let cancelled = false
     setDiffLoading(true)
-    getDockApi().gitManager.getDiff(projectDir, selectedFile.path, selectedFile.staged)
-      .then((diffs) => { if (!cancelled) setFileDiffs(diffs) })
-      .catch(() => { if (!cancelled) setFileDiffs([]) })
-      .finally(() => { if (!cancelled) setDiffLoading(false) })
+    Promise.all(
+      paths.map((p) =>
+        getDockApi().gitManager.getDiff(projectDir, p, staged)
+          .then((diffs) => diffs)
+          .catch(() => [] as GitFileDiff[])
+      )
+    ).then((results) => {
+      if (!cancelled) setFileDiffs(results.flat())
+    }).finally(() => {
+      if (!cancelled) setDiffLoading(false)
+    })
     return () => { cancelled = true }
-  }, [selectedFile, projectDir])
+  }, [selectedFile, selectedPaths, projectDir])
 
   // Clear selection when the file disappears from the status
   useEffect(() => {
@@ -3557,7 +3566,8 @@ const WorkingChanges: React.FC<{
             staged={selectedFile.staged}
             projectDir={projectDir}
             syntaxHL={syntaxHL}
-            onClose={() => setSelectedFile(null)}
+            multiFile={selectedPaths.size > 1}
+            onClose={() => { setSelectedFile(null); setSelectedPaths(new Set()) }}
             onRefresh={onRefresh}
           />
         </>
@@ -3770,9 +3780,10 @@ const WorkingDiffViewer: React.FC<{
   staged: boolean
   projectDir: string
   syntaxHL: boolean
+  multiFile?: boolean
   onClose: () => void
   onRefresh: () => void
-}> = ({ diffs, loading, filePath, staged, projectDir, syntaxHL, onClose, onRefresh }) => {
+}> = ({ diffs, loading, filePath, staged, projectDir, syntaxHL, multiFile, onClose, onRefresh }) => {
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [dragStart, setDragStart] = useState<string | null>(null)
@@ -3789,13 +3800,15 @@ const WorkingDiffViewer: React.FC<{
   // Clear selection when file changes
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [filePath, staged])
 
-  // Build flat key list for range selection
+  // Build flat key list for range selection (fi:hi:li for multi-file, hi:li for single)
   const allLineKeys = useMemo(() => {
     const keys: string[] = []
     if (diffs.length === 0) return keys
-    for (let hi = 0; hi < diffs[0].hunks.length; hi++) {
-      for (let li = 0; li < diffs[0].hunks[hi].lines.length; li++) {
-        keys.push(`${hi}:${li}`)
+    for (let fi = 0; fi < diffs.length; fi++) {
+      for (let hi = 0; hi < diffs[fi].hunks.length; hi++) {
+        for (let li = 0; li < diffs[fi].hunks[hi].lines.length; li++) {
+          keys.push(`${fi}:${hi}:${li}`)
+        }
       }
     }
     return keys
@@ -3880,45 +3893,70 @@ const WorkingDiffViewer: React.FC<{
     if (diffs.length === 0) return 0
     let count = 0
     for (const key of selectedLines) {
-      const [hi, li] = key.split(':').map(Number)
-      const line = diffs[0]?.hunks[hi]?.lines[li]
+      const [fi, hi, li] = key.split(':').map(Number)
+      const line = diffs[fi]?.hunks[hi]?.lines[li]
       if (line && line.type !== 'context') count++
     }
     return count
   }, [selectedLines, diffs])
 
   const api = getDockApi()
-  const diff = diffs[0]
+
+  // Group selected lines by file index for per-file patch operations
+  const groupLinesByFile = useCallback((): Map<number, Set<string>> => {
+    const byFile = new Map<number, Set<string>>()
+    for (const key of selectedLines) {
+      const [fi, hi, li] = key.split(':').map(Number)
+      if (!byFile.has(fi)) byFile.set(fi, new Set())
+      byFile.get(fi)!.add(`${hi}:${li}`)
+    }
+    return byFile
+  }, [selectedLines])
 
   const handleStageLines = async () => {
-    if (!diff || selectedChanges === 0) return
-    const patch = buildPartialPatch(diff, selectedLines)
-    if (!patch) return
+    if (selectedChanges === 0) return
     setCtxMenu(null)
-    const result = await api.gitManager.applyPatch(projectDir, patch, true, false)
-    if (!result.success) { console.error('Stage lines failed:', result.error) }
+    const byFile = groupLinesByFile()
+    for (const [fi, lineKeys] of byFile) {
+      const diff = diffs[fi]
+      if (!diff) continue
+      const patch = buildPartialPatch(diff, lineKeys)
+      if (!patch) continue
+      const result = await api.gitManager.applyPatch(projectDir, patch, true, false)
+      if (!result.success) { console.error('Stage lines failed:', result.error) }
+    }
     setSelectedLines(new Set())
     onRefresh()
   }
 
   const handleUnstageLines = async () => {
-    if (!diff || selectedChanges === 0) return
-    const patch = buildPartialPatch(diff, selectedLines)
-    if (!patch) return
+    if (selectedChanges === 0) return
     setCtxMenu(null)
-    const result = await api.gitManager.applyPatch(projectDir, patch, true, true)
-    if (!result.success) { console.error('Unstage lines failed:', result.error) }
+    const byFile = groupLinesByFile()
+    for (const [fi, lineKeys] of byFile) {
+      const diff = diffs[fi]
+      if (!diff) continue
+      const patch = buildPartialPatch(diff, lineKeys)
+      if (!patch) continue
+      const result = await api.gitManager.applyPatch(projectDir, patch, true, true)
+      if (!result.success) { console.error('Unstage lines failed:', result.error) }
+    }
     setSelectedLines(new Set())
     onRefresh()
   }
 
   const handleDiscardLines = async () => {
-    if (!diff || selectedChanges === 0) return
-    const patch = buildPartialPatch(diff, selectedLines)
-    if (!patch) return
+    if (selectedChanges === 0) return
     setCtxMenu(null)
-    const result = await api.gitManager.applyPatch(projectDir, patch, false, true)
-    if (!result.success) { console.error('Discard lines failed:', result.error) }
+    const byFile = groupLinesByFile()
+    for (const [fi, lineKeys] of byFile) {
+      const diff = diffs[fi]
+      if (!diff) continue
+      const patch = buildPartialPatch(diff, lineKeys)
+      if (!patch) continue
+      const result = await api.gitManager.applyPatch(projectDir, patch, false, true)
+      if (!result.success) { console.error('Discard lines failed:', result.error) }
+    }
     setSelectedLines(new Set())
     onRefresh()
   }
@@ -3949,16 +3987,16 @@ const WorkingDiffViewer: React.FC<{
   }, [diffs])
 
   const getSelectedText = useCallback((mode: 'content' | 'patch' | 'new' | 'old') => {
-    if (!diff) return ''
+    if (diffs.length === 0) return ''
     const lines: string[] = []
     const sortedKeys = [...selectedLines].sort((a, b) => {
-      const [ah, al] = a.split(':').map(Number)
-      const [bh, bl] = b.split(':').map(Number)
-      return ah !== bh ? ah - bh : al - bl
+      const [af, ah, al] = a.split(':').map(Number)
+      const [bf, bh, bl] = b.split(':').map(Number)
+      return af !== bf ? af - bf : ah !== bh ? ah - bh : al - bl
     })
     for (const key of sortedKeys) {
-      const [hi, li] = key.split(':').map(Number)
-      const line = diff.hunks[hi]?.lines[li]
+      const [fi, hi, li] = key.split(':').map(Number)
+      const line = diffs[fi]?.hunks[hi]?.lines[li]
       if (!line) continue
       if (mode === 'content') {
         lines.push(line.content)
@@ -3972,7 +4010,7 @@ const WorkingDiffViewer: React.FC<{
       }
     }
     return lines.join('\n')
-  }, [diff, selectedLines])
+  }, [diffs, selectedLines])
 
   const doCopy = (mode: 'content' | 'patch' | 'new' | 'old') => {
     navigator.clipboard.writeText(getSelectedText(mode))
@@ -3983,17 +4021,23 @@ const WorkingDiffViewer: React.FC<{
     <div className="gm-changes-diff">
       <div className="gm-changes-diff-header">
         <span className="gm-changes-diff-title">
-          <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {filePath}</span>
-          <button
-            className="gm-file-hover-btn"
-            onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
-            title="Open file"
-          ><OpenFileIcon /></button>
-          <button
-            className="gm-file-hover-btn"
-            onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
-            title="Show in folder"
-          ><ShowInFolderIcon /></button>
+          {multiFile ? (
+            <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {diffs.length} file{diffs.length !== 1 ? 's' : ''}</span>
+          ) : (
+            <>
+              <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {filePath}</span>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
+                title="Open file"
+              ><OpenFileIcon /></button>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
+                title="Show in folder"
+              ><ShowInFolderIcon /></button>
+            </>
+          )}
         </span>
         <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
       </div>
@@ -4005,6 +4049,21 @@ const WorkingDiffViewer: React.FC<{
         ) : (
           diffs.map((f, fi) => (
             <div key={f.path} className="gm-diff-file">
+              {multiFile && (
+                <div className="gm-diff-file-header">
+                  <span className="gm-diff-file-path">{f.path}</span>
+                  <button
+                    className="gm-file-hover-btn"
+                    onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
+                    title="Open file"
+                  ><OpenFileIcon /></button>
+                  <button
+                    className="gm-file-hover-btn"
+                    onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
+                    title="Show in folder"
+                  ><ShowInFolderIcon /></button>
+                </div>
+              )}
               {f.isBinary ? (
                 <div className="gm-diff-binary">Binary file</div>
               ) : (
@@ -4013,7 +4072,7 @@ const WorkingDiffViewer: React.FC<{
                     <div key={hi} className="gm-diff-hunk">
                       <div className="gm-diff-hunk-header">{h.header}</div>
                       {h.lines.map((l, li) => {
-                        const key = `${hi}:${li}`
+                        const key = `${fi}:${hi}:${li}`
                         const isSelected = selectedLines.has(key)
                         return (
                           <div
