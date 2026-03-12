@@ -10,6 +10,7 @@ import { registerPlugins, PluginManager } from './plugins'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 import { updateJumpList } from './recent-store'
+import { enrichPathWithKnownDirs } from './claude-cli'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -33,6 +34,10 @@ const cliDebug = process.argv.includes('--enable-logging')
 const settingsDebug = (() => { try { return getSetting('advanced')?.debugLogging } catch { return false } })()
 const buildDebug = typeof __DEBUG_DEFAULT__ !== 'undefined' && __DEBUG_DEFAULT__
 initLogger(cliDebug || settingsDebug || buildDebug)
+
+// Enrich PATH early so PTY shells and child_process.spawn find CLI tools.
+// On macOS/Linux, Electron inherits a minimal PATH when launched from Finder/desktop.
+enrichPathWithKnownDirs()
 
 // Disable GPU acceleration for portable exe — GPU compositing from the temp extraction
 // directory causes rendering failures (tiny terminals, broken canvas) with multiple windows.

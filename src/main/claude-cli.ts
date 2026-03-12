@@ -251,7 +251,7 @@ export async function detectClaudeCli(): Promise<ClaudeCliStatus> {
     if (knownPath) {
       log(`Claude CLI found at known location: ${knownPath}`)
       // Found at known location but not in PATH — fix it
-      ensureClaudeInWindowsPath()
+      ensureClaudeInPath(knownPath)
       return { installed: true, path: knownPath }
     }
 
@@ -627,6 +627,88 @@ function logInstallResult(logPath: string): void {
     logInfo(`Claude install log (${logPath}):\n${content}`)
   } catch (err) {
     logError('Failed to read install log:', err)
+  }
+}
+
+/**
+ * Ensure the directory containing the detected claude binary is in process.env.PATH.
+ * On macOS, Electron apps launched from Finder/Dock get a minimal PATH that
+ * doesn't include ~/.local/bin or Homebrew paths. This enriches the process env
+ * so that PTY shells and child_process.spawn inherit the correct PATH.
+ * On Windows, also persists the change to the user's registry PATH.
+ */
+function ensureClaudeInPath(claudePath: string): void {
+  const dir = path.dirname(claudePath)
+  addDirToProcessPath(dir)
+
+  // On Windows, also persist to the registry
+  if (process.platform === 'win32') {
+    ensureClaudeInWindowsPath()
+  }
+}
+
+/** Add a directory to process.env.PATH if not already present */
+function addDirToProcessPath(dir: string): void {
+  const envPath = process.env.PATH || ''
+  const separator = process.platform === 'win32' ? ';' : ':'
+  const dirs = envPath.split(separator).map((d) => d.toLowerCase())
+
+  if (!dirs.includes(dir.toLowerCase())) {
+    process.env.PATH = envPath + separator + dir
+    if (process.platform === 'win32') {
+      process.env.Path = process.env.PATH
+    }
+    log(`addDirToProcessPath: added ${dir} to process.env.PATH`)
+  }
+}
+
+/**
+ * Enrich process.env.PATH with well-known directories that may contain CLI tools.
+ * Called early at app startup — before any terminal spawns — to work around
+ * the minimal PATH that Electron inherits on macOS (Finder/Dock launch)
+ * and some Linux desktop environments.
+ */
+export function enrichPathWithKnownDirs(): void {
+  const home = os.homedir()
+  const dirs: string[] = process.platform === 'darwin'
+    ? [
+        path.join(home, '.local', 'bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        path.join(home, '.npm-global', 'bin'),
+        path.join(home, '.local', 'share', 'pnpm'),
+      ]
+    : process.platform === 'linux'
+    ? [
+        path.join(home, '.local', 'bin'),
+        '/usr/local/bin',
+        path.join(home, '.npm-global', 'bin'),
+        path.join(home, '.local', 'share', 'pnpm'),
+      ]
+    : [] // Windows uses registry-based PATH refresh instead
+
+  for (const dir of dirs) {
+    try {
+      if (fs.existsSync(dir)) {
+        addDirToProcessPath(dir)
+      }
+    } catch { /* skip inaccessible dirs */ }
+  }
+
+  // Also check nvm versions for any node version bin dir
+  if (process.platform !== 'win32') {
+    const nvmDir = path.join(home, '.nvm', 'versions', 'node')
+    try {
+      if (fs.existsSync(nvmDir)) {
+        const versions = fs.readdirSync(nvmDir)
+        for (const ver of versions) {
+          const binDir = path.join(nvmDir, ver, 'bin')
+          if (fs.existsSync(binDir)) {
+            addDirToProcessPath(binDir)
+          }
+        }
+      }
+    } catch { /* skip */ }
   }
 }
 

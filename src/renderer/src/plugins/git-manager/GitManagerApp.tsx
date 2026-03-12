@@ -479,6 +479,13 @@ const GitManagerApp: React.FC = () => {
     return () => { if (timer) clearInterval(timer) }
   }, [activeDir, refresh])
 
+  // Refresh when the window regains focus (e.g. toolbar button re-opens it)
+  useEffect(() => {
+    const onFocus = () => refresh()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refresh])
+
   const selectCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectCommitGen = useRef(0)
 
@@ -2506,6 +2513,7 @@ const WorkingChanges: React.FC<{
   const allUnstaged = [...status.unstaged, ...status.untracked]
 
   const pendingActionRef = useRef<'commit' | 'commit-push' | null>(null)
+  const [pendingAction, setPendingAction] = useState<'commit' | 'commit-push' | null>(null)
 
   const autoGenRef = useRef(0)
 
@@ -2521,6 +2529,7 @@ const WorkingChanges: React.FC<{
         // Execute queued action if any
         const queued = pendingActionRef.current
         pendingActionRef.current = null
+        setPendingAction(null)
         if (queued) {
           setBusy(true)
           const commitResult = await api.gitManager.commit(projectDir, result.message)
@@ -2553,10 +2562,12 @@ const WorkingChanges: React.FC<{
         }
       } else {
         pendingActionRef.current = null
+        setPendingAction(null)
         setGenError(result.error || 'Failed to generate')
       }
     } catch (err) {
       pendingActionRef.current = null
+      setPendingAction(null)
       setGenError(err instanceof Error ? err.message : 'Failed to generate')
     }
     setGenerating(false)
@@ -2565,6 +2576,7 @@ const WorkingChanges: React.FC<{
   const cancelGenerate = () => {
     ++autoGenRef.current // invalidate in-flight result
     pendingActionRef.current = null
+    setPendingAction(null)
     setGenerating(false)
   }
 
@@ -2612,7 +2624,7 @@ const WorkingChanges: React.FC<{
   }
 
   const handleCommit = async () => {
-    if (generating) { pendingActionRef.current = 'commit'; return }
+    if (generating) { pendingActionRef.current = 'commit'; setPendingAction('commit'); return }
     if (!commitMsg.trim()) return
     setBusy(true)
     setCommitting('commit')
@@ -2635,7 +2647,7 @@ const WorkingChanges: React.FC<{
   }
 
   const handleCommitPush = async () => {
-    if (generating) { pendingActionRef.current = 'commit-push'; return }
+    if (generating) { pendingActionRef.current = 'commit-push'; setPendingAction('commit-push'); return }
     if (!commitMsg.trim()) return
     setBusy(true)
     setCommitting('commit-push')
@@ -2908,22 +2920,26 @@ const WorkingChanges: React.FC<{
           )}
           <div className="gm-commit-btn-group">
             <button
-              className="gm-commit-btn gm-commit-btn-left"
+              className={`gm-commit-btn gm-commit-btn-left${pendingAction === 'commit' ? ' gm-commit-btn-queued' : ''}`}
               onClick={handleCommit}
               disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
             >
               {committing === 'commit'
                 ? <><span className="gm-commit-spinner" /> Committing...</>
-                : pendingActionRef.current === 'commit' ? 'Waiting...' : `Commit (${status.staged.length} staged)`}
+                : pendingAction === 'commit'
+                  ? <><span className="gm-commit-spinner" /> Commit <span className="gm-commit-queued-hint">after generate</span></>
+                  : `Commit (${status.staged.length} staged)`}
             </button>
             <button
-              className="gm-commit-btn gm-commit-btn-right"
+              className={`gm-commit-btn gm-commit-btn-right${pendingAction === 'commit-push' ? ' gm-commit-btn-queued' : ''}`}
               onClick={handleCommitPush}
               disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
             >
               {committing === 'commit-push'
                 ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
-                : pendingActionRef.current === 'commit-push' ? 'Waiting...' : 'Commit & Push'}
+                : pendingAction === 'commit-push'
+                  ? <><span className="gm-commit-spinner" /> Commit & Push <span className="gm-commit-queued-hint">after generate</span></>
+                  : 'Commit & Push'}
             </button>
           </div>
         </div>
