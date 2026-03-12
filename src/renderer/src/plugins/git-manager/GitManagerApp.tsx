@@ -1166,20 +1166,6 @@ const GitManagerApp: React.FC = () => {
               onError={handleSmartError}
               onCheckout={handleCheckoutBranch}
             />
-          ) : activeTab === 'changes' ? (
-            <WorkingChanges
-              status={status}
-              stashes={stashes}
-              projectDir={activeDir}
-              syntaxHL={syntaxHL}
-              navigateTo={wcNavigateTo}
-              onNavigateHandled={() => setWcNavigateTo(null)}
-              onRefresh={refresh}
-              onError={handleSmartError}
-              onConfirm={setConfirmModal}
-              onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
-              onStatusRefreshed={setStatus}
-            />
           ) : activeTab === 'conflicts' && mergeState ? (
             <MergeConflictsPanel
               mergeState={mergeState}
@@ -1187,7 +1173,25 @@ const GitManagerApp: React.FC = () => {
               onRefresh={refresh}
               onError={handleSmartError}
             />
-          ) : activeTab === 'ci' ? null : null}
+          ) : activeTab === 'ci' ? null : activeTab === 'changes' ? null : null}
+          {/* Working changes stays mounted so commit/push/generation survives tab switches */}
+          {!notGitRepo && !loading && status && (
+            <div style={{ display: activeTab === 'changes' ? 'contents' : 'none' }}>
+              <WorkingChanges
+                status={status}
+                stashes={stashes}
+                projectDir={activeDir}
+                syntaxHL={syntaxHL}
+                navigateTo={wcNavigateTo}
+                onNavigateHandled={() => setWcNavigateTo(null)}
+                onRefresh={refresh}
+                onError={handleSmartError}
+                onConfirm={setConfirmModal}
+                onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
+                onStatusRefreshed={setStatus}
+              />
+            </div>
+          )}
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
