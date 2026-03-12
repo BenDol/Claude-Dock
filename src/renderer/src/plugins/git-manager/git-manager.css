@@ -2890,6 +2890,10 @@
   flex: 1;
 }
 
+.gm-notif-list::-webkit-scrollbar { width: 6px; }
+.gm-notif-list::-webkit-scrollbar-track { background: transparent; }
+.gm-notif-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
 .gm-notif-empty {
   padding: 24px;
   text-align: center;

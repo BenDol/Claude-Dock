@@ -405,6 +405,10 @@ body {
   flex: 1;
 }
 
+.tb-notif-list::-webkit-scrollbar { width: 6px; }
+.tb-notif-list::-webkit-scrollbar-track { background: transparent; }
+.tb-notif-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
 .tb-notif-empty {
   padding: 16px;
   text-align: center;
