@@ -514,13 +514,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
-                    checked={settings.updater?.autoUpdate ?? false}
+                    checked={__DEV__ ? false : (settings.updater?.autoUpdate ?? false)}
                     onChange={(e) => updateUpdater({ autoUpdate: e.target.checked })}
+                    disabled={__DEV__}
                   />
                   Automatically update
                 </label>
                 <div className="settings-description">
-                  When enabled, updates are downloaded and installed automatically on launch.
+                  {__DEV__
+                    ? 'Automatic updates are disabled in dev builds.'
+                    : 'When enabled, updates are downloaded and installed automatically on launch.'}
                 </div>
                 <div>
                   <button
@@ -586,5 +589,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
 
 declare const __BUILD_SHA__: string
 declare const __BUILD_DATE__: string
+declare const __DEV__: boolean
 
 export default SettingsModal

@@ -79,7 +79,7 @@ const Launcher: React.FC = () => {
     // Start update check
     api.settings.get().then((settings) => {
       const profile = settings.updater?.profile || 'latest'
-      autoUpdateRef.current = settings.updater?.autoUpdate ?? false
+      autoUpdateRef.current = __DEV__ ? false : (settings.updater?.autoUpdate ?? false)
       api.updater
         .check(profile)
         .then((info) => {
@@ -967,5 +967,7 @@ const Launcher: React.FC = () => {
     </div>
   )
 }
+
+declare const __DEV__: boolean
 
 export default Launcher

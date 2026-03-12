@@ -193,6 +193,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.UPDATER_DOWNLOAD, async (event, url: string, assetName: string) => {
+    if (__DEV__) throw new Error('Updates are disabled in dev mode')
     const win = BrowserWindow.fromWebContents(event.sender)
     try {
       const filePath = await downloadUpdate(url, assetName, (downloaded, total) => {
@@ -414,6 +415,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.UPDATER_INSTALL, () => {
+    if (__DEV__) throw new Error('Updates are disabled in dev mode')
     try {
       installAndRestart()
     } catch (err) {
