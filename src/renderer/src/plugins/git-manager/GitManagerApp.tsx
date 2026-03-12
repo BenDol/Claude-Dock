@@ -6381,7 +6381,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                   className={`gm-notif-item gm-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
                   onClick={() => {
                     if (n.source === 'ci' && n.data?.runId) {
-                      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
+                      getDockApi().ci.navigateToRun(projectDir, n.data.runId as number)
                       setOpen(false)
                     }
                   }}

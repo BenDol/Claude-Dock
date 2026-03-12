@@ -434,11 +434,13 @@ body {
   line-height: 1;
   padding: 0 3px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.1s;
 }
 
 .tb-notif-item:hover .tb-notif-dismiss {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .tb-notif-dismiss:hover {
