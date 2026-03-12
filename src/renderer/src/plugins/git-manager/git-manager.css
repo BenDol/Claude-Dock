@@ -2882,6 +2882,30 @@
   padding: 8px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
   transition: background 0.1s;
+  position: relative;
+}
+
+.gm-notif-item-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.gm-notif-item:hover .gm-notif-item-dismiss {
+  opacity: 1;
+}
+
+.gm-notif-item-dismiss:hover {
+  color: var(--text-primary);
 }
 
 .gm-notif-item:last-child {
