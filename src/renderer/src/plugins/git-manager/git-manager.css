@@ -913,12 +913,12 @@
 .gm-submodule-icon-badge {
   position: absolute;
   top: -6px;
-  right: -10px;
+  right: -4px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 0;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
   pointer-events: none;
@@ -933,8 +933,8 @@
 
 .gm-submodule-icon-badge .gm-submodule-ahead svg,
 .gm-submodule-icon-badge .gm-submodule-behind svg {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 .gm-submodule-ahead {
