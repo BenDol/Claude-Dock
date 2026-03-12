@@ -319,41 +319,57 @@ const BellIcon: React.FC = () => (
   </svg>
 )
 
-const NOTIF_STORAGE_KEY = 'dock-notifications'
-const NOTIF_READ_KEY = 'dock-notifications-read'
+function notifStorageKey(projectDir: string): string {
+  return `dock-notifications:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+}
 
-function loadStoredNotifications(): DockNotification[] {
+function notifReadKey(projectDir: string): string {
+  return `dock-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+}
+
+function loadStoredNotifications(projectDir: string): DockNotification[] {
+  if (!projectDir) return []
   try {
-    const raw = localStorage.getItem(NOTIF_STORAGE_KEY)
+    const raw = localStorage.getItem(notifStorageKey(projectDir))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
 
-function loadStoredReadIds(): Set<string> {
+function loadStoredReadIds(projectDir: string): Set<string> {
+  if (!projectDir) return new Set()
   try {
-    const raw = localStorage.getItem(NOTIF_READ_KEY)
+    const raw = localStorage.getItem(notifReadKey(projectDir))
     return raw ? new Set(JSON.parse(raw)) : new Set()
   } catch { return new Set() }
 }
 
 const NotificationDropdown: React.FC = () => {
   const [open, setOpen] = useState(false)
-  const [notifications, setNotifications] = useState<DockNotification[]>(() => loadStoredNotifications())
-  const [readIds, setReadIds] = useState<Set<string>>(() => loadStoredReadIds())
+  const [notifications, setNotifications] = useState<DockNotification[]>([])
+  const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
   const projectDir = useDockStore((s) => s.projectDir)
 
+  // Reload stored notifications when projectDir becomes available or changes
+  useEffect(() => {
+    if (!projectDir) return
+    setNotifications(loadStoredNotifications(projectDir))
+    setReadIds(loadStoredReadIds(projectDir))
+  }, [projectDir])
+
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
 
-  // Persist notifications
+  // Persist notifications (project-scoped)
   useEffect(() => {
-    try { localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(notifications)) } catch { /* ignore */ }
-  }, [notifications])
+    if (!projectDir) return
+    try { localStorage.setItem(notifStorageKey(projectDir), JSON.stringify(notifications)) } catch { /* ignore */ }
+  }, [notifications, projectDir])
 
-  // Persist read state
+  // Persist read state (project-scoped)
   useEffect(() => {
-    try { localStorage.setItem(NOTIF_READ_KEY, JSON.stringify([...readIds])) } catch { /* ignore */ }
-  }, [readIds])
+    if (!projectDir) return
+    try { localStorage.setItem(notifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
+  }, [readIds, projectDir])
 
   useEffect(() => {
     const api = getDockApi()
@@ -385,11 +401,13 @@ const NotificationDropdown: React.FC = () => {
   const clearAll = useCallback(() => {
     setNotifications([])
     setReadIds(new Set())
-    try {
-      localStorage.removeItem(NOTIF_STORAGE_KEY)
-      localStorage.removeItem(NOTIF_READ_KEY)
-    } catch { /* ignore */ }
-  }, [])
+    if (projectDir) {
+      try {
+        localStorage.removeItem(notifStorageKey(projectDir))
+        localStorage.removeItem(notifReadKey(projectDir))
+      } catch { /* ignore */ }
+    }
+  }, [projectDir])
 
   // Close on outside click
   useEffect(() => {

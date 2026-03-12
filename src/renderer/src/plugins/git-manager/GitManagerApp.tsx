@@ -6326,29 +6326,40 @@ const SettingsIcon: React.FC = () => (
 
 const MAX_NOTIFICATIONS = 50
 
-const GM_NOTIF_STORAGE_KEY = 'gm-notifications'
-const GM_NOTIF_READ_KEY = 'gm-notifications-read'
+function gmNotifStorageKey(projectDir: string): string {
+  return `gm-notifications:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+}
+
+function gmNotifReadKey(projectDir: string): string {
+  return `gm-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+}
 
 const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<DockNotification[]>(() => {
-    try { const raw = localStorage.getItem(GM_NOTIF_STORAGE_KEY); return raw ? JSON.parse(raw) : [] } catch { return [] }
+    try { const raw = localStorage.getItem(gmNotifStorageKey(projectDir)); return raw ? JSON.parse(raw) : [] } catch { return [] }
   })
   const [readIds, setReadIds] = useState<Set<string>>(() => {
-    try { const raw = localStorage.getItem(GM_NOTIF_READ_KEY); return raw ? new Set(JSON.parse(raw)) : new Set() } catch { return new Set() }
+    try { const raw = localStorage.getItem(gmNotifReadKey(projectDir)); return raw ? new Set(JSON.parse(raw)) : new Set() } catch { return new Set() }
   })
   const ref = useRef<HTMLDivElement>(null)
 
+  // Reload stored notifications when projectDir changes (e.g. navigating into submodule)
+  useEffect(() => {
+    try { const raw = localStorage.getItem(gmNotifStorageKey(projectDir)); setNotifications(raw ? JSON.parse(raw) : []) } catch { setNotifications([]) }
+    try { const raw = localStorage.getItem(gmNotifReadKey(projectDir)); setReadIds(raw ? new Set(JSON.parse(raw)) : new Set()) } catch { setReadIds(new Set()) }
+  }, [projectDir])
+
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
 
-  // Persist notifications
+  // Persist notifications (project-scoped)
   useEffect(() => {
-    try { localStorage.setItem(GM_NOTIF_STORAGE_KEY, JSON.stringify(notifications)) } catch { /* ignore */ }
-  }, [notifications])
+    try { localStorage.setItem(gmNotifStorageKey(projectDir), JSON.stringify(notifications)) } catch { /* ignore */ }
+  }, [notifications, projectDir])
 
   useEffect(() => {
-    try { localStorage.setItem(GM_NOTIF_READ_KEY, JSON.stringify([...readIds])) } catch { /* ignore */ }
-  }, [readIds])
+    try { localStorage.setItem(gmNotifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
+  }, [readIds, projectDir])
 
   useEffect(() => {
     const api = getDockApi()
@@ -6381,10 +6392,10 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
     setNotifications([])
     setReadIds(new Set())
     try {
-      localStorage.removeItem(GM_NOTIF_STORAGE_KEY)
-      localStorage.removeItem(GM_NOTIF_READ_KEY)
+      localStorage.removeItem(gmNotifStorageKey(projectDir))
+      localStorage.removeItem(gmNotifReadKey(projectDir))
     } catch { /* ignore */ }
-  }, [])
+  }, [projectDir])
 
   return (
     <div className="gm-notif-dropdown" ref={ref}>
