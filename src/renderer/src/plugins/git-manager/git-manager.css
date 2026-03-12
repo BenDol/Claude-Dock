@@ -359,10 +359,14 @@
   cursor: default;
 }
 
-.gm-pull-split-arrow:hover,
 .gm-pull-split:hover .gm-pull-split-arrow {
   color: var(--text-primary);
-  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.gm-pull-split-arrow:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
   border-color: var(--border-color);
 }
 

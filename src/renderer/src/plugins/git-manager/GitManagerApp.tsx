@@ -2079,11 +2079,31 @@ const LazyDiffFile: React.FC<{
   useEffect(() => {
     if (!scrollTo) return
     setVisible(true)
-    // Wait a frame so the content renders before scrolling
+
+    // Wait for React to commit the expanded content, then scroll.
+    // Use instant scroll to avoid being thrown off by intermediate lazy files
+    // expanding during a smooth scroll (which shifts the target element).
+    // After the initial jump, do a second correction to account for any
+    // layout shifts from IntersectionObserver-triggered expansions.
+    let cancelled = false
+    const doScroll = (): void => {
+      if (cancelled || !sentinelRef.current) return
+      sentinelRef.current.scrollIntoView({ behavior: 'instant', block: 'start' })
+      // Second pass: after intermediate files may have expanded from the scroll,
+      // re-verify position. This catches layout shifts from lazy loading.
+      requestAnimationFrame(() => {
+        if (cancelled || !sentinelRef.current) return
+        sentinelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        onScrolled()
+      })
+    }
     requestAnimationFrame(() => {
-      sentinelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      onScrolled()
+      requestAnimationFrame(() => {
+        if (cancelled) return
+        setTimeout(doScroll, 50)
+      })
     })
+    return () => { cancelled = true }
   }, [scrollTo, onScrolled])
 
   useEffect(() => {
@@ -2129,7 +2149,7 @@ const LazyDiffFile: React.FC<{
         </span>
       </div>
       {!visible ? (
-        <div className="gm-diff-lazy-placeholder" style={{ height: Math.min(lineCount * 20, 100) }} />
+        <div className="gm-diff-lazy-placeholder" style={{ height: lineCount * 20 + 8 }} />
       ) : f.isBinary ? (
         <div className="gm-diff-binary">Binary file</div>
       ) : (

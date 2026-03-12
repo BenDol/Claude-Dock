@@ -151,6 +151,14 @@ function DockApp() {
     init()
   }, [setDockInfo, loadSettings])
 
+  // Set window title to include project folder name
+  useEffect(() => {
+    if (projectDir) {
+      const name = projectDir.split(/[/\\]/).pop() || projectDir
+      document.title = `Claude Dock - ${name}`
+    }
+  }, [projectDir])
+
   // Auto-spawn terminals (matching saved session count or 1)
   useEffect(() => {
     if (initialized && autoSpawn && terminals.length === 0) {
