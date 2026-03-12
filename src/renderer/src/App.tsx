@@ -10,6 +10,7 @@ import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
+import { useInputContextMenu } from './hooks/useInputContextMenu'
 
 const searchParams = new URLSearchParams(window.location.search)
 const isLauncher = searchParams.has('launcher')
@@ -31,6 +32,9 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
 }
 
 function App() {
+  // Right-click Cut/Copy/Paste menu on all text inputs and textareas
+  useInputContextMenu()
+
   if (pluginView) {
     const PluginComponent = pluginView.component
     return (

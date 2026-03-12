@@ -1485,3 +1485,53 @@ body {
   border-radius: 6px;
 }
 
+/* ── Input right-click context menu ── */
+
+.input-ctx-menu {
+  position: fixed;
+  min-width: 180px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  user-select: none;
+}
+
+.input-ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.input-ctx-item:hover:not(.disabled) {
+  background: var(--accent-color);
+  color: white;
+}
+
+.input-ctx-item.disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.input-ctx-shortcut {
+  margin-left: 24px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.input-ctx-item:hover:not(.disabled) .input-ctx-shortcut {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.input-ctx-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
