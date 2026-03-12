@@ -463,9 +463,13 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     return () => window.removeEventListener('ci-navigate-run', handler)
   }, [projectDir])
 
-  // Apply filters
+  // Apply filters — exclude runs already shown in the active section
+  const activeRunIds = useMemo(() => new Set(filteredActiveRuns.map((r) => r.id)), [filteredActiveRuns])
+
   const filteredRuns = useMemo(() => {
     return runs.filter((run) => {
+      // Skip runs already in the active section
+      if (activeRunIds.has(run.id)) return false
       // Prune stale queued unless user opted in
       if (!filters.showStaleQueued && isStaleQueued(run)) return false
       // Status filter
@@ -476,7 +480,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       if (filters.event && run.event !== filters.event) return false
       return true
     })
-  }, [runs, filters])
+  }, [runs, filters, activeRunIds])
 
   const toggleStatusFilter = useCallback((s: ConclusionFilter) => {
     setFilters((prev) => {

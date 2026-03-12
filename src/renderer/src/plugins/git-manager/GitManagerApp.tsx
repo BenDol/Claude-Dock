@@ -6379,9 +6379,9 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                 <div
                   key={n.id}
                   className={`gm-notif-item gm-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
-                  onClick={() => {
+                  onMouseDown={() => {
                     if (n.source === 'ci' && n.data?.runId) {
-                      getDockApi().ci.navigateToRun(projectDir, n.data.runId as number)
+                      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
                       setOpen(false)
                     }
                   }}
@@ -6394,7 +6394,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                       <button
                         key={i}
                         className="gm-notif-item-event-action"
-                        onClick={(e) => {
+                        onMouseDown={(e) => {
                           e.stopPropagation()
                           if (a.event === 'ci-fix-with-claude' && n.data) {
                             getDockApi().ci.fixWithClaude(projectDir, n.data as Record<string, unknown>)
@@ -6412,7 +6412,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                   {resolveNotifActions(n).some((a) => a.url) && (
                     <button
                       className="gm-notif-item-action"
-                      onClick={(e) => {
+                      onMouseDown={(e) => {
                         e.stopPropagation()
                         const urlAction = resolveNotifActions(n).find((a) => a.url)
                         if (urlAction?.url) getDockApi().app.openExternal(urlAction.url)
@@ -6424,7 +6424,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                   )}
                   <button
                     className="gm-notif-item-dismiss"
-                    onClick={(e) => { e.stopPropagation(); removeNotification(n.id) }}
+                    onMouseDown={(e) => { e.stopPropagation(); removeNotification(n.id) }}
                     title="Dismiss"
                   >
                     &times;
