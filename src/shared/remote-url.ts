@@ -1,5 +1,31 @@
 export type GitProvider = 'github' | 'gitlab' | 'bitbucket' | 'azure' | 'sourcehut' | 'codeberg' | 'gitea' | 'generic'
 
+/** Extract owner/repo from a git remote URL. Returns null if unparseable. */
+export function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string } | null {
+  const cleaned = remoteUrl.trim().replace(/\.git$/, '')
+
+  // SSH: git@github.com:owner/repo
+  const sshMatch = cleaned.match(/^(?:ssh:\/\/)?(?:[^@]+@)?[^:/]+[:/](.+)$/)
+  if (sshMatch && !cleaned.startsWith('http')) {
+    const parts = sshMatch[1].split('/')
+    if (parts.length >= 2) {
+      return { owner: parts[parts.length - 2], repo: parts[parts.length - 1] }
+    }
+  }
+
+  // HTTPS: https://github.com/owner/repo
+  try {
+    const url = new URL(cleaned)
+    const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/')
+    if (segments.length >= 2) {
+      return { owner: segments[segments.length - 2], repo: segments[segments.length - 1] }
+    }
+  } catch {
+    // not a valid URL
+  }
+  return null
+}
+
 /** Detect the git hosting provider from a remote URL. */
 export function detectProvider(remoteUrl: string): GitProvider {
   const normalized = remoteUrl.trim().replace(/\.git$/, '').toLowerCase()

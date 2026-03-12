@@ -7,6 +7,7 @@ import * as gitOps from './git-operations'
 import type { GitLogOptions } from '../../../shared/git-manager-types'
 import { log, logError } from '../../logger'
 import { getPluginSetting } from '../plugin-store'
+import { registerCiIpc } from './ci/ci-ipc'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -494,6 +495,8 @@ export function registerGitManagerIpc(): void {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set identity' }
     }
   })
+
+  registerCiIpc()
 
   log('[git-manager] IPC handlers registered')
 }

@@ -17,6 +17,8 @@ import type {
   GitConflictChunk
 } from '../../../../shared/git-manager-types'
 import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../../../shared/remote-url'
+import { highlightDiffHunks } from './diff-highlight'
+import CiPanel from './CiPanel'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
@@ -242,7 +244,8 @@ const GitManagerApp: React.FC = () => {
   const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts'>('log')
+  const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts' | 'ci'>('log')
+  const [enableCiTab, setEnableCiTab] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
   const actionBusyRef = useRef(false)
@@ -269,6 +272,27 @@ const GitManagerApp: React.FC = () => {
       applyThemeToDocument(useSettingsStore.getState().settings)
     })
   }, [loadSettings])
+
+  // Load CI tab setting
+  useEffect(() => {
+    getDockApi().plugins.getSetting(projectDir, 'git-manager', 'enableCiTab')
+      .then((v) => setEnableCiTab(v === true))
+      .catch(() => {})
+  }, [projectDir])
+
+  // React to CI tab setting changes from the settings dropdown
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { key, value } = (e as CustomEvent).detail
+      if (key === 'enableCiTab') {
+        const enabled = !!value
+        setEnableCiTab(enabled)
+        if (!enabled) setActiveTab((t) => t === 'ci' ? 'history' : t)
+      }
+    }
+    window.addEventListener('gm-setting-changed', handler)
+    return () => window.removeEventListener('gm-setting-changed', handler)
+  }, [])
 
   // Set window title based on active directory
   useEffect(() => {
@@ -876,6 +900,14 @@ const GitManagerApp: React.FC = () => {
                 )}
               </button>
             )}
+            {enableCiTab && (
+              <button
+                className={`gm-tab${activeTab === 'ci' ? ' gm-tab-active' : ''}`}
+                onClick={() => setActiveTab('ci')}
+              >
+                CI
+              </button>
+            )}
             <span className="gm-tabs-spacer" />
           </div>
 
@@ -922,6 +954,8 @@ const GitManagerApp: React.FC = () => {
               onRefresh={refresh}
               onError={handleSmartError}
             />
+          ) : activeTab === 'ci' ? (
+            <CiPanel projectDir={activeDir} />
           ) : null}
         </div>
 
@@ -1786,6 +1820,29 @@ const CommitDetailPanel: React.FC<{
   const isDragging = useRef(false)
   const [commitUrl, setCommitUrl] = useState<string | null>(null)
   const [provider, setProvider] = useState<GitProvider>('generic')
+  const [syntaxHL, setSyntaxHL] = useState(true)
+
+  // Load syntax highlighting setting
+  useEffect(() => {
+    getDockApi().plugins.getSetting(projectDir, 'git-manager', 'syntaxHighlighting')
+      .then((val) => { setSyntaxHL(typeof val === 'boolean' ? val : true) })
+  }, [projectDir])
+
+  // React to setting changes from the settings dropdown
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { key, value } = (e as CustomEvent).detail
+      if (key === 'syntaxHighlighting') setSyntaxHL(!!value)
+    }
+    window.addEventListener('gm-setting-changed', handler)
+    return () => window.removeEventListener('gm-setting-changed', handler)
+  }, [])
+
+  // Syntax-highlighted HTML per file/hunk/line
+  const highlightedFiles = useMemo(() => {
+    if (!syntaxHL) return null
+    return detail.files.map(f => highlightDiffHunks(f.path, f.hunks))
+  }, [detail.files, syntaxHL])
 
   // Clear selection on new commit
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [detail.hash])
@@ -2022,7 +2079,10 @@ const CommitDetailPanel: React.FC<{
                             <span className="gm-diff-line-prefix">
                               {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
                             </span>
-                            <span className="gm-diff-line-content">{l.content}</span>
+                            {highlightedFiles?.[fi]?.[hi]?.[li]
+                              ? <span className="gm-diff-line-content gm-highlighted"
+                                  dangerouslySetInnerHTML={{ __html: highlightedFiles[fi][hi][li] }} />
+                              : <span className="gm-diff-line-content">{l.content}</span>}
                           </div>
                         )
                       })}
@@ -3176,6 +3236,29 @@ const WorkingDiffViewer: React.FC<{
   const lastClickedRef = useRef<string | null>(null)
   const isDragging = useRef(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const [syntaxHL, setSyntaxHL] = useState(true)
+
+  // Load syntax highlighting setting
+  useEffect(() => {
+    getDockApi().plugins.getSetting(projectDir, 'git-manager', 'syntaxHighlighting')
+      .then((val) => { setSyntaxHL(typeof val === 'boolean' ? val : true) })
+  }, [projectDir])
+
+  // React to setting changes from the settings dropdown
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { key, value } = (e as CustomEvent).detail
+      if (key === 'syntaxHighlighting') setSyntaxHL(!!value)
+    }
+    window.addEventListener('gm-setting-changed', handler)
+    return () => window.removeEventListener('gm-setting-changed', handler)
+  }, [])
+
+  // Syntax-highlighted HTML per file/hunk/line
+  const highlightedDiffs = useMemo(() => {
+    if (!syntaxHL || diffs.length === 0) return null
+    return diffs.map(f => highlightDiffHunks(f.path, f.hunks))
+  }, [diffs, syntaxHL])
 
   // Clear selection when file changes
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [filePath, staged])
@@ -3394,7 +3477,7 @@ const WorkingDiffViewer: React.FC<{
         ) : diffs.length === 0 ? (
           <div className="gm-diff-empty">No diff available</div>
         ) : (
-          diffs.map((f) => (
+          diffs.map((f, fi) => (
             <div key={f.path} className="gm-diff-file">
               {f.isBinary ? (
                 <div className="gm-diff-binary">Binary file</div>
@@ -3421,7 +3504,10 @@ const WorkingDiffViewer: React.FC<{
                             <span className="gm-diff-line-prefix">
                               {l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' '}
                             </span>
-                            <span className="gm-diff-line-content">{l.content}</span>
+                            {highlightedDiffs?.[fi]?.[hi]?.[li]
+                              ? <span className="gm-diff-line-content gm-highlighted"
+                                  dangerouslySetInnerHTML={{ __html: highlightedDiffs[fi][hi][li] }} />
+                              : <span className="gm-diff-line-content">{l.content}</span>}
                           </div>
                         )
                       })}
@@ -5579,9 +5665,12 @@ const AddRemoteModal: React.FC<{
 // --- Settings dropdown ---
 
 const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number'; default?: unknown }[] = [
-  { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean' },
-  { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean' },
-  { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 }
+  { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
+  { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
+  { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
+  { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
+  { key: 'enableCiTab', label: 'Show CI tab (GitHub Actions)', type: 'boolean', default: false },
+  { key: 'showActionNotifications', label: 'Show notifications when CI runs complete', type: 'boolean', default: true }
 ]
 
 const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
@@ -5622,6 +5711,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     const next = !cur
     setValues((prev) => ({ ...prev, [key]: next }))
     await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, next)
+    window.dispatchEvent(new CustomEvent('gm-setting-changed', { detail: { key, value: next } }))
   }
 
   const setNumber = async (key: string, val: number) => {

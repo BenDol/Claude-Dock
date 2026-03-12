@@ -57,7 +57,7 @@ describe('GitManagerPlugin settings schema', () => {
     expect(plugin.lazyLoad).toBe(true)
   })
 
-  it('has 3 settings total', () => {
-    expect(plugin.settingsSchema.length).toBe(3)
+  it('has 6 settings total', () => {
+    expect(plugin.settingsSchema.length).toBe(6)
   })
 })

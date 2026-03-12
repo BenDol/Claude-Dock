@@ -14,6 +14,7 @@ import type {
   GitMergeState,
   GitConflictFileContent
 } from '../shared/git-manager-types'
+import type { CiWorkflow, CiWorkflowRun, CiJob, DockNotification } from '../shared/ci-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -187,6 +188,23 @@ export interface DockApi {
     getIdentity: (projectDir: string) => Promise<{ name: string; email: string }>
     setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
   }
+  ci: {
+    checkAvailable: (projectDir: string) => Promise<boolean>
+    checkGhInstalled: () => Promise<boolean>
+    checkGhAuth: () => Promise<boolean>
+    checkGithubRemote: (projectDir: string) => Promise<boolean>
+    runGhAuthLogin: () => Promise<{ success: boolean; error?: string }>
+    getWorkflows: (projectDir: string) => Promise<CiWorkflow[]>
+    getWorkflowRuns: (projectDir: string, workflowId: number, page: number, perPage: number) => Promise<CiWorkflowRun[]>
+    getActiveRuns: (projectDir: string) => Promise<CiWorkflowRun[]>
+    getRunJobs: (projectDir: string, runId: number) => Promise<CiJob[]>
+    cancelRun: (projectDir: string, runId: number) => Promise<{ success: boolean; error?: string }>
+    startPolling: (projectDir: string) => Promise<void>
+    stopPolling: (projectDir: string) => Promise<void>
+  }
+  notifications: {
+    onShow: (callback: (notification: DockNotification) => void) => () => void
+  }
   launcher: {
     setZoom: (factor: number) => void
     getZoom: () => number
@@ -353,6 +371,29 @@ const dockApi: DockApi = {
     removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir),
     getIdentity: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_IDENTITY, projectDir),
     setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global)
+  },
+  ci: {
+    checkAvailable: (projectDir) => ipcRenderer.invoke(IPC.CI_CHECK_AVAILABLE, projectDir),
+    checkGhInstalled: () => ipcRenderer.invoke(IPC.CI_CHECK_GH_INSTALLED),
+    checkGhAuth: () => ipcRenderer.invoke(IPC.CI_CHECK_GH_AUTH),
+    checkGithubRemote: (projectDir) => ipcRenderer.invoke(IPC.CI_CHECK_GITHUB_REMOTE, projectDir),
+    runGhAuthLogin: () => ipcRenderer.invoke(IPC.CI_RUN_GH_AUTH_LOGIN),
+    getWorkflows: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_WORKFLOWS, projectDir),
+    getWorkflowRuns: (projectDir, workflowId, page, perPage) => ipcRenderer.invoke(IPC.CI_GET_WORKFLOW_RUNS, projectDir, workflowId, page, perPage),
+    getActiveRuns: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_ACTIVE_RUNS, projectDir),
+    getRunJobs: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_GET_RUN_JOBS, projectDir, runId),
+    cancelRun: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_CANCEL_RUN, projectDir, runId),
+    startPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_START_POLLING, projectDir),
+    stopPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_STOP_POLLING, projectDir)
+  },
+  notifications: {
+    onShow: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, notification: DockNotification) => {
+        callback(notification)
+      }
+      ipcRenderer.on(IPC.NOTIFICATION_SHOW, handler)
+      return () => ipcRenderer.removeListener(IPC.NOTIFICATION_SHOW, handler)
+    }
   },
   launcher: {
     setZoom: (factor) => webFrame.setZoomFactor(factor),

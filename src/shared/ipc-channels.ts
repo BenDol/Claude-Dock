@@ -110,9 +110,24 @@ export const IPC = {
   GIT_MGR_GET_IDENTITY: 'gitMgr:getIdentity',
   GIT_MGR_SET_IDENTITY: 'gitMgr:setIdentity',
 
+  // CI
+  CI_CHECK_AVAILABLE: 'ci:checkAvailable',
+  CI_CHECK_GH_INSTALLED: 'ci:checkGhInstalled',
+  CI_CHECK_GH_AUTH: 'ci:checkGhAuth',
+  CI_CHECK_GITHUB_REMOTE: 'ci:checkGithubRemote',
+  CI_RUN_GH_AUTH_LOGIN: 'ci:runGhAuthLogin',
+  CI_GET_WORKFLOWS: 'ci:getWorkflows',
+  CI_GET_WORKFLOW_RUNS: 'ci:getWorkflowRuns',
+  CI_GET_ACTIVE_RUNS: 'ci:getActiveRuns',
+  CI_GET_RUN_JOBS: 'ci:getRunJobs',
+  CI_CANCEL_RUN: 'ci:cancelRun',
+  CI_START_POLLING: 'ci:startPolling',
+  CI_STOP_POLLING: 'ci:stopPolling',
+
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
   SETTINGS_CHANGED: 'settings:changed',
-  UPDATER_PROGRESS: 'updater:progress'
+  UPDATER_PROGRESS: 'updater:progress',
+  NOTIFICATION_SHOW: 'notification:show'
 } as const

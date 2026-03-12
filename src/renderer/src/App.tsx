@@ -4,6 +4,7 @@ import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
 import SettingsModal from './components/SettingsModal'
 import Launcher from './components/Launcher'
+import ToastContainer from './components/ToastContainer'
 import { useDockStore } from './stores/dock-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
@@ -38,15 +39,28 @@ function App() {
   if (pluginView) {
     const PluginComponent = pluginView.component
     return (
-      <Suspense fallback={<div className="loading">Loading...</div>}>
-        <PluginComponent />
-      </Suspense>
+      <>
+        <Suspense fallback={<div className="loading">Loading...</div>}>
+          <PluginComponent />
+        </Suspense>
+        <ToastContainer />
+      </>
     )
   }
   if (isLauncher) {
-    return <LauncherApp />
+    return (
+      <>
+        <LauncherApp />
+        <ToastContainer />
+      </>
+    )
   }
-  return <DockApp />
+  return (
+    <>
+      <DockApp />
+      <ToastContainer />
+    </>
+  )
 }
 
 function LauncherApp() {

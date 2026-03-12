@@ -3,6 +3,7 @@ import type { PluginEventBus } from '../plugin-events'
 import type { PluginSettingDef } from '../../../shared/plugin-types'
 import { registerGitManagerIpc } from './git-manager-ipc'
 import { GitManagerWindowManager } from './git-manager-window'
+import { disposeCi, stopCiPollingForProject } from './ci/ci-ipc'
 import { log } from '../../logger'
 
 export class GitManagerPlugin implements DockPlugin {
@@ -29,20 +30,40 @@ export class GitManagerPlugin implements DockPlugin {
       label: 'Auto recheck time (minutes) — 0 to disable recurring fetch',
       type: 'number',
       defaultValue: 15
+    },
+    {
+      key: 'syntaxHighlighting',
+      label: 'Syntax highlighting in diff views',
+      type: 'boolean',
+      defaultValue: true
+    },
+    {
+      key: 'enableCiTab',
+      label: 'Show CI tab (GitHub Actions)',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
+      key: 'showActionNotifications',
+      label: 'Show notifications when CI runs complete',
+      type: 'boolean',
+      defaultValue: true
     }
   ]
 
   register(bus: PluginEventBus): void {
     registerGitManagerIpc()
 
-    // Close git manager window when the dock for that project closes
+    // Close git manager window and stop CI polling when the dock for that project closes
     bus.on('project:postClose', this.id, ({ projectDir }) => {
+      stopCiPollingForProject(projectDir)
       GitManagerWindowManager.getInstance().close(projectDir)
     })
 
-    // Close git manager window when this plugin is disabled for a project
+    // Close git manager window and stop CI polling when this plugin is disabled for a project
     bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
       if (pluginId === this.id) {
+        stopCiPollingForProject(projectDir)
         GitManagerWindowManager.getInstance().close(projectDir)
       }
     })
@@ -51,6 +72,7 @@ export class GitManagerPlugin implements DockPlugin {
   }
 
   dispose(): void {
+    disposeCi()
     GitManagerWindowManager.getInstance().closeAll()
   }
 }
