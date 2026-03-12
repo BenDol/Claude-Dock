@@ -2817,6 +2817,12 @@
   pointer-events: none;
 }
 
+.gm-notif-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
 .gm-notif-panel {
   position: absolute;
   top: calc(100% + 6px);
@@ -3840,8 +3846,8 @@
   border-radius: 2px;
 }
 
-.gm-search-nav-btn:first-of-type { right: 38px; }
-.gm-search-nav-btn:last-of-type { right: 22px; }
+.gm-search-nav-btn:not(.gm-search-nav-btn ~ .gm-search-nav-btn) { right: 38px; }
+.gm-search-nav-btn + .gm-search-nav-btn { right: 22px; }
 
 .gm-search-nav-btn:hover {
   color: var(--text-primary);

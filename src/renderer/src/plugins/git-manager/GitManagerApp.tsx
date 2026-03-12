@@ -6348,23 +6348,16 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
   return (
     <div className="gm-notif-dropdown" ref={ref}>
-      <button className="gm-toolbar-btn" onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }} title="Notifications">
+      <button className="gm-toolbar-btn" onClick={() => setOpen(!open)} title="Notifications">
         <NotificationBellIcon />
         {unreadCount > 0 && <span className="gm-notif-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
       </button>
       {open && (
-        <div className="gm-notif-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <>
+        <div className="gm-notif-backdrop" onMouseDown={() => setOpen(false)} />
+        <div className="gm-notif-panel">
           <div className="gm-notif-header">
             <span className="gm-notif-title">Notifications</span>
             {notifications.length > 0 && (
@@ -6379,7 +6372,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                 <div
                   key={n.id}
                   className={`gm-notif-item gm-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
-                  onMouseDown={() => {
+                  onClick={() => {
                     if (n.source === 'ci' && n.data?.runId) {
                       window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
                       setOpen(false)
@@ -6394,7 +6387,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                       <button
                         key={i}
                         className="gm-notif-item-event-action"
-                        onMouseDown={(e) => {
+                        onClick={(e) => {
                           e.stopPropagation()
                           if (a.event === 'ci-fix-with-claude' && n.data) {
                             getDockApi().ci.fixWithClaude(projectDir, n.data as Record<string, unknown>)
@@ -6412,7 +6405,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                   {resolveNotifActions(n).some((a) => a.url) && (
                     <button
                       className="gm-notif-item-action"
-                      onMouseDown={(e) => {
+                      onClick={(e) => {
                         e.stopPropagation()
                         const urlAction = resolveNotifActions(n).find((a) => a.url)
                         if (urlAction?.url) getDockApi().app.openExternal(urlAction.url)
@@ -6424,7 +6417,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                   )}
                   <button
                     className="gm-notif-item-dismiss"
-                    onMouseDown={(e) => { e.stopPropagation(); removeNotification(n.id) }}
+                    onClick={(e) => { e.stopPropagation(); removeNotification(n.id) }}
                     title="Dismiss"
                   >
                     &times;
@@ -6434,6 +6427,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   )
