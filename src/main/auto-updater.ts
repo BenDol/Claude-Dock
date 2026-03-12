@@ -407,66 +407,113 @@ function installMacOS(dmgPath: string, currentExe: string): void {
   const appNameNoExt = appName.replace(/\.app$/, '')
   const appParent = path.dirname(appBundle)
   const mountPoint = path.join(os.tmpdir(), 'claude-dock-dmg')
-  const updateLogPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.log')
+  const updateDir = path.join(os.tmpdir(), 'claude-dock-update')
+  const updateLogPath = path.join(updateDir, 'update.log')
 
-  const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.sh')
+  // Determine install destination — if running from a read-only volume
+  // (e.g. a mounted DMG or non-writable dir), install to /Applications instead
+  let destParent = appParent
+  let destBundle = appBundle
+  try {
+    fs.accessSync(appParent, fs.constants.W_OK)
+  } catch {
+    destParent = '/Applications'
+    destBundle = path.join('/Applications', appName)
+  }
+
+  fs.mkdirSync(updateDir, { recursive: true })
+
+  const scriptPath = path.join(updateDir, 'update.sh')
   const script = [
     '#!/bin/bash',
     `LOG="${updateLogPath}"`,
-    'log() { echo "$(date +%H:%M:%S) $1" | tee -a "$LOG"; }',
+    'log() { echo "$(date +%H:%M:%S) $1" >> "$LOG" 2>&1; }',
     '',
     'log "=== Claude Dock macOS update ==="',
     `log "App bundle: ${appBundle}"`,
+    `log "Dest bundle: ${destBundle}"`,
     `log "DMG path: ${dmgPath}"`,
+    `log "PID: $$"`,
     '',
-    // Gracefully close ALL instances
-    `log "Killing ${appNameNoExt}..."`,
-    `pkill -x "${appNameNoExt}" 2>/dev/null || true`,
-    'sleep 3',
+    // Wait for the Electron process to fully exit
+    `log "Waiting for ${appNameNoExt} to exit..."`,
+    `for i in $(seq 1 30); do`,
+    `  if ! pgrep -x "${appNameNoExt}" >/dev/null 2>&1; then break; fi`,
+    '  sleep 0.5',
+    'done',
     // Force kill any remaining instances
     `pkill -9 -x "${appNameNoExt}" 2>/dev/null || true`,
     'sleep 1',
     '',
+    // Remove quarantine from the downloaded DMG itself
+    `xattr -d com.apple.quarantine "${dmgPath}" 2>/dev/null || true`,
+    '',
     // Mount DMG — abort if this fails (don't delete the old app!)
     `mkdir -p "${mountPoint}"`,
-    `log "Mounting DMG..."`,
+    'log "Mounting DMG..."',
     `if ! hdiutil attach "${dmgPath}" -mountpoint "${mountPoint}" -nobrowse -quiet 2>>"$LOG"; then`,
     '  log "ERROR: Failed to mount DMG — aborting update"',
-    `  open "${appBundle}" 2>/dev/null`,
+    `  open "${destBundle}" 2>/dev/null`,
     '  exit 1',
     'fi',
     '',
-    // Verify the app exists inside the DMG before deleting the old one
-    `if [ ! -d "${mountPoint}/${appName}" ]; then`,
-    `  log "ERROR: ${appName} not found in DMG — aborting"`,
+    // Find the .app inside the DMG (don't assume same name)
+    'log "Listing DMG contents:"',
+    `ls -la "${mountPoint}/" >> "$LOG" 2>&1`,
+    `SRC_APP=$(find "${mountPoint}" -maxdepth 1 -name "*.app" -print -quit)`,
+    'if [ -z "$SRC_APP" ]; then',
+    '  log "ERROR: No .app found in DMG — aborting"',
     `  hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
-    `  open "${appBundle}" 2>/dev/null`,
+    `  open "${destBundle}" 2>/dev/null`,
     '  exit 1',
     'fi',
+    'log "Found app in DMG: $SRC_APP"',
     '',
     // Now safe to replace
     `log "Removing old app bundle..."`,
-    `rm -rf "${appBundle}"`,
-    `log "Copying new app from DMG..."`,
-    `cp -R "${mountPoint}/${appName}" "${appParent}/"`,
+    `rm -rf "${destBundle}" 2>>"$LOG"`,
+    `if [ -d "${destBundle}" ]; then`,
+    '  log "ERROR: Failed to remove old app (permission denied?) — aborting"',
+    `  hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
+    '  exit 1',
+    'fi',
+    '',
+    'log "Copying new app from DMG..."',
+    `if ! cp -R "$SRC_APP" "${destParent}/" 2>>"$LOG"; then`,
+    '  log "ERROR: Failed to copy new app — aborting"',
+    `  hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
+    '  exit 1',
+    'fi',
     '',
     // Remove quarantine attribute so Gatekeeper doesn't block the updated app
-    `log "Removing quarantine attribute..."`,
-    `xattr -cr "${appBundle}" 2>/dev/null || true`,
+    'log "Removing quarantine attribute..."',
+    `xattr -cr "${destBundle}" 2>/dev/null || true`,
     '',
-    `log "Unmounting DMG..."`,
+    'log "Unmounting DMG..."',
     `hdiutil detach "${mountPoint}" -quiet 2>/dev/null`,
     `rm -f "${dmgPath}"`,
     '',
     `log "Launching updated app..."`,
-    `open "${appBundle}"`,
-    `log "Update complete."`,
+    `if ! open "${destBundle}" 2>>"$LOG"; then`,
+    '  log "ERROR: Failed to launch app"',
+    '  exit 1',
+    'fi',
+    'log "Update complete."',
     `rm -f "$0"`
   ].join('\n')
 
   fs.writeFileSync(scriptPath, script, { mode: 0o755 })
-  spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' }).unref()
-  app.quit()
+
+  // Use nohup to ensure the script survives parent exit, redirect to log
+  const logFd = fs.openSync(updateLogPath, 'a')
+  spawn('nohup', ['/bin/bash', scriptPath], {
+    detached: true,
+    stdio: ['ignore', logFd, logFd]
+  }).unref()
+  fs.closeSync(logFd)
+
+  // Small delay so the child process fully forks before we exit
+  setTimeout(() => app.quit(), 300)
 }
 
 function installLinux(newAppImage: string, currentExe: string): void {
