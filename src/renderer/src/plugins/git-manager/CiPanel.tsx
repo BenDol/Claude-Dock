@@ -11,6 +11,8 @@ interface CiPanelProps {
   searchQuery?: string
   currentBranch?: string
   active?: boolean
+  pendingRunId?: number | null
+  onNavigated?: () => void
 }
 
 type CiStatus = 'loading' | 'setup' | 'ready' | 'error'
@@ -90,7 +92,7 @@ function getStatusColor(run: CiWorkflowRun): string {
   return 'var(--text-secondary)' // cancelled
 }
 
-export default function CiPanel({ projectDir, provider, searchQuery, currentBranch, active }: CiPanelProps) {
+export default function CiPanel({ projectDir, provider, searchQuery, currentBranch, active, pendingRunId, onNavigated }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [setup, setSetup] = useState<SetupState>({ ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false, loginOpened: false })
@@ -445,23 +447,33 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     window.dispatchEvent(new CustomEvent('ci-status-change', { detail: ciStatus }))
   }, [runs, filteredActiveRuns])
 
-  // Listen for navigate-to-run events from notifications
+  // Navigate to a specific run (shared logic for DOM events + pending prop)
+  const navigateToRun = useCallback((runId: number) => {
+    setExpandedRun(runId)
+    setRunJobs([])
+    setLoadingJobs(true)
+    api.ci.getRunJobs(projectDir, runId)
+      .then((jobs) => setRunJobs(jobs))
+      .catch(() => {})
+      .finally(() => setLoadingJobs(false))
+  }, [projectDir])
+
+  // Listen for navigate-to-run DOM events (from within this window)
   useEffect(() => {
     const handler = (e: Event) => {
       const runId = (e as CustomEvent).detail as number
-      if (runId) {
-        setExpandedRun(runId)
-        setRunJobs([])
-        setLoadingJobs(true)
-        api.ci.getRunJobs(projectDir, runId)
-          .then((jobs) => setRunJobs(jobs))
-          .catch(() => {})
-          .finally(() => setLoadingJobs(false))
-      }
+      if (runId) navigateToRun(runId)
     }
     window.addEventListener('ci-navigate-run', handler)
     return () => window.removeEventListener('ci-navigate-run', handler)
-  }, [projectDir])
+  }, [navigateToRun])
+
+  // Process pending navigation from dock notifications — waits until runs are loaded
+  useEffect(() => {
+    if (!pendingRunId || status !== 'ready' || loadingRuns) return
+    navigateToRun(pendingRunId)
+    onNavigated?.()
+  }, [pendingRunId, status, loadingRuns, navigateToRun, onNavigated])
 
   // Apply filters — exclude runs already shown in the active section
   const activeRunIds = useMemo(() => new Set(filteredActiveRuns.map((r) => r.id)), [filteredActiveRuns])

@@ -153,16 +153,26 @@ export function registerCiIpc(): void {
   // Navigate to a CI run in the git-manager plugin window (called from dock window)
   ipcMain.handle(IPC.CI_NAVIGATE_TO_RUN, async (_event, projectDir: string, runId: number) => {
     const mgr = GitManagerWindowManager.getInstance()
+    const existingWin = mgr.getWindow(projectDir)
     await mgr.open(projectDir)
     const win = mgr.getWindow(projectDir)
-    if (win) {
-      // Brief delay so React hooks mount in newly-created windows
-      setTimeout(() => {
-        if (!win.isDestroyed()) win.webContents.send('ci-navigate-run', runId)
-      }, 300)
-      return true
+    if (!win) return false
+
+    const send = () => {
+      if (!win.isDestroyed()) win.webContents.send('ci-navigate-run', runId)
     }
-    return false
+
+    if (existingWin) {
+      // Window already loaded — send immediately
+      send()
+    } else {
+      // Newly created — wait for page + React mount, then send
+      // The renderer queues this as pendingCiRunId, so exact timing is non-critical
+      win.webContents.once('did-finish-load', () => {
+        setTimeout(send, 500)
+      })
+    }
+    return true
   })
 
   // Forward "Fix with Claude" from plugin window to the dock window and focus it

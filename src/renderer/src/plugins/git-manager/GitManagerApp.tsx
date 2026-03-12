@@ -333,10 +333,15 @@ const GitManagerApp: React.FC = () => {
     return () => window.removeEventListener('ci-status-change', handler)
   }, [])
 
+  // Pending CI run navigation — queued until CiPanel is fully loaded
+  const [pendingCiRunId, setPendingCiRunId] = useState<number | null>(null)
+
   // Navigate to CI tab when a notification is clicked (DOM event from within this window)
   useEffect(() => {
-    const handler = () => {
+    const handler = (e: Event) => {
+      const runId = (e as CustomEvent).detail as number | undefined
       setActiveTab('ci')
+      if (runId) setPendingCiRunId(runId)
     }
     window.addEventListener('ci-navigate-run', handler)
     return () => window.removeEventListener('ci-navigate-run', handler)
@@ -347,7 +352,7 @@ const GitManagerApp: React.FC = () => {
     const api = getDockApi()
     return api.ci.onNavigateToRun((runId) => {
       setActiveTab('ci')
-      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: runId }))
+      setPendingCiRunId(runId)
     })
   }, [])
 
@@ -1198,7 +1203,7 @@ const GitManagerApp: React.FC = () => {
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
-              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} />
+              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} pendingRunId={pendingCiRunId} onNavigated={() => setPendingCiRunId(null)} />
             </div>
           )}
         </div>
