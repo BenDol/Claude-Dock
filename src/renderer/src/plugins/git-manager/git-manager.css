@@ -1109,6 +1109,22 @@
   cursor: default;
 }
 
+.gm-tab-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--text-secondary);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: gm-tab-spin 0.8s linear infinite;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+@keyframes gm-tab-spin {
+  to { transform: rotate(360deg); }
+}
+
 .gm-tab-badge {
   display: inline-flex;
   align-items: center;

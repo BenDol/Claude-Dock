@@ -251,6 +251,7 @@ const GitManagerApp: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts' | 'ci'>('log')
   const [enableCiTab, setEnableCiTab] = useState(false)
   const [ciStatus, setCiStatus] = useState<'success' | 'failure' | 'in_progress' | 'none'>('none')
+  const [wcBusy, setWcBusy] = useState(false)
   const [syntaxHL, setSyntaxHL] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
@@ -1032,6 +1033,7 @@ const GitManagerApp: React.FC = () => {
               }}
             >
               Working Changes
+              {wcBusy && activeTab !== 'changes' && <span className="gm-tab-spinner" />}
               {status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 && (
                 <span className="gm-tab-badge">
                   {status.staged.length + status.unstaged.length + status.untracked.length}
@@ -1189,6 +1191,7 @@ const GitManagerApp: React.FC = () => {
                 onConfirm={setConfirmModal}
                 onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
                 onStatusRefreshed={setStatus}
+                onBusyChange={setWcBusy}
               />
             </div>
           )}
@@ -2974,7 +2977,8 @@ const WorkingChanges: React.FC<{
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
   onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
-}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed }) => {
+  onBusyChange?: (busy: boolean) => void
+}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -2995,6 +2999,11 @@ const WorkingChanges: React.FC<{
   const fileListRef = useRef<HTMLDivElement>(null)
   const scrollListRef = useRef<HTMLDivElement>(null)
   const commitBoxRef = useRef<HTMLDivElement>(null)
+
+  // Report busy state to parent for tab indicator
+  useEffect(() => {
+    onBusyChange?.(!!committing || generating)
+  }, [committing, generating, onBusyChange])
 
   // Sync localStatus when parentStatus changes (from full refresh)
   useEffect(() => { setLocalStatus(null) }, [parentStatus])
