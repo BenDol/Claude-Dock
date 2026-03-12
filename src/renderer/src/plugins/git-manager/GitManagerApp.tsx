@@ -6079,7 +6079,8 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
   { key: 'enableCiTab', label: 'Show CI tab (GitHub Actions)', type: 'boolean', default: false },
-  { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['success', 'failure'], options: [
+  { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
+    { value: 'started', label: 'Started' },
     { value: 'success', label: 'Success' },
     { value: 'failure', label: 'Failure' },
     { value: 'cancelled', label: 'Cancelled' }

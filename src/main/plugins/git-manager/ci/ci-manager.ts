@@ -8,7 +8,7 @@ import { log } from '../../../logger'
 const ACTIVE_POLL_MS = 10_000
 const IDLE_POLL_MS = 60_000
 
-const DEFAULT_NOTIFICATION_CATEGORIES = ['success', 'failure']
+const DEFAULT_NOTIFICATION_CATEGORIES = ['started', 'success', 'failure']
 
 interface ProjectPolling {
   provider: CiProvider
@@ -16,6 +16,7 @@ interface ProjectPolling {
   timer: ReturnType<typeof setTimeout> | null
   cachedRuns: Map<number, CiWorkflowRun>
   ticking: boolean
+  initialized: boolean
 }
 
 export class CiManager {
@@ -32,7 +33,8 @@ export class CiManager {
       projectDir,
       timer: null,
       cachedRuns: new Map(),
-      ticking: false
+      ticking: false,
+      initialized: false
     }
     this.projects.set(projectDir, entry)
     this.tick(entry)
@@ -64,11 +66,19 @@ export class CiManager {
       // Detect transitions: previously active -> now completed
       for (const [runId, prev] of entry.cachedRuns) {
         if (prev.status !== 'completed') {
-          // See if this run is no longer in active list
           const stillActive = runs.find((r) => r.id === runId)
           if (!stillActive) {
-            // Run completed — fetch actual conclusion and notify
             this.emitCompletionNotification(entry, prev)
+          }
+        }
+      }
+
+      // Detect new runs (not in previous cache) — skip first poll to avoid
+      // notifying about already-running jobs on startup
+      if (entry.initialized) {
+        for (const run of runs) {
+          if (!entry.cachedRuns.has(run.id)) {
+            this.emitStartedNotification(entry, run)
           }
         }
       }
@@ -78,6 +88,7 @@ export class CiManager {
       for (const run of runs) {
         entry.cachedRuns.set(run.id, run)
       }
+      entry.initialized = true
     } catch (err) {
       log('[ci-manager] tick error:', err)
     }
@@ -89,6 +100,21 @@ export class CiManager {
       const interval = hasActive ? ACTIVE_POLL_MS : IDLE_POLL_MS
       entry.timer = setTimeout(() => this.tick(entry), interval)
     }
+  }
+
+  private emitStartedNotification(entry: ProjectPolling, run: CiWorkflowRun): void {
+    const categories = getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
+    const enabledCategories = categories ?? DEFAULT_NOTIFICATION_CATEGORIES
+    if (!enabledCategories.includes('started')) return
+
+    const nm = NotificationManager.getInstance()
+    nm.notify({
+      title: 'CI Run Started',
+      message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
+      type: 'info',
+      source: 'ci',
+      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined
+    })
   }
 
   private async emitCompletionNotification(entry: ProjectPolling, run: CiWorkflowRun): Promise<void> {
