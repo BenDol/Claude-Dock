@@ -7,7 +7,7 @@ describe('remoteUrlToCommitUrl', () => {
   describe('GitHub', () => {
     it('HTTPS URL', () => {
       expect(remoteUrlToCommitUrl('https://github.com/user/repo.git', HASH))
-        .toBe(`https://github.com/user/repo/commits/${HASH}`)
+        .toBe(`https://github.com/user/repo/commit/${HASH}`)
     })
 
     it('HTTPS URL without .git', () => {
