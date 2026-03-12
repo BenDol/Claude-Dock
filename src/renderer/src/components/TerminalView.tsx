@@ -53,11 +53,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, gotDataRef])
 
-  // Re-fit when loading dismissed — multiple attempts to handle layout settling
+  // Re-fit when loading dismissed — single fit after layout settles to avoid
+  // hammering the PTY with multiple resize events during Claude's TUI init
   useEffect(() => {
     if (!loading) {
-      const timers = [50, 200, 500].map((ms) => setTimeout(() => fit(), ms))
-      return () => timers.forEach(clearTimeout)
+      const timer = setTimeout(() => fit(), 150)
+      return () => clearTimeout(timer)
     }
   }, [loading, fit])
 

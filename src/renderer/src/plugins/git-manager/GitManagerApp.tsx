@@ -14,7 +14,9 @@ import type {
   GitSubmoduleInfo,
   GitMergeState,
   GitConflictFileContent,
-  GitConflictChunk
+  GitConflictChunk,
+  GitSearchResult,
+  GitSearchResponse
 } from '../../../../shared/git-manager-types'
 import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../../../shared/remote-url'
 import { highlightDiffHunks } from './diff-highlight'
@@ -247,6 +249,7 @@ const GitManagerApp: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts' | 'ci'>('log')
   const [enableCiTab, setEnableCiTab] = useState(false)
+  const [ciStatus, setCiStatus] = useState<'success' | 'failure' | 'in_progress' | 'none'>('none')
   const [syntaxHL, setSyntaxHL] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
@@ -268,6 +271,18 @@ const GitManagerApp: React.FC = () => {
   const sidebarRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
   const [sidebarFocusIdx, setSidebarFocusIdx] = useState(-1)
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<GitSearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchTruncated, setSearchTruncated] = useState(false)
+  const [searchFocusIdx, setSearchFocusIdx] = useState(-1)
+  const [scrollToFileAndLine, setScrollToFileAndLine] = useState<{ filePath: string; lineNumber?: number } | null>(null)
+  const [wcNavigateTo, setWcNavigateTo] = useState<{ path: string; staged: boolean; lineNumber?: number } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -300,6 +315,15 @@ const GitManagerApp: React.FC = () => {
     }
     window.addEventListener('gm-setting-changed', handler)
     return () => window.removeEventListener('gm-setting-changed', handler)
+  }, [])
+
+  // Listen for CI status changes from CiPanel
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setCiStatus((e as CustomEvent).detail)
+    }
+    window.addEventListener('ci-status-change', handler)
+    return () => window.removeEventListener('ci-status-change', handler)
   }, [])
 
   // Set window title based on active directory
@@ -511,11 +535,9 @@ const GitManagerApp: React.FC = () => {
     return () => { if (timer) clearInterval(timer) }
   }, [activeDir, refresh])
 
-  // Refresh when the window regains focus (e.g. toolbar button re-opens it)
+  // Refresh when the toolbar button re-opens an already-open window
   useEffect(() => {
-    const onFocus = () => refresh()
-    window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    return getDockApi().gitManager.onReopen(() => refresh())
   }, [refresh])
 
   const selectCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -577,6 +599,65 @@ const GitManagerApp: React.FC = () => {
     const errorMsg = actionMatch ? msg.slice(actionMatch[0].length) || msg : msg
     showActionError(action, errorMsg, { retry })
   }, [showActionError])
+
+  // Search handler (debounced)
+  const triggerSearch = useCallback((q: string) => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (!q.trim()) {
+      setSearchResults([])
+      setSearchLoading(false)
+      setSearchTruncated(false)
+      return
+    }
+    setSearchLoading(true)
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const mode = activeTab === 'changes' ? 'working' as const : 'log' as const
+        const response = await getDockApi().gitManager.search(activeDir, { query: q.trim(), mode })
+        setSearchResults(response.results)
+        setSearchTruncated(response.truncated)
+        setSearchFocusIdx(-1)
+      } catch {
+        setSearchResults([])
+        setSearchTruncated(false)
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+  }, [activeDir, activeTab])
+
+  // Search result click handler
+  const handleSearchResult = useCallback((result: GitSearchResult) => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults([])
+    if (result.source.type === 'commit') {
+      navigateToCommit(result.source.hash)
+      if (result.filePath) {
+        setScrollToFileAndLine({ filePath: result.filePath, lineNumber: result.lineNumber })
+      }
+    } else {
+      setActiveTab('changes')
+      setWcNavigateTo({
+        path: result.filePath,
+        staged: result.source.section === 'staged',
+        lineNumber: result.lineNumber
+      })
+    }
+  }, [navigateToCommit])
+
+  // Ctrl+F keyboard shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
@@ -918,9 +999,71 @@ const GitManagerApp: React.FC = () => {
                 onClick={() => setActiveTab('ci')}
               >
                 CI
+                {ciStatus !== 'none' && (
+                  <span className={`gm-ci-tab-dot gm-ci-tab-dot-${ciStatus}`} />
+                )}
               </button>
             )}
             <span className="gm-tabs-spacer" />
+            <div className="gm-search-bar">
+              <SearchIcon />
+              <input
+                ref={searchInputRef}
+                className="gm-search-input"
+                placeholder={activeTab === 'changes' ? 'Search working changes...' : 'Search commit history...'}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value)
+                  setSearchOpen(true)
+                  triggerSearch(e.target.value)
+                }}
+                onFocus={() => { if (searchQuery) setSearchOpen(true) }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchOpen(false)
+                    setSearchFocusIdx(-1)
+                    searchInputRef.current?.blur()
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    if (searchResults.length > 0) {
+                      setSearchOpen(true)
+                      setSearchFocusIdx((i) => i < searchResults.length - 1 ? i + 1 : 0)
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    if (searchResults.length > 0) {
+                      setSearchOpen(true)
+                      setSearchFocusIdx((i) => i > 0 ? i - 1 : searchResults.length - 1)
+                    }
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (searchFocusIdx >= 0 && searchResults[searchFocusIdx]) {
+                      handleSearchResult(searchResults[searchFocusIdx])
+                    } else if (searchResults.length > 0) {
+                      handleSearchResult(searchResults[0])
+                    }
+                  }
+                }}
+              />
+              {searchQuery && (
+                <button
+                  className="gm-search-clear"
+                  onClick={() => { setSearchQuery(''); setSearchResults([]); setSearchOpen(false); setSearchTruncated(false) }}
+                >
+                  &times;
+                </button>
+              )}
+              {searchOpen && searchQuery.trim() && (
+                <SearchDropdown
+                  results={searchResults}
+                  loading={searchLoading}
+                  truncated={searchTruncated}
+                  focusIdx={searchFocusIdx}
+                  onSelect={handleSearchResult}
+                  onClose={() => setSearchOpen(false)}
+                />
+              )}
+            </div>
           </div>
 
           {notGitRepo ? (
@@ -954,6 +1097,8 @@ const GitManagerApp: React.FC = () => {
               stashes={stashes}
               projectDir={activeDir}
               syntaxHL={syntaxHL}
+              navigateTo={wcNavigateTo}
+              onNavigateHandled={() => setWcNavigateTo(null)}
               onRefresh={refresh}
               onError={handleSmartError}
               onConfirm={setConfirmModal}
@@ -967,9 +1112,13 @@ const GitManagerApp: React.FC = () => {
               onRefresh={refresh}
               onError={handleSmartError}
             />
-          ) : activeTab === 'ci' ? (
-            <CiPanel projectDir={activeDir} provider={repoProvider} />
-          ) : null}
+          ) : activeTab === 'ci' ? null : null}
+          {/* CI panel stays mounted to preserve state across tab switches */}
+          {enableCiTab && (
+            <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
+              <CiPanel projectDir={activeDir} provider={repoProvider} />
+            </div>
+          )}
         </div>
 
         {/* Detail panel */}
@@ -981,6 +1130,8 @@ const GitManagerApp: React.FC = () => {
                 detail={selectedCommit}
                 projectDir={activeDir}
                 syntaxHL={syntaxHL}
+                scrollToFileAndLine={scrollToFileAndLine}
+                onScrollToHandled={() => setScrollToFileAndLine(null)}
                 onClose={() => setSelectedCommit(null)}
               />
             </div>
@@ -1934,12 +2085,137 @@ const LazyDiffFile: React.FC<{
   )
 }
 
+// --- Search Dropdown ---
+
+function highlightMatch(text: string, query: string): React.ReactNode {
+  if (!query || !text) return text
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return text
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark>{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  )
+}
+
+const SEARCH_ROW_HEIGHT = 44
+
+const SearchDropdown: React.FC<{
+  results: GitSearchResult[]
+  loading: boolean
+  truncated: boolean
+  focusIdx: number
+  onSelect: (result: GitSearchResult) => void
+  onClose: () => void
+}> = ({ results, loading, truncated, focusIdx, onSelect, onClose }) => {
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        // Check if click is on the search input
+        const searchBar = dropdownRef.current.closest('.gm-search-bar')
+        if (searchBar && searchBar.contains(e.target as Node)) return
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  // Scroll focused item into view
+  useEffect(() => {
+    if (focusIdx < 0 || !scrollRef.current) return
+    const top = focusIdx * SEARCH_ROW_HEIGHT
+    const el = scrollRef.current
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + SEARCH_ROW_HEIGHT > el.scrollTop + el.clientHeight) {
+      el.scrollTop = top + SEARCH_ROW_HEIGHT - el.clientHeight
+    }
+  }, [focusIdx])
+
+  if (loading && results.length === 0) {
+    return (
+      <div className="gm-search-dropdown" ref={dropdownRef}>
+        <div className="gm-search-dropdown-loading">Searching...</div>
+      </div>
+    )
+  }
+
+  if (!loading && results.length === 0) {
+    return (
+      <div className="gm-search-dropdown" ref={dropdownRef}>
+        <div className="gm-search-dropdown-empty">No results found</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="gm-search-dropdown" ref={dropdownRef}>
+      <div className="gm-search-dropdown-scroll" ref={scrollRef}>
+        {results.map((r, i) => {
+          const isCommit = r.source.type === 'commit'
+          const badge = isCommit
+            ? { cls: 'gm-search-badge-commit', label: r.source.shortHash }
+            : { cls: `gm-search-badge-${r.source.section}`, label: r.source.section }
+
+          const displayPath = r.filePath
+            ? r.filePath + (r.lineNumber ? `:${r.lineNumber}` : '')
+            : (isCommit ? r.source.subject : '')
+
+          const line2 = r.matchType === 'subject' && isCommit
+            ? r.source.subject
+            : r.lineContent || (isCommit ? r.source.subject : '')
+
+          // Get query from the search input (passed via closure)
+          const searchInput = dropdownRef.current?.closest('.gm-search-bar')?.querySelector('input')
+          const query = searchInput?.value || ''
+
+          return (
+            <div
+              key={r.id}
+              className={`gm-search-result${i === focusIdx ? ' gm-search-result-focused' : ''}`}
+              style={{ height: SEARCH_ROW_HEIGHT }}
+              onClick={() => onSelect(r)}
+            >
+              <div className="gm-search-result-line1">
+                <span className="gm-search-result-path">
+                  {highlightMatch(displayPath, query)}
+                </span>
+                <span className={`gm-search-badge ${badge.cls}`}>{badge.label}</span>
+              </div>
+              <div className="gm-search-result-line2">
+                {highlightMatch(line2, query)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {truncated && <div className="gm-search-truncated">Results truncated — refine your search</div>}
+      {loading && results.length > 0 && <div className="gm-search-dropdown-loading">Searching...</div>}
+    </div>
+  )
+}
+
+const SearchIcon: React.FC = () => (
+  <svg className="gm-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+)
+
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
   projectDir: string
   syntaxHL: boolean
+  scrollToFileAndLine?: { filePath: string; lineNumber?: number } | null
+  onScrollToHandled?: () => void
   onClose: () => void
-}> = ({ detail, projectDir, syntaxHL, onClose }) => {
+}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose }) => {
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
@@ -1954,6 +2230,38 @@ const CommitDetailPanel: React.FC<{
 
   // Clear selection on new commit
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [detail.hash])
+
+  // Scroll to file and line from search navigation
+  useEffect(() => {
+    if (!scrollToFileAndLine) return
+    const fileIdx = detail.files.findIndex((f) => f.path === scrollToFileAndLine.filePath)
+    if (fileIdx >= 0) {
+      setScrollToFileIdx(fileIdx)
+      // After a short delay, try to scroll to the specific line within the file
+      if (scrollToFileAndLine.lineNumber) {
+        const targetLine = scrollToFileAndLine.lineNumber
+        setTimeout(() => {
+          // Find the diff line with the matching new line number
+          const file = detail.files[fileIdx]
+          for (let hi = 0; hi < file.hunks.length; hi++) {
+            for (let li = 0; li < file.hunks[hi].lines.length; li++) {
+              const l = file.hunks[hi].lines[li]
+              if (l.newLineNo === targetLine || l.oldLineNo === targetLine) {
+                const key = `${fileIdx}:${hi}:${li}`
+                const lineEl = document.querySelector(`[data-linekey="${key}"]`)
+                if (lineEl) {
+                  lineEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                  lineEl.classList.add('gm-search-highlight-flash')
+                }
+                return
+              }
+            }
+          }
+        }, 400)
+      }
+    }
+    onScrollToHandled?.()
+  }, [scrollToFileAndLine, detail.files, onScrollToHandled])
 
   // Resolve commit web URL from remote origin
   useEffect(() => {
@@ -2580,12 +2888,14 @@ const WorkingChanges: React.FC<{
   stashes: GitStashEntry[]
   projectDir: string
   syntaxHL: boolean
+  navigateTo?: { path: string; staged: boolean; lineNumber?: number } | null
+  onNavigateHandled?: () => void
   onRefresh: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
   onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
-}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed }) => {
+}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -2650,6 +2960,34 @@ const WorkingChanges: React.FC<{
     const inUnstaged = [...status.unstaged, ...status.untracked].some((f) => f.path === selectedFile.path)
     if (!inStaged && !inUnstaged) setSelectedFile(null)
   }, [status, selectedFile])
+
+  // Navigate to file from search
+  useEffect(() => {
+    if (!navigateTo) return
+    setSelectedFile({ path: navigateTo.path, staged: navigateTo.staged })
+    if (navigateTo.lineNumber) {
+      const targetLine = navigateTo.lineNumber
+      // Wait for diff to load, then scroll to the line
+      setTimeout(() => {
+        const diffContainer = document.querySelector('.gm-changes-diff-content')
+        if (!diffContainer) return
+        const lineEls = diffContainer.querySelectorAll('.gm-diff-line')
+        for (const el of lineEls) {
+          const lineNos = el.querySelector('.gm-diff-line-no')
+          const spans = lineNos?.querySelectorAll('span')
+          if (spans && spans.length >= 2) {
+            const newLineText = spans[1].textContent?.trim()
+            if (newLineText === String(targetLine)) {
+              el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+              el.classList.add('gm-search-highlight-flash')
+              break
+            }
+          }
+        }
+      }, 500)
+    }
+    onNavigateHandled?.()
+  }, [navigateTo, onNavigateHandled])
 
   if (!status) return <div className="gm-loading">No status data</div>
 
@@ -5733,13 +6071,17 @@ const AddRemoteModal: React.FC<{
 
 // --- Settings dropdown ---
 
-const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number'; default?: unknown }[] = [
+const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' | 'multiselect'; default?: unknown; options?: { value: string; label: string }[] }[] = [
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
   { key: 'enableCiTab', label: 'Show CI tab (GitHub Actions)', type: 'boolean', default: false },
-  { key: 'showActionNotifications', label: 'Show notifications when CI runs complete', type: 'boolean', default: true }
+  { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['success', 'failure'], options: [
+    { value: 'success', label: 'Success' },
+    { value: 'failure', label: 'Failure' },
+    { value: 'cancelled', label: 'Cancelled' }
+  ]}
 ]
 
 const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
@@ -5788,6 +6130,15 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, val)
   }
 
+  const toggleMultiselect = async (key: string, optionValue: string) => {
+    const current = (values[key] as string[] | undefined) ?? (PLUGIN_SETTINGS.find((s) => s.key === key)?.default as string[]) ?? []
+    const next = current.includes(optionValue)
+      ? current.filter((v: string) => v !== optionValue)
+      : [...current, optionValue]
+    setValues((prev) => ({ ...prev, [key]: next }))
+    await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, next)
+  }
+
   return (
     <div className="gm-settings-dropdown" ref={ref}>
       <button className="gm-toolbar-btn" onClick={() => setOpen(!open)} title="Settings">
@@ -5806,6 +6157,25 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
                 />
                 <span>{s.label}</span>
               </label>
+            ) : s.type === 'multiselect' ? (
+              <div key={s.key} className="gm-settings-item gm-settings-item-multiselect">
+                <span className="gm-settings-multiselect-label">{s.label}</span>
+                <div className="gm-settings-multiselect-options">
+                  {(s.options ?? []).map((opt) => {
+                    const selected = ((values[s.key] as string[] | undefined) ?? (s.default as string[]) ?? []).includes(opt.value)
+                    return (
+                      <label key={opt.value} className={`gm-settings-multiselect-chip${selected ? ' gm-settings-multiselect-chip-on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleMultiselect(s.key, opt.value)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
             ) : (
               <label key={s.key} className="gm-settings-item gm-settings-item-number">
                 <span>{s.label}</span>

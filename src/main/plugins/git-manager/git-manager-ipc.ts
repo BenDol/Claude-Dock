@@ -4,7 +4,7 @@ import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
 import { GitManagerWindowManager } from './git-manager-window'
 import * as gitOps from './git-operations'
-import type { GitLogOptions } from '../../../shared/git-manager-types'
+import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manager-types'
 import { log, logError } from '../../logger'
 import { getPluginSetting } from '../plugin-store'
 import { registerCiIpc } from './ci/ci-ipc'
@@ -494,6 +494,10 @@ export function registerGitManagerIpc(): void {
       logError('[git-manager] set identity failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set identity' }
     }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_SEARCH, async (_event, projectDir: string, opts: GitSearchOptions) => {
+    return gitOps.searchRepo(projectDir, opts)
   })
 
   registerCiIpc()

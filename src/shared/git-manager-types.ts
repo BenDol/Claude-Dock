@@ -134,3 +134,32 @@ export interface GitStatusResult {
   untracked: GitFileStatusEntry[]
   conflicts: GitConflictEntry[]
 }
+
+/** Search result source — commit or working tree */
+export type SearchResultSource =
+  | { type: 'commit'; hash: string; shortHash: string; subject: string }
+  | { type: 'working'; section: 'staged' | 'unstaged' | 'untracked' }
+
+/** A single search result */
+export interface GitSearchResult {
+  id: string
+  source: SearchResultSource
+  filePath: string
+  lineNumber?: number
+  lineContent?: string
+  matchType: 'subject' | 'body' | 'filepath' | 'diff-content'
+  confidence: number
+}
+
+/** Search options */
+export interface GitSearchOptions {
+  query: string
+  mode: 'log' | 'working'
+  maxResults?: number
+}
+
+/** Search response */
+export interface GitSearchResponse {
+  results: GitSearchResult[]
+  truncated: boolean
+}

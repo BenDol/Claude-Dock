@@ -18,7 +18,11 @@ import type {
   GitMergeState,
   GitConflictEntry,
   GitConflictChunk,
-  GitConflictFileContent
+  GitConflictFileContent,
+  GitSearchOptions,
+  GitSearchResponse,
+  GitSearchResult,
+  SearchResultSource
 } from '../../../shared/git-manager-types'
 import { log, logError } from '../../logger'
 
@@ -1302,4 +1306,267 @@ export async function continueMerge(cwd: string): Promise<void> {
     // merge/cherry-pick/revert: commit to continue
     await gitExec(cwd, ['commit', '--no-edit'], 30000)
   }
+}
+
+// --- Search ---
+
+const searchGeneration = new Map<string, number>()
+
+function nextSearchGen(cwd: string): number {
+  const gen = (searchGeneration.get(cwd) || 0) + 1
+  searchGeneration.set(cwd, gen)
+  return gen
+}
+
+function isSearchStale(cwd: string, gen: number): boolean {
+  return (searchGeneration.get(cwd) || 0) !== gen
+}
+
+export async function searchRepo(cwd: string, opts: GitSearchOptions): Promise<GitSearchResponse> {
+  const gen = nextSearchGen(cwd)
+  const query = opts.query.trim()
+  const maxResults = opts.maxResults ?? 100
+
+  if (!query) return { results: [], truncated: false }
+
+  if (opts.mode === 'working') {
+    return searchWorking(cwd, query, maxResults, gen)
+  }
+  return searchLog(cwd, query, maxResults, gen)
+}
+
+async function searchLog(cwd: string, query: string, maxResults: number, gen: number): Promise<GitSearchResponse> {
+  const results: GitSearchResult[] = []
+  const seen = new Set<string>() // dedup key: hash:filePath
+
+  const addResult = (r: GitSearchResult) => {
+    const key = r.source.type === 'commit' ? `${r.source.hash}:${r.filePath}` : `w:${r.filePath}`
+    if (seen.has(key)) {
+      // Keep higher confidence
+      const idx = results.findIndex((e) =>
+        e.source.type === 'commit' && r.source.type === 'commit' &&
+        e.source.hash === r.source.hash && e.filePath === r.filePath
+      )
+      if (idx >= 0 && results[idx].confidence < r.confidence) {
+        results[idx] = r
+      }
+      return
+    }
+    seen.add(key)
+    results.push(r)
+  }
+
+  // Strategy 1: Message grep
+  const messageSearch = async () => {
+    if (isSearchStale(cwd, gen)) return
+    try {
+      const { stdout } = await gitExec(cwd, [
+        'log', '--all', '-i', `--grep=${query}`, `--format=%H%n%h%n%s`, '--max-count=50'
+      ], 15000)
+      if (isSearchStale(cwd, gen)) return
+      const lines = stdout.trim().split('\n').filter(Boolean)
+      for (let i = 0; i + 2 < lines.length; i += 3) {
+        const hash = lines[i]
+        const shortHash = lines[i + 1]
+        const subject = lines[i + 2]
+        const lowerSubject = subject.toLowerCase()
+        const lowerQuery = query.toLowerCase()
+        const confidence = lowerSubject === lowerQuery ? 100
+          : lowerSubject.includes(lowerQuery) ? 95 : 90
+        addResult({
+          id: `msg:${hash}`,
+          source: { type: 'commit', hash, shortHash, subject },
+          filePath: '',
+          matchType: 'subject',
+          confidence
+        })
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Strategy 2: Pickaxe (content search)
+  const pickaxeSearch = async () => {
+    if (isSearchStale(cwd, gen)) return
+    try {
+      const { stdout } = await gitExec(cwd, [
+        'log', '--all', `-S${query}`, `--format=%H%n%h%n%s`, '--max-count=30'
+      ], 30000)
+      if (isSearchStale(cwd, gen)) return
+      const lines = stdout.trim().split('\n').filter(Boolean)
+      const commits: { hash: string; shortHash: string; subject: string }[] = []
+      for (let i = 0; i + 2 < lines.length; i += 3) {
+        commits.push({ hash: lines[i], shortHash: lines[i + 1], subject: lines[i + 2] })
+      }
+
+      // For each commit, get lightweight diff to find file + line
+      for (const c of commits.slice(0, 15)) {
+        if (isSearchStale(cwd, gen)) return
+        try {
+          const { stdout: diffOut } = await gitExec(cwd, [
+            'diff-tree', '--root', '-p', '--unified=0', c.hash
+          ], 10000)
+          let currentFile = ''
+          let lineNum: number | undefined
+          let lineContent: string | undefined
+          const lowerQuery = query.toLowerCase()
+          for (const line of diffOut.split('\n')) {
+            if (line.startsWith('+++ b/')) {
+              currentFile = line.slice(6)
+            } else if (line.startsWith('@@')) {
+              const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)/)
+              if (match) lineNum = parseInt(match[1], 10)
+            } else if ((line.startsWith('+') || line.startsWith('-')) && !line.startsWith('+++') && !line.startsWith('---')) {
+              if (line.toLowerCase().includes(lowerQuery)) {
+                const isAdd = line.startsWith('+')
+                const confidence = isAdd ? 70 : 65
+                addResult({
+                  id: `pick:${c.hash}:${currentFile}:${lineNum}`,
+                  source: { type: 'commit', hash: c.hash, shortHash: c.shortHash, subject: c.subject },
+                  filePath: currentFile,
+                  lineNumber: lineNum,
+                  lineContent: line.slice(1).trim(),
+                  matchType: 'diff-content',
+                  confidence
+                })
+                // Only take first match per file per commit
+                currentFile = ''
+              }
+              if (lineNum !== undefined && line.startsWith('+')) lineNum++
+            }
+          }
+        } catch { /* ignore per-commit errors */ }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Strategy 3: File path search
+  const filePathSearch = async () => {
+    if (isSearchStale(cwd, gen)) return
+    try {
+      const { stdout } = await gitExec(cwd, ['ls-tree', '-r', '--name-only', 'HEAD'], 10000)
+      if (isSearchStale(cwd, gen)) return
+      const lowerQuery = query.toLowerCase()
+      const matchingPaths = stdout.trim().split('\n').filter((p) => p.toLowerCase().includes(lowerQuery))
+
+      for (const filePath of matchingPaths.slice(0, 30)) {
+        if (isSearchStale(cwd, gen)) return
+        const basename = filePath.split('/').pop() || filePath
+        const confidence = basename.toLowerCase().includes(lowerQuery) ? 85 : 80
+        try {
+          const { stdout: logOut } = await gitExec(cwd, [
+            'log', '--all', '--format=%H%n%h%n%s', '--max-count=1', '--', filePath
+          ], 5000)
+          const lines = logOut.trim().split('\n').filter(Boolean)
+          if (lines.length >= 3) {
+            addResult({
+              id: `fp:${lines[0]}:${filePath}`,
+              source: { type: 'commit', hash: lines[0], shortHash: lines[1], subject: lines[2] },
+              filePath,
+              matchType: 'filepath',
+              confidence
+            })
+          }
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+  }
+
+  await Promise.all([messageSearch(), pickaxeSearch(), filePathSearch()])
+
+  if (isSearchStale(cwd, gen)) return { results: [], truncated: false }
+
+  results.sort((a, b) => b.confidence - a.confidence)
+  const truncated = results.length > maxResults
+  return { results: results.slice(0, maxResults), truncated }
+}
+
+async function searchWorking(cwd: string, query: string, maxResults: number, gen: number): Promise<GitSearchResponse> {
+  const results: GitSearchResult[] = []
+  const lowerQuery = query.toLowerCase()
+
+  try {
+    const status = await getStatus(cwd)
+    if (isSearchStale(cwd, gen)) return { results: [], truncated: false }
+
+    const sections: { files: GitFileStatusEntry[]; section: 'staged' | 'unstaged' | 'untracked' }[] = [
+      { files: status.staged, section: 'staged' },
+      { files: status.unstaged, section: 'unstaged' },
+      { files: status.untracked, section: 'untracked' }
+    ]
+
+    // First pass: path matches
+    const pathMatches = new Set<string>()
+    for (const { files, section } of sections) {
+      for (const f of files) {
+        if (f.path.toLowerCase().includes(lowerQuery)) {
+          pathMatches.add(f.path)
+          const basename = f.path.split('/').pop() || f.path
+          const confidence = basename.toLowerCase().includes(lowerQuery) ? 85 : 80
+          results.push({
+            id: `wc:${section}:${f.path}`,
+            source: { type: 'working', section },
+            filePath: f.path,
+            matchType: 'filepath',
+            confidence
+          })
+        }
+      }
+    }
+
+    // Second pass: diff content search (only staged + unstaged, limit scope)
+    const diffSections: { files: GitFileStatusEntry[]; section: 'staged' | 'unstaged'; staged: boolean }[] = [
+      { files: status.staged, section: 'staged', staged: true },
+      { files: status.unstaged, section: 'unstaged', staged: false }
+    ]
+
+    let diffCount = 0
+    const MAX_DIFF_FILES = 20
+    for (const { files, section, staged } of diffSections) {
+      for (const f of files) {
+        if (diffCount >= MAX_DIFF_FILES) break
+        if (isSearchStale(cwd, gen)) return { results: [], truncated: false }
+        // Skip files already found by path match unless we want content matches too
+        diffCount++
+        try {
+          const diffs = await getDiff(cwd, f.path, staged)
+          for (const diff of diffs) {
+            for (const hunk of diff.hunks) {
+              for (const line of hunk.lines) {
+                if (line.content.toLowerCase().includes(lowerQuery)) {
+                  const confidence = line.type === 'add' ? 70 : 65
+                  const lineNo = line.type === 'delete' ? line.oldLineNo : line.newLineNo
+                  results.push({
+                    id: `wcd:${section}:${f.path}:${lineNo}`,
+                    source: { type: 'working', section },
+                    filePath: f.path,
+                    lineNumber: lineNo,
+                    lineContent: line.content.trim(),
+                    matchType: 'diff-content',
+                    confidence
+                  })
+                  break // one match per file is enough
+                }
+              }
+            }
+          }
+        } catch { /* ignore per-file errors */ }
+      }
+    }
+  } catch (err) {
+    logError('[git-manager] searchWorking failed:', err)
+  }
+
+  if (isSearchStale(cwd, gen)) return { results: [], truncated: false }
+
+  results.sort((a, b) => {
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence
+    // Within same confidence: staged > unstaged > untracked
+    const order = { staged: 0, unstaged: 1, untracked: 2 }
+    const aOrder = a.source.type === 'working' ? order[a.source.section] : 3
+    const bOrder = b.source.type === 'working' ? order[b.source.section] : 3
+    return aOrder - bOrder
+  })
+
+  const truncated = results.length > maxResults
+  return { results: results.slice(0, maxResults), truncated }
 }

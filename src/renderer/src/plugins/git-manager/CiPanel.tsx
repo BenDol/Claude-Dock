@@ -29,6 +29,37 @@ interface CiFilters {
   showStaleQueued: boolean
 }
 
+// Session-level cache so we don't re-check CLI availability on every tab switch
+const ciAvailabilityCache = new Map<string, { available: boolean; workflows: CiWorkflow[] }>()
+
+// Persist expanded state for job panels across refreshes/tab switches
+const CI_GROUPS_KEY = 'ci-expanded-groups'
+const CI_JOBS_KEY = 'ci-expanded-jobs'
+
+function loadExpandedGroups(): Set<string> {
+  try {
+    const raw = localStorage.getItem(CI_GROUPS_KEY)
+    if (raw) return new Set(JSON.parse(raw))
+  } catch { /* ignore */ }
+  return new Set()
+}
+
+function saveExpandedGroups(groups: Set<string>): void {
+  try { localStorage.setItem(CI_GROUPS_KEY, JSON.stringify([...groups])) } catch { /* ignore */ }
+}
+
+function loadExpandedJobs(): Set<number> {
+  try {
+    const raw = localStorage.getItem(CI_JOBS_KEY)
+    if (raw) return new Set(JSON.parse(raw))
+  } catch { /* ignore */ }
+  return new Set()
+}
+
+function saveExpandedJobs(jobs: Set<number>): void {
+  try { localStorage.setItem(CI_JOBS_KEY, JSON.stringify([...jobs])) } catch { /* ignore */ }
+}
+
 const STALE_QUEUED_HOURS = 24
 
 function isStaleQueued(run: CiWorkflowRun): boolean {
@@ -47,6 +78,15 @@ function getEffectiveStatus(run: CiWorkflowRun): ConclusionFilter {
   return 'queued'
 }
 
+function getStatusColor(run: CiWorkflowRun): string {
+  const s = getEffectiveStatus(run)
+  if (s === 'success') return '#9ece6a'
+  if (s === 'failure') return '#f7768e'
+  if (s === 'in_progress') return '#e0af68'
+  if (s === 'queued') return 'var(--accent-color)'
+  return 'var(--text-secondary)' // cancelled
+}
+
 export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
@@ -61,10 +101,11 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const [expandedRun, setExpandedRun] = useState<number | null>(null)
   const [runJobs, setRunJobs] = useState<CiJob[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => loadExpandedGroups())
   const [filters, setFilters] = useState<CiFilters>({ status: new Set(), branch: null, event: null, showStaleQueued: false })
   const [filtersExpanded, setFiltersExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const detailRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
 
   const api = getDockApi()
@@ -98,19 +139,32 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     }
   }, [projectDir])
 
-  // Check availability + load workflows
+  // Check availability + load workflows (cached per session)
   useEffect(() => {
     let cancelled = false
     async function init() {
+      const cached = ciAvailabilityCache.get(projectDir)
+      if (cached) {
+        if (!cached.available) {
+          await checkSetup()
+          return
+        }
+        setWorkflows(cached.workflows)
+        setStatus('ready')
+        return
+      }
+
       try {
         const available = await api.ci.checkAvailable(projectDir)
         if (cancelled) return
         if (!available) {
+          ciAvailabilityCache.set(projectDir, { available: false, workflows: [] })
           await checkSetup()
           return
         }
         const wf = await api.ci.getWorkflows(projectDir)
         if (cancelled) return
+        ciAvailabilityCache.set(projectDir, { available: true, workflows: wf })
         setWorkflows(wf)
         setStatus('ready')
       } catch (err) {
@@ -233,6 +287,7 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      saveExpandedGroups(next)
       return next
     })
   }, [])
@@ -241,8 +296,40 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const availableBranches = useMemo(() => [...new Set(runs.map((r) => r.headBranch))].sort(), [runs])
   const availableEvents = useMemo(() => [...new Set(runs.map((r) => r.event))].sort(), [runs])
 
-  // Count stale queued runs
-  const staleQueuedCount = useMemo(() => runs.filter(isStaleQueued).length, [runs])
+  // Filter active runs to exclude stale queued
+  const filteredActiveRuns = useMemo(() => {
+    if (filters.showStaleQueued) return activeRuns
+    return activeRuns.filter((r) => !isStaleQueued(r))
+  }, [activeRuns, filters.showStaleQueued])
+
+  // Count stale queued runs (across both lists)
+  const staleQueuedCount = useMemo(() => {
+    const staleInRuns = runs.filter(isStaleQueued).length
+    const staleInActive = activeRuns.filter(isStaleQueued).length
+    // Deduplicate by counting unique stale IDs
+    const staleIds = new Set([
+      ...runs.filter(isStaleQueued).map((r) => r.id),
+      ...activeRuns.filter(isStaleQueued).map((r) => r.id)
+    ])
+    return staleIds.size
+  }, [runs, activeRuns])
+
+  // Emit CI status to parent via custom event
+  useEffect(() => {
+    let ciStatus: 'success' | 'failure' | 'in_progress' | 'none' = 'none'
+    if (filteredActiveRuns.some((r) => r.status === 'in_progress' || r.status === 'queued')) {
+      ciStatus = 'in_progress'
+    } else if (runs.length > 0) {
+      // Check the latest completed run
+      const latest = runs.find((r) => r.status === 'completed')
+      if (latest) {
+        if (latest.conclusion === 'success') ciStatus = 'success'
+        else if (latest.conclusion === 'failure') ciStatus = 'failure'
+        else ciStatus = 'none'
+      }
+    }
+    window.dispatchEvent(new CustomEvent('ci-status-change', { detail: ciStatus }))
+  }, [runs, filteredActiveRuns])
 
   // Apply filters
   const filteredRuns = useMemo(() => {
@@ -281,9 +368,10 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
         onRecheck={async () => {
           const ok = await checkSetup()
           if (ok) {
-            // All checks passed — load workflows
+            // All checks passed — load workflows and update cache
             try {
               const wf = await api.ci.getWorkflows(projectDir)
+              ciAvailabilityCache.set(projectDir, { available: true, workflows: wf })
               setWorkflows(wf)
               setStatus('ready')
             } catch (err) {
@@ -316,172 +404,432 @@ export default function CiPanel({ projectDir, provider }: CiPanelProps) {
     )
   }
 
+  const selectedRun = expandedRun !== null ? [...filteredActiveRuns, ...filteredRuns].find((r) => r.id === expandedRun) ?? null : null
   const jobGroups = groupJobsByMatrix(runJobs)
 
   return (
     <div className="ci-panel">
-      {/* Header */}
-      <div className="ci-header">
-        <select
-          className="ci-workflow-select"
-          value={selectedWorkflow}
-          onChange={(e) => setSelectedWorkflow(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-        >
-          <option value="all">All workflows</option>
-          {workflows.map((wf) => (
-            <option key={wf.id} value={wf.id}>{wf.name}</option>
-          ))}
-        </select>
-        <button className="ci-refresh-btn" onClick={handleRefresh} title="Refresh">
-          <RefreshIcon />
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <div className="ci-filter-bar">
-        <button
-          className={`ci-filter-toggle${hasActiveFilters ? ' ci-filter-toggle-active' : ''}`}
-          onClick={() => setFiltersExpanded((p) => !p)}
-          title="Toggle filters"
-        >
-          <FilterIcon />
-          {hasActiveFilters && <span className="ci-filter-dot" />}
-        </button>
-        {filtersExpanded && (
-          <div className="ci-filter-controls">
-            <div className="ci-filter-group">
-              {(['success', 'failure', 'in_progress', 'queued', 'cancelled'] as ConclusionFilter[]).map((s) => (
-                <button
-                  key={s}
-                  className={`ci-filter-chip ci-filter-chip-${s}${filters.status.has(s) ? ' ci-filter-chip-on' : ''}`}
-                  onClick={() => toggleStatusFilter(s)}
-                >
-                  {s === 'in_progress' ? 'running' : s}
-                </button>
-              ))}
-            </div>
-            {availableBranches.length > 1 && (
-              <select
-                className="ci-filter-select"
-                value={filters.branch ?? ''}
-                onChange={(e) => setFilters((p) => ({ ...p, branch: e.target.value || null }))}
-              >
-                <option value="">All branches</option>
-                {availableBranches.map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
-            )}
-            {availableEvents.length > 1 && (
-              <select
-                className="ci-filter-select"
-                value={filters.event ?? ''}
-                onChange={(e) => setFilters((p) => ({ ...p, event: e.target.value || null }))}
-              >
-                <option value="">All events</option>
-                {availableEvents.map((ev) => <option key={ev} value={ev}>{ev}</option>)}
-              </select>
-            )}
-            {hasActiveFilters && (
-              <button className="ci-filter-clear" onClick={() => setFilters((p) => ({ ...p, status: new Set(), branch: null, event: null }))}>
-                Clear
-              </button>
-            )}
-          </div>
-        )}
-        {!filtersExpanded && hasActiveFilters && (
-          <span className="ci-filter-summary">
-            {filters.status.size > 0 && [...filters.status].map((s) => s === 'in_progress' ? 'running' : s).join(', ')}
-            {filters.branch && `${filters.status.size > 0 ? ' · ' : ''}${filters.branch}`}
-            {filters.event && `${filters.status.size > 0 || filters.branch ? ' · ' : ''}${filters.event}`}
-          </span>
-        )}
-      </div>
-
-      {/* Stale queued notice */}
-      {staleQueuedCount > 0 && !filters.showStaleQueued && (
-        <div className="ci-stale-notice">
-          {staleQueuedCount} stale queued run{staleQueuedCount > 1 ? 's' : ''} hidden
-          <button className="ci-stale-show" onClick={() => setFilters((p) => ({ ...p, showStaleQueued: true }))}>Show</button>
+      <div className="ci-list-pane">
+        {/* Header */}
+        <div className="ci-header">
+          <select
+            className="ci-workflow-select"
+            value={selectedWorkflow}
+            onChange={(e) => setSelectedWorkflow(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+          >
+            <option value="all">All workflows</option>
+            {workflows.map((wf) => (
+              <option key={wf.id} value={wf.id}>{wf.name}</option>
+            ))}
+          </select>
+          <button className="ci-refresh-btn" onClick={handleRefresh} title="Refresh">
+            <RefreshIcon />
+          </button>
         </div>
-      )}
-      {filters.showStaleQueued && staleQueuedCount > 0 && (
-        <div className="ci-stale-notice">
-          Showing stale queued runs
-          <button className="ci-stale-show" onClick={() => setFilters((p) => ({ ...p, showStaleQueued: false }))}>Hide</button>
-        </div>
-      )}
 
-      {/* Active runs */}
-      {activeRuns.length > 0 && (
-        <div className="ci-active-section">
-          <div className="ci-section-label">Active Runs</div>
-          {activeRuns.map((run) => (
-            <div key={run.id} className="ci-active-card">
-              <StatusBadge status={run.status} conclusion={run.conclusion} />
-              <div className="ci-run-info">
-                <span className="ci-run-name">{run.name}</span>
-                <span className="ci-run-meta">#{run.runNumber} on {run.headBranch}</span>
+        {/* Filter bar */}
+        <div className="ci-filter-bar">
+          <button
+            className={`ci-filter-toggle${hasActiveFilters ? ' ci-filter-toggle-active' : ''}`}
+            onClick={() => setFiltersExpanded((p) => !p)}
+            title="Toggle filters"
+          >
+            <FilterIcon />
+            {hasActiveFilters && <span className="ci-filter-dot" />}
+          </button>
+          {filtersExpanded && (
+            <div className="ci-filter-controls">
+              <div className="ci-filter-group">
+                {(['success', 'failure', 'in_progress', 'queued', 'cancelled'] as ConclusionFilter[]).map((s) => (
+                  <button
+                    key={s}
+                    className={`ci-filter-chip ci-filter-chip-${s}${filters.status.has(s) ? ' ci-filter-chip-on' : ''}`}
+                    onClick={() => toggleStatusFilter(s)}
+                  >
+                    {s === 'in_progress' ? 'running' : s}
+                  </button>
+                ))}
               </div>
-              <button className="ci-cancel-btn" onClick={() => handleCancel(run.id)} title="Cancel">Cancel</button>
-              {run.url && (
-                <button className="ci-view-btn ci-view-btn-icon" onClick={() => api.app.openExternal(run.url)} title={`View on ${providerLabel(provider)}`}><ProviderIcon provider={provider} /></button>
+              {availableBranches.length > 1 && (
+                <select
+                  className="ci-filter-select"
+                  value={filters.branch ?? ''}
+                  onChange={(e) => setFilters((p) => ({ ...p, branch: e.target.value || null }))}
+                >
+                  <option value="">All branches</option>
+                  {availableBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              )}
+              {availableEvents.length > 1 && (
+                <select
+                  className="ci-filter-select"
+                  value={filters.event ?? ''}
+                  onChange={(e) => setFilters((p) => ({ ...p, event: e.target.value || null }))}
+                >
+                  <option value="">All events</option>
+                  {availableEvents.map((ev) => <option key={ev} value={ev}>{ev}</option>)}
+                </select>
+              )}
+              <label className="ci-filter-stale-toggle">
+                <input
+                  type="checkbox"
+                  checked={filters.showStaleQueued}
+                  onChange={(e) => setFilters((p) => ({ ...p, showStaleQueued: e.target.checked }))}
+                />
+                Show stale queued{staleQueuedCount > 0 ? ` (${staleQueuedCount})` : ''}
+              </label>
+              {hasActiveFilters && (
+                <button className="ci-filter-clear" onClick={() => setFilters((p) => ({ ...p, status: new Set(), branch: null, event: null }))}>
+                  Clear
+                </button>
               )}
             </div>
-          ))}
+          )}
+          {!filtersExpanded && hasActiveFilters && (
+            <span className="ci-filter-summary">
+              {filters.status.size > 0 && [...filters.status].map((s) => s === 'in_progress' ? 'running' : s).join(', ')}
+              {filters.branch && `${filters.status.size > 0 ? ' · ' : ''}${filters.branch}`}
+              {filters.event && `${filters.status.size > 0 || filters.branch ? ' · ' : ''}${filters.event}`}
+            </span>
+          )}
         </div>
-      )}
 
-      {/* Run history */}
-      <div className="ci-section-label">Run History</div>
-      <div className="ci-run-list" ref={scrollRef} onScroll={handleScroll}>
-        {filteredRuns.map((run) => (
-          <div key={run.id} className="ci-run-item">
-            <div className="ci-run-row" onClick={() => handleExpandRun(run.id)}>
-              <span className="ci-expand-icon">{expandedRun === run.id ? '\u25BE' : '\u25B8'}</span>
-              <StatusBadge status={run.status} conclusion={run.conclusion} />
+        {/* Active runs */}
+        {filteredActiveRuns.length > 0 && (
+          <div className="ci-active-section">
+            <div className="ci-section-label">Active</div>
+            {filteredActiveRuns.map((run) => (
+              <div
+                key={run.id}
+                className={`ci-run-row ci-run-row-active${expandedRun === run.id ? ' ci-run-row-selected' : ''}`}
+                onClick={() => handleExpandRun(run.id)}
+              >
+                <StatusDot color={getStatusColor(run)} animated={run.status === 'in_progress' || run.status === 'queued'} />
+                <div className="ci-run-info">
+                  <span className="ci-run-name">{run.name}</span>
+                  <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span></span>
+                </div>
+                <button className="ci-cancel-btn" onClick={(e) => { e.stopPropagation(); handleCancel(run.id) }} title="Cancel run">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Run history */}
+        <div className="ci-run-list" ref={scrollRef} onScroll={handleScroll}>
+          {filteredRuns.map((run) => (
+            <div
+              key={run.id}
+              className={`ci-run-row${expandedRun === run.id ? ' ci-run-row-selected' : ''}`}
+              onClick={() => handleExpandRun(run.id)}
+            >
+              <StatusDot color={getStatusColor(run)} />
               <div className="ci-run-info">
                 <span className="ci-run-name">{run.name}</span>
                 <span className="ci-run-meta">
-                  #{run.runNumber} · {run.headBranch} · {run.actor} · {formatTime(run.createdAt)}
+                  #{run.runNumber} · <span className="ci-run-branch">{run.headBranch}</span> · {run.event} · {formatTime(run.createdAt)}
                 </span>
               </div>
-              {run.url && (
-                <button
-                  className="ci-view-btn ci-view-btn-icon ci-view-btn-sm"
-                  onClick={(e) => { e.stopPropagation(); api.app.openExternal(run.url) }}
-                  title={`View on ${providerLabel(provider)}`}
-                >
-                  <ProviderIcon provider={provider} />
-                </button>
-              )}
             </div>
-            {expandedRun === run.id && (
-              <div className="ci-jobs-panel">
-                {loadingJobs ? (
-                  <div className="ci-jobs-loading"><div className="ci-spinner" /> Loading jobs...</div>
-                ) : runJobs.length === 0 ? (
-                  <div className="ci-jobs-empty">No jobs found</div>
-                ) : (
-                  jobGroups.map((group) => (
-                    <JobGroupRow
-                      key={group.key}
-                      group={group}
-                      expanded={expandedGroups.has(group.key)}
-                      onToggle={() => toggleGroup(group.key)}
-                    />
-                  ))
-                )}
-              </div>
-            )}
+          ))}
+          {filteredRuns.length === 0 && !loadingRuns && runs.length > 0 && (
+            <div className="ci-end-marker">No runs match filters</div>
+          )}
+          {loadingRuns && <div className="ci-loading-more"><div className="ci-spinner" /></div>}
+          {!hasMore && filteredRuns.length > 0 && <div className="ci-end-marker">No more runs</div>}
+        </div>
+      </div>
+
+      {/* Detail panel */}
+      {selectedRun && (
+        <>
+          <CiResizeHandle targetRef={detailRef} min={280} max={910} storageKey="ci-detail-width" />
+          <div className="ci-detail-pane" ref={detailRef}>
+            <RunDetailPanel
+              run={selectedRun}
+              jobs={runJobs}
+              jobGroups={jobGroups}
+              loadingJobs={loadingJobs}
+              expandedGroups={expandedGroups}
+              provider={provider}
+              projectDir={projectDir}
+              onToggleGroup={toggleGroup}
+              onClose={() => setExpandedRun(null)}
+              onCancel={handleCancel}
+              onOpenUrl={(url) => api.app.openExternal(url)}
+            />
           </div>
-        ))}
-        {filteredRuns.length === 0 && !loadingRuns && runs.length > 0 && (
-          <div className="ci-end-marker">No runs match filters</div>
-        )}
-        {loadingRuns && <div className="ci-loading-more"><div className="ci-spinner" /></div>}
-        {!hasMore && filteredRuns.length > 0 && <div className="ci-end-marker">No more runs</div>}
+        </>
+      )}
+    </div>
+  )
+}
+
+function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, onToggleGroup, onClose, onCancel, onOpenUrl }: {
+  run: CiWorkflowRun
+  jobs: CiJob[]
+  jobGroups: CiJobGroup[]
+  loadingJobs: boolean
+  expandedGroups: Set<string>
+  provider: GitProvider
+  projectDir: string
+  onToggleGroup: (key: string) => void
+  onClose: () => void
+  onCancel: (runId: number) => void
+  onOpenUrl: (url: string) => void
+}) {
+  const api = getDockApi()
+  const [logJobId, setLogJobId] = useState<number | null>(null)
+  const [logText, setLogText] = useState<string>('')
+  const [logLoading, setLogLoading] = useState(false)
+  const [logStepFilter, setLogStepFilter] = useState<string | null>(null)
+
+  const effectiveStatus = getEffectiveStatus(run)
+  const statusLabel = effectiveStatus === 'in_progress' ? 'Running' : effectiveStatus.charAt(0).toUpperCase() + effectiveStatus.slice(1)
+  const totalDuration = run.status === 'completed' ? formatDuration(run.createdAt, run.updatedAt) : null
+
+  const viewJobLog = useCallback(async (jobId: number, stepName?: string) => {
+    setLogJobId(jobId)
+    setLogStepFilter(stepName ?? null)
+    setLogLoading(true)
+    setLogText('')
+    try {
+      const text = await api.ci.getJobLog(projectDir, jobId)
+      setLogText(text || 'No log output available.')
+    } catch {
+      setLogText('Failed to fetch logs.')
+    }
+    setLogLoading(false)
+  }, [projectDir])
+
+  const closeLog = useCallback(() => {
+    setLogJobId(null)
+    setLogText('')
+    setLogStepFilter(null)
+  }, [])
+
+  // Filter log text to a specific step if requested
+  const displayLog = useMemo(() => {
+    if (!logStepFilter || !logText) return logText
+    // GitHub logs format: each line starts with the step timestamp then step name
+    // Try to extract lines belonging to the step section
+    const lines = logText.split('\n')
+    const stepLines: string[] = []
+    let inStep = false
+    for (const line of lines) {
+      // GitHub job log sections are delimited by lines starting with "##[group]StepName"
+      if (line.includes(`##[group]${logStepFilter}`)) {
+        inStep = true
+        continue
+      }
+      if (inStep && line.includes('##[endgroup]')) {
+        break
+      }
+      if (inStep) stepLines.push(line)
+    }
+    return stepLines.length > 0 ? stepLines.join('\n') : logText
+  }, [logText, logStepFilter])
+
+  if (logJobId !== null) {
+    return (
+      <div className="ci-detail">
+        <div className="ci-detail-header">
+          <button className="ci-detail-back" onClick={closeLog} title="Back to run details">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <span className="ci-detail-title">{logStepFilter || 'Job Log'}</span>
+          <button className="ci-detail-close" onClick={onClose}>{'\u2715'}</button>
+        </div>
+        <div className="ci-log-viewer">
+          {logLoading ? (
+            <div className="ci-jobs-loading"><div className="ci-spinner" /> Loading logs...</div>
+          ) : (
+            <pre className="ci-log-content">{displayLog}</pre>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="ci-detail">
+      <div className="ci-detail-header">
+        <span className="ci-detail-title">{run.name}</span>
+        <div className="ci-detail-header-actions">
+          {(effectiveStatus === 'in_progress' || effectiveStatus === 'queued') && (
+            <button className="ci-detail-icon-btn ci-detail-icon-cancel" onClick={() => onCancel(run.id)} title="Cancel run">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
+              </svg>
+            </button>
+          )}
+          {run.url && (
+            <button className="ci-detail-icon-btn" onClick={() => onOpenUrl(run.url)} title={`View on ${providerLabel(provider)}`}>
+              <ProviderIcon provider={provider} />
+            </button>
+          )}
+          <button className="ci-detail-close" onClick={onClose}>{'\u2715'}</button>
+        </div>
+      </div>
+
+      <div className="ci-detail-body">
+        {/* Status banner */}
+        <div className={`ci-detail-status ci-detail-status-${effectiveStatus}`}>
+          <StatusDot color={getStatusColor(run)} animated={effectiveStatus === 'in_progress' || effectiveStatus === 'queued'} />
+          <span className="ci-detail-status-label">{statusLabel}</span>
+          {totalDuration && <span className="ci-detail-duration">{totalDuration}</span>}
+        </div>
+
+        {/* Info grid */}
+        <div className="ci-detail-info">
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Run</span>
+            <span className="ci-detail-value">#{run.runNumber} (attempt {run.runAttempt})</span>
+          </div>
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Branch</span>
+            <span className="ci-detail-value ci-run-branch">{run.headBranch}</span>
+          </div>
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Event</span>
+            <span className="ci-detail-value">{run.event}</span>
+          </div>
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Actor</span>
+            <span className="ci-detail-value">{run.actor}</span>
+          </div>
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Commit</span>
+            <span className="ci-detail-value ci-detail-sha">{run.headSha.slice(0, 7)}</span>
+          </div>
+          <div className="ci-detail-row">
+            <span className="ci-detail-label">Started</span>
+            <span className="ci-detail-value">{new Date(run.createdAt).toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* Jobs */}
+        <div className="ci-detail-jobs-header">Jobs</div>
+        <div className="ci-detail-jobs">
+          {loadingJobs ? (
+            <div className="ci-jobs-loading"><div className="ci-spinner" /> Loading jobs...</div>
+          ) : jobs.length === 0 ? (
+            <div className="ci-jobs-empty">No jobs found</div>
+          ) : (
+            jobGroups.map((group) => (
+              <DetailJobGroup
+                key={group.key}
+                group={group}
+                expanded={expandedGroups.has(group.key)}
+                onToggle={() => onToggleGroup(group.key)}
+                onViewLog={viewJobLog}
+              />
+            ))
+          )}
+        </div>
       </div>
     </div>
   )
+}
+
+function LogIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+    </svg>
+  )
+}
+
+function DetailJobGroup({ group, expanded, onToggle, onViewLog }: {
+  group: CiJobGroup; expanded: boolean; onToggle: () => void
+  onViewLog: (jobId: number, stepName?: string) => void
+}) {
+  const [expandedJobs, setExpandedJobs] = useState<Set<number>>(() => loadExpandedJobs())
+
+  const toggleJob = useCallback((jobId: number) => {
+    setExpandedJobs((prev) => {
+      const next = new Set(prev)
+      if (next.has(jobId)) next.delete(jobId)
+      else next.add(jobId)
+      saveExpandedJobs(next)
+      return next
+    })
+  }, [])
+
+  const renderJob = (job: CiJob, label: string) => {
+    const duration = job.completedAt && job.startedAt ? formatDuration(job.startedAt, job.completedAt) : null
+    const jobExpanded = expandedJobs.has(job.id)
+    const hasSteps = job.steps.length > 0
+    return (
+      <div key={job.id} className="ci-detail-job">
+        <div className="ci-detail-job-header" onClick={hasSteps ? () => toggleJob(job.id) : undefined} style={hasSteps ? { cursor: 'pointer' } : undefined}>
+          {hasSteps && <span className="ci-expand-icon">{jobExpanded ? '\u25BC' : '\u25B6'}</span>}
+          <StatusDot color={jobStatusColor(job.status, job.conclusion)} animated={job.status === 'in_progress'} />
+          <span className="ci-detail-job-name">{label}</span>
+          {duration && <span className="ci-detail-job-duration">{duration}</span>}
+          <button className="ci-detail-log-btn" onClick={(e) => { e.stopPropagation(); onViewLog(job.id) }} title="View log">
+            <LogIcon />
+          </button>
+        </div>
+        {hasSteps && jobExpanded && (
+          <div className="ci-detail-steps">
+            {job.steps.map((step) => (
+              <div key={step.number} className="ci-detail-step">
+                <StepIcon status={step.status} conclusion={step.conclusion} />
+                <span className="ci-detail-step-name">{step.name}</span>
+                <button
+                  className="ci-detail-step-log-btn"
+                  onClick={() => onViewLog(job.id, step.name)}
+                  title="View step log"
+                >
+                  <LogIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (!group.isMatrix) {
+    return renderJob(group.jobs[0], group.jobs[0].name)
+  }
+
+  return (
+    <div className="ci-detail-matrix">
+      <div className="ci-detail-matrix-header" onClick={onToggle}>
+        <span className="ci-expand-icon">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <StatusDot color={jobStatusColor(group.overallStatus, group.overallConclusion)} />
+        <span className="ci-detail-job-name">{group.key}</span>
+        <span className="ci-matrix-count">({group.jobs.length})</span>
+      </div>
+      {expanded && group.jobs.map((job) => {
+        const label = job.matrixValues ? Object.values(job.matrixValues).join(' / ') : job.name
+        return renderJob(job, label)
+      })}
+    </div>
+  )
+}
+
+function StepIcon({ status, conclusion }: { status: string; conclusion: string | null }) {
+  if (status === 'completed') {
+    if (conclusion === 'success') return <span className="ci-step-icon ci-step-success">{'\u2713'}</span>
+    if (conclusion === 'failure') return <span className="ci-step-icon ci-step-failure">{'\u2717'}</span>
+    if (conclusion === 'skipped') return <span className="ci-step-icon ci-step-skipped">{'\u2013'}</span>
+    return <span className="ci-step-icon ci-step-skipped">{'\u2013'}</span>
+  }
+  if (status === 'in_progress') return <span className="ci-step-icon ci-step-running"><div className="ci-spinner" /></span>
+  return <span className="ci-step-icon ci-step-pending">{'\u25CB'}</span>
 }
 
 function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expanded: boolean; onToggle: () => void }) {
@@ -489,7 +837,7 @@ function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expande
     const job = group.jobs[0]
     return (
       <div className="ci-job-item">
-        <StatusBadge status={job.status} conclusion={job.conclusion} />
+        <StatusDot color={jobStatusColor(job.status, job.conclusion)} animated={job.status === 'in_progress'} />
         <span className="ci-job-name">{job.name}</span>
         {job.completedAt && job.startedAt && (
           <span className="ci-job-duration">{formatDuration(job.startedAt, job.completedAt)}</span>
@@ -501,10 +849,10 @@ function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expande
   return (
     <div className="ci-matrix-group">
       <div className="ci-matrix-header" onClick={onToggle}>
-        <span className="ci-expand-icon">{expanded ? '\u25BE' : '\u25B8'}</span>
-        <StatusBadge status={group.overallStatus} conclusion={group.overallConclusion} />
+        <span className="ci-expand-icon">{expanded ? '\u25BC' : '\u25B6'}</span>
+        <StatusDot color={jobStatusColor(group.overallStatus, group.overallConclusion)} />
         <span className="ci-job-name">{group.key}</span>
-        <span className="ci-matrix-count">({group.jobs.length} variants)</span>
+        <span className="ci-matrix-count">({group.jobs.length})</span>
       </div>
       {expanded && (
         <div className="ci-matrix-variants">
@@ -514,7 +862,7 @@ function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expande
               : job.name
             return (
               <div key={job.id} className="ci-job-item ci-matrix-variant">
-                <StatusBadge status={job.status} conclusion={job.conclusion} />
+                <StatusDot color={jobStatusColor(job.status, job.conclusion)} animated={job.status === 'in_progress'} />
                 <span className="ci-job-name">{label}</span>
                 {job.completedAt && job.startedAt && (
                   <span className="ci-job-duration">{formatDuration(job.startedAt, job.completedAt)}</span>
@@ -625,6 +973,12 @@ function FilterIcon() {
   )
 }
 
+function StatusDot({ color, animated }: { color: string; animated?: boolean }) {
+  return (
+    <span className={`ci-status-dot${animated ? ' ci-status-dot-animated' : ''}`} style={{ background: color }} />
+  )
+}
+
 function StatusBadge({ status, conclusion }: { status: string; conclusion: string | null }) {
   let cls = 'ci-badge'
   let label = status
@@ -635,6 +989,64 @@ function StatusBadge({ status, conclusion }: { status: string; conclusion: strin
     cls += ` ci-badge-${status}`
   }
   return <span className={cls}>{label}</span>
+}
+
+function jobStatusColor(status: string, conclusion: string | null): string {
+  if (status === 'completed' && conclusion) {
+    if (conclusion === 'success') return '#9ece6a'
+    if (conclusion === 'failure') return '#f7768e'
+    return 'var(--text-secondary)'
+  }
+  if (status === 'in_progress') return '#e0af68'
+  if (status === 'queued') return 'var(--accent-color)'
+  return 'var(--text-secondary)'
+}
+
+function CiResizeHandle({ targetRef, min, max, storageKey }: {
+  targetRef: React.RefObject<HTMLDivElement | null>
+  min: number
+  max: number
+  storageKey: string
+}) {
+  useEffect(() => {
+    if (!targetRef.current) return
+    const saved = localStorage.getItem(storageKey)
+    if (saved) {
+      const w = parseInt(saved, 10)
+      if (w >= min && w <= max) targetRef.current.style.width = `${w}px`
+    }
+  }, [storageKey, targetRef, min, max])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const el = targetRef.current
+    if (!el) return
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const startX = e.clientX
+    const startW = el.getBoundingClientRect().width / zoom
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = (startX - ev.clientX) / zoom
+      const newW = Math.min(max, Math.max(min, startW + delta))
+      el.style.width = `${newW}px`
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (el) {
+        const z = parseFloat(document.documentElement.style.zoom) || 1
+        localStorage.setItem(storageKey, String(Math.round(el.getBoundingClientRect().width / z)))
+      }
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [targetRef, min, max, storageKey])
+
+  return <div className="ci-resize-handle" onMouseDown={handleMouseDown} />
 }
 
 function RefreshIcon() {

@@ -149,6 +149,21 @@ export class GitHubActionsProvider implements CiProvider {
     }
   }
 
+  async getRun(projectDir: string, runId: number): Promise<CiWorkflowRun | null> {
+    try {
+      const fields = 'databaseId,name,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,updatedAt,url,event,number,attempt,displayTitle'
+      const { stdout } = await gh(
+        ['run', 'view', String(runId), '--json', fields],
+        projectDir
+      )
+      const raw = JSON.parse(stdout) as Record<string, unknown>
+      return mapRun(raw)
+    } catch (err) {
+      logError('[ci-github] getRun failed:', err)
+      return null
+    }
+  }
+
   async getRunJobs(projectDir: string, runId: number): Promise<CiJob[]> {
     try {
       const { stdout } = await gh(
@@ -189,6 +204,19 @@ export class GitHubActionsProvider implements CiProvider {
 
   async cancelRun(projectDir: string, runId: number): Promise<void> {
     await gh(['run', 'cancel', String(runId)], projectDir)
+  }
+
+  async getJobLog(projectDir: string, jobId: number): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync(resolveGh(), [
+        'api',
+        `repos/{owner}/{repo}/actions/jobs/${jobId}/logs`,
+      ], { cwd: projectDir, timeout: 30_000, maxBuffer: 5 * 1024 * 1024 })
+      return stdout
+    } catch (err) {
+      logError('[ci-github] getJobLog failed:', err)
+      return ''
+    }
   }
 
   async getRunUrl(projectDir: string, runId: number): Promise<string> {

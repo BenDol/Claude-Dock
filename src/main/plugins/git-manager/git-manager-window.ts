@@ -28,6 +28,7 @@ export class GitManagerWindowManager {
       if (existing.isMinimized()) existing.restore()
       existing.show()
       existing.focus()
+      existing.webContents.send('git-manager:reopen')
       return
     }
 

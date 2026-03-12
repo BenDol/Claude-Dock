@@ -109,6 +109,7 @@ export const IPC = {
   GIT_MGR_REMOVE_LOCK_FILE: 'gitMgr:removeLockFile',
   GIT_MGR_GET_IDENTITY: 'gitMgr:getIdentity',
   GIT_MGR_SET_IDENTITY: 'gitMgr:setIdentity',
+  GIT_MGR_SEARCH: 'gitMgr:search',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',
@@ -121,6 +122,7 @@ export const IPC = {
   CI_GET_ACTIVE_RUNS: 'ci:getActiveRuns',
   CI_GET_RUN_JOBS: 'ci:getRunJobs',
   CI_CANCEL_RUN: 'ci:cancelRun',
+  CI_GET_JOB_LOG: 'ci:getJobLog',
   CI_START_POLLING: 'ci:startPolling',
   CI_STOP_POLLING: 'ci:stopPolling',
 

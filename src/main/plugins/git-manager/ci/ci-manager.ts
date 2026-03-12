@@ -1,11 +1,14 @@
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflowRun } from '../../../../shared/ci-types'
+import type { NotificationType } from '../../../../shared/ci-types'
 import { NotificationManager } from '../../../notification-manager'
 import { getPluginSetting } from '../../plugin-store'
 import { log } from '../../../logger'
 
 const ACTIVE_POLL_MS = 10_000
 const IDLE_POLL_MS = 60_000
+
+const DEFAULT_NOTIFICATION_CATEGORIES = ['success', 'failure']
 
 interface ProjectPolling {
   provider: CiProvider
@@ -64,8 +67,8 @@ export class CiManager {
           // See if this run is no longer in active list
           const stillActive = runs.find((r) => r.id === runId)
           if (!stillActive) {
-            // Run completed — notify
-            this.emitCompletionNotification(entry.projectDir, prev)
+            // Run completed — fetch actual conclusion and notify
+            this.emitCompletionNotification(entry, prev)
           }
         }
       }
@@ -88,17 +91,53 @@ export class CiManager {
     }
   }
 
-  private emitCompletionNotification(projectDir: string, run: CiWorkflowRun): void {
-    const showNotifications = getPluginSetting(projectDir, 'git-manager', 'showActionNotifications')
-    if (showNotifications === false) return
+  private async emitCompletionNotification(entry: ProjectPolling, run: CiWorkflowRun): Promise<void> {
+    const categories = getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
+    const enabledCategories = categories ?? DEFAULT_NOTIFICATION_CATEGORIES
+    if (enabledCategories.length === 0) return
 
-    // We don't have the final conclusion from the active runs list since it disappeared.
-    // We know it completed. Default to info; if we had cached conclusion we'd use it.
+    // Fetch actual conclusion
+    let conclusion: string | null = run.conclusion
+    if (!conclusion) {
+      try {
+        const updated = await entry.provider.getRun(entry.projectDir, run.id)
+        if (updated) conclusion = updated.conclusion
+      } catch {
+        log('[ci-manager] failed to fetch run conclusion for', run.id)
+      }
+    }
+
+    // Map conclusion to category
+    let category: string
+    if (conclusion === 'success') category = 'success'
+    else if (conclusion === 'failure') category = 'failure'
+    else if (conclusion === 'cancelled') category = 'cancelled'
+    else category = 'failure' // timed_out, action_required etc.
+
+    if (!enabledCategories.includes(category)) return
+
+    // Map to notification type
+    let notifType: NotificationType
+    let statusLabel: string
+    if (conclusion === 'success') {
+      notifType = 'success'
+      statusLabel = 'succeeded'
+    } else if (conclusion === 'failure') {
+      notifType = 'error'
+      statusLabel = 'failed'
+    } else if (conclusion === 'cancelled') {
+      notifType = 'warning'
+      statusLabel = 'was cancelled'
+    } else {
+      notifType = 'error'
+      statusLabel = conclusion ? conclusion : 'completed'
+    }
+
     const nm = NotificationManager.getInstance()
     nm.notify({
-      title: 'CI Run Completed',
-      message: `${run.name} #${run.runNumber} on ${run.headBranch} finished`,
-      type: 'info',
+      title: `CI Run ${conclusion === 'success' ? 'Passed' : conclusion === 'failure' ? 'Failed' : conclusion === 'cancelled' ? 'Cancelled' : 'Completed'}`,
+      message: `${run.name} #${run.runNumber} on ${run.headBranch} ${statusLabel}`,
+      type: notifType,
       source: 'ci',
       action: run.url ? { label: 'View on GitHub', url: run.url } : undefined
     })

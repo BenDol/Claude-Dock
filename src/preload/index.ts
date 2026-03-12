@@ -12,7 +12,9 @@ import type {
   GitStashEntry,
   GitSubmoduleInfo,
   GitMergeState,
-  GitConflictFileContent
+  GitConflictFileContent,
+  GitSearchOptions,
+  GitSearchResponse
 } from '../shared/git-manager-types'
 import type { CiWorkflow, CiWorkflowRun, CiJob, DockNotification } from '../shared/ci-types'
 
@@ -187,6 +189,8 @@ export interface DockApi {
     removeLockFile: (projectDir: string) => Promise<{ success: boolean; error?: string }>
     getIdentity: (projectDir: string) => Promise<{ name: string; email: string }>
     setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
+    search: (projectDir: string, opts: GitSearchOptions) => Promise<GitSearchResponse>
+    onReopen: (callback: () => void) => () => void
   }
   ci: {
     checkAvailable: (projectDir: string) => Promise<boolean>
@@ -199,6 +203,7 @@ export interface DockApi {
     getActiveRuns: (projectDir: string) => Promise<CiWorkflowRun[]>
     getRunJobs: (projectDir: string, runId: number) => Promise<CiJob[]>
     cancelRun: (projectDir: string, runId: number) => Promise<{ success: boolean; error?: string }>
+    getJobLog: (projectDir: string, jobId: number) => Promise<string>
     startPolling: (projectDir: string) => Promise<void>
     stopPolling: (projectDir: string) => Promise<void>
   }
@@ -370,7 +375,13 @@ const dockApi: DockApi = {
     getSetting: (projectDir, key) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SETTING, projectDir, key),
     removeLockFile: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_LOCK_FILE, projectDir),
     getIdentity: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_IDENTITY, projectDir),
-    setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global)
+    setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global),
+    search: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_SEARCH, projectDir, opts),
+    onReopen: (callback) => {
+      const handler = () => callback()
+      ipcRenderer.on('git-manager:reopen', handler)
+      return () => ipcRenderer.removeListener('git-manager:reopen', handler)
+    }
   },
   ci: {
     checkAvailable: (projectDir) => ipcRenderer.invoke(IPC.CI_CHECK_AVAILABLE, projectDir),
@@ -383,6 +394,7 @@ const dockApi: DockApi = {
     getActiveRuns: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_ACTIVE_RUNS, projectDir),
     getRunJobs: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_GET_RUN_JOBS, projectDir, runId),
     cancelRun: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_CANCEL_RUN, projectDir, runId),
+    getJobLog: (projectDir, jobId) => ipcRenderer.invoke(IPC.CI_GET_JOB_LOG, projectDir, jobId),
     startPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_START_POLLING, projectDir),
     stopPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_STOP_POLLING, projectDir)
   },

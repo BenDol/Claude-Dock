@@ -111,6 +111,15 @@ export function registerCiIpc(): void {
     return provider.getRunJobs(projectDir, runId)
   })
 
+  ipcMain.handle(IPC.CI_GET_JOB_LOG, async (_event, projectDir: string, jobId: number) => {
+    try {
+      return await provider.getJobLog(projectDir, jobId)
+    } catch (err) {
+      logError('[ci] getJobLog failed:', err)
+      return ''
+    }
+  })
+
   ipcMain.handle(IPC.CI_CANCEL_RUN, async (_event, projectDir: string, runId: number) => {
     try {
       await provider.cancelRun(projectDir, runId)

@@ -6,6 +6,7 @@ export interface CiProvider {
   getWorkflows(projectDir: string): Promise<CiWorkflow[]>
   getWorkflowRuns(projectDir: string, workflowId: number, page: number, perPage: number): Promise<CiWorkflowRun[]>
   getActiveRuns(projectDir: string): Promise<CiWorkflowRun[]>
+  getRun(projectDir: string, runId: number): Promise<CiWorkflowRun | null>
   getRunJobs(projectDir: string, runId: number): Promise<CiJob[]>
   cancelRun(projectDir: string, runId: number): Promise<void>
   getRunUrl(projectDir: string, runId: number): Promise<string>

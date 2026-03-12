@@ -4,29 +4,100 @@ import type { GitDiffHunk } from '../../../../shared/git-manager-types'
 const MAX_LINES = 3000
 
 const EXT_MAP: Record<string, string> = {
+  // Web / JS ecosystem
   ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
   mjs: 'javascript', cjs: 'javascript', json: 'json', json5: 'json',
-  html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml', xhtml: 'xml',
-  css: 'css', scss: 'scss', less: 'less', sass: 'scss',
+  html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml', xhtml: 'xml', xsl: 'xml', xslt: 'xml',
+  css: 'css', scss: 'scss', less: 'less', sass: 'scss', styl: 'stylus',
+  coffee: 'coffeescript', litcoffee: 'coffeescript',
+  hbs: 'handlebars', handlebars: 'handlebars',
+  haml: 'haml', twig: 'twig', erb: 'erb',
+  // Python
   py: 'python', pyw: 'python', pyi: 'python',
-  rb: 'ruby', rs: 'rust', go: 'go', java: 'java',
-  kt: 'kotlin', kts: 'kotlin', scala: 'scala', groovy: 'groovy',
-  cs: 'csharp', fs: 'fsharp', vb: 'vbnet',
-  c: 'c', h: 'c', cpp: 'cpp', cxx: 'cpp', cc: 'cpp', hpp: 'cpp', hxx: 'cpp',
+  // Ruby
+  rb: 'ruby',
+  // Rust
+  rs: 'rust',
+  // Go
+  go: 'go',
+  // JVM
+  java: 'java', kt: 'kotlin', kts: 'kotlin', scala: 'scala', groovy: 'groovy', gradle: 'groovy',
+  clj: 'clojure', cljs: 'clojure', cljc: 'clojure',
+  // .NET
+  cs: 'csharp', fs: 'fsharp', fsx: 'fsharp', vb: 'vbnet', vbs: 'vbscript',
+  // C / C++
+  c: 'c', h: 'c', cpp: 'cpp', cxx: 'cpp', cc: 'cpp', hpp: 'cpp', hxx: 'cpp', hh: 'cpp',
+  // Apple
   m: 'objectivec', mm: 'objectivec', swift: 'swift',
-  php: 'php', lua: 'lua', r: 'r', jl: 'julia', dart: 'dart',
+  // PHP
+  php: 'php',
+  // Scripting
+  lua: 'lua', r: 'r', jl: 'julia', dart: 'dart',
+  tcl: 'tcl', awk: 'awk',
+  // GameMaker
+  gml: 'gml',
+  // Game / shader
+  glsl: 'glsl', vert: 'glsl', frag: 'glsl', hlsl: 'glsl', shader: 'glsl',
+  sqf: 'sqf',
+  // Shell
   sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash',
-  ps1: 'powershell', psm1: 'powershell',
-  sql: 'sql', pl: 'perl', pm: 'perl',
-  md: 'markdown', yaml: 'yaml', yml: 'yaml', toml: 'ini', ini: 'ini',
-  dockerfile: 'dockerfile', makefile: 'makefile',
-  ex: 'elixir', exs: 'elixir', erl: 'erlang', hs: 'haskell',
-  clj: 'clojure', cljs: 'clojure', lisp: 'lisp', el: 'lisp',
-  vim: 'vim', tf: 'hcl', hcl: 'hcl', nix: 'nix',
-  zig: 'zig', v: 'verilog', vhd: 'vhdl', vhdl: 'vhdl',
-  proto: 'protobuf', graphql: 'graphql', gql: 'graphql',
+  ps1: 'powershell', psm1: 'powershell', psd1: 'powershell',
   bat: 'dos', cmd: 'dos',
-  gradle: 'groovy',
+  // SQL
+  sql: 'sql', pgsql: 'pgsql',
+  // Perl
+  pl: 'perl', pm: 'perl',
+  // Functional
+  hs: 'haskell', lhs: 'haskell',
+  ex: 'elixir', exs: 'elixir', erl: 'erlang', hrl: 'erlang',
+  ml: 'ocaml', mli: 'ocaml', re: 'reasonml', rei: 'reasonml',
+  elm: 'elm', sml: 'sml',
+  lisp: 'lisp', el: 'lisp', scm: 'scheme', ss: 'scheme',
+  // Systems / low-level
+  zig: 'zig', nim: 'nim', d: 'd', cr: 'crystal', wren: 'wren',
+  v: 'verilog', sv: 'verilog', vhd: 'vhdl', vhdl: 'vhdl',
+  asm: 'x86asm', s: 'armasm',
+  wasm: 'wasm', wat: 'wasm',
+  // Markup / config
+  md: 'markdown', mdx: 'markdown',
+  yaml: 'yaml', yml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini',
+  tex: 'latex', ltx: 'latex', bib: 'latex',
+  properties: 'properties',
+  // Infrastructure / DevOps
+  dockerfile: 'dockerfile', makefile: 'makefile',
+  tf: 'hcl', hcl: 'hcl', nix: 'nix',
+  nginx: 'nginx',
+  // Data / interchange
+  proto: 'protobuf', graphql: 'graphql', gql: 'graphql',
+  thrift: 'thrift',
+  xq: 'xquery', xquery: 'xquery',
+  // Pascal / Delphi
+  pas: 'delphi', dpr: 'delphi', pp: 'delphi',
+  // Fortran
+  f: 'fortran', f90: 'fortran', f95: 'fortran', for: 'fortran',
+  // Other
+  vim: 'vim', vimrc: 'vim',
+  cmake: 'cmake',
+  ada: 'ada', adb: 'ada', ads: 'ada',
+  pro: 'prolog',
+  pony: 'pony',
+  hx: 'haxe', hxml: 'haxe',
+  ahk: 'autohotkey',
+  au3: 'autoit',
+  nsi: 'nsis', nsh: 'nsis',
+  qml: 'qml',
+  vala: 'vala', vapi: 'vala',
+  m4: 'matlab', mat: 'matlab',
+  nb: 'mathematica', wl: 'mathematica',
+  sas: 'sas', do: 'stata', dta: 'stata',
+  stan: 'stan',
+  scad: 'openscad',
+  ino: 'arduino', pde: 'processing',
+  as: 'actionscript',
+  applescript: 'applescript', scpt: 'applescript',
+  coq: 'coq',
+  purs: 'haskell',
+  lsl: 'lsl',
 }
 
 const BASENAME_MAP: Record<string, string> = {
@@ -34,6 +105,17 @@ const BASENAME_MAP: Record<string, string> = {
   Jenkinsfile: 'groovy', Vagrantfile: 'ruby',
   Gemfile: 'ruby', Rakefile: 'ruby',
   CMakeLists: 'cmake',
+  Cakefile: 'coffeescript',
+  Guardfile: 'ruby',
+  Thorfile: 'ruby',
+  Berksfile: 'ruby',
+  Fastfile: 'ruby',
+  Podfile: 'ruby',
+  Brewfile: 'ruby',
+  SConstruct: 'python', SConscript: 'python',
+  Procfile: 'bash',
+  Justfile: 'makefile',
+  Taskfile: 'yaml',
 }
 
 export function getLanguageFromPath(filePath: string): string | null {

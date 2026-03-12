@@ -9,6 +9,9 @@ export interface PtyInstance {
   pid: number
   cwd: string
   sessionId: string
+  cols: number
+  rows: number
+  isResume: boolean
 }
 
 export class PtyManager {
@@ -91,7 +94,10 @@ export class PtyManager {
       id: terminalId,
       pid: 0,
       cwd,
-      sessionId
+      sessionId,
+      cols: 80,
+      rows: 24,
+      isResume: !!resumeId
     }
     this.ptys.set(terminalId, instance)
 
@@ -124,6 +130,13 @@ export class PtyManager {
     this.enqueueLaunch(() => {
       if (this.ptys.has(terminalId)) {
         this.sendToHost({ type: 'write', terminalId, data: cmd })
+
+        // For resumed sessions on Windows, force a resize poke after Claude has had
+        // time to start rendering. This fixes a ConPTY issue where the input area
+        // ends up mispositioned after resume due to dimension mismatches during TUI init.
+        if (resumeId && process.platform === 'win32') {
+          this.scheduleResizePoke(terminalId)
+        }
       }
     })
   }
@@ -185,9 +198,39 @@ export class PtyManager {
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
-    if (this.ptys.has(terminalId)) {
+    const instance = this.ptys.get(terminalId)
+    if (instance) {
+      instance.cols = cols
+      instance.rows = rows
       this.sendToHost({ type: 'resize', terminalId, cols, rows })
     }
+  }
+
+  /**
+   * After a resumed Claude session starts on Windows, send a resize poke to force
+   * the TUI to recalculate its layout. We briefly resize to cols-1 then back to
+   * the real size, which guarantees SIGWINCH is delivered even if the current
+   * dimensions already match.
+   */
+  private scheduleResizePoke(terminalId: string): void {
+    // Multiple pokes at staggered intervals to cover different rendering stages
+    const poke = () => {
+      const inst = this.ptys.get(terminalId)
+      if (!inst) return
+      const { cols, rows } = inst
+      if (cols > 1) {
+        this.sendToHost({ type: 'resize', terminalId, cols: cols - 1, rows })
+        setTimeout(() => {
+          if (this.ptys.has(terminalId)) {
+            this.sendToHost({ type: 'resize', terminalId, cols, rows })
+          }
+        }, 50)
+      }
+    }
+    // Poke after Claude has started rendering (1.5s) and after it has likely
+    // finished restoring the conversation (4s)
+    setTimeout(poke, 1500)
+    setTimeout(poke, 4000)
   }
 
   kill(terminalId: string): void {
