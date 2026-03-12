@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { getDockApi } from '../lib/ipc-bridge'
+import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
 import { InputUndoManager } from '../lib/input-undo'
@@ -43,7 +44,8 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   useEffect(() => {
     if (!spawnedRef.current) {
       spawnedRef.current = true
-      getDockApi().terminal.spawn(terminalId)
+      const ephemeral = useDockStore.getState().ciFixTerminals.has(terminalId)
+      getDockApi().terminal.spawn(terminalId, ephemeral ? { ephemeral: true } : undefined)
     }
   }, [terminalId])
 

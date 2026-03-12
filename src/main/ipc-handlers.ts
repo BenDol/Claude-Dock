@@ -19,17 +19,18 @@ declare const __DEV__: boolean
 export function registerIpcHandlers(): void {
   const manager = DockManager.getInstance()
 
-  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string) => {
+  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string, options?: { ephemeral?: boolean }) => {
     const dock = getDockForEvent(event)
     if (dock) {
-      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}`)
+      const ephemeral = options?.ephemeral ?? false
+      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}${ephemeral ? ' (ephemeral)' : ''}`)
       pluginManager.emitTerminalPreSpawn(dock.projectDir, terminalId)
-      const resumeId = dock.getNextResumeId()
+      const resumeId = ephemeral ? undefined : dock.getNextResumeId()
       // Restore saved terminal buffer before PTY starts (for resumed sessions)
       if (resumeId) {
         dock.restoreBuffer(terminalId, resumeId)
       }
-      dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId)
+      dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId, ephemeral)
       // Register with activity tracker (non-critical)
       const sessionId = dock.ptyManager.getSessionId(terminalId) || ''
       try {

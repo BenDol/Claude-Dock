@@ -16,6 +16,7 @@ export interface PtyInstance {
 
 export class PtyManager {
   private ptys = new Map<string, PtyInstance>()
+  private ephemeralIds = new Set<string>()
   private onData: (terminalId: string, data: string) => void
   private onExit: (terminalId: string, exitCode: number) => void
   private onSessionCreated: (sessionId: string) => void
@@ -83,12 +84,14 @@ export class PtyManager {
     }
   }
 
-  spawn(terminalId: string, cwd: string, resumeId?: string): void {
+  spawn(terminalId: string, cwd: string, resumeId?: string, ephemeral?: boolean): void {
     const shell = getDefaultShell()
     const args = getShellArgs(shell)
     const sessionId = resumeId ?? crypto.randomUUID()
 
-    log(`pty.spawn: terminalId=${terminalId} shell=${shell} cwd=${cwd} resume=${!!resumeId}`)
+    if (ephemeral) this.ephemeralIds.add(terminalId)
+
+    log(`pty.spawn: terminalId=${terminalId} shell=${shell} cwd=${cwd} resume=${!!resumeId}${ephemeral ? ' ephemeral' : ''}`)
 
     const instance: PtyInstance = {
       id: terminalId,
@@ -119,10 +122,12 @@ export class PtyManager {
 
     const cmd = resumeId
       ? `claude --resume ${sessionId}\r`
-      : `claude --session-id ${sessionId}\r`
+      : ephemeral
+        ? `claude\r`
+        : `claude --session-id ${sessionId}\r`
 
-    // Persist session immediately for fresh terminals
-    if (!resumeId) {
+    // Persist session immediately for fresh terminals (skip ephemeral)
+    if (!resumeId && !ephemeral) {
       this.onSessionCreated(sessionId)
     }
 
@@ -178,11 +183,14 @@ export class PtyManager {
   }
 
   getSessionIds(): string[] {
-    return Array.from(this.ptys.values()).map((p) => p.sessionId)
+    return Array.from(this.ptys.entries())
+      .filter(([id]) => !this.ephemeralIds.has(id))
+      .map(([, p]) => p.sessionId)
   }
 
   getOrderedSessionIds(terminalIds: string[]): string[] {
     return terminalIds
+      .filter((id) => !this.ephemeralIds.has(id))
       .map((id) => this.ptys.get(id)?.sessionId)
       .filter((s): s is string => !!s)
   }
@@ -238,6 +246,7 @@ export class PtyManager {
       this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
+      this.ephemeralIds.delete(terminalId)
       if (!this.suppressSessionChanges) {
         this.onSessionsChanged()
       }

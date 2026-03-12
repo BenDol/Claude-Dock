@@ -77,6 +77,48 @@ function LauncherApp() {
 
 let nextTermId = 1
 
+const ERROR_PATTERNS = /\b(error|fail|fatal|exception|panic|abort|segfault|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|could not|undefined is not|is not a function|exit code [1-9]|Process completed with exit code [1-9]|ERR!|npm ERR|FAILED|AssertionError|assert\.|expect\()\b/i
+
+/**
+ * Extract only the error-relevant lines from a CI log, with context.
+ * Falls back to the last 80 lines if no error patterns are found.
+ */
+function extractErrorContext(fullLog: string, contextLines = 10): string {
+  const lines = fullLog.split('\n')
+  // Find all line indices that match error patterns
+  const errorIndices: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (ERROR_PATTERNS.test(lines[i])) errorIndices.push(i)
+  }
+
+  if (errorIndices.length === 0) {
+    // No error patterns found — fall back to tail
+    return lines.slice(-80).join('\n')
+  }
+
+  // Merge overlapping ranges into contiguous blocks
+  const ranges: [number, number][] = []
+  for (const idx of errorIndices) {
+    const start = Math.max(0, idx - contextLines)
+    const end = Math.min(lines.length - 1, idx + contextLines)
+    if (ranges.length > 0 && start <= ranges[ranges.length - 1][1] + 1) {
+      // Extend the previous range
+      ranges[ranges.length - 1][1] = end
+    } else {
+      ranges.push([start, end])
+    }
+  }
+
+  // Build output, joining blocks with separator
+  const blocks = ranges.map(([start, end]) => lines.slice(start, end + 1).join('\n'))
+  const result = blocks.join('\n...\n')
+
+  // Cap at ~200 lines to avoid overly large prompts
+  const resultLines = result.split('\n')
+  if (resultLines.length > 200) return resultLines.slice(0, 200).join('\n')
+  return result
+}
+
 function DockApp() {
   const terminals = useDockStore((s) => s.terminals)
   const projectDir = useDockStore((s) => s.projectDir)
@@ -209,8 +251,7 @@ function DockApp() {
       if (failedJobs.length > 0 && failedJobs[0].id) {
         try {
           const fullLog = await api.ci.getJobLog(dir, failedJobs[0].id)
-          const lines = fullLog.split('\n')
-          logSnippet = lines.slice(-150).join('\n')
+          logSnippet = extractErrorContext(fullLog, 10)
         } catch { /* continue without log */ }
       }
 
@@ -223,7 +264,7 @@ function DockApp() {
         `Workflow: ${runName} #${runNumber}\n` +
         `Branch: ${branch}\n` +
         (jobList ? `Failed jobs:\n${jobList}\n` : '') +
-        (logSnippet ? `\nLog output (last 150 lines):\n\`\`\`\n${logSnippet}\n\`\`\`\n` : '') +
+        (logSnippet ? `\nRelevant error output:\n\`\`\`\n${logSnippet}\n\`\`\`\n` : '') +
         `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
         `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
         `The fix MUST be committed and pushed to the branch "${branch}". ` +

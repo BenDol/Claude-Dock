@@ -60,7 +60,7 @@ export interface GitInstallResult {
 
 export interface DockApi {
   terminal: {
-    spawn: (terminalId: string) => Promise<boolean>
+    spawn: (terminalId: string, options?: { ephemeral?: boolean }) => Promise<boolean>
     write: (terminalId: string, data: string) => Promise<void>
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>
@@ -228,7 +228,7 @@ export interface DockApi {
 
 const dockApi: DockApi = {
   terminal: {
-    spawn: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, terminalId),
+    spawn: (terminalId, options) => ipcRenderer.invoke(IPC.TERMINAL_SPAWN, terminalId, options),
     write: (terminalId, data) => ipcRenderer.invoke(IPC.TERMINAL_WRITE, terminalId, data),
     resize: (terminalId, cols, rows) => ipcRenderer.invoke(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_KILL, terminalId),

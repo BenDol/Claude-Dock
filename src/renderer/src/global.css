@@ -2221,6 +2221,25 @@ body {
   color: #f7768e;
 }
 
+.ci-cancel-btn-active {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ci-cancel-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: ci-cancel-spin 0.6s linear infinite;
+}
+
+@keyframes ci-cancel-spin {
+  to { transform: rotate(360deg); }
+}
+
 .ci-run-fix-btn {
   background: none;
   border: none;

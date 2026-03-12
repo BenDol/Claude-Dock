@@ -341,12 +341,24 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     setLoadingJobs(false)
   }, [expandedRun, projectDir])
 
+  const [cancellingRuns, setCancellingRuns] = useState<Set<number>>(new Set())
+
   const handleCancel = useCallback(async (runId: number) => {
-    await api.ci.cancelRun(projectDir, runId)
-    // Refresh active runs
-    const active = await api.ci.getActiveRuns(projectDir)
-    setActiveRuns(active)
-  }, [projectDir])
+    setCancellingRuns((prev) => new Set(prev).add(runId))
+    try {
+      await api.ci.cancelRun(projectDir, runId)
+      // Refresh active runs immediately
+      const active = await api.ci.getActiveRuns(projectDir)
+      setActiveRuns(active)
+      // Refresh the full run list after a short delay to show final state
+      setTimeout(() => {
+        loadRuns(1, true)
+        setCancellingRuns((prev) => { const next = new Set(prev); next.delete(runId); return next })
+      }, 3000)
+    } catch {
+      setCancellingRuns((prev) => { const next = new Set(prev); next.delete(runId); return next })
+    }
+  }, [projectDir, loadRuns])
 
   const handleFixRunWithClaude = useCallback(async (run: CiWorkflowRun) => {
     const jobs = await api.ci.getRunJobs(projectDir, run.id)
@@ -645,10 +657,19 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                   </span>
                   <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span></span>
                 </div>
-                <button className="ci-cancel-btn" onClick={(e) => { e.stopPropagation(); handleCancel(run.id) }} title="Cancel run">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
-                  </svg>
+                <button
+                  className={`ci-cancel-btn${cancellingRuns.has(run.id) ? ' ci-cancel-btn-active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); handleCancel(run.id) }}
+                  disabled={cancellingRuns.has(run.id)}
+                  title={cancellingRuns.has(run.id) ? 'Cancelling...' : 'Cancel run'}
+                >
+                  {cancellingRuns.has(run.id) ? (
+                    <span className="ci-cancel-spinner" />
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
+                    </svg>
+                  )}
                 </button>
               </div>
             ))}
@@ -694,6 +715,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
           <CiResizeHandle targetRef={detailRef} min={280} max={910} storageKey="ci-detail-width" />
           <div className="ci-detail-pane" ref={detailRef}>
             <RunDetailPanel
+              key={selectedRun.id}
               run={selectedRun}
               jobs={runJobs}
               jobGroups={jobGroups}
@@ -706,6 +728,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
               onToggleGroup={toggleGroup}
               onClose={() => setExpandedRun(null)}
               onCancel={handleCancel}
+              cancelling={cancellingRuns.has(selectedRun.id)}
               onOpenUrl={(url) => api.app.openExternal(url)}
             />
           </div>
@@ -715,7 +738,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   )
 }
 
-function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, onOpenUrl }: {
+function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, cancelling, onOpenUrl }: {
   run: CiWorkflowRun
   jobs: CiJob[]
   jobGroups: CiJobGroup[]
@@ -728,6 +751,7 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
   onToggleGroup: (key: string) => void
   onClose: () => void
   onCancel: (runId: number) => void
+  cancelling?: boolean
   onOpenUrl: (url: string) => void
 }) {
   const api = getDockApi()
@@ -811,10 +835,19 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
         <span className="ci-detail-title">{run.name}</span>
         <div className="ci-detail-header-actions">
           {(effectiveStatus === 'in_progress' || effectiveStatus === 'queued') && (
-            <button className="ci-detail-icon-btn ci-detail-icon-cancel" onClick={() => onCancel(run.id)} title="Cancel run">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
-              </svg>
+            <button
+              className={`ci-detail-icon-btn ci-detail-icon-cancel${cancelling ? ' ci-cancel-btn-active' : ''}`}
+              onClick={() => onCancel(run.id)}
+              disabled={cancelling}
+              title={cancelling ? 'Cancelling...' : 'Cancel run'}
+            >
+              {cancelling ? (
+                <span className="ci-cancel-spinner" />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
+                </svg>
+              )}
             </button>
           )}
           {run.url && (
