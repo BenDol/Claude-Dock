@@ -904,6 +904,39 @@
   font-weight: 500;
 }
 
+.gm-submodule-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.gm-submodule-icon-badge {
+  position: absolute;
+  top: -6px;
+  right: -10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.gm-submodule-icon-badge .gm-submodule-ahead,
+.gm-submodule-icon-badge .gm-submodule-behind {
+  display: flex;
+  align-items: center;
+  gap: 0px;
+}
+
+.gm-submodule-icon-badge .gm-submodule-ahead svg,
+.gm-submodule-icon-badge .gm-submodule-behind svg {
+  width: 6px;
+  height: 6px;
+}
+
 .gm-submodule-ahead {
   color: #9ece6a;
 }
