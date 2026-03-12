@@ -14,7 +14,7 @@ function getBuildInfo() {
 }
 
 const { sha, fullSha, date } = getBuildInfo()
-const isDev = process.env.NODE_ENV !== 'production'
+const isDev = process.env.PRODUCTION_BUILD !== '1'
 const updateProfile = process.env.UPDATE_PROFILE || 'latest'
 const debugDefault = updateProfile === 'bleeding-edge'
 

@@ -1,10 +1,13 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { getDockApi } from '../../lib/ipc-bridge'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobGroup } from '../../../../shared/ci-types'
 import { groupJobsByMatrix } from '../../../../shared/ci-types'
+import type { GitProvider } from '../../../../shared/remote-url'
+import { ProviderIcon, providerLabel } from './ProviderIcons'
 
 interface CiPanelProps {
   projectDir: string
+  provider: GitProvider
 }
 
 type CiStatus = 'loading' | 'setup' | 'ready' | 'error'
@@ -17,7 +20,34 @@ interface SetupState {
   loginOpened: boolean
 }
 
-export default function CiPanel({ projectDir }: CiPanelProps) {
+type ConclusionFilter = 'success' | 'failure' | 'cancelled' | 'in_progress' | 'queued'
+
+interface CiFilters {
+  status: Set<ConclusionFilter>
+  branch: string | null
+  event: string | null
+  showStaleQueued: boolean
+}
+
+const STALE_QUEUED_HOURS = 24
+
+function isStaleQueued(run: CiWorkflowRun): boolean {
+  if (run.status !== 'queued') return false
+  const age = Date.now() - new Date(run.createdAt).getTime()
+  return age > STALE_QUEUED_HOURS * 60 * 60 * 1000
+}
+
+function getEffectiveStatus(run: CiWorkflowRun): ConclusionFilter {
+  if (run.status === 'completed' && run.conclusion) {
+    if (run.conclusion === 'success') return 'success'
+    if (run.conclusion === 'failure') return 'failure'
+    return 'cancelled' // cancelled, skipped, timed_out, action_required
+  }
+  if (run.status === 'in_progress' || run.status === 'waiting' || run.status === 'requested') return 'in_progress'
+  return 'queued'
+}
+
+export default function CiPanel({ projectDir, provider }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [setup, setSetup] = useState<SetupState>({ ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false, loginOpened: false })
@@ -32,6 +62,8 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
   const [runJobs, setRunJobs] = useState<CiJob[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [filters, setFilters] = useState<CiFilters>({ status: new Set(), branch: null, event: null, showStaleQueued: false })
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
 
@@ -205,6 +237,39 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
     })
   }, [])
 
+  // Derive unique branches and events from loaded runs
+  const availableBranches = useMemo(() => [...new Set(runs.map((r) => r.headBranch))].sort(), [runs])
+  const availableEvents = useMemo(() => [...new Set(runs.map((r) => r.event))].sort(), [runs])
+
+  // Count stale queued runs
+  const staleQueuedCount = useMemo(() => runs.filter(isStaleQueued).length, [runs])
+
+  // Apply filters
+  const filteredRuns = useMemo(() => {
+    return runs.filter((run) => {
+      // Prune stale queued unless user opted in
+      if (!filters.showStaleQueued && isStaleQueued(run)) return false
+      // Status filter
+      if (filters.status.size > 0 && !filters.status.has(getEffectiveStatus(run))) return false
+      // Branch filter
+      if (filters.branch && run.headBranch !== filters.branch) return false
+      // Event filter
+      if (filters.event && run.event !== filters.event) return false
+      return true
+    })
+  }, [runs, filters])
+
+  const toggleStatusFilter = useCallback((s: ConclusionFilter) => {
+    setFilters((prev) => {
+      const next = new Set(prev.status)
+      if (next.has(s)) next.delete(s)
+      else next.add(s)
+      return { ...prev, status: next }
+    })
+  }, [])
+
+  const hasActiveFilters = filters.status.size > 0 || filters.branch !== null || filters.event !== null
+
   if (status === 'loading') {
     return <div className="ci-panel-center"><div className="ci-spinner" /> Checking CI availability...</div>
   }
@@ -272,6 +337,79 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
         </button>
       </div>
 
+      {/* Filter bar */}
+      <div className="ci-filter-bar">
+        <button
+          className={`ci-filter-toggle${hasActiveFilters ? ' ci-filter-toggle-active' : ''}`}
+          onClick={() => setFiltersExpanded((p) => !p)}
+          title="Toggle filters"
+        >
+          <FilterIcon />
+          {hasActiveFilters && <span className="ci-filter-dot" />}
+        </button>
+        {filtersExpanded && (
+          <div className="ci-filter-controls">
+            <div className="ci-filter-group">
+              {(['success', 'failure', 'in_progress', 'queued', 'cancelled'] as ConclusionFilter[]).map((s) => (
+                <button
+                  key={s}
+                  className={`ci-filter-chip ci-filter-chip-${s}${filters.status.has(s) ? ' ci-filter-chip-on' : ''}`}
+                  onClick={() => toggleStatusFilter(s)}
+                >
+                  {s === 'in_progress' ? 'running' : s}
+                </button>
+              ))}
+            </div>
+            {availableBranches.length > 1 && (
+              <select
+                className="ci-filter-select"
+                value={filters.branch ?? ''}
+                onChange={(e) => setFilters((p) => ({ ...p, branch: e.target.value || null }))}
+              >
+                <option value="">All branches</option>
+                {availableBranches.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            )}
+            {availableEvents.length > 1 && (
+              <select
+                className="ci-filter-select"
+                value={filters.event ?? ''}
+                onChange={(e) => setFilters((p) => ({ ...p, event: e.target.value || null }))}
+              >
+                <option value="">All events</option>
+                {availableEvents.map((ev) => <option key={ev} value={ev}>{ev}</option>)}
+              </select>
+            )}
+            {hasActiveFilters && (
+              <button className="ci-filter-clear" onClick={() => setFilters((p) => ({ ...p, status: new Set(), branch: null, event: null }))}>
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+        {!filtersExpanded && hasActiveFilters && (
+          <span className="ci-filter-summary">
+            {filters.status.size > 0 && [...filters.status].map((s) => s === 'in_progress' ? 'running' : s).join(', ')}
+            {filters.branch && `${filters.status.size > 0 ? ' · ' : ''}${filters.branch}`}
+            {filters.event && `${filters.status.size > 0 || filters.branch ? ' · ' : ''}${filters.event}`}
+          </span>
+        )}
+      </div>
+
+      {/* Stale queued notice */}
+      {staleQueuedCount > 0 && !filters.showStaleQueued && (
+        <div className="ci-stale-notice">
+          {staleQueuedCount} stale queued run{staleQueuedCount > 1 ? 's' : ''} hidden
+          <button className="ci-stale-show" onClick={() => setFilters((p) => ({ ...p, showStaleQueued: true }))}>Show</button>
+        </div>
+      )}
+      {filters.showStaleQueued && staleQueuedCount > 0 && (
+        <div className="ci-stale-notice">
+          Showing stale queued runs
+          <button className="ci-stale-show" onClick={() => setFilters((p) => ({ ...p, showStaleQueued: false }))}>Hide</button>
+        </div>
+      )}
+
       {/* Active runs */}
       {activeRuns.length > 0 && (
         <div className="ci-active-section">
@@ -285,7 +423,7 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
               </div>
               <button className="ci-cancel-btn" onClick={() => handleCancel(run.id)} title="Cancel">Cancel</button>
               {run.url && (
-                <button className="ci-view-btn" onClick={() => api.app.openExternal(run.url)} title="View on GitHub">View</button>
+                <button className="ci-view-btn ci-view-btn-icon" onClick={() => api.app.openExternal(run.url)} title={`View on ${providerLabel(provider)}`}><ProviderIcon provider={provider} /></button>
               )}
             </div>
           ))}
@@ -295,7 +433,7 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
       {/* Run history */}
       <div className="ci-section-label">Run History</div>
       <div className="ci-run-list" ref={scrollRef} onScroll={handleScroll}>
-        {runs.map((run) => (
+        {filteredRuns.map((run) => (
           <div key={run.id} className="ci-run-item">
             <div className="ci-run-row" onClick={() => handleExpandRun(run.id)}>
               <span className="ci-expand-icon">{expandedRun === run.id ? '\u25BE' : '\u25B8'}</span>
@@ -308,11 +446,11 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
               </div>
               {run.url && (
                 <button
-                  className="ci-view-btn ci-view-btn-sm"
+                  className="ci-view-btn ci-view-btn-icon ci-view-btn-sm"
                   onClick={(e) => { e.stopPropagation(); api.app.openExternal(run.url) }}
-                  title="View on GitHub"
+                  title={`View on ${providerLabel(provider)}`}
                 >
-                  View
+                  <ProviderIcon provider={provider} />
                 </button>
               )}
             </div>
@@ -336,8 +474,11 @@ export default function CiPanel({ projectDir }: CiPanelProps) {
             )}
           </div>
         ))}
+        {filteredRuns.length === 0 && !loadingRuns && runs.length > 0 && (
+          <div className="ci-end-marker">No runs match filters</div>
+        )}
         {loadingRuns && <div className="ci-loading-more"><div className="ci-spinner" /></div>}
-        {!hasMore && runs.length > 0 && <div className="ci-end-marker">No more runs</div>}
+        {!hasMore && filteredRuns.length > 0 && <div className="ci-end-marker">No more runs</div>}
       </div>
     </div>
   )
@@ -472,6 +613,14 @@ function SetupRefreshIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
       <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    </svg>
+  )
+}
+
+function FilterIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   )
 }

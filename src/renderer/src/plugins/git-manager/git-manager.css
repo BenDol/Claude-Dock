@@ -1739,6 +1739,67 @@
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.gm-detail-files-header:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.gm-detail-files-toggle {
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.gm-detail-file-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.gm-detail-file-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gm-detail-file-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.gm-detail-file-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.gm-detail-file-list-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.gm-detail-file-list-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.gm-detail-file-list-name::before {
+  content: '\200E';
 }
 
 /* Diff rendering */
@@ -3354,4 +3415,8 @@
 .gm-diff-large-gate-text {
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.gm-diff-lazy-placeholder {
+  background: transparent;
 }

@@ -1,4 +1,5 @@
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
+import { existsSync } from 'fs'
 import { promisify } from 'util'
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobStep } from '../../../../shared/ci-types'
@@ -6,8 +7,47 @@ import { log, logError } from '../../../logger'
 
 const execFileAsync = promisify(execFile)
 
+let ghPath: string | null = null
+
+export function resolveGh(): string {
+  if (ghPath) return ghPath
+
+  // Try PATH first
+  try {
+    const cmd = process.platform === 'win32' ? 'where' : 'which'
+    const result = execFileSync(cmd, ['gh'], { timeout: 5000, encoding: 'utf-8' }).trim().split('\n')[0].trim()
+    if (result) {
+      ghPath = result
+      log('[ci-github] found gh at:', ghPath)
+      return ghPath
+    }
+  } catch { /* not in PATH */ }
+
+  // Try common install locations
+  const candidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\GitHub CLI\\gh.exe',
+        'C:\\Program Files (x86)\\GitHub CLI\\gh.exe'
+      ]
+    : process.platform === 'darwin'
+      ? ['/opt/homebrew/bin/gh', '/usr/local/bin/gh']
+      : ['/usr/bin/gh', '/usr/local/bin/gh', '/snap/bin/gh']
+
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      ghPath = p
+      log('[ci-github] found gh at:', ghPath)
+      return ghPath
+    }
+  }
+
+  // Fallback — let the OS resolve it
+  ghPath = 'gh'
+  return ghPath
+}
+
 function gh(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync('gh', args, { cwd, timeout: 30_000 })
+  return execFileAsync(resolveGh(), args, { cwd, timeout: 30_000 })
 }
 
 function parseMatrixJobName(name: string): { matrixKey: string | null; matrixValues: Record<string, string> | null } {
@@ -61,7 +101,7 @@ export class GitHubActionsProvider implements CiProvider {
 
   async getWorkflowRuns(projectDir: string, workflowId: number, page: number, perPage: number): Promise<CiWorkflowRun[]> {
     try {
-      const fields = 'databaseId,name,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,updatedAt,url,event,number,attempt,actor'
+      const fields = 'databaseId,name,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,updatedAt,url,event,number,attempt,displayTitle'
       const args = [
         'run', 'list',
         '--workflow', String(workflowId),
@@ -89,7 +129,7 @@ export class GitHubActionsProvider implements CiProvider {
 
   async getActiveRuns(projectDir: string): Promise<CiWorkflowRun[]> {
     try {
-      const fields = 'databaseId,name,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,updatedAt,url,event,number,attempt,actor'
+      const fields = 'databaseId,name,workflowDatabaseId,headBranch,headSha,status,conclusion,createdAt,updatedAt,url,event,number,attempt,displayTitle'
       const { stdout } = await gh(
         ['run', 'list', '--status', 'in_progress', '--json', fields, '--limit', '50'],
         projectDir
@@ -161,7 +201,6 @@ export class GitHubActionsProvider implements CiProvider {
 }
 
 function mapRun(r: Record<string, unknown>): CiWorkflowRun {
-  const actor = r.actor as { login?: string } | string | undefined
   return {
     id: (r.databaseId as number) || 0,
     name: (r.name as string) || '',
@@ -176,6 +215,6 @@ function mapRun(r: Record<string, unknown>): CiWorkflowRun {
     event: (r.event as string) || '',
     runNumber: (r.number as number) || 0,
     runAttempt: (r.attempt as number) || 1,
-    actor: typeof actor === 'object' ? (actor?.login || '') : (actor || '')
+    actor: (r.displayTitle as string) || ''
   }
 }

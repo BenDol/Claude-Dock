@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { IPC } from '../../../../shared/ipc-channels'
-import { GitHubActionsProvider } from './github-actions-provider'
+import { GitHubActionsProvider, resolveGh } from './github-actions-provider'
 import { CiManager } from './ci-manager'
 import { log, logError } from '../../../logger'
 
@@ -26,8 +26,9 @@ export function registerCiIpc(): void {
 
   ipcMain.handle(IPC.CI_CHECK_GH_INSTALLED, async () => {
     try {
-      const cmd = process.platform === 'win32' ? 'where' : 'which'
-      await execFileAsync(cmd, ['gh'], { timeout: 5000 })
+      const ghBin = resolveGh()
+      // resolveGh falls back to 'gh' if nothing found — verify it actually exists
+      await execFileAsync(ghBin, ['--version'], { timeout: 5000 })
       return true
     } catch {
       return false
@@ -36,7 +37,7 @@ export function registerCiIpc(): void {
 
   ipcMain.handle(IPC.CI_CHECK_GH_AUTH, async () => {
     try {
-      await execFileAsync('gh', ['auth', 'status'], { timeout: 10_000 })
+      await execFileAsync(resolveGh(), ['auth', 'status'], { timeout: 10_000 })
       return true
     } catch {
       return false
@@ -45,7 +46,7 @@ export function registerCiIpc(): void {
 
   ipcMain.handle(IPC.CI_CHECK_GITHUB_REMOTE, async (_event, projectDir: string) => {
     try {
-      const { stdout } = await execFileAsync('gh', ['repo', 'view', '--json', 'name', '-q', '.name'], { cwd: projectDir, timeout: 10_000 })
+      const { stdout } = await execFileAsync(resolveGh(), ['repo', 'view', '--json', 'name', '-q', '.name'], { cwd: projectDir, timeout: 10_000 })
       return stdout.trim().length > 0
     } catch {
       return false
@@ -54,14 +55,15 @@ export function registerCiIpc(): void {
 
   ipcMain.handle(IPC.CI_RUN_GH_AUTH_LOGIN, async () => {
     try {
+      const ghBin = resolveGh()
       if (process.platform === 'win32') {
-        spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', 'gh auth login'], {
+        spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `"${ghBin}" auth login`], {
           stdio: 'ignore',
           detached: true,
           windowsHide: false
         }).unref()
       } else if (process.platform === 'darwin') {
-        spawn('open', ['-a', 'Terminal', '--args', '-e', 'gh auth login'], {
+        spawn('open', ['-a', 'Terminal', '--args', '-e', `${ghBin} auth login`], {
           stdio: 'ignore',
           detached: true
         }).unref()
@@ -77,7 +79,7 @@ export function registerCiIpc(): void {
         for (const t of terminals) {
           try {
             await execFileAsync('which', [t.cmd], { timeout: 3000 })
-            spawn(t.cmd, [...t.args, 'gh', 'auth', 'login'], {
+            spawn(t.cmd, [...t.args, ghBin, 'auth', 'login'], {
               stdio: 'ignore',
               detached: true
             }).unref()

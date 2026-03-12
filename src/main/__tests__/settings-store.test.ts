@@ -42,10 +42,10 @@ describe('settings-store', () => {
     })
 
     it('deep merges nested objects', () => {
-      const defaults = { theme: { mode: 'dark', accentColor: '#6366f1' } }
+      const defaults = { theme: { mode: 'dark', accentColor: '#da7756' } }
       const stored = { theme: { mode: 'light' } }
       const result = deepMergeDefaults(defaults, stored)
-      expect(result).toEqual({ theme: { mode: 'light', accentColor: '#6366f1' } })
+      expect(result).toEqual({ theme: { mode: 'light', accentColor: '#da7756' } })
     })
 
     it('preserves new default keys not in stored data', () => {
@@ -115,7 +115,7 @@ describe('settings-store', () => {
       expect(result.terminal.fontSize).toBe(18)
 
       // Default values preserved
-      expect(result.theme.accentColor).toBe('#6366f1')
+      expect(result.theme.accentColor).toBe('#da7756')
       expect(result.terminal.cursorStyle).toBe('block')
       expect(result.grid.maxColumns).toBe(4)
       expect(result.behavior.confirmCloseWithRunning).toBe(true)

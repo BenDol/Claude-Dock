@@ -93,6 +93,7 @@ jobs:
         run: npx electron-vite build
         env:
           UPDATE_PROFILE: bleeding-edge
+          PRODUCTION_BUILD: '1'
 
       - name: Import macOS signing certificate
         if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'

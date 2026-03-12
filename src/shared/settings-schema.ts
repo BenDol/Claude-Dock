@@ -171,7 +171,7 @@ export const LIGHT_TERMINAL_COLORS: TerminalColors = {
 export const DEFAULT_SETTINGS: Settings = {
   theme: {
     mode: 'dark',
-    accentColor: '#6366f1',
+    accentColor: '#da7756',
     terminalStyle: 'claude-code',
     terminalColors: { ...CLAUDE_CODE_TERMINAL_COLORS }
   },
