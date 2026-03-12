@@ -172,8 +172,8 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: {
     mode: 'dark',
     accentColor: '#6366f1',
-    terminalStyle: 'default',
-    terminalColors: { ...DARK_TERMINAL_COLORS }
+    terminalStyle: 'claude-code',
+    terminalColors: { ...CLAUDE_CODE_TERMINAL_COLORS }
   },
   terminal: {
     fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace",
