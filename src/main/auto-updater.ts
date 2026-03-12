@@ -6,7 +6,7 @@ import { app } from 'electron'
 import { spawn } from 'child_process'
 
 declare const __BUILD_SHA__: string
-
+// test: force updater rebuild
 const GITHUB_API = 'https://api.github.com/repos/BenDol/Claude-Dock/releases'
 
 interface GitHubAsset {
