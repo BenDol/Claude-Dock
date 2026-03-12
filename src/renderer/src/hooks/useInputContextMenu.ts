@@ -76,7 +76,17 @@ export function useInputContextMenu(): void {
           disabled: false,
           action: () => {
             target.focus()
-            document.execCommand('paste')
+            navigator.clipboard.readText().then((text) => {
+              if (!text) return
+              // insertText preserves undo history and fires input events for React
+              if (!document.execCommand('insertText', false, text)) {
+                // Fallback: manual insertion + synthetic input event
+                const start = target.selectionStart ?? target.value.length
+                const end = target.selectionEnd ?? start
+                target.setRangeText(text, start, end, 'end')
+                target.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+            }).catch(() => { /* clipboard permission denied — nothing we can do */ })
             close()
           }
         })

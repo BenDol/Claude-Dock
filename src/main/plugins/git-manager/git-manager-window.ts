@@ -25,6 +25,8 @@ export class GitManagerWindowManager {
     // Focus existing window if already open
     const existing = this.windows.get(projectDir)
     if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore()
+      existing.show()
       existing.focus()
       return
     }
