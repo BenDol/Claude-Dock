@@ -649,7 +649,7 @@ const Launcher: React.FC = () => {
             {claudePhase === 'installing' && (
               <div className="updater-row">
                 <div className="updater-spinner" />
-                <span className="updater-text">Installer opened — close the terminal window when finished.</span>
+                <span className="updater-text">Installing Claude CLI — this may take a moment...</span>
               </div>
             )}
 

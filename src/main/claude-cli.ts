@@ -331,6 +331,8 @@ function checkKnownLocations(): string | null {
       ]
     : process.platform === 'darwin'
     ? [
+        // Official installer location
+        path.join(home, '.local', 'bin', 'claude'),
         '/usr/local/bin/claude',
         '/opt/homebrew/bin/claude',
         path.join(home, '.npm-global', 'bin', 'claude'),
@@ -495,8 +497,9 @@ function installMacOS(): Promise<ClaudeInstallResult> {
     'echo "~/.local/bin exists: $([ -d ~/.local/bin ] && echo true || echo false)" >> "$LOG_FILE"',
     '[ -d ~/.local/bin ] && ls -la ~/.local/bin >> "$LOG_FILE"',
     'echo ""',
-    'echo "Installation complete. You can close this window."',
-    'read -n 1 -s -r -p "Press any key to close..."',
+    'echo "Installation complete. This window will close shortly."',
+    'sleep 2',
+    'osascript -e \'tell application "Terminal" to close front window\' 2>/dev/null &',
     ''
   ].join('\n'), { mode: 0o755 })
 
