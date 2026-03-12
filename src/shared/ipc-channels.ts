@@ -28,6 +28,8 @@ export const IPC = {
   CLAUDE_CHECK_INSTALL: 'claude:checkInstall',
   CLAUDE_INSTALL: 'claude:install',
   CLAUDE_VERSION: 'claude:version',
+  CLAUDE_CHECK_PATH: 'claude:checkPath',
+  CLAUDE_FIX_PATH: 'claude:fixPath',
   DOCK_RESTART: 'dock:restart',
   LINKED_CHECK_MCP: 'linked:checkMcp',
   LINKED_INSTALL_MCP: 'linked:installMcp',

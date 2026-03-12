@@ -66,6 +66,11 @@ const Launcher: React.FC = () => {
   const [claudeError, setClaudeError] = useState('')
   const [claudeVersion, setClaudeVersion] = useState('')
 
+  // PATH check state (runs after Claude is detected/installed)
+  const [pathPrompt, setPathPrompt] = useState<{ claudeDir: string } | null>(null)
+  const [pathFixing, setPathFixing] = useState(false)
+  const [pathFixResult, setPathFixResult] = useState<{ success: boolean; file?: string; error?: string } | null>(null)
+
   const autoUpdateRef = useRef(false)
 
   useEffect(() => {
@@ -140,6 +145,23 @@ const Launcher: React.FC = () => {
         setClaudePhase('skipped')
       })
   }, [gitPhase])
+
+  // After Claude is resolved, check if claude is in shell PATH (macOS/Linux only)
+  useEffect(() => {
+    if (claudePhase !== 'installed' && claudePhase !== 'skipped') return
+    // Only relevant when Claude IS installed but might not be in PATH
+    if (claudePhase === 'installed' || claudePhase === 'skipped') {
+      const api = getDockApi()
+      api.settings.get().then((settings) => {
+        if (settings.launcher?.skipPathPrompt) return
+        api.claude.checkPath().then((status) => {
+          if (!status.inPath && status.claudeDir) {
+            setPathPrompt({ claudeDir: status.claudeDir })
+          }
+        }).catch(() => { /* ignore */ })
+      }).catch(() => { /* ignore */ })
+    }
+  }, [claudePhase])
 
   // Zoom: Ctrl+Scroll, Ctrl++/-, Ctrl+0 to reset
   const applyZoom = useCallback((newZoom: number) => {
@@ -300,6 +322,29 @@ const Launcher: React.FC = () => {
     } catch {
       setClaudePhase('skipped')
     }
+  }
+
+  const handleFixPath = async () => {
+    if (!pathPrompt) return
+    setPathFixing(true)
+    try {
+      const result = await getDockApi().claude.fixPath(pathPrompt.claudeDir)
+      setPathFixResult(result)
+      if (result.success) {
+        // Auto-dismiss after a moment
+        setTimeout(() => { setPathPrompt(null); setPathFixResult(null) }, 3000)
+      }
+    } catch {
+      setPathFixResult({ success: false, error: 'Unexpected error' })
+    }
+    setPathFixing(false)
+  }
+
+  const handleSkipPathFix = async () => {
+    const api = getDockApi()
+    const settings = await api.settings.get()
+    await api.settings.set({ launcher: { ...settings.launcher, skipPathPrompt: true } })
+    setPathPrompt(null)
   }
 
   const openPath = async (dir: string) => {
@@ -691,6 +736,54 @@ const Launcher: React.FC = () => {
                   </button>
                   <button className="updater-btn updater-btn-secondary" onClick={skipClaudeInstall}>
                     Dismiss
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {pathPrompt && (
+          <div className="claude-setup-banner">
+            {pathFixResult?.success ? (
+              <div className="updater-row">
+                <svg className="updater-icon updater-icon-success" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm3.78-9.72a.75.75 0 00-1.06-1.06L6.75 9.19 5.28 7.72a.75.75 0 00-1.06 1.06l2 2a.75.75 0 001.06 0l4.5-4.5z" />
+                </svg>
+                <span className="updater-text">
+                  PATH updated{pathFixResult.file ? ` in ${pathFixResult.file}` : ''}
+                </span>
+              </div>
+            ) : pathFixResult?.error ? (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon updater-icon-error" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M2.343 13.657A8 8 0 1113.657 2.343 8 8 0 012.343 13.657zM6.03 4.97a.75.75 0 00-1.06 1.06L6.94 8 4.97 9.97a.75.75 0 101.06 1.06L8 9.06l1.97 1.97a.75.75 0 101.06-1.06L9.06 8l1.97-1.97a.75.75 0 10-1.06-1.06L8 6.94 6.03 4.97z" />
+                  </svg>
+                  <span className="updater-text updater-text-error">{pathFixResult.error}</span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-secondary" onClick={() => { setPathPrompt(null); setPathFixResult(null) }}>
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="updater-row">
+                  <svg className="updater-icon claude-setup-icon-warn" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8.22 1.754a.25.25 0 00-.44 0L1.698 13.132a.25.25 0 00.22.368h12.164a.25.25 0 00.22-.368L8.22 1.754zm-1.763-.707c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0114.082 15H1.918a1.75 1.75 0 01-1.543-2.575L6.457 1.047zM9 11a1 1 0 11-2 0 1 1 0 012 0zm-.25-5.25a.75.75 0 00-1.5 0v2.5a.75.75 0 001.5 0v-2.5z" />
+                  </svg>
+                  <span className="updater-text">
+                    <strong>Claude CLI</strong> is not in your shell PATH. Add <code>{pathPrompt.claudeDir}</code> to PATH?
+                  </span>
+                </div>
+                <div className="updater-actions">
+                  <button className="updater-btn updater-btn-primary" onClick={handleFixPath} disabled={pathFixing}>
+                    {pathFixing ? 'Adding...' : 'Yes, fix PATH'}
+                  </button>
+                  <button className="updater-btn updater-btn-secondary" onClick={handleSkipPathFix} disabled={pathFixing}>
+                    No, don&#39;t ask again
                   </button>
                 </div>
               </>

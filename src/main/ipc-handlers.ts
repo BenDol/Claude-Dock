@@ -8,7 +8,7 @@ import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
-import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit } from './claude-cli'
+import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit, checkClaudePath, fixClaudePath } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
 import { PluginManager, getPluginsDir } from './plugins'
@@ -297,6 +297,22 @@ export function registerIpcHandlers(): void {
       return await installClaudeCli()
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Installation failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.CLAUDE_CHECK_PATH, async () => {
+    try {
+      return await checkClaudePath()
+    } catch {
+      return { inPath: true }
+    }
+  })
+
+  ipcMain.handle(IPC.CLAUDE_FIX_PATH, (_event, claudeDir: string) => {
+    try {
+      return fixClaudePath(claudeDir)
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to fix PATH' }
     }
   })
 

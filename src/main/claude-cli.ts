@@ -826,3 +826,85 @@ function refreshWindowsPath(): void {
     logError('Failed to refresh PATH from registry:', err)
   }
 }
+
+export interface ClaudePathStatus {
+  inPath: boolean
+  claudeDir?: string
+}
+
+/**
+ * Check if `claude` is accessible from a login shell PATH.
+ * Returns { inPath: true } if the shell can find it, or
+ * { inPath: false, claudeDir } if it was found at a known location but not in shell PATH.
+ */
+export async function checkClaudePath(): Promise<ClaudePathStatus> {
+  // Windows uses registry-based PATH — handled by ensureClaudeInWindowsPath
+  if (process.platform === 'win32') return { inPath: true }
+
+  // Check if a login shell can find claude
+  const shellFound = await findViaWhich()
+  if (shellFound) return { inPath: true }
+
+  // Not in shell PATH — check known locations to see where it actually is
+  const knownPath = checkKnownLocations()
+  if (knownPath) {
+    return { inPath: false, claudeDir: path.dirname(knownPath) }
+  }
+
+  // Not found at all — not a PATH issue, just not installed
+  return { inPath: true }
+}
+
+/**
+ * Add claude's directory to the user's shell profile so it persists across sessions.
+ * Supports macOS (zsh) and Linux (bash/zsh).
+ */
+export function fixClaudePath(claudeDir: string): { success: boolean; error?: string; file?: string } {
+  if (process.platform === 'win32') {
+    ensureClaudeInWindowsPath()
+    return { success: true }
+  }
+
+  const home = os.homedir()
+  const exportLine = `export PATH="$PATH:${claudeDir}"`
+
+  // Determine the right shell profile file
+  const shell = process.env.SHELL || ''
+  let profilePath: string
+
+  if (shell.endsWith('/zsh') || process.platform === 'darwin') {
+    // macOS defaults to zsh; .zshrc is sourced for interactive shells,
+    // .zprofile for login shells — use .zshrc since it covers both via Terminal
+    profilePath = path.join(home, '.zshrc')
+  } else {
+    // Linux bash — .bashrc for interactive, .profile for login
+    profilePath = path.join(home, '.bashrc')
+  }
+
+  try {
+    // Check if already present
+    let content = ''
+    try { content = fs.readFileSync(profilePath, 'utf8') } catch { /* file may not exist */ }
+
+    if (content.includes(claudeDir)) {
+      log(`fixClaudePath: ${claudeDir} already in ${profilePath}`)
+      // Also update process.env for current session
+      addDirToProcessPath(claudeDir)
+      return { success: true, file: profilePath }
+    }
+
+    // Append the export line
+    const suffix = content.length > 0 && !content.endsWith('\n') ? '\n' : ''
+    fs.appendFileSync(profilePath, `${suffix}\n# Added by Claude Dock\n${exportLine}\n`)
+    log(`fixClaudePath: appended ${claudeDir} to ${profilePath}`)
+
+    // Also update process.env for current session
+    addDirToProcessPath(claudeDir)
+
+    return { success: true, file: profilePath }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logError(`fixClaudePath failed for ${profilePath}:`, msg)
+    return { success: false, error: `Failed to update ${profilePath}: ${msg}` }
+  }
+}

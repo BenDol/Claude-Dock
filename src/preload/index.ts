@@ -35,6 +35,17 @@ export interface ClaudeInstallResult {
   error?: string
 }
 
+export interface ClaudePathStatus {
+  inPath: boolean
+  claudeDir?: string
+}
+
+export interface ClaudeFixPathResult {
+  success: boolean
+  error?: string
+  file?: string
+}
+
 export interface GitStatus {
   installed: boolean
 }
@@ -88,6 +99,8 @@ export interface DockApi {
     checkInstall: () => Promise<ClaudeCliStatus>
     install: () => Promise<ClaudeInstallResult>
     version: () => Promise<string | null>
+    checkPath: () => Promise<ClaudePathStatus>
+    fixPath: (claudeDir: string) => Promise<ClaudeFixPathResult>
   }
   win: {
     minimize: () => Promise<void>
@@ -252,7 +265,9 @@ const dockApi: DockApi = {
   claude: {
     checkInstall: () => ipcRenderer.invoke(IPC.CLAUDE_CHECK_INSTALL),
     install: () => ipcRenderer.invoke(IPC.CLAUDE_INSTALL),
-    version: () => ipcRenderer.invoke(IPC.CLAUDE_VERSION)
+    version: () => ipcRenderer.invoke(IPC.CLAUDE_VERSION),
+    checkPath: () => ipcRenderer.invoke(IPC.CLAUDE_CHECK_PATH),
+    fixPath: (claudeDir) => ipcRenderer.invoke(IPC.CLAUDE_FIX_PATH, claudeDir)
   },
   win: {
     minimize: () => ipcRenderer.invoke(IPC.WIN_MINIMIZE),

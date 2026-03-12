@@ -45,6 +45,7 @@ export interface Settings {
     zoom: number
     width: number
     height: number
+    skipPathPrompt: boolean
   }
   advanced: {
     debugLogging: boolean
@@ -211,7 +212,8 @@ export const DEFAULT_SETTINGS: Settings = {
   launcher: {
     zoom: 1.0,
     width: 500,
-    height: 550
+    height: 550,
+    skipPathPrompt: false
   },
   advanced: {
     debugLogging: false,

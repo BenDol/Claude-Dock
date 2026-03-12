@@ -104,6 +104,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null)
   const [mcpBusy, setMcpBusy] = useState(false)
   const [mcpStatus, setMcpStatus] = useState('')
+  const [pathCheckStatus, setPathCheckStatus] = useState('')
+  const [pathChecking, setPathChecking] = useState(false)
 
   // Check MCP install status when behavior tab is shown
   useEffect(() => {
@@ -149,6 +151,37 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       setUpdateCheckStatus('Failed to check for updates.')
     }
     setCheckingUpdate(false)
+  }
+
+  const handleCheckPath = async () => {
+    setPathChecking(true)
+    setPathCheckStatus('Checking...')
+    try {
+      const api = getDockApi()
+      const status = await api.claude.checkPath()
+      if (status.inPath) {
+        setPathCheckStatus('Claude CLI is in your shell PATH.')
+        // Reset the skip preference since it's now fine
+        const s = await api.settings.get()
+        if (s.launcher?.skipPathPrompt) {
+          await api.settings.set({ launcher: { ...s.launcher, skipPathPrompt: false } })
+        }
+      } else if (status.claudeDir) {
+        const result = await api.claude.fixPath(status.claudeDir)
+        if (result.success) {
+          setPathCheckStatus(`Added ${status.claudeDir} to PATH${result.file ? ` (${result.file})` : ''}. Restart your terminal for changes to take effect.`)
+          const s = await api.settings.get()
+          await api.settings.set({ launcher: { ...s.launcher, skipPathPrompt: false } })
+        } else {
+          setPathCheckStatus(`Failed to fix PATH: ${result.error}`)
+        }
+      } else {
+        setPathCheckStatus('Claude CLI not found. Install it first.')
+      }
+    } catch {
+      setPathCheckStatus('Failed to check PATH.')
+    }
+    setPathChecking(false)
   }
 
   return (
@@ -508,6 +541,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   >
                     Open DevTools
                   </button>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Claude CLI</div>
+                <div>
+                  <button
+                    className="settings-check-update-btn"
+                    onClick={handleCheckPath}
+                    disabled={pathChecking}
+                  >
+                    {pathChecking ? 'Checking...' : 'Check & Fix PATH'}
+                  </button>
+                  <div className="settings-description">
+                    Check if the Claude CLI is in your shell PATH and fix it if not.
+                  </div>
+                  {pathCheckStatus && (
+                    <div className="settings-update-status">{pathCheckStatus}</div>
+                  )}
                 </div>
               </div>
             )}
