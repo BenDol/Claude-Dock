@@ -2251,7 +2251,7 @@ const VirtualFileList: React.FC<{
                 onContextMenu={(e) => onContextMenu(e, f, section)}
               >
                 {f.isSubmodule && <SubmoduleIcon />}
-                <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
+                {!f.isSubmodule && <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />}
                 <span className="gm-file-path">{f.path}</span>
                 <button
                   className="gm-file-hover-btn"
