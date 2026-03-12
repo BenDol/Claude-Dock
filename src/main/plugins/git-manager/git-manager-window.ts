@@ -101,6 +101,11 @@ export class GitManagerWindowManager {
     log(`[git-manager] window opened for ${projectDir}`)
   }
 
+  getWindow(projectDir: string): BrowserWindow | null {
+    const win = this.windows.get(projectDir)
+    return win && !win.isDestroyed() ? win : null
+  }
+
   close(projectDir: string): void {
     const win = this.windows.get(projectDir)
     if (win && !win.isDestroyed()) {

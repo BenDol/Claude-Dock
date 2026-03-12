@@ -319,13 +319,41 @@ const BellIcon: React.FC = () => (
   </svg>
 )
 
+const NOTIF_STORAGE_KEY = 'dock-notifications'
+const NOTIF_READ_KEY = 'dock-notifications-read'
+
+function loadStoredNotifications(): DockNotification[] {
+  try {
+    const raw = localStorage.getItem(NOTIF_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+function loadStoredReadIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(NOTIF_READ_KEY)
+    return raw ? new Set(JSON.parse(raw)) : new Set()
+  } catch { return new Set() }
+}
+
 const NotificationDropdown: React.FC = () => {
   const [open, setOpen] = useState(false)
-  const [notifications, setNotifications] = useState<DockNotification[]>([])
-  const [readIds, setReadIds] = useState<Set<string>>(new Set())
+  const [notifications, setNotifications] = useState<DockNotification[]>(() => loadStoredNotifications())
+  const [readIds, setReadIds] = useState<Set<string>>(() => loadStoredReadIds())
   const ref = useRef<HTMLDivElement>(null)
+  const projectDir = useDockStore((s) => s.projectDir)
 
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
+
+  // Persist notifications
+  useEffect(() => {
+    try { localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(notifications)) } catch { /* ignore */ }
+  }, [notifications])
+
+  // Persist read state
+  useEffect(() => {
+    try { localStorage.setItem(NOTIF_READ_KEY, JSON.stringify([...readIds])) } catch { /* ignore */ }
+  }, [readIds])
 
   useEffect(() => {
     const api = getDockApi()
@@ -348,6 +376,19 @@ const NotificationDropdown: React.FC = () => {
     }
     window.addEventListener('notification-read', handler)
     return () => window.removeEventListener('notification-read', handler)
+  }, [])
+
+  const removeNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
+  }, [])
+
+  const clearAll = useCallback(() => {
+    setNotifications([])
+    setReadIds(new Set())
+    try {
+      localStorage.removeItem(NOTIF_STORAGE_KEY)
+      localStorage.removeItem(NOTIF_READ_KEY)
+    } catch { /* ignore */ }
   }, [])
 
   // Close on outside click
@@ -375,7 +416,7 @@ const NotificationDropdown: React.FC = () => {
           <div className="tb-notif-header">
             <span>Notifications</span>
             {notifications.length > 0 && (
-              <button className="tb-notif-clear" onClick={() => { setNotifications([]); setReadIds(new Set()) }}>Clear</button>
+              <button className="tb-notif-clear" onClick={clearAll}>Clear</button>
             )}
           </div>
           <div className="tb-notif-list">
@@ -387,8 +428,8 @@ const NotificationDropdown: React.FC = () => {
                   key={n.id}
                   className={`tb-notif-item tb-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' tb-notif-item-clickable' : ''}`}
                   onClick={() => {
-                    if (n.source === 'ci' && n.data?.runId) {
-                      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
+                    if (n.source === 'ci' && n.data?.runId && projectDir) {
+                      getDockApi().ci.navigateToRun(projectDir, n.data.runId as number)
                       setOpen(false)
                     }
                   }}
@@ -425,6 +466,13 @@ const NotificationDropdown: React.FC = () => {
                       &#8599;
                     </button>
                   )}
+                  <button
+                    className="tb-notif-dismiss"
+                    onClick={(e) => { e.stopPropagation(); removeNotification(n.id) }}
+                    title="Dismiss"
+                  >
+                    &times;
+                  </button>
                 </div>
               ))
             )}

@@ -153,9 +153,8 @@ function DockApp() {
       .replace(/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g, ''),
   [])
 
-  const monitorForCompletion = useCallback((termId: string, runId: number) => {
+  const monitorForCompletion = useCallback((termId: string, fixData: Record<string, unknown>) => {
     const api = getDockApi()
-    const dir = useDockStore.getState().projectDir
     const MARKER = 'CI_FIX_COMPLETE'
     let buf = ''
 
@@ -166,15 +165,12 @@ function DockApp() {
       if (buf.length > 5000) buf = buf.slice(-3000)
 
       if (buf.includes(MARKER)) {
-        // Claude signalled completion — wait a moment, then close and re-run
+        // Claude signalled completion — push triggers new CI run automatically
         doCleanup()
-        setTimeout(async () => {
+        window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
+        setTimeout(() => {
           api.terminal.kill(termId)
           removeTerminal(termId)
-          // Re-run the failed jobs
-          try {
-            await api.ci.rerunFailed(dir, runId)
-          } catch { /* re-run failed, notification will appear on next poll */ }
         }, 2000)
       }
     })
@@ -201,8 +197,6 @@ function DockApp() {
 
     const api = getDockApi()
     const dir = useDockStore.getState().projectDir
-    const runId = data.runId as number
-
     // Build prompt from failure data
     let failurePrompt = ''
     try {
@@ -231,11 +225,23 @@ function DockApp() {
         (jobList ? `Failed jobs:\n${jobList}\n` : '') +
         (logSnippet ? `\nLog output (last 150 lines):\n\`\`\`\n${logSnippet}\n\`\`\`\n` : '') +
         `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
-        `IMPORTANT: When you have successfully fixed the issue and committed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
+        `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
+        `The fix MUST be committed and pushed to the branch "${branch}". ` +
+        `You MUST NOT disturb the user's current working tree, staged files, or checked-out branch. ` +
+        `Use a git worktree to work in isolation:\n` +
+        `  1. Run: git worktree add ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')} ${branch}\n` +
+        `  2. cd into the worktree directory and make your fix there\n` +
+        `  IMPORTANT: The worktree will NOT have node_modules or other installed dependencies. ` +
+        `Do NOT run tests, builds, or linters from the worktree. Always run those from the original project directory if needed. ` +
+        `The worktree is ONLY for making code changes, committing, and pushing.\n` +
+        `  3. Commit and push from the worktree: git push origin ${branch}\n` +
+        `  4. cd back to the original directory and clean up: git worktree remove ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')}\n` +
+        `Pushing the fix will automatically trigger a new CI run.\n\n` +
+        `IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
         `If you cannot fix the issue or need more information, do NOT output this marker.`
     } catch {
       failurePrompt = 'A CI build has failed. Please check the CI logs and fix the issue.\n\n' +
-        'IMPORTANT: When you have successfully fixed the issue and committed the changes, output the exact text CI_FIX_COMPLETE on its own line.'
+        'IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line.'
     }
 
     const sendToTerminal = (termId: string) => {
@@ -247,7 +253,7 @@ function DockApp() {
 
     const startMonitoring = (termId: string) => {
       // Start monitoring after prompt is submitted (give time for paste + submit)
-      setTimeout(() => monitorForCompletion(termId, runId), 1500)
+      setTimeout(() => monitorForCompletion(termId, data), 1500)
     }
 
     if (terminalId) {
@@ -282,6 +288,20 @@ function DockApp() {
       setTimeout(() => { cleanup(); send() }, 8000)
     }
   }, [pendingFixData, addTerminal, monitorForCompletion])
+
+  // Handle manual cancellation of CI fix terminals
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const termId = (e as CustomEvent).detail as string
+      if (!termId) return
+      // Clean up the completion monitor
+      const cleanup = ciFixCleanups.current.get(termId)
+      if (cleanup) cleanup()
+      useDockStore.getState().setTerminalCiFix(termId, false)
+    }
+    window.addEventListener('ci-fix-cancelled', handler)
+    return () => window.removeEventListener('ci-fix-cancelled', handler)
+  }, [])
 
   // Cleanup CI fix monitors on unmount
   useEffect(() => {
@@ -403,10 +423,13 @@ function DockApp() {
 
   const handleCloseFocused = useCallback(() => {
     const state = useDockStore.getState()
-    if (state.focusedTerminalId) {
-      getDockApi().terminal.kill(state.focusedTerminalId)
-      removeTerminal(state.focusedTerminalId)
+    if (!state.focusedTerminalId) return
+    if (state.ciFixTerminals.has(state.focusedTerminalId)) {
+      if (!window.confirm('This terminal is running a CI fix. Close it and cancel the fix?')) return
+      window.dispatchEvent(new CustomEvent('ci-fix-cancelled', { detail: state.focusedTerminalId }))
     }
+    getDockApi().terminal.kill(state.focusedTerminalId)
+    removeTerminal(state.focusedTerminalId)
   }, [removeTerminal])
 
   if (!initialized) {

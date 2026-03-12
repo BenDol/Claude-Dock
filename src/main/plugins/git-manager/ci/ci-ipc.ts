@@ -5,6 +5,7 @@ import { IPC } from '../../../../shared/ipc-channels'
 import { GitHubActionsProvider, resolveGh } from './github-actions-provider'
 import { CiManager } from './ci-manager'
 import { DockManager } from '../../../dock-manager'
+import { GitManagerWindowManager } from '../git-manager-window'
 import { log, logError } from '../../../logger'
 
 const execFileAsync = promisify(execFile)
@@ -147,6 +148,21 @@ export function registerCiIpc(): void {
       logError('[ci] rerunFailed failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Rerun failed' }
     }
+  })
+
+  // Navigate to a CI run in the git-manager plugin window (called from dock window)
+  ipcMain.handle(IPC.CI_NAVIGATE_TO_RUN, async (_event, projectDir: string, runId: number) => {
+    const mgr = GitManagerWindowManager.getInstance()
+    await mgr.open(projectDir)
+    const win = mgr.getWindow(projectDir)
+    if (win) {
+      // Brief delay so React hooks mount in newly-created windows
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.webContents.send('ci-navigate-run', runId)
+      }, 300)
+      return true
+    }
+    return false
   })
 
   // Forward "Fix with Claude" from plugin window to the dock window and focus it

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
+import { useDockStore } from '../stores/dock-store'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
 
 interface ToastEntry extends DockNotification {
@@ -18,6 +19,7 @@ function handleAction(action: NotificationAction, toast: DockNotification) {
 export default function ToastContainer() {
   const [toasts, setToasts] = useState<ToastEntry[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const projectDir = useDockStore((s) => s.projectDir)
 
   const removeToast = useCallback((id: string) => {
     // Start exit animation
@@ -71,7 +73,13 @@ export default function ToastContainer() {
             className={`toast toast-${toast.type}${toast.exiting ? ' toast-exit' : ''}${toast.source === 'ci' && toast.data?.runId ? ' toast-clickable' : ''}`}
             onClick={() => {
               if (toast.source === 'ci' && toast.data?.runId) {
-                window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: toast.data.runId }))
+                if (projectDir) {
+                  // Dock window: route through IPC to open/focus git-manager
+                  getDockApi().ci.navigateToRun(projectDir, toast.data.runId as number)
+                } else {
+                  // Already in git-manager window: dispatch DOM event
+                  window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: toast.data.runId }))
+                }
               }
               window.dispatchEvent(new CustomEvent('notification-read', { detail: toast.id }))
               removeToast(toast.id)

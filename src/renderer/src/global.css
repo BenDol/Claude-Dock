@@ -364,8 +364,8 @@ body {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  width: 320px;
-  max-height: 380px;
+  width: 384px;
+  max-height: 456px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -488,25 +488,23 @@ body {
 }
 
 .tb-notif-link {
-  background: none;
-  border: none;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
+  padding: 3px 6px;
+  border-radius: 4px;
   flex-shrink: 0;
-  font-size: 11px;
-  opacity: 0;
-  transition: opacity 0.1s, color 0.1s;
-}
-
-.tb-notif-item:hover .tb-notif-link {
-  opacity: 1;
+  font-size: 12px;
+  line-height: 1;
+  align-self: center;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
 }
 
 .tb-notif-link:hover {
   color: var(--accent-color);
   background: var(--bg-primary);
+  border-color: var(--accent-color);
 }
 
 /* Grid */

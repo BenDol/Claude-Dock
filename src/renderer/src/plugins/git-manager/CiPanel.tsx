@@ -10,6 +10,7 @@ interface CiPanelProps {
   provider: GitProvider
   searchQuery?: string
   currentBranch?: string
+  active?: boolean
 }
 
 type CiStatus = 'loading' | 'setup' | 'ready' | 'error'
@@ -89,7 +90,7 @@ function getStatusColor(run: CiWorkflowRun): string {
   return 'var(--text-secondary)' // cancelled
 }
 
-export default function CiPanel({ projectDir, provider, searchQuery, currentBranch }: CiPanelProps) {
+export default function CiPanel({ projectDir, provider, searchQuery, currentBranch, active }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
   const [setup, setSetup] = useState<SetupState>({ ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false, loginOpened: false })
@@ -116,6 +117,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const scrollRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
+  const lastCiRefreshRef = useRef(0)
 
   const api = getDockApi()
 
@@ -240,18 +242,27 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
           loadRuns(1, true)
         }
 
-        // Fetch job progress for active runs
+        // Fetch job progress for in-progress runs only (queued runs have no jobs yet)
         const progressMap = new Map<number, number>()
-        await Promise.all(active.map(async (run) => {
+        const inProgressRuns = active.filter((r) => r.status === 'in_progress')
+        await Promise.all(inProgressRuns.map(async (run) => {
           try {
             const jobs = await api.ci.getRunJobs(projectDir, run.id)
             if (jobs.length === 0) return
-            const totalSteps = jobs.reduce((sum, j) => sum + Math.max(j.steps.length, 1), 0)
-            const doneSteps = jobs.reduce((sum, j) => {
-              if (j.status === 'completed') return sum + Math.max(j.steps.length, 1)
-              return sum + j.steps.filter((s) => s.status === 'completed').length
-            }, 0)
-            progressMap.set(run.id, Math.round((doneSteps / totalSteps) * 100))
+            // Exclude skipped jobs — they don't contribute to progress
+            const relevant = jobs.filter((j) => j.conclusion !== 'skipped')
+            if (relevant.length === 0) return
+            let done = 0
+            for (const j of relevant) {
+              if (j.status === 'completed') { done += 1; continue }
+              // For in-progress jobs, use step ratio as a fractional contribution
+              if (j.status === 'in_progress' && j.steps.length > 0) {
+                const completedSteps = j.steps.filter((s) => s.status === 'completed').length
+                done += completedSteps / j.steps.length
+              }
+              // queued/waiting = 0 contribution
+            }
+            progressMap.set(run.id, Math.round((done / relevant.length) * 100))
           } catch { /* ignore */ }
         }))
         setRunProgress((prev) => {
@@ -297,6 +308,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       if (newRuns.length < 20) setHasMore(false)
       setRuns((prev) => reset ? newRuns : [...prev, ...newRuns])
       setPage(p)
+      if (reset) lastCiRefreshRef.current = Date.now()
     } catch {
       setHasMore(false)
     }
@@ -360,6 +372,13 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     setHasMore(true)
     loadRuns(1, true)
   }, [loadRuns])
+
+  // Refresh runs when tab becomes active (10s cooldown)
+  useEffect(() => {
+    if (active && status === 'ready' && Date.now() - lastCiRefreshRef.current > 10000) {
+      handleRefresh()
+    }
+  }, [active])
 
   const toggleGroup = useCallback((key: string) => {
     setExpandedGroups((prev) => {

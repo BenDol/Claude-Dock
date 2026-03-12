@@ -209,6 +209,8 @@ export interface DockApi {
     fixWithClaude: (projectDir: string, data: Record<string, unknown>) => Promise<boolean>
     onFixWithClaude: (callback: (data: Record<string, unknown>) => void) => () => void
     rerunFailed: (projectDir: string, runId: number) => Promise<{ success: boolean; error?: string }>
+    navigateToRun: (projectDir: string, runId: number) => Promise<boolean>
+    onNavigateToRun: (callback: (runId: number) => void) => () => void
   }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
@@ -406,7 +408,13 @@ const dockApi: DockApi = {
       ipcRenderer.on('ci-fix-with-claude', handler)
       return () => ipcRenderer.removeListener('ci-fix-with-claude', handler)
     },
-    rerunFailed: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_RERUN_FAILED, projectDir, runId)
+    rerunFailed: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_RERUN_FAILED, projectDir, runId),
+    navigateToRun: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_NAVIGATE_TO_RUN, projectDir, runId),
+    onNavigateToRun: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, runId: number) => callback(runId)
+      ipcRenderer.on('ci-navigate-run', handler)
+      return () => ipcRenderer.removeListener('ci-navigate-run', handler)
+    }
   },
   notifications: {
     onShow: (callback) => {

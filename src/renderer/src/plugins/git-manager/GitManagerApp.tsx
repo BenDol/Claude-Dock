@@ -332,13 +332,22 @@ const GitManagerApp: React.FC = () => {
     return () => window.removeEventListener('ci-status-change', handler)
   }, [])
 
-  // Navigate to CI tab when a notification is clicked
+  // Navigate to CI tab when a notification is clicked (DOM event from within this window)
   useEffect(() => {
     const handler = () => {
       setActiveTab('ci')
     }
     window.addEventListener('ci-navigate-run', handler)
     return () => window.removeEventListener('ci-navigate-run', handler)
+  }, [])
+
+  // Navigate to CI tab via IPC from dock window
+  useEffect(() => {
+    const api = getDockApi()
+    return api.ci.onNavigateToRun((runId) => {
+      setActiveTab('ci')
+      window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: runId }))
+    })
   }, [])
 
   // Set window title based on active directory
@@ -466,6 +475,7 @@ const GitManagerApp: React.FC = () => {
   const refreshGenRef = useRef(0)
   const submoduleGenRef = useRef(0)
   const lastRefreshRef = useRef(0)
+  const lastFetchRef = useRef(0)
   const refresh = useCallback(async () => {
     if (!activeDir) return
     const gen = ++refreshGenRef.current
@@ -863,7 +873,7 @@ const GitManagerApp: React.FC = () => {
             <OpenFolderIcon />
           </button>
           <SettingsDropdown projectDir={activeDir} />
-          <NotificationPanel />
+          <NotificationPanel projectDir={activeDir} />
           <div className="toolbar-separator" />
           <div className="gm-win-controls">
             <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
@@ -1003,7 +1013,14 @@ const GitManagerApp: React.FC = () => {
           <div className="gm-tabs">
             <button
               className={`gm-tab${activeTab === 'log' ? ' gm-tab-active' : ''}`}
-              onClick={() => setActiveTab('log')}
+              onClick={() => {
+                setActiveTab('log')
+                if (activeDir && Date.now() - lastFetchRef.current > 30000) {
+                  lastFetchRef.current = Date.now()
+                  const api = getDockApi()
+                  api.gitManager.fetchAll(activeDir).then(() => refresh()).catch(() => {})
+                }
+              }}
             >
               Commit Log
             </button>
@@ -1174,7 +1191,7 @@ const GitManagerApp: React.FC = () => {
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
-              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} />
+              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} />
             </div>
           )}
         </div>
@@ -6271,13 +6288,29 @@ const SettingsIcon: React.FC = () => (
 
 const MAX_NOTIFICATIONS = 50
 
-const NotificationPanel: React.FC = () => {
+const GM_NOTIF_STORAGE_KEY = 'gm-notifications'
+const GM_NOTIF_READ_KEY = 'gm-notifications-read'
+
+const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => {
   const [open, setOpen] = useState(false)
-  const [notifications, setNotifications] = useState<DockNotification[]>([])
-  const [readIds, setReadIds] = useState<Set<string>>(new Set())
+  const [notifications, setNotifications] = useState<DockNotification[]>(() => {
+    try { const raw = localStorage.getItem(GM_NOTIF_STORAGE_KEY); return raw ? JSON.parse(raw) : [] } catch { return [] }
+  })
+  const [readIds, setReadIds] = useState<Set<string>>(() => {
+    try { const raw = localStorage.getItem(GM_NOTIF_READ_KEY); return raw ? new Set(JSON.parse(raw)) : new Set() } catch { return new Set() }
+  })
   const ref = useRef<HTMLDivElement>(null)
 
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
+
+  // Persist notifications
+  useEffect(() => {
+    try { localStorage.setItem(GM_NOTIF_STORAGE_KEY, JSON.stringify(notifications)) } catch { /* ignore */ }
+  }, [notifications])
+
+  useEffect(() => {
+    try { localStorage.setItem(GM_NOTIF_READ_KEY, JSON.stringify([...readIds])) } catch { /* ignore */ }
+  }, [readIds])
 
   useEffect(() => {
     const api = getDockApi()
@@ -6302,6 +6335,19 @@ const NotificationPanel: React.FC = () => {
     return () => window.removeEventListener('notification-read', handler)
   }, [])
 
+  const removeNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id))
+  }, [])
+
+  const clearAll = useCallback(() => {
+    setNotifications([])
+    setReadIds(new Set())
+    try {
+      localStorage.removeItem(GM_NOTIF_STORAGE_KEY)
+      localStorage.removeItem(GM_NOTIF_READ_KEY)
+    } catch { /* ignore */ }
+  }, [])
+
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
@@ -6322,7 +6368,7 @@ const NotificationPanel: React.FC = () => {
           <div className="gm-notif-header">
             <span className="gm-notif-title">Notifications</span>
             {notifications.length > 0 && (
-              <button className="gm-notif-clear" onClick={() => { setNotifications([]); setReadIds(new Set()) }}>Clear all</button>
+              <button className="gm-notif-clear" onClick={clearAll}>Clear all</button>
             )}
           </div>
           <div className="gm-notif-list">
@@ -6350,7 +6396,11 @@ const NotificationPanel: React.FC = () => {
                         className="gm-notif-item-event-action"
                         onClick={(e) => {
                           e.stopPropagation()
-                          window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
+                          if (a.event === 'ci-fix-with-claude' && n.data) {
+                            getDockApi().ci.fixWithClaude(projectDir, n.data as Record<string, unknown>)
+                          } else {
+                            window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
+                          }
                           setOpen(false)
                         }}
                       >
@@ -6372,6 +6422,13 @@ const NotificationPanel: React.FC = () => {
                       <ExternalLinkMiniIcon />
                     </button>
                   )}
+                  <button
+                    className="gm-notif-item-dismiss"
+                    onClick={(e) => { e.stopPropagation(); removeNotification(n.id) }}
+                    title="Dismiss"
+                  >
+                    &times;
+                  </button>
                 </div>
               ))
             )}

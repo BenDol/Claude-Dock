@@ -80,6 +80,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const toggleTerminalLock = useDockStore((s) => s.toggleTerminalLock)
 
   const handleClose = useCallback(() => {
+    const state = useDockStore.getState()
+    if (state.ciFixTerminals.has(terminalId)) {
+      if (!window.confirm('This terminal is running a CI fix. Close it and cancel the fix?')) return
+      window.dispatchEvent(new CustomEvent('ci-fix-cancelled', { detail: terminalId }))
+    }
     getDockApi().terminal.kill(terminalId)
     removeTerminal(terminalId)
   }, [terminalId, removeTerminal])
