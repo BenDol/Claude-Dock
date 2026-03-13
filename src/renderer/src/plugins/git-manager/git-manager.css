@@ -2396,12 +2396,20 @@
   border-left: 2px solid var(--accent-color-50, rgba(122, 162, 247, 0.5));
 }
 
-.gm-file-path {
+.gm-file-path-wrap {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gm-file-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .gm-file-hover-btn {
@@ -2432,6 +2440,85 @@
 .gm-file-hover-btn:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
+}
+
+.gm-write-tests-rainbow {
+  opacity: 1 !important;
+  animation: rainbow-pulse 3s ease-in-out infinite;
+}
+
+.gm-write-tests-rainbow:hover {
+  animation: none;
+  background: var(--bg-tertiary);
+}
+
+@keyframes rainbow-pulse {
+  0%   { color: #f7768e; }
+  20%  { color: #ff9e64; }
+  40%  { color: #e0af68; }
+  60%  { color: #9ece6a; }
+  80%  { color: #7aa2f7; }
+  100% { color: #bb9af7; }
+}
+
+.gm-beaker-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gm-beaker-particles {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.gm-beaker-particles::before,
+.gm-beaker-particles::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  animation: beaker-rise 2s ease-out infinite;
+}
+
+.gm-beaker-particles::before {
+  left: -3px;
+  background: #f7768e;
+  animation-delay: 0s;
+  box-shadow:
+    2px -4px 0 0 #ff9e64,
+    5px -1px 0 0 #e0af68;
+}
+
+.gm-beaker-particles::after {
+  left: 1px;
+  background: #7aa2f7;
+  animation-delay: 0.7s;
+  box-shadow:
+    -4px -3px 0 0 #9ece6a,
+    3px -2px 0 0 #bb9af7;
+}
+
+@keyframes beaker-rise {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-12px) scale(0);
+    opacity: 0;
+  }
+}
+
+.gm-write-tests-rainbow:hover .gm-beaker-particles::before,
+.gm-write-tests-rainbow:hover .gm-beaker-particles::after {
+  animation-play-state: paused;
 }
 
 .gm-file-action {

@@ -85,7 +85,7 @@ export class PtyManager {
     }
   }
 
-  spawn(terminalId: string, cwd: string, resumeId?: string, ephemeral?: boolean): void {
+  spawn(terminalId: string, cwd: string, resumeId?: string, ephemeral?: boolean, claudeFlags?: string): void {
     const shell = getDefaultShell()
     const args = getShellArgs(shell)
     const sessionId = resumeId ?? crypto.randomUUID()
@@ -124,7 +124,7 @@ export class PtyManager {
     const cmd = resumeId
       ? `claude --resume ${sessionId}\r`
       : ephemeral
-        ? `claude\r`
+        ? `claude${claudeFlags ? ' ' + claudeFlags : ''}\r`
         : `claude --session-id ${sessionId}\r`
 
     // Resumed sessions are already interacted (user had a prior conversation)

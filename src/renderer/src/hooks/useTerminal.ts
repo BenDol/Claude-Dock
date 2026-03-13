@@ -44,8 +44,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   useEffect(() => {
     if (!spawnedRef.current) {
       spawnedRef.current = true
-      const ephemeral = useDockStore.getState().claudeTaskTerminals.has(terminalId)
-      getDockApi().terminal.spawn(terminalId, ephemeral ? { ephemeral: true } : undefined)
+      const state = useDockStore.getState()
+      const ephemeral = state.claudeTaskTerminals.has(terminalId)
+      const claudeFlags = state.claudeTaskFlags.get(terminalId)
+      getDockApi().terminal.spawn(terminalId, ephemeral ? { ephemeral: true, claudeFlags } : undefined)
     }
   }, [terminalId])
 

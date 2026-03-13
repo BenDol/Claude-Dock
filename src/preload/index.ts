@@ -61,7 +61,7 @@ export interface GitInstallResult {
 
 export interface DockApi {
   terminal: {
-    spawn: (terminalId: string, options?: { ephemeral?: boolean }) => Promise<boolean>
+    spawn: (terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string }) => Promise<boolean>
     write: (terminalId: string, data: string) => Promise<void>
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // We don't import settings-store directly because it depends on electron-store
 // and __UPDATE_PROFILE__ define. Instead we test the pure merge function inline.
 
-import { DEFAULT_SETTINGS } from '../../shared/settings-schema'
+import { DEFAULT_SETTINGS, BUILTIN_NOTIFICATION_SOURCES } from '../../shared/settings-schema'
 
 describe('settings-store', () => {
   beforeEach(() => {
@@ -130,6 +130,40 @@ describe('settings-store', () => {
       const result = deepMergeDefaults(defaults, stored)
       expect(result.a).toBe(2)
       expect(result.extraKey).toBe('bonus')
+    })
+
+    it('preserves blockedNotificationSources default for old stored data', () => {
+      // Simulates stored settings from before blockedNotificationSources was added
+      const stored = {
+        behavior: {
+          confirmCloseWithRunning: false,
+          autoSpawnFirstTerminal: false
+        }
+      }
+      const result = deepMergeDefaults(DEFAULT_SETTINGS, stored as any)
+      expect(result.behavior.blockedNotificationSources).toEqual([])
+      expect(result.behavior.confirmCloseWithRunning).toBe(false)
+    })
+
+    it('preserves user-set blockedNotificationSources', () => {
+      const stored = {
+        behavior: {
+          blockedNotificationSources: ['updater', 'git-manager']
+        }
+      }
+      const result = deepMergeDefaults(DEFAULT_SETTINGS, stored as any)
+      expect(result.behavior.blockedNotificationSources).toEqual(['updater', 'git-manager'])
+    })
+  })
+
+  describe('BUILTIN_NOTIFICATION_SOURCES', () => {
+    it('contains updater source', () => {
+      expect(BUILTIN_NOTIFICATION_SOURCES).toContainEqual({ id: 'updater', label: 'App Updates' })
+    })
+
+    it('has unique ids', () => {
+      const ids = BUILTIN_NOTIFICATION_SOURCES.map((s) => s.id)
+      expect(new Set(ids).size).toBe(ids.length)
     })
   })
 })

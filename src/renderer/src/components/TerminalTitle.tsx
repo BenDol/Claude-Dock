@@ -31,6 +31,7 @@ const TerminalTitle: React.FC<TerminalTitleProps> = ({ terminalId, title }) => {
   const inputRef = useRef<HTMLInputElement>(null)
   const setTerminalTitle = useDockStore((s) => s.setTerminalTitle)
   const taskType = useDockStore((s) => s.claudeTaskTerminals.get(terminalId))
+  const flags = useDockStore((s) => s.claudeTaskFlags.get(terminalId))
 
   const startEditing = useCallback(() => {
     setEditValue(title)
@@ -64,11 +65,21 @@ const TerminalTitle: React.FC<TerminalTitleProps> = ({ terminalId, title }) => {
 
   const task = taskType ? taskInfo[taskType] : null
 
+  // Extract permission mode from flags string for display
+  let permSuffix = ''
+  if (task && flags) {
+    const modeMatch = flags.match(/--permission-mode\s+(\S+)/)
+    if (modeMatch) {
+      const modeLabels: Record<string, string> = { acceptEdits: 'auto-edit', bypassPermissions: 'auto-all' }
+      permSuffix = modeLabels[modeMatch[1]] || modeMatch[1]
+    }
+  }
+
   return (
     <span className="terminal-title" onDoubleClick={startEditing} title="Double-click to edit">
       {task && <task.icon />}
       {title}
-      {task && <span className="terminal-title-task-label">{task.label}</span>}
+      {task && <span className="terminal-title-task-label">{task.label}{permSuffix && ` (${permSuffix})`}</span>}
     </span>
   )
 }

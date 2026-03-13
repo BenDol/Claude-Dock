@@ -2886,20 +2886,22 @@ const VirtualFileList: React.FC<{
                 ) : (
                   <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
                 )}
-                <span className="gm-file-path">{f.path}</span>
-                <button
-                  className="gm-file-hover-btn"
-                  onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
-                  title="Open file"
-                ><OpenFileIcon /></button>
-                <button
-                  className="gm-file-hover-btn"
-                  onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
-                  title="Show in folder"
-                ><ShowInFolderIcon /></button>
-                {f.isSubmodule && !((f.submoduleAhead ?? 0) > 0 || (f.submoduleBehind ?? 0) > 0) && (
-                  <span className="gm-file-submodule-label">submodule</span>
-                )}
+                <span className="gm-file-path-wrap">
+                  <span className="gm-file-path">{f.path}</span>
+                  <button
+                    className="gm-file-hover-btn"
+                    onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
+                    title="Open file"
+                  ><OpenFileIcon /></button>
+                  <button
+                    className="gm-file-hover-btn"
+                    onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
+                    title="Show in folder"
+                  ><ShowInFolderIcon /></button>
+                  {f.isSubmodule && !((f.submoduleAhead ?? 0) > 0 || (f.submoduleBehind ?? 0) > 0) && (
+                    <span className="gm-file-submodule-label">submodule</span>
+                  )}
+                </span>
                 <button
                   className="gm-file-action"
                   onClick={() => onAction(f.path)}
@@ -3490,12 +3492,17 @@ const WorkingChanges: React.FC<{
               <div className="gm-section-actions">
                 {allUnstaged.length > 0 && (
                   <>
-                    <button className="gm-file-hover-btn" onClick={() => sendWriteTestsTask(allUnstaged.map(f => f.path))} title="Write tests for unstaged files">
-                      <WriteTestsIcon />
-                    </button>
                     <button className="gm-file-hover-btn" onClick={handleStashUnstaged} disabled={busy} title="Stash unstaged & untracked changes (keep staged)">
                       <StashIcon />
                     </button>
+                    <button className="gm-file-hover-btn" onClick={() => sendWriteTestsTask(allUnstaged.map(f => f.path))} title="Write tests for unstaged files">
+                      <WriteTestsIcon />
+                    </button>
+                    {selectedPaths.size > 1 && selectedFile?.staged === false && (
+                      <button className="gm-small-btn" onClick={() => handleBatchStage([...selectedPaths])} disabled={busy}>
+                        Stage Selected ({selectedPaths.size})
+                      </button>
+                    )}
                     <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
                       Stage All
                     </button>
@@ -3529,12 +3536,20 @@ const WorkingChanges: React.FC<{
               <div className="gm-section-actions">
                 {status.staged.length > 0 && (
                   <>
-                    <button className="gm-file-hover-btn" onClick={() => sendWriteTestsTask(status.staged.map(f => f.path))} title="Write tests for staged files">
-                      <WriteTestsIcon />
-                    </button>
                     <button className="gm-file-hover-btn" onClick={handleStashStaged} disabled={busy} title="Stash all changes">
                       <StashIcon />
                     </button>
+                    <button className={`gm-file-hover-btn${allUnstaged.length === 0 ? ' gm-write-tests-rainbow' : ''}`} onClick={() => sendWriteTestsTask(status.staged.map(f => f.path))} title="Write tests for staged files">
+                      <span className="gm-beaker-wrap">
+                        <WriteTestsIcon />
+                        {allUnstaged.length === 0 && <span className="gm-beaker-particles" />}
+                      </span>
+                    </button>
+                    {selectedPaths.size > 1 && selectedFile?.staged === true && (
+                      <button className="gm-small-btn" onClick={() => handleBatchUnstage([...selectedPaths])} disabled={busy}>
+                        Unstage Selected ({selectedPaths.size})
+                      </button>
+                    )}
                     <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
                       Unstage All
                     </button>
@@ -4140,29 +4155,27 @@ const WorkingDiffViewer: React.FC<{
     <div className="gm-changes-diff">
       <div className="gm-changes-diff-header">
         <span className="gm-changes-diff-title">
-          {multiFile ? (
-            <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {diffs.length} file{diffs.length !== 1 ? 's' : ''}</span>
-          ) : (
-            <>
-              <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {filePath}</span>
-              <button
-                className="gm-file-hover-btn"
-                onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
-                title="Open file"
-              ><OpenFileIcon /></button>
-              <button
-                className="gm-file-hover-btn"
-                onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
-                title="Show in folder"
-              ><ShowInFolderIcon /></button>
-              <button
-                className="gm-file-hover-btn"
-                onClick={() => sendWriteTestsTask([filePath])}
-                title="Write tests"
-              ><WriteTestsIcon /></button>
-            </>
-          )}
+          <span className="gm-changes-diff-title-text">{staged ? 'Staged' : 'Unstaged'}: {multiFile ? `${diffs.length} file${diffs.length !== 1 ? 's' : ''}` : filePath}</span>
         </span>
+        {!multiFile && (
+          <>
+            <button
+              className="gm-file-hover-btn"
+              onClick={() => api.app.openInExplorer(projectDir + '/' + filePath)}
+              title="Open file"
+            ><OpenFileIcon /></button>
+            <button
+              className="gm-file-hover-btn"
+              onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
+              title="Show in folder"
+            ><ShowInFolderIcon /></button>
+            <button
+              className="gm-file-hover-btn"
+              onClick={() => sendWriteTestsTask([filePath])}
+              title="Write tests"
+            ><WriteTestsIcon /></button>
+          </>
+        )}
         {!loading && diffs.length > 0 && <DiffStats diffs={diffs} />}
         <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
       </div>

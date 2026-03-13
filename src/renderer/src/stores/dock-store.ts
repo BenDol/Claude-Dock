@@ -14,6 +14,8 @@ interface DockState {
   loadingTerminals: Set<string>
   /** Maps terminal ID → task type string for terminals running Claude tasks */
   claudeTaskTerminals: Map<string, ClaudeTaskRequest['type']>
+  /** Maps terminal ID → extra Claude CLI flags for task terminals */
+  claudeTaskFlags: Map<string, string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -29,6 +31,7 @@ interface DockState {
   setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
   setTerminalClaudeTask: (id: string, taskType: ClaudeTaskRequest['type'] | null) => void
+  setTerminalClaudeFlags: (id: string, flags: string | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -42,6 +45,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   rcTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
   claudeTaskTerminals: new Map<string, ClaudeTaskRequest['type']>(),
+  claudeTaskFlags: new Map<string, string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -72,7 +76,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       unlockedTerminals.delete(id)
       const claudeTaskTerminals = new Map(state.claudeTaskTerminals)
       claudeTaskTerminals.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals }
+      const claudeTaskFlags = new Map(state.claudeTaskFlags)
+      claudeTaskFlags.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -137,5 +143,13 @@ export const useDockStore = create<DockState>((set, get) => ({
       if (taskType) next.set(id, taskType)
       else next.delete(id)
       return { claudeTaskTerminals: next }
+    }),
+
+  setTerminalClaudeFlags: (id, flags) =>
+    set((state) => {
+      const next = new Map(state.claudeTaskFlags)
+      if (flags) next.set(id, flags)
+      else next.delete(id)
+      return { claudeTaskFlags: next }
     })
 }))

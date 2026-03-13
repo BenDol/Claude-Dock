@@ -12,8 +12,8 @@ import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
-import type { ClaudeTaskRequest, CiFixTask } from '../../shared/claude-task-types'
-import { getTaskMeta } from '../../shared/claude-task-types'
+import type { ClaudeTaskRequest, CiFixTask, TaskPermissions } from '../../shared/claude-task-types'
+import { getTaskMeta, buildClaudeFlags } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
 const isLauncher = searchParams.has('launcher')
@@ -368,7 +368,7 @@ function DockApp() {
     ciFixCleanups.current.set(termId, () => { doCleanup(); exitCleanup() })
   }, [removeTerminal, stripAnsi])
 
-  const handleTaskTerminalSelected = useCallback(async (terminalId: string | null, context: string) => {
+  const handleTaskTerminalSelected = useCallback(async (terminalId: string | null, context: string, permissions: TaskPermissions) => {
     const task = pendingTask
     setPendingTask(null)
     if (!task) return
@@ -376,6 +376,7 @@ function DockApp() {
     const api = getDockApi()
     const dir = useDockStore.getState().projectDir
     const meta = getTaskMeta(task)
+    const flags = buildClaudeFlags(permissions)
 
     // Build prompt based on task type
     let prompt = ''
@@ -409,6 +410,7 @@ function DockApp() {
       const termId = `term-${nextTermId++}-${Date.now()}`
       const prevFocus = useDockStore.getState().focusedTerminalId
       useDockStore.getState().setTerminalClaudeTask(termId, task.type)
+      if (flags) useDockStore.getState().setTerminalClaudeFlags(termId, flags)
       addTerminal(termId)
       if (prevFocus) useDockStore.getState().setFocusedTerminal(prevFocus)
 
@@ -599,6 +601,7 @@ function DockApp() {
       {pendingTask && (
         <TerminalPicker
           taskLabel={getTaskMeta(pendingTask).label}
+          defaultPermissions={getTaskMeta(pendingTask).defaultPermissions}
           onSelect={handleTaskTerminalSelected}
           onClose={() => setPendingTask(null)}
         />
@@ -607,22 +610,47 @@ function DockApp() {
   )
 }
 
-function TerminalPicker({ taskLabel, onSelect, onClose }: {
+const AVAILABLE_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep']
+const PERMISSION_MODES: { value: import('../../shared/claude-task-types').PermissionMode; label: string }[] = [
+  { value: 'default', label: 'Default (ask each time)' },
+  { value: 'acceptEdits', label: 'Accept edits' },
+  { value: 'bypassPermissions', label: 'Bypass all permissions' }
+]
+
+function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   taskLabel: string
-  onSelect: (terminalId: string | null, context: string) => void
+  defaultPermissions: TaskPermissions
+  onSelect: (terminalId: string | null, context: string, permissions: TaskPermissions) => void
   onClose: () => void
 }) {
   const terminals = useDockStore((s) => s.terminals)
   const maxCols = useSettingsStore((s) => s.settings.grid.maxColumns)
   const [selected, setSelected] = useState<string | null>(null) // null = new terminal
   const [contextText, setContextText] = useState('')
+  const [permMode, setPermMode] = useState(defaultPermissions.permissionMode)
+  const [allowedTools, setAllowedTools] = useState<Set<string>>(new Set(defaultPermissions.allowedTools))
+  const [showPerms, setShowPerms] = useState(false)
 
   const backdropRef = useRef<HTMLDivElement>(null)
+
+  const toggleTool = useCallback((tool: string) => {
+    setAllowedTools((prev) => {
+      const next = new Set(prev)
+      if (next.has(tool)) next.delete(tool)
+      else next.add(tool)
+      return next
+    })
+  }, [])
 
   // Compute grid layout including a "new" cell
   const allIds = [...terminals.map((t) => t.id), '__new__']
   const { cols, layout } = computeAutoLayout(allIds, maxCols)
   const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y)) + 1 : 1
+
+  const handleSubmit = useCallback(() => {
+    const perms: TaskPermissions = { allowedTools: Array.from(allowedTools), permissionMode: permMode }
+    onSelect(selected, contextText, perms)
+  }, [selected, contextText, allowedTools, permMode, onSelect])
 
   const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -632,9 +660,9 @@ function TerminalPicker({ taskLabel, onSelect, onClose }: {
     if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
       e.preventDefault()
       e.stopPropagation()
-      onSelect(selected, contextText)
+      handleSubmit()
     }
-  }, [selected, contextText, onSelect, onClose])
+  }, [handleSubmit, onClose])
 
   return (
     <div
@@ -693,9 +721,48 @@ function TerminalPicker({ taskLabel, onSelect, onClose }: {
             rows={2}
           />
         </div>
+        {selected === null && (
+          <div className="tp-perms">
+            <button className="tp-perms-toggle" onClick={() => setShowPerms(!showPerms)}>
+              <span className="tp-perms-chevron">{showPerms ? '\u25BC' : '\u25B6'}</span>
+              Permissions
+            </button>
+            {showPerms && (
+              <div className="tp-perms-body">
+                <div className="tp-perms-row">
+                  <label className="tp-perms-label">Mode</label>
+                  <select
+                    className="tp-perms-select"
+                    value={permMode}
+                    onChange={(e) => setPermMode(e.target.value as import('../../shared/claude-task-types').PermissionMode)}
+                  >
+                    {PERMISSION_MODES.map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="tp-perms-row">
+                  <label className="tp-perms-label">Allowed tools</label>
+                  <div className="tp-perms-tools">
+                    {AVAILABLE_TOOLS.map((tool) => (
+                      <label key={tool} className="tp-perms-tool">
+                        <input
+                          type="checkbox"
+                          checked={allowedTools.has(tool)}
+                          onChange={() => toggleTool(tool)}
+                        />
+                        {tool}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         <div className="tp-footer">
           <button className="tp-cancel" onClick={onClose}>Cancel</button>
-          <button className="tp-confirm" onClick={() => onSelect(selected, contextText)}>
+          <button className="tp-confirm" onClick={handleSubmit}>
             {selected === null ? 'Create & Send' : 'Send'}
           </button>
         </div>
