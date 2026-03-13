@@ -687,6 +687,27 @@ body {
   border-color: var(--accent-color);
 }
 
+.tp-session-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0 14px 6px;
+}
+
+.tp-session-toggle input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent-color);
+}
+
+.tp-session-hint {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-left: 2px;
+}
+
 .tp-perms {
   padding: 0 14px 4px;
 }

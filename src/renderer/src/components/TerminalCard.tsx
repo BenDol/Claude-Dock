@@ -84,7 +84,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     const state = useDockStore.getState()
     const taskType = state.claudeTaskTerminals.get(terminalId)
     if (taskType) {
-      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task' }
+      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task', 'reference-this': 'a Reference This session' }
       const label = labels[taskType] || 'a Claude task'
       if (!window.confirm(`This terminal is running ${label}. Close it and cancel?`)) return
       window.dispatchEvent(new CustomEvent('claude-task-cancelled', { detail: terminalId }))

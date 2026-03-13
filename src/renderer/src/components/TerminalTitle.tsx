@@ -20,9 +20,17 @@ const BeakerIcon: React.FC = () => (
   </svg>
 )
 
+const ReferenceIcon: React.FC = () => (
+  <svg className="terminal-title-task-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
+    <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
+  </svg>
+)
+
 const taskInfo: Record<string, { icon: React.FC; label: string }> = {
   'ci-fix': { icon: RepairIcon, label: 'CI Fix' },
-  'write-tests': { icon: BeakerIcon, label: 'Write Tests' }
+  'write-tests': { icon: BeakerIcon, label: 'Write Tests' },
+  'reference-this': { icon: ReferenceIcon, label: 'Reference' }
 }
 
 const TerminalTitle: React.FC<TerminalTitleProps> = ({ terminalId, title }) => {

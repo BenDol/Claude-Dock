@@ -17,9 +17,18 @@ export interface WriteTestsTask extends ClaudeTaskBase {
   files: string[]
   commitHash?: string
   commitSubject?: string
+  selectedDiff?: string
 }
 
-export type ClaudeTaskRequest = CiFixTask | WriteTestsTask
+export interface ReferenceThisTask extends ClaudeTaskBase {
+  type: 'reference-this'
+  files: string[]
+  commitHash?: string
+  commitSubject?: string
+  selectedDiff?: string
+}
+
+export type ClaudeTaskRequest = CiFixTask | WriteTestsTask | ReferenceThisTask
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions'
 
@@ -30,6 +39,8 @@ export interface TaskPermissions {
 
 export interface TaskMeta {
   label: string
+  /** If false, the task terminal uses a persistent session (--session-id) instead of ephemeral mode */
+  ephemeral?: boolean
   completionMarker?: string
   defaultPermissions: TaskPermissions
 }
@@ -44,12 +55,19 @@ const WRITE_TESTS_PERMISSIONS: TaskPermissions = {
   permissionMode: 'acceptEdits'
 }
 
+const REFERENCE_THIS_PERMISSIONS: TaskPermissions = {
+  allowedTools: ['Bash', 'Read', 'Glob', 'Grep'],
+  permissionMode: 'default'
+}
+
 export function getTaskMeta(task: ClaudeTaskRequest): TaskMeta {
   switch (task.type) {
     case 'ci-fix':
       return { label: 'Fix CI Failure', completionMarker: 'CI_FIX_COMPLETE', defaultPermissions: CI_FIX_PERMISSIONS }
     case 'write-tests':
       return { label: 'Write Tests', defaultPermissions: WRITE_TESTS_PERMISSIONS }
+    case 'reference-this':
+      return { label: 'Reference This', ephemeral: false, defaultPermissions: REFERENCE_THIS_PERMISSIONS }
   }
 }
 

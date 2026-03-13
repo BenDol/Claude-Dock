@@ -16,6 +16,8 @@ interface DockState {
   claudeTaskTerminals: Map<string, ClaudeTaskRequest['type']>
   /** Maps terminal ID → extra Claude CLI flags for task terminals */
   claudeTaskFlags: Map<string, string>
+  /** Set of terminal IDs for persistent (non-ephemeral) task terminals */
+  claudePersistentTaskTerminals: Set<string>
   /** Set of terminal IDs that are currently receiving data */
   activeTerminals: Set<string>
 
@@ -34,6 +36,7 @@ interface DockState {
   setTerminalLoading: (id: string, loading: boolean) => void
   setTerminalClaudeTask: (id: string, taskType: ClaudeTaskRequest['type'] | null) => void
   setTerminalClaudeFlags: (id: string, flags: string | null) => void
+  setTerminalPersistentTask: (id: string, persistent: boolean) => void
   setTerminalActive: (id: string, active: boolean) => void
 }
 
@@ -49,6 +52,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   loadingTerminals: new Set<string>(),
   claudeTaskTerminals: new Map<string, ClaudeTaskRequest['type']>(),
   claudeTaskFlags: new Map<string, string>(),
+  claudePersistentTaskTerminals: new Set<string>(),
   activeTerminals: new Set<string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
@@ -82,7 +86,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       claudeTaskTerminals.delete(id)
       const claudeTaskFlags = new Map(state.claudeTaskFlags)
       claudeTaskFlags.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags }
+      const claudePersistentTaskTerminals = new Set(state.claudePersistentTaskTerminals)
+      claudePersistentTaskTerminals.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -155,6 +161,14 @@ export const useDockStore = create<DockState>((set, get) => ({
       if (flags) next.set(id, flags)
       else next.delete(id)
       return { claudeTaskFlags: next }
+    }),
+
+  setTerminalPersistentTask: (id, persistent) =>
+    set((state) => {
+      const next = new Set(state.claudePersistentTaskTerminals)
+      if (persistent) next.add(id)
+      else next.delete(id)
+      return { claudePersistentTaskTerminals: next }
     }),
 
   setTerminalActive: (id, active) =>

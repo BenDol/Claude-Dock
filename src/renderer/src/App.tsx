@@ -12,7 +12,7 @@ import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
-import type { ClaudeTaskRequest, CiFixTask, TaskPermissions } from '../../shared/claude-task-types'
+import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, TaskPermissions } from '../../shared/claude-task-types'
 import { getTaskMeta, buildClaudeFlags } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
@@ -197,6 +197,10 @@ function buildWriteTestsPrompt(task: import('../../shared/claude-task-types').Wr
     )
   }
 
+  if (task.selectedDiff) {
+    parts.push(`\nThe following diff lines were specifically selected for focus:\n\`\`\`diff\n${task.selectedDiff}\n\`\`\``)
+  }
+
   if (context) {
     parts.push(`\nAdditional instructions:\n${context}`)
   }
@@ -212,6 +216,35 @@ function buildWriteTestsPrompt(task: import('../../shared/claude-task-types').Wr
     'Follow the existing test patterns and conventions in this project. ' +
     'If test files already exist for these modules, add to them; otherwise create new test files in the appropriate location.'
   )
+
+  return parts.join('\n')
+}
+
+function buildReferenceThisPrompt(task: ReferenceThisTask, context: string): string {
+  const parts: string[] = []
+
+  if (task.commitHash) {
+    parts.push(
+      `Reference changes in commit ${task.commitHash.slice(0, 8)}${task.commitSubject ? ` ("${task.commitSubject}")` : ''}.`,
+      `Run \`git show ${task.commitHash}\` to see the diff.`
+    )
+  } else if (task.files.length > 0) {
+    parts.push(
+      `Reference the following files:`,
+      task.files.map(f => `  - ${f}`).join('\n'),
+      `Read each file.`
+    )
+  }
+
+  if (task.selectedDiff) {
+    parts.push(`\nThe following diff lines were specifically selected for focus:\n\`\`\`diff\n${task.selectedDiff}\n\`\`\``)
+  }
+
+  parts.push(`\nRead the referenced code and be ready for further instructions. Do not make changes yet.`)
+
+  if (context) {
+    parts.push(`\nAdditional instructions:\n${context}`)
+  }
 
   return parts.join('\n')
 }
@@ -368,7 +401,7 @@ function DockApp() {
     ciFixCleanups.current.set(termId, () => { doCleanup(); exitCleanup() })
   }, [removeTerminal, stripAnsi])
 
-  const handleTaskTerminalSelected = useCallback(async (terminalId: string | null, context: string, permissions: TaskPermissions) => {
+  const handleTaskTerminalSelected = useCallback(async (terminalId: string | null, context: string, permissions: TaskPermissions, useSession: boolean) => {
     const task = pendingTask
     setPendingTask(null)
     if (!task) return
@@ -384,6 +417,8 @@ function DockApp() {
       prompt = await buildCiFixPrompt(task, context, api, dir)
     } else if (task.type === 'write-tests') {
       prompt = buildWriteTestsPrompt(task, context)
+    } else if (task.type === 'reference-this') {
+      prompt = buildReferenceThisPrompt(task, context)
     }
 
     const sendToTerminal = (termId: string) => {
@@ -410,7 +445,12 @@ function DockApp() {
       const termId = `term-${nextTermId++}-${Date.now()}`
       const prevFocus = useDockStore.getState().focusedTerminalId
       useDockStore.getState().setTerminalClaudeTask(termId, task.type)
-      if (flags) useDockStore.getState().setTerminalClaudeFlags(termId, flags)
+      if (useSession) {
+        // Persistent session — use session-id mode, not ephemeral
+        useDockStore.getState().setTerminalPersistentTask(termId, true)
+      } else if (flags) {
+        useDockStore.getState().setTerminalClaudeFlags(termId, flags)
+      }
       addTerminal(termId)
       if (prevFocus) useDockStore.getState().setFocusedTerminal(prevFocus)
 
@@ -572,7 +612,7 @@ function DockApp() {
     if (!state.focusedTerminalId) return
     const taskType = state.claudeTaskTerminals.get(state.focusedTerminalId)
     if (taskType) {
-      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task' }
+      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task', 'reference-this': 'a Reference This session' }
       const label = labels[taskType] || 'a Claude task'
       if (!window.confirm(`This terminal is running ${label}. Close it and cancel?`)) return
       window.dispatchEvent(new CustomEvent('claude-task-cancelled', { detail: state.focusedTerminalId }))
@@ -620,7 +660,7 @@ const PERMISSION_MODES: { value: import('../../shared/claude-task-types').Permis
 function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   taskLabel: string
   defaultPermissions: TaskPermissions
-  onSelect: (terminalId: string | null, context: string, permissions: TaskPermissions) => void
+  onSelect: (terminalId: string | null, context: string, permissions: TaskPermissions, useSession: boolean) => void
   onClose: () => void
 }) {
   const terminals = useDockStore((s) => s.terminals)
@@ -630,6 +670,7 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   const [permMode, setPermMode] = useState(defaultPermissions.permissionMode)
   const [allowedTools, setAllowedTools] = useState<Set<string>>(new Set(defaultPermissions.allowedTools))
   const [showPerms, setShowPerms] = useState(false)
+  const [useSession, setUseSession] = useState(false)
 
   const backdropRef = useRef<HTMLDivElement>(null)
 
@@ -649,8 +690,8 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
 
   const handleSubmit = useCallback(() => {
     const perms: TaskPermissions = { allowedTools: Array.from(allowedTools), permissionMode: permMode }
-    onSelect(selected, contextText, perms)
-  }, [selected, contextText, allowedTools, permMode, onSelect])
+    onSelect(selected, contextText, perms, useSession)
+  }, [selected, contextText, allowedTools, permMode, useSession, onSelect])
 
   const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -723,6 +764,11 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
         </div>
         {selected === null && (
           <div className="tp-perms">
+            <label className="tp-session-toggle">
+              <input type="checkbox" checked={useSession} onChange={() => setUseSession(!useSession)} />
+              Persistent session
+              <span className="tp-session-hint">Uses --session-id so the terminal retains context across restarts</span>
+            </label>
             <button className="tp-perms-toggle" onClick={() => setShowPerms(!showPerms)}>
               <span className="tp-perms-chevron">{showPerms ? '\u25BC' : '\u25B6'}</span>
               Permissions

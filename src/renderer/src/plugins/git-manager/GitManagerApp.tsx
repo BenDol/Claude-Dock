@@ -23,7 +23,7 @@ import { highlightDiffHunks } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
-import type { WriteTestsTask } from '../../../../shared/claude-task-types'
+import type { WriteTestsTask, ReferenceThisTask } from '../../../../shared/claude-task-types'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
@@ -34,15 +34,54 @@ interface NavEntry {
 }
 
 /** Send a write-tests task to the dock window */
-function sendWriteTestsTask(files: string[], commitHash?: string, commitSubject?: string): void {
+function sendWriteTestsTask(files: string[], commitHash?: string, commitSubject?: string, selectedDiff?: string): void {
   const api = getDockApi()
   const task: WriteTestsTask = {
     type: 'write-tests',
     files,
     commitHash,
-    commitSubject
+    commitSubject,
+    selectedDiff
   }
   api.claudeTask.send(projectDir, task)
+}
+
+/** Send a reference-this task to the dock window */
+function sendReferenceThisTask(files: string[], commitHash?: string, commitSubject?: string, selectedDiff?: string): void {
+  const api = getDockApi()
+  const task: ReferenceThisTask = {
+    type: 'reference-this',
+    files,
+    commitHash,
+    commitSubject,
+    selectedDiff
+  }
+  api.claudeTask.send(projectDir, task)
+}
+
+/** Ref callback: repositions a context submenu if it overflows the viewport */
+function adjustSubmenuRef(el: HTMLDivElement | null): void {
+  if (!el) return
+  const zoom = parseFloat(document.documentElement.style.zoom) || 1
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let r = el.getBoundingClientRect()
+  // Flip horizontally if overflowing right
+  if (r.right > vw) {
+    el.classList.add('gm-ctx-submenu-left')
+    r = el.getBoundingClientRect()
+  }
+  // Flip back if flipping caused left overflow
+  if (r.left < 0) {
+    el.classList.remove('gm-ctx-submenu-left')
+    r = el.getBoundingClientRect()
+  }
+  // Adjust vertically if overflowing bottom
+  if (r.bottom > vh) {
+    const over = (r.bottom - vh + 4) / zoom
+    const currentTop = parseFloat(el.style.top) || -4
+    el.style.top = `${currentTop - over}px`
+  }
 }
 
 // --- Action error with resolutions ---
@@ -1243,7 +1282,7 @@ const GitManagerApp: React.FC = () => {
                 onRefresh={refresh}
                 onError={handleSmartError}
                 onConfirm={setConfirmModal}
-                onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
+                onCommitted={async (hash) => { await refresh(); navigateToCommit(hash) }}
                 onStatusRefreshed={setStatus}
                 onBusyChange={setWcBusy}
               />
@@ -2194,11 +2233,7 @@ const LazyDiffFile: React.FC<{
           onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
           title="Show in folder"
         ><ShowInFolderIcon /></button>
-        <button
-          className="gm-file-hover-btn"
-          onClick={() => sendWriteTestsTask([f.path], commitHash, commitSubject)}
-          title="Write tests"
-        ><WriteTestsIcon /></button>
+        <ClaudeActionWheel files={[f.path]} commitHash={commitHash} commitSubject={commitSubject} />
         <span className="gm-diff-file-stats">
           {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
           {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
@@ -2656,6 +2691,10 @@ const CommitDetailPanel: React.FC<{
           x={ctxMenu.x}
           y={ctxMenu.y}
           selectedCount={selectedLines.size}
+          selectedPatch={getSelectedText('patch')}
+          selectedFiles={[...new Set([...selectedLines].map(k => detail.files[Number(k.split(':')[0])]?.path).filter(Boolean))]}
+          commitHash={detail.hash}
+          commitSubject={detail.subject}
           onCopy={() => doCopy('content')}
           onCopyPatch={() => doCopy('patch')}
           onCopyNew={() => doCopy('new')}
@@ -2670,13 +2709,18 @@ const CommitDetailPanel: React.FC<{
 const CommitDiffContextMenu: React.FC<{
   x: number; y: number
   selectedCount: number
+  selectedPatch: string
+  selectedFiles: string[]
+  commitHash: string
+  commitSubject: string
   onCopy: () => void
   onCopyPatch: () => void
   onCopyNew: () => void
   onCopyOld: () => void
   onClose: () => void
-}> = ({ x, y, selectedCount, onCopy, onCopyPatch, onCopyNew, onCopyOld, onClose }) => {
+}> = ({ x, y, selectedCount, selectedPatch, selectedFiles, commitHash, commitSubject, onCopy, onCopyPatch, onCopyNew, onCopyOld, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
+  const [claudeSubmenu, setClaudeSubmenu] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -2709,6 +2753,21 @@ const CommitDiffContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={onCopyPatch}>Copy patch</div>
       <div className="gm-ctx-item" onClick={onCopyNew}>Copy new version</div>
       <div className="gm-ctx-item" onClick={onCopyOld}>Copy old version</div>
+      <div className="gm-ctx-separator" />
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSubmenu(true)}
+        onMouseLeave={() => setClaudeSubmenu(false)}
+      >
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" /><path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" /></svg>Claude Actions</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {claudeSubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendWriteTestsTask(selectedFiles, commitHash, commitSubject, selectedPatch) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span></div>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendReferenceThisTask(selectedFiles, commitHash, commitSubject, selectedPatch) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>Reference This</span></div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -2890,12 +2949,18 @@ const VirtualFileList: React.FC<{
                   <span className="gm-file-path">{f.path}</span>
                   <button
                     className="gm-file-hover-btn"
-                    onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
+                    onClick={() => {
+                      if (!(isActive || isInSelection)) { onSelect(f.path, isStaged); return }
+                      api.app.openInExplorer(projectDir + '/' + f.path)
+                    }}
                     title="Open file"
                   ><OpenFileIcon /></button>
                   <button
                     className="gm-file-hover-btn"
-                    onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
+                    onClick={() => {
+                      if (!(isActive || isInSelection)) { onSelect(f.path, isStaged); return }
+                      api.gitManager.showInFolder(projectDir, f.path)
+                    }}
                     title="Show in folder"
                   ><ShowInFolderIcon /></button>
                   {f.isSubmodule && !((f.submoduleAhead ?? 0) > 0 || (f.submoduleBehind ?? 0) > 0) && (
@@ -3061,7 +3126,7 @@ const WorkingChanges: React.FC<{
   onRefresh: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
-  onCommitted?: (hash: string) => void
+  onCommitted?: (hash: string) => void | Promise<void>
   onStatusRefreshed?: (status: GitStatusResult) => void
   onBusyChange?: (busy: boolean) => void
 }> = ({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
@@ -3313,9 +3378,10 @@ const WorkingChanges: React.FC<{
     if (result.success) {
       setCommitMsg('')
       userEditedMsgRef.current = false
+      if (onCommitted && result.hash) { await onCommitted(result.hash) }
+      else { onRefresh() }
       setBusy(false)
       setCommitting(null)
-      if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
         const r = await api.gitManager.commit(projectDir, commitMsg)
@@ -3324,8 +3390,8 @@ const WorkingChanges: React.FC<{
       })
       setBusy(false)
       setCommitting(null)
+      onRefresh()
     }
-    onRefresh()
   }
 
   const handleCommitPush = async () => {
@@ -3339,19 +3405,20 @@ const WorkingChanges: React.FC<{
       userEditedMsgRef.current = false
       const pushResult = await api.gitManager.push(projectDir)
       if (!pushResult.success) {
+        // Commit succeeded but push failed — still navigate to the commit
+        if (onCommitted && result.hash) { await onCommitted(result.hash) } else { onRefresh() }
         setBusy(false)
         setCommitting(null)
-        // Commit succeeded but push failed — still navigate to the commit
-        if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
         onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
           const r = await api.gitManager.push(projectDir)
           if (!r.success) throw new Error(r.error || 'Push still failed')
         })
         return
       }
+      if (onCommitted && result.hash) { await onCommitted(result.hash) }
+      else { onRefresh() }
       setBusy(false)
       setCommitting(null)
-      if (onCommitted && result.hash) { onCommitted(result.hash); return }
     } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
         const r = await api.gitManager.commit(projectDir, commitMsg)
@@ -3360,8 +3427,8 @@ const WorkingChanges: React.FC<{
       })
       setBusy(false)
       setCommitting(null)
+      onRefresh()
     }
-    onRefresh()
   }
 
   const handleStageFile = async (filePath: string) => {
@@ -3699,6 +3766,7 @@ const FileContextMenu: React.FC<{
 }> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
+  const [claudeSubmenu, setClaudeSubmenu] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -3775,10 +3843,20 @@ const FileContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={doOpenFile}>Open file{count > 1 ? 's' : ''}{suffix}</div>
       <div className="gm-ctx-item" onClick={doShowInFolder}>Show in folder{count > 1 ? 's' : ''}{suffix}</div>
       <div className="gm-ctx-separator" />
-      <div className="gm-ctx-item" onClick={() => {
-        onClose()
-        sendWriteTestsTask(targetPaths)
-      }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests{suffix}</span></div>
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSubmenu(true)}
+        onMouseLeave={() => setClaudeSubmenu(false)}
+      >
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" /><path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" /></svg>Claude Actions</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {claudeSubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendWriteTestsTask(targetPaths) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests{suffix}</span></div>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendReferenceThisTask(targetPaths) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>Reference This{suffix}</span></div>
+          </div>
+        )}
+      </div>
       <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item gm-ctx-submenu-trigger"
@@ -3788,7 +3866,7 @@ const FileContextMenu: React.FC<{
         <span>Copy path{count > 1 ? 's' : ''}</span>
         <span className="gm-ctx-arrow">&#9656;</span>
         {copySubmenu && (
-          <div className="gm-ctx-submenu">
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
             <div className="gm-ctx-item" onClick={() => doCopyPath(targetPaths.join('\n'))}>
               Relative{count > 1 ? ` (${count})` : `: ${file.path}`}
             </div>
@@ -4169,11 +4247,7 @@ const WorkingDiffViewer: React.FC<{
               onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
               title="Show in folder"
             ><ShowInFolderIcon /></button>
-            <button
-              className="gm-file-hover-btn"
-              onClick={() => sendWriteTestsTask([filePath])}
-              title="Write tests"
-            ><WriteTestsIcon /></button>
+            <ClaudeActionWheel files={[filePath]} direction="left" />
           </>
         )}
         {!loading && diffs.length > 0 && <DiffStats diffs={diffs} />}
@@ -4200,11 +4274,7 @@ const WorkingDiffViewer: React.FC<{
                     onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                     title="Show in folder"
                   ><ShowInFolderIcon /></button>
-                  <button
-                    className="gm-file-hover-btn"
-                    onClick={() => sendWriteTestsTask([f.path])}
-                    title="Write tests"
-                  ><WriteTestsIcon /></button>
+                  <ClaudeActionWheel files={[f.path]} direction="left" />
                   <DiffStats diffs={[f]} />
                 </div>
               )}
@@ -4256,6 +4326,8 @@ const WorkingDiffViewer: React.FC<{
           staged={staged}
           hasChanges={selectedChanges > 0}
           selectedCount={selectedLines.size}
+          selectedPatch={getSelectedText('patch')}
+          selectedFiles={[...new Set([...selectedLines].map(k => diffs[Number(k.split(':')[0])]?.path).filter(Boolean))]}
           onStage={handleStageLines}
           onUnstage={handleUnstageLines}
           onDiscard={handleDiscardLines}
@@ -4275,6 +4347,8 @@ const DiffLineContextMenu: React.FC<{
   staged: boolean
   hasChanges: boolean
   selectedCount: number
+  selectedPatch: string
+  selectedFiles: string[]
   onStage: () => void
   onUnstage: () => void
   onDiscard: () => void
@@ -4283,8 +4357,9 @@ const DiffLineContextMenu: React.FC<{
   onCopyNew: () => void
   onCopyOld: () => void
   onClose: () => void
-}> = ({ x, y, staged, hasChanges, selectedCount, onStage, onUnstage, onDiscard, onCopy, onCopyPatch, onCopyNew, onCopyOld, onClose }) => {
+}> = ({ x, y, staged, hasChanges, selectedCount, selectedPatch, selectedFiles, onStage, onUnstage, onDiscard, onCopy, onCopyPatch, onCopyNew, onCopyOld, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
+  const [claudeSubmenu, setClaudeSubmenu] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -4336,6 +4411,21 @@ const DiffLineContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={onCopyPatch}>Copy patch</div>
       <div className="gm-ctx-item" onClick={onCopyNew}>Copy new version</div>
       <div className="gm-ctx-item" onClick={onCopyOld}>Copy old version</div>
+      <div className="gm-ctx-separator" />
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSubmenu(true)}
+        onMouseLeave={() => setClaudeSubmenu(false)}
+      >
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" /><path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" /></svg>Claude Actions</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {claudeSubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendWriteTestsTask(selectedFiles, undefined, undefined, selectedPatch) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span></div>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendReferenceThisTask(selectedFiles, undefined, undefined, selectedPatch) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>Reference This</span></div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -5233,6 +5323,7 @@ const CommitContextMenu: React.FC<{
   const [copySubmenu, setCopySubmenu] = useState(false)
   const [checkoutSubmenu, setCheckoutSubmenu] = useState(false)
   const [mergeSubmenu, setMergeSubmenu] = useState(false)
+  const [claudeSubmenu, setClaudeSubmenu] = useState(false)
   const [subFlip, setSubFlip] = useState(false)
 
   useEffect(() => {
@@ -5433,12 +5524,19 @@ const CommitContextMenu: React.FC<{
         Cherry pick this commit...
       </div>
       <div className="gm-ctx-separator" />
-      <div className="gm-ctx-item" onClick={() => {
-        onClose()
-        // Commit hash is enough — Claude will run `git show` to see the diff
-        sendWriteTestsTask([], commit.hash, commit.subject)
-      }}>
-        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span>
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSubmenu(true)}
+        onMouseLeave={() => setClaudeSubmenu(false)}
+      >
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" /><path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" /></svg>Claude Actions</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {claudeSubmenu && (
+          <div className={`gm-ctx-submenu${subFlip ? ' gm-ctx-submenu-left' : ''}`} ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendWriteTestsTask([], commit.hash, commit.subject) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span></div>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendReferenceThisTask([], commit.hash, commit.subject) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>Reference This</span></div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -7225,6 +7323,55 @@ const WriteTestsIcon: React.FC = () => (
     <line x1="6" y1="18" x2="18" y2="18" />
   </svg>
 )
+
+const ClaudeActionIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
+    <path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" />
+  </svg>
+)
+
+const ReferenceThisIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
+    <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
+  </svg>
+)
+
+/** Claude action button — hover to expand action icons inline */
+const ClaudeActionWheel: React.FC<{ files: string[]; commitHash?: string; commitSubject?: string; direction?: 'left' | 'right' }> = ({ files, commitHash, commitSubject, direction = 'right' }) => {
+  const [open, setOpen] = useState(false)
+  const leaveTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  const handleEnter = useCallback(() => {
+    clearTimeout(leaveTimer.current)
+    setOpen(true)
+  }, [])
+
+  const handleLeave = useCallback(() => {
+    leaveTimer.current = setTimeout(() => setOpen(false), 200)
+  }, [])
+
+  return (
+    <div
+      className={`gm-claude-wrap${direction === 'left' ? ' gm-claude-left' : ''}`}
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
+      <button className="gm-file-hover-btn gm-claude-trigger" title="Claude actions">
+        <ClaudeActionIcon />
+      </button>
+      <div className={`gm-claude-actions${open ? ' open' : ''}`}>
+        <button className="gm-claude-action-btn" onClick={(e) => { e.stopPropagation(); setOpen(false); sendWriteTestsTask(files, commitHash, commitSubject) }} title="Write Tests">
+          <WriteTestsIcon />
+        </button>
+        <button className="gm-claude-action-btn" onClick={(e) => { e.stopPropagation(); setOpen(false); sendReferenceThisTask(files, commitHash, commitSubject) }} title="Reference This">
+          <ReferenceThisIcon />
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const FolderIcon: React.FC = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>

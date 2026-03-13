@@ -4141,3 +4141,57 @@
 .gm-search-highlight-flash {
   animation: gm-search-highlight-flash 1.5s ease-out;
 }
+
+/* --- Claude Action Expand --- */
+.gm-claude-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 3px;
+  transition: background 0.15s ease-out;
+}
+
+.gm-claude-wrap:hover {
+  background: rgba(232,128,74,0.12);
+}
+
+.gm-claude-wrap.gm-claude-left {
+  flex-direction: row-reverse;
+}
+
+.gm-claude-trigger { color: var(--accent-color); }
+.gm-claude-trigger:hover { color: #ff9a5c; background: none; }
+
+.gm-claude-actions {
+  display: flex;
+  align-items: center;
+  max-width: 0;
+  overflow: hidden;
+  transition: max-width 0.2s ease-out, opacity 0.15s ease-out;
+  opacity: 0;
+}
+
+.gm-claude-actions.open {
+  max-width: 60px;
+  opacity: 1;
+}
+
+.gm-claude-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.gm-claude-action-btn:hover {
+  color: var(--text-primary);
+  background: rgba(232,128,74,0.22);
+}
