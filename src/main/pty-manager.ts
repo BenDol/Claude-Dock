@@ -17,6 +17,7 @@ export interface PtyInstance {
 export class PtyManager {
   private ptys = new Map<string, PtyInstance>()
   private ephemeralIds = new Set<string>()
+  private interactedIds = new Set<string>()
   private onData: (terminalId: string, data: string) => void
   private onExit: (terminalId: string, exitCode: number) => void
   private onSessionCreated: (sessionId: string) => void
@@ -126,8 +127,9 @@ export class PtyManager {
         ? `claude\r`
         : `claude --session-id ${sessionId}\r`
 
-    // Persist session immediately for fresh terminals (skip ephemeral)
-    if (!resumeId && !ephemeral) {
+    // Resumed sessions are already interacted (user had a prior conversation)
+    if (resumeId && !ephemeral) {
+      this.interactedIds.add(terminalId)
       this.onSessionCreated(sessionId)
     }
 
@@ -184,13 +186,13 @@ export class PtyManager {
 
   getSessionIds(): string[] {
     return Array.from(this.ptys.entries())
-      .filter(([id]) => !this.ephemeralIds.has(id))
+      .filter(([id]) => !this.ephemeralIds.has(id) && this.interactedIds.has(id))
       .map(([, p]) => p.sessionId)
   }
 
   getOrderedSessionIds(terminalIds: string[]): string[] {
     return terminalIds
-      .filter((id) => !this.ephemeralIds.has(id))
+      .filter((id) => !this.ephemeralIds.has(id) && this.interactedIds.has(id))
       .map((id) => this.ptys.get(id)?.sessionId)
       .filter((s): s is string => !!s)
   }
@@ -201,6 +203,14 @@ export class PtyManager {
 
   write(terminalId: string, data: string): void {
     if (this.ptys.has(terminalId)) {
+      // On first user write, mark as interacted and persist session
+      if (!this.interactedIds.has(terminalId) && !this.ephemeralIds.has(terminalId)) {
+        this.interactedIds.add(terminalId)
+        const instance = this.ptys.get(terminalId)
+        if (instance) {
+          this.onSessionCreated(instance.sessionId)
+        }
+      }
       this.sendToHost({ type: 'write', terminalId, data })
     }
   }
@@ -247,6 +257,7 @@ export class PtyManager {
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
       this.ephemeralIds.delete(terminalId)
+      this.interactedIds.delete(terminalId)
       if (!this.suppressSessionChanges) {
         this.onSessionsChanged()
       }
