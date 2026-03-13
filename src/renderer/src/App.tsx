@@ -271,11 +271,16 @@ function DockApp() {
       const branch = (data.headBranch as string) || ''
       const failedJobs = (data.failedJobs as Array<{ id: number; name: string; failedSteps: string[] }>) || []
 
-      let logSnippet = ''
-      if (failedJobs.length > 0 && failedJobs[0].id) {
+      // Fetch logs for all failed jobs (not just the first)
+      const jobLogSnippets: { name: string; log: string }[] = []
+      for (const fj of failedJobs) {
+        if (!fj.id) continue
         try {
-          const fullLog = await api.ci.getJobLog(dir, failedJobs[0].id)
-          logSnippet = extractErrorContext(fullLog, 10)
+          const fullLog = await api.ci.getJobLog(dir, fj.id)
+          if (fullLog) {
+            const snippet = extractErrorContext(fullLog, 10)
+            if (snippet) jobLogSnippets.push({ name: fj.name, log: snippet })
+          }
         } catch { /* continue without log */ }
       }
 
@@ -284,11 +289,21 @@ function DockApp() {
         return `  - ${j.name}${steps}`
       }).join('\n')
 
+      // Build log section — include all job logs with headers if multiple
+      let logSection = ''
+      if (jobLogSnippets.length === 1) {
+        logSection = `\nRelevant error output from "${jobLogSnippets[0].name}":\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
+      } else if (jobLogSnippets.length > 1) {
+        logSection = '\nRelevant error output:\n' + jobLogSnippets.map(
+          (s) => `\n--- ${s.name} ---\n\`\`\`\n${s.log}\n\`\`\``
+        ).join('\n') + '\n'
+      }
+
       failurePrompt = `A CI build has failed and needs to be fixed.\n\n` +
         `Workflow: ${runName} #${runNumber}\n` +
         `Branch: ${branch}\n` +
         (jobList ? `Failed jobs:\n${jobList}\n` : '') +
-        (logSnippet ? `\nRelevant error output:\n\`\`\`\n${logSnippet}\n\`\`\`\n` : '') +
+        logSection +
         `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
         `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
         `The fix MUST be committed and pushed to the branch "${branch}". ` +

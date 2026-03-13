@@ -594,18 +594,12 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                 ))}
               </div>
               {availableBranches.length > 0 && (
-                <div className="ci-filter-group ci-filter-branches">
-                  {availableBranches.map((b) => (
-                    <button
-                      key={b}
-                      className={`ci-filter-chip ci-filter-chip-branch${filters.branches.has(b) ? ' ci-filter-chip-on' : ''}${b === currentBranch ? ' ci-filter-chip-current' : ''}`}
-                      onClick={() => toggleBranchFilter(b)}
-                    >
-                      {b === currentBranch && <span className="ci-filter-current-dot" />}
-                      {b}
-                    </button>
-                  ))}
-                </div>
+                <BranchFilterDropdown
+                  branches={availableBranches}
+                  selected={filters.branches}
+                  currentBranch={currentBranch}
+                  onToggle={toggleBranchFilter}
+                />
               )}
               {availableEvents.length > 1 && (
                 <select
@@ -1085,6 +1079,97 @@ function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expande
         </div>
       )}
     </div>
+  )
+}
+
+function BranchFilterDropdown({ branches, selected, currentBranch, onToggle }: {
+  branches: string[]
+  selected: Set<string>
+  currentBranch?: string
+  onToggle: (branch: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Focus input when opening
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
+    if (!q) return branches
+    return branches.filter((b) => b.toLowerCase().includes(q))
+  }, [branches, search])
+
+  const label = selected.size === 0
+    ? 'Branches'
+    : selected.size === 1
+      ? [...selected][0]
+      : `${selected.size} branches`
+
+  return (
+    <div className="ci-branch-dropdown" ref={containerRef}>
+      <button
+        className={`ci-branch-dropdown-trigger${selected.size > 0 ? ' ci-branch-dropdown-active' : ''}`}
+        onClick={() => { setOpen((p) => !p); setSearch('') }}
+      >
+        <BranchIcon />
+        <span className="ci-branch-dropdown-label">{label}</span>
+        <span className={`ci-branch-dropdown-caret${open ? ' ci-branch-dropdown-caret-open' : ''}`}>{'\u25BE'}</span>
+      </button>
+      {open && (
+        <div className="ci-branch-dropdown-menu">
+          <input
+            ref={inputRef}
+            className="ci-branch-dropdown-search"
+            type="text"
+            placeholder="Filter branches..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setOpen(false)
+            }}
+          />
+          <div className="ci-branch-dropdown-list">
+            {filtered.length === 0 && (
+              <div className="ci-branch-dropdown-empty">No branches match</div>
+            )}
+            {filtered.map((b) => (
+              <button
+                key={b}
+                className={`ci-branch-dropdown-item${selected.has(b) ? ' ci-branch-dropdown-item-on' : ''}${b === currentBranch ? ' ci-branch-dropdown-item-current' : ''}`}
+                onClick={() => onToggle(b)}
+              >
+                <span className="ci-branch-dropdown-check">{selected.has(b) ? '\u2713' : ''}</span>
+                {b === currentBranch && <span className="ci-filter-current-dot" />}
+                <span className="ci-branch-dropdown-name">{b}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BranchIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
   )
 }
 

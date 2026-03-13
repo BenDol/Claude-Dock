@@ -3773,6 +3773,30 @@ function buildPartialPatch(
   return parts.join('\n') + '\n'
 }
 
+function DiffStats({ diffs }: { diffs: GitFileDiff[] }) {
+  const { add, del } = useMemo(() => {
+    let add = 0, del = 0
+    for (const f of diffs) {
+      for (const h of f.hunks) {
+        for (const l of h.lines) {
+          if (l.type === 'add') add++
+          else if (l.type === 'delete') del++
+        }
+      }
+    }
+    return { add, del }
+  }, [diffs])
+
+  if (add === 0 && del === 0) return null
+
+  return (
+    <span className="gm-diff-stats">
+      {add > 0 && <span className="gm-diff-stat-add">+{add}</span>}
+      {del > 0 && <span className="gm-diff-stat-del">-{del}</span>}
+    </span>
+  )
+}
+
 const WorkingDiffViewer: React.FC<{
   diffs: GitFileDiff[]
   loading: boolean
@@ -4039,6 +4063,7 @@ const WorkingDiffViewer: React.FC<{
             </>
           )}
         </span>
+        {!loading && diffs.length > 0 && <DiffStats diffs={diffs} />}
         <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
       </div>
       <div className="gm-changes-diff-content" ref={contentRef} tabIndex={0}>
@@ -4062,6 +4087,7 @@ const WorkingDiffViewer: React.FC<{
                     onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                     title="Show in folder"
                   ><ShowInFolderIcon /></button>
+                  <DiffStats diffs={[f]} />
                 </div>
               )}
               {f.isBinary ? (

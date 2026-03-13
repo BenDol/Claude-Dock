@@ -101,6 +101,20 @@ function mapGitLabJobConclusion(status: string): CiJob['conclusion'] {
   }
 }
 
+// Cache project ID per projectDir so we don't fetch it on every API call
+const projectIdCache = new Map<string, number>()
+
+async function getProjectId(cwd: string): Promise<number> {
+  const cached = projectIdCache.get(cwd)
+  if (cached) return cached
+  const { stdout } = await glab(['repo', 'view', '--output', 'json'], cwd)
+  const repo = JSON.parse(stdout) as Record<string, unknown>
+  const id = repo.id as number
+  if (!id) throw new Error('Could not determine GitLab project ID')
+  projectIdCache.set(cwd, id)
+  return id
+}
+
 export class GitLabCiProvider implements CiProvider {
   readonly name = 'GitLab CI'
   readonly providerKey = 'gitlab'
@@ -275,24 +289,26 @@ export class GitLabCiProvider implements CiProvider {
 
   async getRunJobs(projectDir: string, runId: number): Promise<CiJob[]> {
     try {
+      const projectId = await getProjectId(projectDir)
       const { stdout } = await glab(
-        ['ci', 'view', String(runId), '--output', 'json'],
+        ['api', `/projects/${projectId}/pipelines/${runId}/jobs`, '--per-page', '100'],
         projectDir
       )
-      const raw = JSON.parse(stdout) as Record<string, unknown>
-      const jobs = (raw.jobs as Array<Record<string, unknown>>) || []
-      return jobs.map((j) => {
+      const jobs = JSON.parse(stdout) as Array<Record<string, unknown>>
+      log('[ci-gitlab] getRunJobs: got', jobs.length, 'jobs for pipeline', runId)
+      return (jobs || []).map((j) => {
         const name = (j.name as string) || ''
         const { matrixKey, matrixValues } = parseMatrixJobName(name)
         const status = (j.status as string) || 'created'
+        const stage = (j.stage as string) || ''
         return {
           id: (j.id as number) || 0,
-          name,
+          name: stage ? `${stage} / ${name}` : name,
           status: mapGitLabJobStatus(status),
           conclusion: mapGitLabJobConclusion(status),
           startedAt: (j.started_at as string) || null,
           completedAt: (j.finished_at as string) || null,
-          steps: [], // GitLab doesn't expose step-level data via glab
+          steps: [], // GitLab doesn't expose step-level data via API
           matrixKey,
           matrixValues
         }
@@ -314,9 +330,9 @@ export class GitLabCiProvider implements CiProvider {
 
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
     try {
-      // glab ci trace fetches the log for a specific job
+      const projectId = await getProjectId(projectDir)
       const { stdout } = await execFileAsync(resolveGlab(), [
-        'ci', 'trace', String(jobId)
+        'api', `/projects/${projectId}/jobs/${jobId}/trace`
       ], { cwd: projectDir, timeout: 30_000, maxBuffer: 5 * 1024 * 1024 })
       return stdout
     } catch (err) {

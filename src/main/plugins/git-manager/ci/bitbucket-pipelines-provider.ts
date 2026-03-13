@@ -288,6 +288,9 @@ pipelines:
 `
 }
 
+// Maps hashed step ID → { stepUuid, runId } for log retrieval
+const bbStepLookup = new Map<number, { stepUuid: string; runId: number }>()
+
 export class BitbucketPipelinesProvider implements CiProvider {
   readonly name = 'Bitbucket Pipelines'
   readonly providerKey = 'bitbucket'
@@ -562,8 +565,14 @@ export class BitbucketPipelinesProvider implements CiProvider {
         const result = ((step.state as Record<string, unknown>)?.result as Record<string, unknown>)?.name as string || ''
         const startedOn = (step.started_on as string) || null
         const completedOn = (step.completed_on as string) || null
+        const stepUuid = (step.uuid as string) || ''
+        const hashedId = hashStepUuid(stepUuid || name)
+        // Store mapping for log retrieval
+        if (stepUuid) {
+          bbStepLookup.set(hashedId, { stepUuid, runId })
+        }
         return {
-          id: hashStepUuid((step.uuid as string) || name),
+          id: hashedId,
           name,
           status: mapBbJobStatus(state),
           conclusion: mapBbJobConclusion(state, result),
@@ -652,14 +661,17 @@ export class BitbucketPipelinesProvider implements CiProvider {
       const creds = getBitbucketCredentials()
       if (!creds) return ''
 
-      // jobId is a hashed step UUID — we need to find the step by listing steps
-      // and matching. For simplicity, we fetch all steps and use the index.
-      // The caller passes us the numeric ID we assigned. We need to reverse-lookup.
-      // Since we hash UUIDs to numeric IDs, we'll need to re-fetch steps to get the log.
-      // Bitbucket log endpoint: /repositories/{workspace}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}/log
-      // We don't have the pipeline UUID here, so we need to work around this.
-      // For now, return a message directing to the web UI.
-      return 'Log viewing for Bitbucket Pipelines requires the web UI.\nUse the "View on Bitbucket" button to see full logs.'
+      const info = bbStepLookup.get(jobId)
+      if (!info) {
+        log('[ci-bitbucket] no step UUID mapping for jobId', jobId)
+        return ''
+      }
+
+      const body = await bbApi(
+        `repositories/${slug.owner}/${slug.repo}/pipelines/${info.runId}/steps/${info.stepUuid}/log`,
+        creds
+      )
+      return body
     } catch (err) {
       logError('[ci-bitbucket] getJobLog failed:', err)
       return ''

@@ -2120,7 +2120,7 @@
 .gm-changes-diff-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 6px 12px;
   font-size: 12px;
   background: var(--bg-secondary);
@@ -2142,6 +2142,24 @@
   white-space: nowrap;
   min-width: 0;
   flex-shrink: 1;
+}
+
+.gm-diff-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--term-font-family);
+  margin-left: auto;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.gm-diff-stat-add {
+  color: #9ece6a;
+}
+
+.gm-diff-stat-del {
+  color: #f7768e;
 }
 
 .gm-changes-diff-content {

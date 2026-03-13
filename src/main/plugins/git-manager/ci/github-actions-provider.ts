@@ -308,6 +308,7 @@ export class GitHubActionsProvider implements CiProvider {
           steps: Array<{ name: string; number: number; status: string; conclusion: string }>
         }>
       }
+      log('[ci-github] getRunJobs: got', data.jobs.length, 'jobs for run', runId)
       return data.jobs.map((j) => {
         const { matrixKey, matrixValues } = parseMatrixJobName(j.name)
         return {
