@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc-channels'
 import { getSessions, saveSessions, clearSessions } from './session-store'
 import { saveBuffer, loadBuffer, clearBuffer } from './buffer-store'
 import { getWindowState, saveWindowState, WindowState } from './window-state-store'
+import { getSettings, setSetting } from './settings-store'
 import { ActivityTracker } from './activity-tracker'
 import { log } from './logger'
 
@@ -118,6 +119,21 @@ export class DockWindow {
     // Confirm before closing if terminals are running
     this.window.on('close', (e) => {
       if (this.ptyManager.size > 0) {
+        const { closeAction } = getSettings().behavior
+
+        // Remembered choice — skip dialog
+        if (closeAction === 'close') {
+          if (ENABLE_BUFFER_STORAGE) this.saveOutputBuffers()
+          this.ptyManager.killAll()
+          return // allow close
+        }
+        if (closeAction === 'clearAndClose') {
+          if (ENABLE_BUFFER_STORAGE) this.clearOutputBuffers()
+          clearSessions(this.projectDir)
+          this.ptyManager.killAll()
+          return // allow close
+        }
+
         e.preventDefault()
         const count = this.ptyManager.size
         dialog
@@ -128,16 +144,22 @@ export class DockWindow {
             cancelId: 2,
             title: 'Close Dock',
             message: `${count} terminal${count !== 1 ? 's' : ''} still running.`,
-            detail: 'Close: close and keep saved sessions for resuming.\nClear Session: discard saved sessions and close.'
+            detail: 'Close: close and keep saved sessions for resuming.\nClear Session: discard saved sessions and close.',
+            checkboxLabel: 'Remember this choice',
+            checkboxChecked: false
           })
-          .then(({ response }) => {
+          .then(({ response, checkboxChecked }) => {
             if (response === 0) {
-              // Close (sessions already persisted on spawn)
+              if (checkboxChecked) {
+                setSetting('behavior', { ...getSettings().behavior, closeAction: 'close' })
+              }
               if (ENABLE_BUFFER_STORAGE) this.saveOutputBuffers()
               this.ptyManager.killAll()
               this.window.destroy()
             } else if (response === 1) {
-              // Clear Session & Close
+              if (checkboxChecked) {
+                setSetting('behavior', { ...getSettings().behavior, closeAction: 'clearAndClose' })
+              }
               if (ENABLE_BUFFER_STORAGE) this.clearOutputBuffers()
               clearSessions(this.projectDir)
               this.ptyManager.killAll()

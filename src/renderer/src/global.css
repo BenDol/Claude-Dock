@@ -1010,12 +1010,22 @@ body {
   flex-shrink: 0;
 }
 
-.status-dot.alive {
+.status-dot.active {
   background: #9ece6a;
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+.status-dot.inactive {
+  background: #6b7089;
 }
 
 .status-dot.dead {
   background: #f7768e;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .terminal-title {
@@ -1411,6 +1421,29 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: -4px;
+}
+
+.settings-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 22px;
+}
+
+.settings-reset-btn {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-reset-btn:hover {
+  background: var(--hover-color);
+  color: var(--text-primary);
 }
 
 .settings-btn-group {

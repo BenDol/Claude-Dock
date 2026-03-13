@@ -425,6 +425,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Confirm close with running terminals
                 </label>
+                {settings.behavior.closeAction !== 'ask' && (
+                  <div className="settings-inline-row">
+                    <span className="settings-description" style={{ margin: 0 }}>
+                      Close action remembered: <strong>{settings.behavior.closeAction === 'close' ? 'Close (keep sessions)' : 'Clear sessions & close'}</strong>
+                    </span>
+                    <button
+                      className="settings-reset-btn"
+                      onClick={() => updateBehavior({ closeAction: 'ask' })}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                )}
                 <label className="checkbox-label">
                   <input
                     type="checkbox"

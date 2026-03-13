@@ -22,6 +22,7 @@ export interface Settings {
   }
   behavior: {
     confirmCloseWithRunning: boolean
+    closeAction: 'ask' | 'close' | 'clearAndClose'
     autoSpawnFirstTerminal: boolean
     markNotificationsRead: boolean
     blockedNotificationSources: string[]
@@ -197,6 +198,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   behavior: {
     confirmCloseWithRunning: true,
+    closeAction: 'ask',
     autoSpawnFirstTerminal: true,
     markNotificationsRead: false,
     blockedNotificationSources: []

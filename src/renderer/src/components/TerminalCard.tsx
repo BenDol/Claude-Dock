@@ -78,6 +78,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const removeTerminal = useDockStore((s) => s.removeTerminal)
   const isUnlocked = useDockStore((s) => s.unlockedTerminals.has(terminalId))
   const toggleTerminalLock = useDockStore((s) => s.toggleTerminalLock)
+  const isActive = useDockStore((s) => s.activeTerminals.has(terminalId))
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
@@ -115,7 +116,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     <div className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`}>
       <div className="terminal-card-header">
         <div className="terminal-card-status">
-          <span className={`status-dot ${isAlive ? 'alive' : 'dead'}`} />
+          <span className={`status-dot ${!isAlive ? 'dead' : isActive ? 'active' : 'inactive'}`} />
           <TerminalTitle terminalId={terminalId} title={title} />
         </div>
         <div className="terminal-card-actions">

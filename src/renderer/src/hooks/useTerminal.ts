@@ -37,6 +37,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const dataLenRef = useRef(0)
   const gotDataRef = useRef(false)
   const undoRef = useRef(new InputUndoManager())
+  const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -54,6 +55,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   // Buffer data from PTY - works even before terminal is mounted
   useEffect(() => {
     const api = getDockApi()
+    const setTerminalActive = useDockStore.getState().setTerminalActive
     const cleanup = api.terminal.onData((id, data) => {
       if (id !== terminalId) return
       dataLenRef.current += data.length
@@ -61,6 +63,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       if (dataLenRef.current > 1500) {
         gotDataRef.current = true
       }
+
+      // Track activity: mark active on data, inactive after 3s idle
+      setTerminalActive(terminalId, true)
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      activityTimerRef.current = setTimeout(() => {
+        setTerminalActive(terminalId, false)
+      }, 3000)
 
       if (termRef.current) {
         termRef.current.write(data)
@@ -261,6 +270,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       termRef.current?.dispose()
       termRef.current = null
       fitAddonRef.current = null
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
     }
   }, [])
 
