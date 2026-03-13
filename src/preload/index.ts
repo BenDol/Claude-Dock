@@ -191,6 +191,7 @@ export interface DockApi {
     getIdentity: (projectDir: string) => Promise<{ name: string; email: string }>
     setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
     search: (projectDir: string, opts: GitSearchOptions) => Promise<GitSearchResponse>
+    getActiveTerminals: (projectDir: string) => Promise<{ id: string; title: string; sessionId: string }[]>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -382,6 +383,7 @@ const dockApi: DockApi = {
     getIdentity: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_IDENTITY, projectDir),
     setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global),
     search: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_SEARCH, projectDir, opts),
+    getActiveTerminals: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_ACTIVE_TERMINALS, projectDir),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

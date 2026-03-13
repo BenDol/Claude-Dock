@@ -8,6 +8,7 @@ import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manage
 import { log, logError } from '../../logger'
 import { getPluginSetting } from '../plugin-store'
 import { registerCiIpc } from './ci/ci-ipc'
+import { ActivityTracker } from '../../activity-tracker'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -498,6 +499,11 @@ export function registerGitManagerIpc(): void {
 
   ipcMain.handle(IPC.GIT_MGR_SEARCH, async (_event, projectDir: string, opts: GitSearchOptions) => {
     return gitOps.searchRepo(projectDir, opts)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_ACTIVE_TERMINALS, async (_event, projectDir: string) => {
+    const active = ActivityTracker.getInstance().getActiveTerminals(projectDir)
+    return active.map((t) => ({ id: t.id, title: t.title, sessionId: t.sessionId }))
   })
 
   registerCiIpc()

@@ -751,12 +751,8 @@ const GitManagerApp: React.FC = () => {
     }
   }, [refresh, refreshing])
 
-  const handleCheckoutBranch = useCallback(async (name: string) => {
+  const doCheckout = useCallback(async (checkoutName: string) => {
     const api = getDockApi()
-    // If name matches a remote branch (e.g. "origin/feature/x"), strip remote prefix
-    // so git creates a local tracking branch instead of detaching HEAD
-    const isRemote = branches.some((b) => b.remote && b.name === name)
-    const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
     setError(null)
     actionBusyRef.current = true
     try {
@@ -795,7 +791,39 @@ const GitManagerApp: React.FC = () => {
     } finally {
       actionBusyRef.current = false
     }
-  }, [activeDir, branches, refresh, showActionError])
+  }, [activeDir, refresh, showActionError])
+
+  const handleCheckoutBranch = useCallback(async (name: string) => {
+    const api = getDockApi()
+    const isRemote = branches.some((b) => b.remote && b.name === name)
+    const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
+
+    // Check if any Claude terminals are actively working before switching branches
+    try {
+      const active = await api.gitManager.getActiveTerminals(activeDir)
+      if (active.length > 0) {
+        const termNames = active.map((t) => t.title || `Terminal ${t.id.slice(0, 6)}`).join(', ')
+        setConfirmModal({
+          title: 'Claude is working',
+          message: (
+            <>
+              <p>{active.length === 1 ? 'A Claude terminal is' : `${active.length} Claude terminals are`} actively working in this project:</p>
+              <p style={{ fontWeight: 600, margin: '8px 0' }}>{termNames}</p>
+              <p>Switching branches now may disrupt ongoing work. Are you sure you want to checkout <strong>{checkoutName}</strong>?</p>
+            </>
+          ),
+          confirmLabel: 'Switch anyway',
+          danger: true,
+          onConfirm: () => { setConfirmModal(null); doCheckout(checkoutName) }
+        })
+        return
+      }
+    } catch {
+      // If the check fails, proceed without warning
+    }
+
+    doCheckout(checkoutName)
+  }, [activeDir, branches, doCheckout])
 
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
@@ -4912,22 +4940,12 @@ const BranchDropdown: React.FC<{
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Close on outside click (including drag-region areas in titlebar)
+  // Close on Escape key
   useEffect(() => {
     if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    // Drag regions swallow mousedown, so also close on window blur
-    const blurHandler = () => setOpen(false)
-    document.addEventListener('mousedown', handler)
-    window.addEventListener('blur', blurHandler)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      window.removeEventListener('blur', blurHandler)
-    }
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
   }, [open])
 
   const [focusIdx, setFocusIdx] = useState(-1)
@@ -5030,6 +5048,8 @@ const BranchDropdown: React.FC<{
         <ChevronIcon open={open} />
       </button>
       {open && (
+        <>
+        <div className="gm-dropdown-backdrop" onMouseDown={() => setOpen(false)} />
         <div className="gm-branch-dropdown-menu" onMouseDown={(e) => e.stopPropagation()}>
           <div className="gm-branch-dropdown-search">
             <input
@@ -5076,6 +5096,7 @@ const BranchDropdown: React.FC<{
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   )
@@ -6305,23 +6326,6 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
     ).then((entries) => setValues(Object.fromEntries(entries)))
   }, [open, projectDir])
 
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    const blurHandler = () => {
-      // Only close if the window actually lost focus (not just internal focus changes)
-      setTimeout(() => { if (!document.hasFocus()) setOpen(false) }, 100)
-    }
-    document.addEventListener('mousedown', handler)
-    window.addEventListener('blur', blurHandler)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      window.removeEventListener('blur', blurHandler)
-    }
-  }, [open])
-
   const toggle = async (key: string) => {
     const cur = !!values[key]
     const next = !cur
@@ -6350,6 +6354,8 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
         <SettingsIcon />
       </button>
       {open && (
+        <>
+        <div className="gm-dropdown-backdrop" onMouseDown={() => setOpen(false)} />
         <div className="gm-settings-menu" onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
           <div className="gm-settings-title">Git Manager Settings</div>
           {PLUGIN_SETTINGS.map((s) => (
@@ -6395,6 +6401,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
             )
           ))}
         </div>
+        </>
       )}
     </div>
   )

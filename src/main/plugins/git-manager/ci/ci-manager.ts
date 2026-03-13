@@ -11,6 +11,16 @@ const IDLE_POLL_MS = 60_000
 
 const DEFAULT_NOTIFICATION_CATEGORIES = ['started', 'success', 'failure']
 
+/** Short display name for "View on X" labels */
+function shortProviderName(providerKey: string): string {
+  switch (providerKey) {
+    case 'github': return 'GitHub'
+    case 'gitlab': return 'GitLab'
+    case 'bitbucket': return 'Bitbucket'
+    default: return providerKey.charAt(0).toUpperCase() + providerKey.slice(1)
+  }
+}
+
 interface ProjectPolling {
   provider: CiProvider
   projectDir: string
@@ -118,7 +128,7 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
       type: 'info',
       source: 'ci',
-      action: run.url ? { label: `View on ${entry.provider.name}`, url: run.url } : undefined,
+      action: run.url ? { label: `View on ${shortProviderName(entry.provider.providerKey)}`, url: run.url } : undefined,
       data: { runId: run.id, providerKey: entry.provider.providerKey }
     })
   }
@@ -192,7 +202,7 @@ export class CiManager {
     }
 
     const nm = NotificationManager.getInstance()
-    const viewAction = run.url ? { label: `View on ${entry.provider.name}`, url: run.url } : undefined
+    const viewAction = run.url ? { label: `View on ${shortProviderName(entry.provider.providerKey)}`, url: run.url } : undefined
     const actions = conclusion === 'failure' && failureContext
       ? [
           ...(viewAction ? [viewAction] : []),

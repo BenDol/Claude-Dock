@@ -193,6 +193,21 @@ export class ActivityTracker {
     }
   }
 
+  /** Returns terminals that are alive and had output within the given threshold (ms) for a project dir */
+  getActiveTerminals(projectDir: string, thresholdMs = 30_000): TerminalActivity[] {
+    const now = Date.now()
+    const active: TerminalActivity[] = []
+    for (const dock of this.docks.values()) {
+      if (dock.projectDir !== projectDir) continue
+      for (const t of dock.terminals) {
+        if (t.isAlive && (now - t.lastUpdate) < thresholdMs) {
+          active.push(t)
+        }
+      }
+    }
+    return active
+  }
+
   shutdown(): void {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer)

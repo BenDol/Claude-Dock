@@ -607,16 +607,6 @@ const NotificationDropdown: React.FC = () => {
     }
   }, [projectDir])
 
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
   return (
     <div className="tb-notif-dropdown" ref={ref}>
       <button
@@ -628,6 +618,8 @@ const NotificationDropdown: React.FC = () => {
         {unreadCount > 0 && <span className="toolbar-badge">{unreadCount > 9 ? '9+' : unreadCount}</span>}
       </button>
       {open && (
+        <>
+        <div className="ws-dropdown-backdrop" onMouseDown={() => setOpen(false)} />
         <div className="tb-notif-panel" onMouseDown={(e) => e.stopPropagation()}>
           <div className="tb-notif-header">
             <span>Notifications</span>
@@ -694,6 +686,7 @@ const NotificationDropdown: React.FC = () => {
             )}
           </div>
         </div>
+        </>
       )}
     </div>
   )
