@@ -314,6 +314,7 @@ const GitManagerApp: React.FC = () => {
   const [enableCiTab, setEnableCiTab] = useState(false)
   const [ciStatus, setCiStatus] = useState<'success' | 'failure' | 'in_progress' | 'none'>('none')
   const [wcBusy, setWcBusy] = useState(false)
+  const wcBusyRef = useRef(false)
   const [syntaxHL, setSyntaxHL] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
@@ -546,6 +547,8 @@ const GitManagerApp: React.FC = () => {
   const lastFetchRef = useRef(0)
   const refresh = useCallback(async () => {
     if (!activeDir) return
+    // Skip refresh while commit/push is in progress to avoid unmounting WorkingChanges
+    if (wcBusyRef.current) return
     const gen = ++refreshGenRef.current
     const api = getDockApi()
     setLoading(true)
@@ -1292,9 +1295,9 @@ const GitManagerApp: React.FC = () => {
                 onRefresh={refresh}
                 onError={handleSmartError}
                 onConfirm={setConfirmModal}
-                onCommitted={async (hash) => { await refresh(); navigateToCommit(hash) }}
+                onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
                 onStatusRefreshed={setStatus}
-                onBusyChange={setWcBusy}
+                onBusyChange={(busy) => { wcBusyRef.current = busy; setWcBusy(busy) }}
               />
             </div>
           )}
@@ -3136,7 +3139,7 @@ const WorkingChanges: React.FC<{
   onRefresh: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
-  onCommitted?: (hash: string) => void | Promise<void>
+  onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
   onBusyChange?: (busy: boolean) => void
 }> = ({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
@@ -3385,21 +3388,19 @@ const WorkingChanges: React.FC<{
     setBusy(true)
     setCommitting('commit')
     const result = await api.gitManager.commit(projectDir, commitMsg)
+    setBusy(false)
+    setCommitting(null)
     if (result.success) {
       setCommitMsg('')
       userEditedMsgRef.current = false
-      if (onCommitted && result.hash) { await onCommitted(result.hash) }
+      if (onCommitted && result.hash) { onCommitted(result.hash) }
       else { onRefresh() }
-      setBusy(false)
-      setCommitting(null)
     } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
         const r = await api.gitManager.commit(projectDir, commitMsg)
         if (!r.success) throw new Error(r.error || 'Commit still failed')
         setCommitMsg('')
       })
-      setBusy(false)
-      setCommitting(null)
       onRefresh()
     }
   }
@@ -3414,29 +3415,27 @@ const WorkingChanges: React.FC<{
       setCommitMsg('')
       userEditedMsgRef.current = false
       const pushResult = await api.gitManager.push(projectDir)
+      setBusy(false)
+      setCommitting(null)
       if (!pushResult.success) {
         // Commit succeeded but push failed — still navigate to the commit
-        if (onCommitted && result.hash) { await onCommitted(result.hash) } else { onRefresh() }
-        setBusy(false)
-        setCommitting(null)
+        if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
         onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
           const r = await api.gitManager.push(projectDir)
           if (!r.success) throw new Error(r.error || 'Push still failed')
         })
         return
       }
-      if (onCommitted && result.hash) { await onCommitted(result.hash) }
+      if (onCommitted && result.hash) { onCommitted(result.hash) }
       else { onRefresh() }
+    } else {
       setBusy(false)
       setCommitting(null)
-    } else {
       onError(`Commit failed: ${result.error || 'Unknown error'}`, async () => {
         const r = await api.gitManager.commit(projectDir, commitMsg)
         if (!r.success) throw new Error(r.error || 'Commit still failed')
         setCommitMsg('')
       })
-      setBusy(false)
-      setCommitting(null)
       onRefresh()
     }
   }
