@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
+import type { GitProvider } from '../../../shared/remote-url'
+import { ProviderIcon } from '../plugins/git-manager/ProviderIcons'
 
 interface ToastEntry extends DockNotification {
   exiting: boolean
@@ -102,6 +104,7 @@ export default function ToastContainer() {
                       }}
                     >
                       {action.event === 'ci-fix-with-claude' && <ClaudeIcon />}
+                      {action.url && toast.data?.providerKey && <ProviderIcon provider={toast.data.providerKey as GitProvider} />}
                       {action.label}
                     </button>
                   ))}

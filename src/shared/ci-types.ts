@@ -69,6 +69,32 @@ export interface DockNotification {
   data?: Record<string, unknown>
 }
 
+export interface CiSetupStep {
+  id: string
+  label: string
+  status: 'ok' | 'missing' | 'checking'
+  helpText?: string
+  helpUrl?: string
+  actionId?: string
+  actionLabel?: string
+  /** Hint shown after the action button is clicked (e.g. "Complete the login..."). If omitted, a generic hint is shown. */
+  actionHint?: string
+  /** When set, the renderer shows inline input fields instead of (or alongside) the action button. */
+  credentialFields?: { id: string; label: string; type: 'text' | 'password'; placeholder?: string }[]
+}
+
+export interface CiSetupStatus {
+  ready: boolean
+  providerName: string
+  steps: CiSetupStep[]
+}
+
+export interface LogSection {
+  name: string
+  lines: string[]
+  collapsed: boolean
+}
+
 /** Group jobs by their matrix key for UI rendering */
 export function groupJobsByMatrix(jobs: CiJob[]): CiJobGroup[] {
   const groups = new Map<string, CiJob[]>()

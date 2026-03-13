@@ -31,6 +31,7 @@ export const IPC = {
   CLAUDE_CHECK_PATH: 'claude:checkPath',
   CLAUDE_FIX_PATH: 'claude:fixPath',
   DOCK_RESTART: 'dock:restart',
+  DOCK_SWITCH_PROJECT: 'dock:switchProject',
   LINKED_CHECK_MCP: 'linked:checkMcp',
   LINKED_INSTALL_MCP: 'linked:installMcp',
   LINKED_UNINSTALL_MCP: 'linked:uninstallMcp',
@@ -113,10 +114,8 @@ export const IPC = {
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',
-  CI_CHECK_GH_INSTALLED: 'ci:checkGhInstalled',
-  CI_CHECK_GH_AUTH: 'ci:checkGhAuth',
-  CI_CHECK_GITHUB_REMOTE: 'ci:checkGithubRemote',
-  CI_RUN_GH_AUTH_LOGIN: 'ci:runGhAuthLogin',
+  CI_GET_SETUP_STATUS: 'ci:getSetupStatus',
+  CI_RUN_SETUP_ACTION: 'ci:runSetupAction',
   CI_GET_WORKFLOWS: 'ci:getWorkflows',
   CI_GET_WORKFLOW_RUNS: 'ci:getWorkflowRuns',
   CI_GET_ACTIVE_RUNS: 'ci:getActiveRuns',

@@ -16,7 +16,7 @@ import type {
   GitSearchOptions,
   GitSearchResponse
 } from '../shared/git-manager-types'
-import type { CiWorkflow, CiWorkflowRun, CiJob, DockNotification } from '../shared/ci-types'
+import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -72,6 +72,7 @@ export interface DockApi {
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
     restart: () => Promise<void>
+    switchProject: (dir: string) => Promise<void>
   }
   settings: {
     get: () => Promise<Settings>
@@ -194,10 +195,8 @@ export interface DockApi {
   }
   ci: {
     checkAvailable: (projectDir: string) => Promise<boolean>
-    checkGhInstalled: () => Promise<boolean>
-    checkGhAuth: () => Promise<boolean>
-    checkGithubRemote: (projectDir: string) => Promise<boolean>
-    runGhAuthLogin: () => Promise<{ success: boolean; error?: string }>
+    getSetupStatus: (projectDir: string) => Promise<CiSetupStatus>
+    runSetupAction: (projectDir: string, actionId: string, data?: Record<string, string>) => Promise<{ success: boolean; error?: string }>
     getWorkflows: (projectDir: string) => Promise<CiWorkflow[]>
     getWorkflowRuns: (projectDir: string, workflowId: number, page: number, perPage: number) => Promise<CiWorkflowRun[]>
     getActiveRuns: (projectDir: string) => Promise<CiWorkflowRun[]>
@@ -251,7 +250,8 @@ const dockApi: DockApi = {
   },
   dock: {
     getInfo: () => ipcRenderer.invoke(IPC.DOCK_GET_INFO),
-    restart: () => ipcRenderer.invoke(IPC.DOCK_RESTART)
+    restart: () => ipcRenderer.invoke(IPC.DOCK_RESTART),
+    switchProject: (dir) => ipcRenderer.invoke(IPC.DOCK_SWITCH_PROJECT, dir)
   },
   settings: {
     get: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
@@ -390,10 +390,8 @@ const dockApi: DockApi = {
   },
   ci: {
     checkAvailable: (projectDir) => ipcRenderer.invoke(IPC.CI_CHECK_AVAILABLE, projectDir),
-    checkGhInstalled: () => ipcRenderer.invoke(IPC.CI_CHECK_GH_INSTALLED),
-    checkGhAuth: () => ipcRenderer.invoke(IPC.CI_CHECK_GH_AUTH),
-    checkGithubRemote: (projectDir) => ipcRenderer.invoke(IPC.CI_CHECK_GITHUB_REMOTE, projectDir),
-    runGhAuthLogin: () => ipcRenderer.invoke(IPC.CI_RUN_GH_AUTH_LOGIN),
+    getSetupStatus: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_SETUP_STATUS, projectDir),
+    runSetupAction: (projectDir, actionId, data) => ipcRenderer.invoke(IPC.CI_RUN_SETUP_ACTION, projectDir, actionId, data),
     getWorkflows: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_WORKFLOWS, projectDir),
     getWorkflowRuns: (projectDir, workflowId, page, perPage) => ipcRenderer.invoke(IPC.CI_GET_WORKFLOW_RUNS, projectDir, workflowId, page, perPage),
     getActiveRuns: (projectDir) => ipcRenderer.invoke(IPC.CI_GET_ACTIVE_RUNS, projectDir),

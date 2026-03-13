@@ -1,8 +1,8 @@
-import { execFile, execFileSync } from 'child_process'
+import { execFile, execFileSync, spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { promisify } from 'util'
 import type { CiProvider } from './ci-provider'
-import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobStep } from '../../../../shared/ci-types'
+import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobStep, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
 import { log, logError } from '../../../logger'
 
 const execFileAsync = promisify(execFile)
@@ -65,6 +65,137 @@ function parseMatrixJobName(name: string): { matrixKey: string | null; matrixVal
 
 export class GitHubActionsProvider implements CiProvider {
   readonly name = 'GitHub Actions'
+  readonly providerKey = 'github'
+
+  async getSetupStatus(projectDir: string): Promise<CiSetupStatus> {
+    const steps: CiSetupStatus['steps'] = []
+
+    // Step 1: CLI installed
+    let cliInstalled = false
+    try {
+      const ghBin = resolveGh()
+      await execFileAsync(ghBin, ['--version'], { timeout: 5000 })
+      cliInstalled = true
+    } catch { /* not installed */ }
+    steps.push({
+      id: 'cli-installed',
+      label: 'GitHub CLI (gh) installed',
+      status: cliInstalled ? 'ok' : 'missing',
+      helpText: 'The gh CLI is required to access GitHub Actions.',
+      helpUrl: 'https://cli.github.com',
+      actionLabel: 'Download CLI'
+    })
+
+    // Step 2: CLI authenticated
+    let cliAuthenticated = false
+    if (cliInstalled) {
+      try {
+        await execFileAsync(resolveGh(), ['auth', 'status'], { timeout: 10_000 })
+        cliAuthenticated = true
+      } catch { /* not authed */ }
+    }
+    steps.push({
+      id: 'cli-authenticated',
+      label: 'Authenticated with GitHub',
+      status: !cliInstalled ? 'missing' : cliAuthenticated ? 'ok' : 'missing',
+      helpText: 'Sign in to your GitHub account via the CLI.',
+      actionId: 'auth-login',
+      actionLabel: 'Run gh auth login'
+    })
+
+    // Step 3: GitHub remote
+    let hasRemote = false
+    if (cliAuthenticated) {
+      try {
+        const { stdout } = await execFileAsync(resolveGh(), ['repo', 'view', '--json', 'name', '-q', '.name'], { cwd: projectDir, timeout: 10_000 })
+        hasRemote = stdout.trim().length > 0
+      } catch { /* no remote */ }
+    }
+    steps.push({
+      id: 'remote-configured',
+      label: 'GitHub remote configured',
+      status: !cliAuthenticated ? 'missing' : hasRemote ? 'ok' : 'missing',
+      helpText: 'This repository needs a GitHub remote. Add one with git remote add origin <url>.'
+    })
+
+    return {
+      ready: cliInstalled && cliAuthenticated && hasRemote,
+      providerName: this.name,
+      steps
+    }
+  }
+
+  async runSetupAction(_projectDir: string, actionId: string): Promise<{ success: boolean; error?: string }> {
+    if (actionId !== 'auth-login') return { success: false, error: 'Unknown action' }
+
+    try {
+      const ghBin = resolveGh()
+      if (process.platform === 'win32') {
+        spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', `"${ghBin}" auth login`], {
+          stdio: 'ignore', detached: true, windowsHide: false
+        }).unref()
+      } else if (process.platform === 'darwin') {
+        spawn('open', ['-a', 'Terminal', '--args', '-e', `${ghBin} auth login`], {
+          stdio: 'ignore', detached: true
+        }).unref()
+      } else {
+        const terminals = [
+          { cmd: 'x-terminal-emulator', args: ['-e'] },
+          { cmd: 'gnome-terminal', args: ['--'] },
+          { cmd: 'konsole', args: ['-e'] },
+          { cmd: 'xfce4-terminal', args: ['-e'] },
+          { cmd: 'xterm', args: ['-e'] }
+        ]
+        for (const t of terminals) {
+          try {
+            await execFileAsync('which', [t.cmd], { timeout: 3000 })
+            spawn(t.cmd, [...t.args, ghBin, 'auth', 'login'], {
+              stdio: 'ignore', detached: true
+            }).unref()
+            return { success: true }
+          } catch { /* try next */ }
+        }
+        return { success: false, error: 'No terminal emulator found' }
+      }
+      return { success: true }
+    } catch (err) {
+      logError('[ci-github] auth login failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to open terminal' }
+    }
+  }
+
+  parseLogSections(rawLog: string): LogSection[] {
+    const lines = rawLog.split('\n')
+    const sections: LogSection[] = []
+    let currentSection: LogSection | null = null
+
+    for (const line of lines) {
+      const groupMatch = line.match(/##\[group\](.*)/)
+      if (groupMatch) {
+        if (currentSection) sections.push(currentSection)
+        currentSection = { name: groupMatch[1], lines: [], collapsed: true }
+        continue
+      }
+      if (line.includes('##[endgroup]')) {
+        if (currentSection) {
+          sections.push(currentSection)
+          currentSection = null
+        }
+        continue
+      }
+      if (currentSection) {
+        currentSection.lines.push(line)
+      } else {
+        // Lines outside any group go into a default section
+        if (sections.length === 0 || sections[sections.length - 1].name !== '') {
+          sections.push({ name: '', lines: [], collapsed: false })
+        }
+        sections[sections.length - 1].lines.push(line)
+      }
+    }
+    if (currentSection) sections.push(currentSection)
+    return sections
+  }
 
   async isAvailable(projectDir: string): Promise<boolean> {
     try {

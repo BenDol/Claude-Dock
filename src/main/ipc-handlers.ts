@@ -101,6 +101,15 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.DOCK_SWITCH_PROJECT, async (event, newDir: string) => {
+    const dock = getDockForEvent(event)
+    if (dock) {
+      log(`DOCK_SWITCH_PROJECT: ${dock.projectDir} -> ${newDir}`)
+      dock.close()
+      await manager.createDock(newDir)
+    }
+  })
+
   ipcMain.handle(IPC.SETTINGS_GET, () => {
     return getSettings()
   })

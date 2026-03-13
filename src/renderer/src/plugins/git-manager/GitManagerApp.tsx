@@ -879,7 +879,7 @@ const GitManagerApp: React.FC = () => {
             <OpenFolderIcon />
           </button>
           <SettingsDropdown projectDir={activeDir} />
-          <NotificationPanel projectDir={activeDir} />
+          <NotificationPanel projectDir={activeDir} provider={repoProvider} />
           <div className="toolbar-separator" />
           <div className="gm-win-controls">
             <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
@@ -6254,7 +6254,7 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
-  { key: 'enableCiTab', label: 'Show CI tab (GitHub Actions)', type: 'boolean', default: false },
+  { key: 'enableCiTab', label: 'Show CI tab', type: 'boolean', default: false },
   { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
     { value: 'started', label: 'Started' },
     { value: 'success', label: 'Success' },
@@ -6393,7 +6393,7 @@ function gmNotifReadKey(projectDir: string): string {
   return `gm-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
 }
 
-const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => {
+const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }> = ({ projectDir, provider }) => {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<DockNotification[]>(() => {
     try { const raw = localStorage.getItem(gmNotifStorageKey(projectDir)); return raw ? JSON.parse(raw) : [] } catch { return [] }
@@ -6524,7 +6524,7 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                       }}
                       title={resolveNotifActions(n).find((a) => a.url)?.label ?? 'Open'}
                     >
-                      <ExternalLinkMiniIcon />
+                      {n.source === 'ci' ? <ProviderIcon provider={provider} /> : <ExternalLinkMiniIcon />}
                     </button>
                   )}
                   <button

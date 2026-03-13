@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { getDockApi } from '../../lib/ipc-bridge'
-import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobGroup } from '../../../../shared/ci-types'
+import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobGroup, CiSetupStatus } from '../../../../shared/ci-types'
 import { groupJobsByMatrix } from '../../../../shared/ci-types'
 import type { GitProvider } from '../../../../shared/remote-url'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
@@ -18,11 +18,9 @@ interface CiPanelProps {
 type CiStatus = 'loading' | 'setup' | 'ready' | 'error'
 
 interface SetupState {
-  ghInstalled: boolean
-  ghAuthenticated: boolean
-  hasRemote: boolean
+  setupStatus: CiSetupStatus | null
   checking: boolean
-  loginOpened: boolean
+  actionTriggered: Set<string>
 }
 
 type ConclusionFilter = 'success' | 'failure' | 'cancelled' | 'in_progress' | 'queued'
@@ -95,7 +93,7 @@ function getStatusColor(run: CiWorkflowRun): string {
 export default function CiPanel({ projectDir, provider, searchQuery, currentBranch, active, pendingRunId, onNavigated }: CiPanelProps) {
   const [status, setStatus] = useState<CiStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
-  const [setup, setSetup] = useState<SetupState>({ ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false, loginOpened: false })
+  const [setup, setSetup] = useState<SetupState>({ setupStatus: null, checking: false, actionTriggered: new Set() })
   const [workflows, setWorkflows] = useState<CiWorkflow[]>([])
   const [selectedWorkflow, setSelectedWorkflow] = useState<number | 'all'>('all')
   const [runs, setRuns] = useState<CiWorkflowRun[]>([])
@@ -126,25 +124,12 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const checkSetup = useCallback(async () => {
     setSetup(prev => ({ ...prev, checking: true }))
     try {
-      const ghInstalled = await api.ci.checkGhInstalled()
-      if (!ghInstalled) {
-        setSetup(prev => ({ ...prev, ghInstalled: false, ghAuthenticated: false, hasRemote: false, checking: false }))
+      const setupStatus = await api.ci.getSetupStatus(projectDir)
+      setSetup(prev => ({ ...prev, setupStatus, checking: false }))
+      if (!setupStatus.ready) {
         setStatus('setup')
         return false
       }
-      const ghAuthenticated = await api.ci.checkGhAuth()
-      if (!ghAuthenticated) {
-        setSetup(prev => ({ ...prev, ghInstalled: true, ghAuthenticated: false, hasRemote: false, checking: false }))
-        setStatus('setup')
-        return false
-      }
-      const hasRemote = await api.ci.checkGithubRemote(projectDir)
-      if (!hasRemote) {
-        setSetup(prev => ({ ...prev, ghInstalled: true, ghAuthenticated: true, hasRemote: false, checking: false }))
-        setStatus('setup')
-        return false
-      }
-      setSetup(prev => ({ ...prev, ghInstalled: true, ghAuthenticated: true, hasRemote: true, checking: false }))
       return true
     } catch {
       setSetup(prev => ({ ...prev, checking: false }))
@@ -522,6 +507,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     return (
       <CiSetupWizard
         setup={setup}
+        projectDir={projectDir}
         onRecheck={async () => {
           const ok = await checkSetup()
           if (ok) {
@@ -537,12 +523,8 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
             }
           }
         }}
-        onOpenAuthLogin={async () => {
-          setSetup(prev => ({ ...prev, loginOpened: true }))
-          await api.ci.runGhAuthLogin()
-        }}
-        onOpenDownload={() => {
-          api.app.openExternal('https://cli.github.com')
+        onActionTriggered={(actionId) => {
+          setSetup(prev => ({ ...prev, actionTriggered: new Set(prev.actionTriggered).add(actionId) }))
         }}
       />
     )
@@ -556,7 +538,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     return (
       <div className="ci-panel-center">
         <div className="ci-empty-title">No workflows found</div>
-        <div className="ci-empty-hint">This repository has no GitHub Actions workflows configured.</div>
+        <div className="ci-empty-hint">This repository has no CI workflows configured.</div>
       </div>
     )
   }
@@ -569,16 +551,20 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       <div className="ci-list-pane">
         {/* Header */}
         <div className="ci-header">
-          <select
-            className="ci-workflow-select"
-            value={selectedWorkflow}
-            onChange={(e) => setSelectedWorkflow(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-          >
-            <option value="all">All workflows</option>
-            {workflows.map((wf) => (
-              <option key={wf.id} value={wf.id}>{wf.name}</option>
-            ))}
-          </select>
+          {workflows.length > 1 ? (
+            <select
+              className="ci-workflow-select"
+              value={selectedWorkflow}
+              onChange={(e) => setSelectedWorkflow(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            >
+              <option value="all">All workflows</option>
+              {workflows.map((wf) => (
+                <option key={wf.id} value={wf.id}>{wf.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="ci-workflow-label">{workflows[0]?.name || 'Pipelines'}</span>
+          )}
           <button className="ci-refresh-btn" onClick={handleRefresh} title="Refresh">
             <RefreshIcon />
           </button>
@@ -1102,18 +1088,30 @@ function JobGroupRow({ group, expanded, onToggle }: { group: CiJobGroup; expande
   )
 }
 
-function CiSetupWizard({ setup, onRecheck, onOpenAuthLogin, onOpenDownload }: {
+function CiSetupWizard({ setup, projectDir, onRecheck, onActionTriggered }: {
   setup: SetupState
+  projectDir: string
   onRecheck: () => void
-  onOpenAuthLogin: () => void
-  onOpenDownload: () => void
+  onActionTriggered: (actionId: string) => void
 }) {
-  const stepIcon = (done: boolean) => done
-    ? <span className="ci-setup-icon ci-setup-done">&#10003;</span>
-    : <span className="ci-setup-icon ci-setup-pending">&#9675;</span>
+  const api = getDockApi()
+  const { setupStatus } = setup
+  const [credValues, setCredValues] = useState<Record<string, string>>({})
+  const [credSaving, setCredSaving] = useState(false)
+  const [credError, setCredError] = useState<string | null>(null)
 
-  // Determine which step is the current blocker
-  const currentStep = !setup.ghInstalled ? 1 : !setup.ghAuthenticated ? 2 : 3
+  if (!setupStatus) {
+    return <div className="ci-panel-center"><div className="ci-spinner" /> Checking CI setup...</div>
+  }
+
+  const stepIcon = (status: 'ok' | 'missing' | 'checking') => {
+    if (status === 'ok') return <span className="ci-setup-icon ci-setup-done">&#10003;</span>
+    if (status === 'checking') return <span className="ci-setup-icon"><div className="ci-spinner" /></span>
+    return <span className="ci-setup-icon ci-setup-pending">&#9675;</span>
+  }
+
+  // Find the first step that is not 'ok' — that's the active blocker
+  const activeStepIndex = setupStatus.steps.findIndex((s) => s.status !== 'ok')
 
   const recheckBtn = (
     <button className="ci-setup-recheck-icon" onClick={onRecheck} disabled={setup.checking} title="Recheck">
@@ -1121,62 +1119,111 @@ function CiSetupWizard({ setup, onRecheck, onOpenAuthLogin, onOpenDownload }: {
     </button>
   )
 
+  const handleCredentialSubmit = async (step: typeof setupStatus.steps[0]) => {
+    if (!step.actionId || !step.credentialFields) return
+    const allFilled = step.credentialFields.every((f) => credValues[f.id]?.trim())
+    if (!allFilled) return
+    setCredSaving(true)
+    setCredError(null)
+    try {
+      const result = await api.ci.runSetupAction(projectDir, step.actionId, credValues)
+      if (result.success) {
+        setCredValues({})
+        onRecheck()
+      } else {
+        setCredError(result.error || 'Failed to save credentials')
+      }
+    } catch {
+      setCredError('Failed to save credentials')
+    } finally {
+      setCredSaving(false)
+    }
+  }
+
   return (
     <div className="ci-panel-center ci-setup-wizard">
       <div className="ci-empty-icon">CI</div>
-      <div className="ci-empty-title">CI Setup Required</div>
+      <div className="ci-empty-title">{setupStatus.providerName} Setup Required</div>
       <div className="ci-setup-steps">
-        <div className={`ci-setup-step${currentStep === 1 ? ' ci-setup-step-active' : ''}`}>
-          {stepIcon(setup.ghInstalled)}
-          <div className="ci-setup-step-content">
-            <div className="ci-setup-step-label">Install GitHub CLI</div>
-            {currentStep === 1 && (
-              <div className="ci-setup-step-action">
-                <span className="ci-setup-step-hint">The <code>gh</code> CLI is required to access GitHub Actions.</span>
-                <div className="ci-setup-step-buttons">
-                  <button className="ci-setup-btn" onClick={onOpenDownload}>Download CLI</button>
-                  {recheckBtn}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className={`ci-setup-step${currentStep === 2 ? ' ci-setup-step-active' : ''}`}>
-          {stepIcon(setup.ghAuthenticated)}
-          <div className="ci-setup-step-content">
-            <div className="ci-setup-step-label">Authenticate with GitHub</div>
-            {currentStep === 2 && (
-              <div className="ci-setup-step-action">
-                <span className="ci-setup-step-hint">Sign in to your GitHub account via the CLI.</span>
-                <div className="ci-setup-step-buttons">
-                  <button className="ci-setup-btn" onClick={onOpenAuthLogin}>
-                    {setup.loginOpened ? 'Open gh auth login again' : 'Run gh auth login'}
-                  </button>
-                  {recheckBtn}
-                </div>
-                {setup.loginOpened && (
-                  <span className="ci-setup-step-hint ci-setup-step-hint-sub">Complete the login in the terminal window that opened, then recheck.</span>
+        {setupStatus.steps.map((step, i) => {
+          const isActive = i === activeStepIndex
+          const hasCredFields = step.credentialFields && step.credentialFields.length > 0
+          return (
+            <div key={step.id} className={`ci-setup-step${isActive ? ' ci-setup-step-active' : ''}`}>
+              {stepIcon(step.status)}
+              <div className="ci-setup-step-content">
+                <div className="ci-setup-step-label">{step.label}</div>
+                {isActive && (
+                  <div className="ci-setup-step-action">
+                    {step.helpText && <span className="ci-setup-step-hint">{step.helpText}</span>}
+                    {hasCredFields && (
+                      <div className="ci-setup-cred-form">
+                        {step.credentialFields!.map((field) => (
+                          <input
+                            key={field.id}
+                            type={field.type}
+                            placeholder={field.placeholder || field.label}
+                            value={credValues[field.id] || ''}
+                            onChange={(e) => setCredValues((v) => ({ ...v, [field.id]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleCredentialSubmit(step) }}
+                            className="ci-setup-cred-input"
+                            disabled={credSaving}
+                          />
+                        ))}
+                        {credError && <span className="ci-setup-cred-error">{credError}</span>}
+                      </div>
+                    )}
+                    <div className="ci-setup-step-buttons">
+                      {step.helpUrl && !hasCredFields && !step.actionId && (
+                        <button className="ci-setup-btn" onClick={() => api.app.openExternal(step.helpUrl!)}>
+                          {step.actionLabel || 'Download'}
+                        </button>
+                      )}
+                      {hasCredFields && (
+                        <>
+                          <button
+                            className="ci-setup-btn ci-setup-btn-primary"
+                            disabled={credSaving || !step.credentialFields!.every((f) => credValues[f.id]?.trim())}
+                            onClick={() => handleCredentialSubmit(step)}
+                          >
+                            {credSaving ? 'Saving...' : 'Save credentials'}
+                          </button>
+                          {step.helpUrl && (
+                            <button className="ci-setup-btn" onClick={() => api.app.openExternal(step.helpUrl!)}>
+                              {step.actionLabel || 'Help'}
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {step.actionId && !hasCredFields && (
+                        <button
+                          className="ci-setup-btn"
+                          onClick={async () => {
+                            onActionTriggered(step.actionId!)
+                            const result = await api.ci.runSetupAction(projectDir, step.actionId!)
+                            if (result.success) {
+                              onRecheck()
+                            } else if (result.error) {
+                              setCredError(result.error)
+                            }
+                          }}
+                        >
+                          {setup.actionTriggered.has(step.actionId) ? `${step.actionLabel} again` : step.actionLabel}
+                        </button>
+                      )}
+                      {recheckBtn}
+                    </div>
+                    {step.actionId && !hasCredFields && setup.actionTriggered.has(step.actionId) && (
+                      credError
+                        ? <span className="ci-setup-cred-error">{credError}</span>
+                        : <span className="ci-setup-step-hint ci-setup-step-hint-sub">{step.actionHint || 'Complete the login in the terminal window that opened, then recheck.'}</span>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className={`ci-setup-step${currentStep === 3 ? ' ci-setup-step-active' : ''}`}>
-          {stepIcon(setup.hasRemote)}
-          <div className="ci-setup-step-content">
-            <div className="ci-setup-step-label">GitHub remote configured</div>
-            {currentStep === 3 && (
-              <div className="ci-setup-step-action">
-                <span className="ci-setup-step-hint">This repository needs a GitHub remote. Add one with <code>git remote add origin &lt;url&gt;</code>.</span>
-                <div className="ci-setup-step-buttons">
-                  {recheckBtn}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

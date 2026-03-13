@@ -1,6 +1,7 @@
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflowRun } from '../../../../shared/ci-types'
 import type { NotificationType } from '../../../../shared/ci-types'
+import { CiProviderRegistry } from './ci-provider-registry'
 import { NotificationManager } from '../../../notification-manager'
 import { getPluginSetting } from '../../plugin-store'
 import { log } from '../../../logger'
@@ -22,14 +23,18 @@ interface ProjectPolling {
 export class CiManager {
   private projects = new Map<string, ProjectPolling>()
 
-  constructor(private provider: CiProvider) {}
-
-  startPolling(projectDir: string): void {
+  async startPolling(projectDir: string): Promise<void> {
     if (this.projects.has(projectDir)) return
     log('[ci-manager] start polling', projectDir)
 
+    const provider = await CiProviderRegistry.getInstance().resolve(projectDir)
+    if (!provider) {
+      log('[ci-manager] no provider for', projectDir)
+      return
+    }
+
     const entry: ProjectPolling = {
-      provider: this.provider,
+      provider,
       projectDir,
       timer: null,
       cachedRuns: new Map(),
@@ -113,8 +118,8 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
       type: 'info',
       source: 'ci',
-      action: run.url ? { label: 'View on GitHub', url: run.url } : undefined,
-      data: { runId: run.id }
+      action: run.url ? { label: `View on ${entry.provider.name}`, url: run.url } : undefined,
+      data: { runId: run.id, providerKey: entry.provider.providerKey }
     })
   }
 
@@ -187,7 +192,7 @@ export class CiManager {
     }
 
     const nm = NotificationManager.getInstance()
-    const viewAction = run.url ? { label: 'View on GitHub', url: run.url } : undefined
+    const viewAction = run.url ? { label: `View on ${entry.provider.name}`, url: run.url } : undefined
     const actions = conclusion === 'failure' && failureContext
       ? [
           ...(viewAction ? [viewAction] : []),
@@ -207,6 +212,7 @@ export class CiManager {
         runName: run.name,
         runNumber: run.runNumber,
         headBranch: run.headBranch,
+        providerKey: entry.provider.providerKey,
         ...(failureContext || {})
       }
     })

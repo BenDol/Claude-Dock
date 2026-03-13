@@ -48,7 +48,7 @@ export const useDockStore = create<DockState>((set, get) => ({
       const unlockedTerminals = new Set(state.unlockedTerminals)
       unlockedTerminals.add(id)
       return {
-        terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}`, isAlive: true }],
+        terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}${state.projectDir ? ' - ' + (state.projectDir.split(/[/\\]/).pop() || state.projectDir) : ''}`, isAlive: true }],
         nextTerminalNum: state.nextTerminalNum + 1,
         focusedTerminalId: id,
         unlockedTerminals

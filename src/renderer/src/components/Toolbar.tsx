@@ -4,6 +4,8 @@ import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
+import type { GitProvider } from '../../../shared/remote-url'
+import { ProviderIcon } from '../plugins/git-manager/ProviderIcons'
 import { sanitizeSvg } from '../lib/svg-sanitize'
 
 interface ToolbarProps {
@@ -214,9 +216,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   return (
     <div className="toolbar">
       <div className="toolbar-left">
-        <span className="toolbar-project" title={projectDir}>
-          {projectDir.split(/[/\\]/).pop()}
-        </span>
+        <WorkspaceDropdown projectDir={projectDir} />
         <span className="toolbar-count">{terminalCount} terminal{terminalCount !== 1 ? 's' : ''}</span>
         <button
           className={`toolbar-btn toolbar-btn-icon${rcCount > 0 ? ' toolbar-btn-active' : ''}`}
@@ -288,6 +288,200 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     </div>
   )
 }
+
+// --- Workspace Dropdown ---
+
+type WsAction = 'browse' | 'clone'
+
+const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
+  const [open, setOpen] = useState(false)
+  const [recents, setRecents] = useState<{ path: string; name: string; lastOpened: number }[]>([])
+  const [cloneMode, setCloneMode] = useState(false)
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneDest, setCloneDest] = useState('')
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState('')
+  const [promptPath, setPromptPath] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const api = getDockApi()
+  const folderName = projectDir.split(/[/\\]/).pop() || projectDir
+
+  // Load recents when opened
+  useEffect(() => {
+    if (!open) return
+    api.app.getRecentPaths().then(setRecents)
+    setCloneMode(false)
+    setCloneUrl('')
+    setCloneDest('')
+    setCloneError('')
+  }, [open])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const openProject = useCallback((path: string) => {
+    setPromptPath(path)
+  }, [])
+
+  const confirmOpen = useCallback(async (mode: 'this' | 'new') => {
+    if (!promptPath) return
+    const dir = promptPath
+    setPromptPath(null)
+    setOpen(false)
+    if (mode === 'this') {
+      api.dock.switchProject(dir)
+    } else {
+      api.app.openDockPath(dir)
+    }
+  }, [promptPath])
+
+  const handleBrowse = useCallback(async () => {
+    const dir = await api.app.pickDirectory()
+    if (dir) openProject(dir)
+  }, [openProject])
+
+  const handleClone = useCallback(async () => {
+    if (!cloneUrl.trim() || !cloneDest.trim()) return
+    setCloning(true)
+    setCloneError('')
+    const result = await api.git.clone(cloneUrl.trim(), cloneDest.trim())
+    setCloning(false)
+    if (result.success && result.clonedPath) {
+      openProject(result.clonedPath)
+    } else {
+      setCloneError(result.error || 'Clone failed')
+    }
+  }, [cloneUrl, cloneDest, openProject])
+
+  const handleRemoveRecent = useCallback((e: React.MouseEvent, path: string) => {
+    e.stopPropagation()
+    api.app.removeRecentPath(path)
+    setRecents((prev) => prev.filter((r) => r.path !== path))
+  }, [])
+
+  const recentItems = recents.filter((r) => r.path.replace(/[\\/]/g, '/').toLowerCase() !== projectDir.replace(/[\\/]/g, '/').toLowerCase())
+
+  return (
+    <div className="ws-dropdown" ref={ref}>
+      <button
+        className={`toolbar-project ws-dropdown-trigger${open ? ' ws-dropdown-trigger-open' : ''}`}
+        onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }}
+        title={projectDir}
+      >
+        {folderName}
+        <span className="ws-dropdown-arrow">{'\u25BE'}</span>
+      </button>
+      {open && !promptPath && (
+        <>
+          <div className="ws-dropdown-backdrop" onMouseDown={() => setOpen(false)} />
+          <div className="ws-dropdown-panel">
+            {!cloneMode ? (
+              <>
+                <div className="ws-dropdown-actions">
+                  <button className="ws-dropdown-action" onClick={handleBrowse}>
+                    <WsBrowseIcon /> Browse Folder...
+                  </button>
+                  <button className="ws-dropdown-action" onClick={() => setCloneMode(true)}>
+                    <WsCloneIcon /> Git Clone...
+                  </button>
+                </div>
+                {recentItems.length > 0 && (
+                  <>
+                    <div className="ws-dropdown-divider" />
+                    <div className="ws-dropdown-label">Recent Workspaces</div>
+                    <div className="ws-dropdown-recents">
+                      {recentItems.map((r) => (
+                        <div key={r.path} className="ws-dropdown-recent" onClick={() => openProject(r.path)} title={r.path}>
+                          <span className="ws-dropdown-recent-name">{r.name}</span>
+                          <span className="ws-dropdown-recent-time">{formatTimeAgo(r.lastOpened)}</span>
+                          <button className="ws-dropdown-recent-remove" onClick={(e) => handleRemoveRecent(e, r.path)} title="Remove from recents">
+                            {'\u2715'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="ws-clone-form">
+                <div className="ws-clone-back" onClick={() => setCloneMode(false)}>{'\u2190'} Back</div>
+                <input
+                  className="ws-clone-input"
+                  placeholder="Repository URL"
+                  value={cloneUrl}
+                  onChange={(e) => setCloneUrl(e.target.value)}
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter' && cloneDest) handleClone() }}
+                />
+                <div className="ws-clone-dest-row">
+                  <input
+                    className="ws-clone-input ws-clone-dest"
+                    placeholder="Destination folder"
+                    value={cloneDest}
+                    onChange={(e) => setCloneDest(e.target.value)}
+                    readOnly
+                  />
+                  <button className="ws-clone-browse" onClick={async () => { const d = await api.app.pickDirectory(); if (d) setCloneDest(d) }}>...</button>
+                </div>
+                {cloneError && <div className="ws-clone-error">{cloneError}</div>}
+                <button className="ws-clone-btn" onClick={handleClone} disabled={cloning || !cloneUrl.trim() || !cloneDest.trim()}>
+                  {cloning ? <><span className="toolbar-spinner" /> Cloning...</> : 'Clone'}
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      {promptPath && (
+        <>
+          <div className="ws-dropdown-backdrop" onMouseDown={() => setPromptPath(null)} />
+          <div className="ws-dropdown-panel ws-prompt-panel">
+            <div className="ws-prompt-title">Open in</div>
+            <div className="ws-prompt-path" title={promptPath}>{promptPath.split(/[/\\]/).pop()}</div>
+            <div className="ws-prompt-buttons">
+              <button className="ws-prompt-btn" onClick={() => confirmOpen('this')}>This Window</button>
+              <button className="ws-prompt-btn ws-prompt-btn-primary" onClick={() => confirmOpen('new')}>New Window</button>
+            </div>
+            <button className="ws-prompt-cancel" onClick={() => setPromptPath(null)}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts
+  const min = Math.floor(diff / 60_000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day}d ago`
+  return new Date(ts).toLocaleDateString()
+}
+
+const WsBrowseIcon: React.FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
+const WsCloneIcon: React.FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 17l5-5-5-5" /><path d="M21 12H9" /><path d="M9 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5" />
+  </svg>
+)
 
 const MAX_NOTIFICATIONS = 30
 
@@ -485,7 +679,7 @@ const NotificationDropdown: React.FC = () => {
                       }}
                       title={resolveActions(n).find((a) => a.url)?.label ?? 'Open'}
                     >
-                      &#8599;
+                      {n.source === 'ci' && n.data?.providerKey ? <ProviderIcon provider={n.data.providerKey as GitProvider} /> : <>&#8599;</>}
                     </button>
                   )}
                   <button

@@ -39,7 +39,7 @@ export class GitManagerPlugin implements DockPlugin {
     },
     {
       key: 'enableCiTab',
-      label: 'Show CI tab (GitHub Actions)',
+      label: 'Show CI tab',
       type: 'boolean',
       defaultValue: false
     },

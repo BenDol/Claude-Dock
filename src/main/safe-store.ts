@@ -1,5 +1,7 @@
 import Store from 'electron-store'
+import { app } from 'electron'
 import * as fs from 'fs'
+import * as path from 'path'
 
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 50
@@ -74,26 +76,20 @@ export function createSafeStore<T extends Record<string, unknown>>(
     return new Store<T>(opts)
   } catch (err) {
     console.error(`[safe-store] Store "${opts?.name}" is corrupt, resetting:`, err)
-    // Try to back up and recreate
+    // Compute the store file path directly — we can't create a Store instance
+    // to find it because the constructor itself throws on corrupt data.
+    const storePath = path.join(app.getPath('userData'), `${opts?.name || 'config'}.json`)
     try {
-      const testStore = new Store<T>({ ...opts, defaults: opts?.defaults })
-      const storePath = testStore.path
-      testStore.clear()
-      return testStore
-    } catch {
-      // If even that fails, try deleting the file and recreating
-      try {
-        const tmpStore = new Store({ name: opts?.name || 'unknown' })
-        const storePath = tmpStore.path
-        if (fs.existsSync(storePath)) {
-          const backupPath = storePath + '.corrupt.' + Date.now()
-          fs.renameSync(storePath, backupPath)
-          console.warn(`[safe-store] Backed up corrupt store to ${backupPath}`)
-        }
-      } catch {
-        // Last resort - ignore
+      if (fs.existsSync(storePath)) {
+        const backupPath = storePath + '.corrupt.' + Date.now()
+        fs.renameSync(storePath, backupPath)
+        console.warn(`[safe-store] Backed up corrupt store to ${backupPath}`)
       }
-      return new Store<T>(opts)
+    } catch (backupErr) {
+      // If rename fails, try to just delete it
+      try { fs.unlinkSync(storePath) } catch { /* give up */ }
+      console.error('[safe-store] Could not back up corrupt store, deleted it:', backupErr)
     }
+    return new Store<T>(opts)
   }
 }
