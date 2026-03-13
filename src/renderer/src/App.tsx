@@ -206,6 +206,9 @@ function buildWriteTestsPrompt(task: import('../../shared/claude-task-types').Wr
     'If you identify any bugs, edge cases, or unsound logic, fix those issues first. ' +
     'Then write tests that verify both the corrected behavior and the existing functionality, ' +
     'ensuring the code is robust and sound.\n\n' +
+    'Only write tests for code where testing is appropriate and adds value. ' +
+    'If the changes are purely cosmetic, configuration-only, or otherwise not suited for testing, ' +
+    'state this clearly and explain why no tests are warranted instead of writing unnecessary tests.\n\n' +
     'Follow the existing test patterns and conventions in this project. ' +
     'If test files already exist for these modules, add to them; otherwise create new test files in the appropriate location.'
   )
