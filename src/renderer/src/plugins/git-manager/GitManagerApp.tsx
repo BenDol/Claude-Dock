@@ -59,6 +59,16 @@ function sendReferenceThisTask(files: string[], commitHash?: string, commitSubje
   api.claudeTask.send(projectDir, task)
 }
 
+/** Compute the character width needed for line numbers in a diff file */
+function lineNoDigits(hunks: GitFileDiff['hunks']): number {
+  let max = 0
+  for (const h of hunks) for (const l of h.lines) {
+    if (l.oldLineNo && l.oldLineNo > max) max = l.oldLineNo
+    if (l.newLineNo && l.newLineNo > max) max = l.newLineNo
+  }
+  return Math.max(String(max).length, 3)
+}
+
 /** Ref callback: repositions a context submenu if it overflows the viewport */
 function adjustSubmenuRef(el: HTMLDivElement | null): void {
   if (!el) return
@@ -2245,7 +2255,7 @@ const LazyDiffFile: React.FC<{
         <div className="gm-diff-binary">Binary file</div>
       ) : (
         <LargeDiffGate lineCount={lineCount}>
-          <div className="gm-diff-file-body">
+          <div className="gm-diff-file-body" style={{ '--line-no-ch': lineNoDigits(f.hunks) } as React.CSSProperties}>
             {f.hunks.map((h, hi) => (
               <div key={hi} className="gm-diff-hunk">
                 <div className="gm-diff-hunk-header">{h.header}</div>
@@ -4260,7 +4270,7 @@ const WorkingDiffViewer: React.FC<{
           <div className="gm-diff-empty">No diff available</div>
         ) : (
           diffs.map((f, fi) => (
-            <div key={f.path} className="gm-diff-file">
+            <div key={f.path} className="gm-diff-file" style={{ '--line-no-ch': lineNoDigits(f.hunks) } as React.CSSProperties}>
               {multiFile && (
                 <div className="gm-diff-file-header">
                   <span className="gm-diff-file-path">{f.path}</span>

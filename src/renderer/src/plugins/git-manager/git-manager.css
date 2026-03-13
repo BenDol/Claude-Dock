@@ -1942,6 +1942,7 @@
 .gm-diff-line-no {
   display: flex;
   flex-shrink: 0;
+  gap: 6px;
   color: var(--text-secondary);
   opacity: 0.5;
   user-select: none;
@@ -1950,7 +1951,7 @@
 
 .gm-diff-line-no span {
   display: inline-block;
-  width: 24px;
+  width: calc(var(--line-no-ch, 3) * 1ch);
   text-align: right;
 }
 
