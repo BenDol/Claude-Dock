@@ -1445,12 +1445,16 @@
 
 .gm-ref-badge {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 0 6px;
   border-radius: 3px;
   background: var(--accent-color);
   color: white;
   white-space: nowrap;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  line-height: 16px;
 }
 
 .gm-ref-remote {

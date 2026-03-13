@@ -23,6 +23,7 @@ export interface Settings {
   behavior: {
     confirmCloseWithRunning: boolean
     autoSpawnFirstTerminal: boolean
+    markNotificationsRead: boolean
     blockedNotificationSources: string[]
   }
   updater: {
@@ -197,6 +198,7 @@ export const DEFAULT_SETTINGS: Settings = {
   behavior: {
     confirmCloseWithRunning: true,
     autoSpawnFirstTerminal: true,
+    markNotificationsRead: false,
     blockedNotificationSources: []
   },
   updater: {

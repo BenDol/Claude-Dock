@@ -6418,16 +6418,6 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
               </label>
             )
           ))}
-          <div className="gm-settings-divider" />
-          <button
-            className="gm-settings-action-btn"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('gm-mark-all-read'))
-              setOpen(false)
-            }}
-          >
-            Mark all notifications as read
-          </button>
         </div>
         </>
       )}
@@ -6463,6 +6453,7 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
     try { const raw = localStorage.getItem(gmNotifReadKey(projectDir)); return raw ? new Set(JSON.parse(raw)) : new Set() } catch { return new Set() }
   })
   const ref = useRef<HTMLDivElement>(null)
+  const markAllRead = useSettingsStore((s) => s.settings.behavior?.markNotificationsRead ?? false)
 
   // Reload stored notifications when projectDir changes (e.g. navigating into submodule)
   useEffect(() => {
@@ -6485,13 +6476,13 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
     const api = getDockApi()
     const cleanup = api.notifications.onShow((notification) => {
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
-      // Auto-mark as read if the window is focused
-      if (document.hasFocus()) {
+      // Auto-mark as read if the setting is enabled or window is focused
+      if (markAllRead || document.hasFocus()) {
         setReadIds((prev) => new Set(prev).add(notification.id))
       }
     })
     return cleanup
-  }, [])
+  }, [markAllRead])
 
   // Mark all as read when panel opens
   useEffect(() => {
@@ -6507,13 +6498,6 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
     window.addEventListener('notification-read', handler)
     return () => window.removeEventListener('notification-read', handler)
   }, [])
-
-  // Listen for "mark all as read" from settings
-  useEffect(() => {
-    const handler = () => setReadIds(new Set(notifications.map((n) => n.id)))
-    window.addEventListener('gm-mark-all-read', handler)
-    return () => window.removeEventListener('gm-mark-all-read', handler)
-  }, [notifications])
 
   const removeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id))

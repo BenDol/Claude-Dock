@@ -433,13 +433,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Auto-spawn first terminal
                 </label>
-                <div>
-                  <button
-                    className="settings-check-update-btn"
-                    onClick={() => window.dispatchEvent(new CustomEvent('dock-mark-all-read'))}
-                  >
-                    Mark All Notifications as Read
-                  </button>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.behavior.markNotificationsRead}
+                    onChange={(e) => updateBehavior({ markNotificationsRead: e.target.checked })}
+                  />
+                  Mark all notifications as read
+                </label>
+                <div className="settings-description">
+                  Incoming notifications will not trigger the unread badge.
                 </div>
                 <div className="settings-divider" />
                 <div className="settings-section-header">Block Notifications From</div>

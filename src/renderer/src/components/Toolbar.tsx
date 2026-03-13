@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useDockStore } from '../stores/dock-store'
+import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
@@ -543,6 +544,7 @@ const NotificationDropdown: React.FC = () => {
   const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
   const projectDir = useDockStore((s) => s.projectDir)
+  const markAllRead = useSettingsStore((s) => s.settings.behavior?.markNotificationsRead ?? false)
 
   // Reload stored notifications when projectDir becomes available or changes
   useEffect(() => {
@@ -569,13 +571,13 @@ const NotificationDropdown: React.FC = () => {
     const api = getDockApi()
     const cleanup = api.notifications.onShow((notification) => {
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
-      // Auto-mark as read if the window is focused
-      if (document.hasFocus()) {
+      // Auto-mark as read if the setting is enabled or window is focused
+      if (markAllRead || document.hasFocus()) {
         setReadIds((prev) => new Set(prev).add(notification.id))
       }
     })
     return cleanup
-  }, [])
+  }, [markAllRead])
 
   // Mark all as read when panel opens
   useEffect(() => {
@@ -591,13 +593,6 @@ const NotificationDropdown: React.FC = () => {
     window.addEventListener('notification-read', handler)
     return () => window.removeEventListener('notification-read', handler)
   }, [])
-
-  // Listen for "mark all as read" from settings
-  useEffect(() => {
-    const handler = () => setReadIds(new Set(notifications.map((n) => n.id)))
-    window.addEventListener('dock-mark-all-read', handler)
-    return () => window.removeEventListener('dock-mark-all-read', handler)
-  }, [notifications])
 
   const removeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id))
