@@ -291,7 +291,7 @@ export class GitLabCiProvider implements CiProvider {
     try {
       const projectId = await getProjectId(projectDir)
       const { stdout } = await glab(
-        ['api', `/projects/${projectId}/pipelines/${runId}/jobs`, '--per-page', '100'],
+        ['api', `/projects/${projectId}/pipelines/${runId}/jobs?per_page=100`],
         projectDir
       )
       const jobs = JSON.parse(stdout) as Array<Record<string, unknown>>

@@ -236,11 +236,6 @@
   width: 5px;
 }
 
-.gm-branch-dropdown-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-branch-dropdown-section-label {
   padding: 6px 10px 3px;
   font-size: 10px;
@@ -321,6 +316,26 @@
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border-color: var(--border-color);
+}
+
+/* Toolbar count indicators (ahead/behind) */
+.gm-toolbar-count {
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  margin-left: 2px;
+}
+.gm-toolbar-count-ahead {
+  color: #9ece6a;
+  background: rgba(158, 206, 106, 0.15);
+}
+.gm-toolbar-count-behind {
+  color: #f7768e;
+  background: rgba(247, 118, 142, 0.15);
 }
 
 /* Pull split button */
@@ -675,11 +690,6 @@
 
 .gm-sidebar::-webkit-scrollbar {
   width: 5px;
-}
-
-.gm-sidebar::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 .gm-sidebar-section {
@@ -1222,15 +1232,6 @@
   overflow-y: auto;
 }
 
-.gm-commit-list-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.gm-commit-list-body::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-commit-row-placeholder {
   opacity: 0.4;
 }
@@ -1656,11 +1657,6 @@
   width: 5px;
 }
 
-.gm-detail::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-commit-detail {
   display: flex;
   flex-direction: column;
@@ -1782,11 +1778,6 @@
   width: 5px;
 }
 
-.gm-detail-files::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-detail-files-header {
   padding: 8px 12px;
   font-size: 11px;
@@ -1819,15 +1810,6 @@
   overflow-y: auto;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-primary);
-}
-
-.gm-detail-file-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.gm-detail-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 .gm-detail-file-list-item {
@@ -1898,11 +1880,6 @@
 
 .gm-diff-file-body::-webkit-scrollbar {
   height: 5px;
-}
-
-.gm-diff-file-body::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 .gm-diff-stat-add {
@@ -2172,11 +2149,6 @@
   height: 5px;
 }
 
-.gm-changes-diff-content::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-diff-empty {
   padding: 20px;
   text-align: center;
@@ -2213,11 +2185,6 @@
   width: 5px;
 }
 
-.gm-changes-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-virtual-file-list {
   overflow-y: auto;
   max-height: 100%;
@@ -2225,11 +2192,6 @@
 
 .gm-virtual-file-list::-webkit-scrollbar {
   width: 5px;
-}
-
-.gm-virtual-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 .gm-changes-section {
@@ -2248,11 +2210,6 @@
 
 .gm-stash-list::-webkit-scrollbar {
   width: 5px;
-}
-
-.gm-stash-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 .gm-stash-entry {
@@ -2921,10 +2878,6 @@
   flex: 1;
 }
 
-.gm-notif-list::-webkit-scrollbar { width: 6px; }
-.gm-notif-list::-webkit-scrollbar-track { background: transparent; }
-.gm-notif-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-
 .gm-notif-empty {
   padding: 24px;
   text-align: center;
@@ -3485,11 +3438,6 @@
   width: 5px;
 }
 
-.gm-conflicts-file-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
 .gm-conflicts-file {
   display: flex;
   align-items: center;
@@ -3626,15 +3574,6 @@
   overflow-y: auto;
   font-family: var(--term-font-family);
   font-size: 12px;
-}
-
-.gm-conflicts-chunks::-webkit-scrollbar {
-  width: 6px;
-}
-
-.gm-conflicts-chunks::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
 }
 
 /* Common (non-conflict) lines */

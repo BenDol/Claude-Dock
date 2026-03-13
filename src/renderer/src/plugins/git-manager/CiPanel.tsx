@@ -33,7 +33,7 @@ interface CiFilters {
 }
 
 // Session-level cache so we don't re-check CLI availability on every tab switch
-const ciAvailabilityCache = new Map<string, { available: boolean; workflows: CiWorkflow[] }>()
+const ciAvailabilityCache = new Map<string, { available: boolean; workflows: CiWorkflow[]; providerKey?: string }>()
 
 // Persist expanded state for job panels across refreshes/tab switches
 const CI_GROUPS_KEY = 'ci-expanded-groups'
@@ -114,6 +114,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     showStaleQueued: false
   }))
   const [filtersExpanded, setFiltersExpanded] = useState(false)
+  const [ciProviderKey, setCiProviderKey] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
@@ -147,22 +148,24 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
           await checkSetup()
           return
         }
+        if (cached.providerKey) setCiProviderKey(cached.providerKey)
         setWorkflows(cached.workflows)
         setStatus('ready')
         return
       }
 
       try {
-        const available = await api.ci.checkAvailable(projectDir)
+        const result = await api.ci.checkAvailable(projectDir)
         if (cancelled) return
-        if (!available) {
+        if (!result) {
           ciAvailabilityCache.set(projectDir, { available: false, workflows: [] })
           await checkSetup()
           return
         }
+        setCiProviderKey(result)
         const wf = await api.ci.getWorkflows(projectDir)
         if (cancelled) return
-        ciAvailabilityCache.set(projectDir, { available: true, workflows: wf })
+        ciAvailabilityCache.set(projectDir, { available: true, workflows: wf, providerKey: result })
         setWorkflows(wf)
         setStatus('ready')
       } catch (err) {
@@ -174,6 +177,31 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     init()
     return () => { cancelled = true }
   }, [projectDir])
+
+  // Reset state when project dir changes (e.g. submodule navigation)
+  useEffect(() => {
+    setRuns([])
+    setActiveRuns([])
+    setPage(1)
+    setHasMore(true)
+    setExpandedRun(null)
+    setRunJobs([])
+    setFilters({
+      status: new Set(),
+      branches: currentBranch ? new Set([currentBranch]) : new Set(),
+      event: null,
+      showStaleQueued: false
+    })
+  }, [projectDir])
+
+  // Update branch filter when currentBranch changes (new repo detected)
+  useEffect(() => {
+    if (!currentBranch) return
+    setFilters((prev) => ({
+      ...prev,
+      branches: new Set([currentBranch])
+    }))
+  }, [currentBranch])
 
   // Start polling when ready
   useEffect(() => {
@@ -717,7 +745,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
               jobGroups={jobGroups}
               loadingJobs={loadingJobs}
               expandedGroups={expandedGroups}
-              provider={provider}
+              provider={(ciProviderKey as GitProvider) || provider}
               projectDir={projectDir}
               searchQuery={searchQuery}
               progress={runProgress.get(selectedRun.id)}
@@ -1492,19 +1520,40 @@ function parseLogLine(line: string): ParsedLogLine {
   return { type: 'normal', timestamp, text, raw: line }
 }
 
+type LogFilter = 'all' | 'errors' | 'warnings' | 'errors+warnings'
+
 function CiLogViewer({ log, searchQuery }: { log: string; searchQuery?: string }) {
   const viewerRef = useRef<HTMLDivElement>(null)
   const [currentMatch, setCurrentMatch] = useState(0)
   const matchRefs = useRef<(HTMLSpanElement | null)[]>([])
+  const [filter, setFilter] = useState<LogFilter>('all')
 
   const lines = useMemo(() => log.split('\n').map(parseLogLine), [log])
+
+  const counts = useMemo(() => {
+    let errors = 0, warnings = 0
+    for (const l of lines) {
+      if (l.type === 'error') errors++
+      else if (l.type === 'warning') warnings++
+    }
+    return { errors, warnings }
+  }, [lines])
+
+  const filteredLines = useMemo(() => {
+    if (filter === 'all') return lines
+    return lines.filter((l) => {
+      if (filter === 'errors') return l.type === 'error'
+      if (filter === 'warnings') return l.type === 'warning'
+      return l.type === 'error' || l.type === 'warning'
+    })
+  }, [lines, filter])
 
   // Build search match index
   const query = searchQuery?.trim().toLowerCase() || ''
   const matchCount = useMemo(() => {
     if (!query) return 0
     let count = 0
-    for (const line of lines) {
+    for (const line of filteredLines) {
       let idx = 0
       const lower = line.text.toLowerCase()
       while (idx < lower.length) {
@@ -1515,7 +1564,7 @@ function CiLogViewer({ log, searchQuery }: { log: string; searchQuery?: string }
       }
     }
     return count
-  }, [lines, query])
+  }, [filteredLines, query])
 
   // Emit match count to parent
   useEffect(() => {
@@ -1577,10 +1626,46 @@ function CiLogViewer({ log, searchQuery }: { log: string; searchQuery?: string }
     return parts
   }
 
+  const hasIssues = counts.errors > 0 || counts.warnings > 0
+
   return (
     <div className="ci-log-viewer" ref={viewerRef}>
+      {hasIssues && (
+        <div className="ci-log-filter-bar">
+          <button
+            className={`ci-log-filter-btn${filter === 'all' ? ' ci-log-filter-active' : ''}`}
+            onClick={() => setFilter('all')}
+          >All</button>
+          {counts.errors > 0 && (
+            <button
+              className={`ci-log-filter-btn ci-log-filter-errors${filter === 'errors' ? ' ci-log-filter-active' : ''}`}
+              onClick={() => setFilter(filter === 'errors' ? 'all' : 'errors')}
+            >
+              <span className="ci-log-level-badge ci-log-level-error">ERR</span>
+              {counts.errors}
+            </button>
+          )}
+          {counts.warnings > 0 && (
+            <button
+              className={`ci-log-filter-btn ci-log-filter-warnings${filter === 'warnings' ? ' ci-log-filter-active' : ''}`}
+              onClick={() => setFilter(filter === 'warnings' ? 'all' : 'warnings')}
+            >
+              <span className="ci-log-level-badge ci-log-level-warning">WRN</span>
+              {counts.warnings}
+            </button>
+          )}
+          {counts.errors > 0 && counts.warnings > 0 && (
+            <button
+              className={`ci-log-filter-btn ci-log-filter-both${filter === 'errors+warnings' ? ' ci-log-filter-active' : ''}`}
+              onClick={() => setFilter(filter === 'errors+warnings' ? 'all' : 'errors+warnings')}
+            >
+              Errors + Warnings
+            </button>
+          )}
+        </div>
+      )}
       <div className="ci-log-structured">
-        {lines.map((line, i) => {
+        {filteredLines.map((line, i) => {
           if (line.type === 'normal' && !line.text && !line.timestamp) {
             return <div key={i} className="ci-log-line ci-log-line-blank">{'\n'}</div>
           }

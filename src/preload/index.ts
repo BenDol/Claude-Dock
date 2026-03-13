@@ -195,7 +195,7 @@ export interface DockApi {
     onReopen: (callback: () => void) => () => void
   }
   ci: {
-    checkAvailable: (projectDir: string) => Promise<boolean>
+    checkAvailable: (projectDir: string) => Promise<string | false>
     getSetupStatus: (projectDir: string) => Promise<CiSetupStatus>
     runSetupAction: (projectDir: string, actionId: string, data?: Record<string, string>) => Promise<{ success: boolean; error?: string }>
     getWorkflows: (projectDir: string) => Promise<CiWorkflow[]>

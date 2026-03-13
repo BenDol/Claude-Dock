@@ -890,6 +890,7 @@ const GitManagerApp: React.FC = () => {
           </button>
           <PullSplitButton
             activeDir={activeDir}
+            behindCount={currentBranch?.behind ?? 0}
             onError={handleSmartError}
             onRefresh={refresh}
             onOpenDialog={() => {
@@ -897,8 +898,8 @@ const GitManagerApp: React.FC = () => {
               setPullDialogOpen(true)
             }}
           />
-          <button className="gm-toolbar-btn" onClick={handlePush} title="Push" disabled={pushing}>
-            {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push
+          <button className="gm-toolbar-btn" onClick={handlePush} title={`Push${currentBranch?.ahead ? ` (${currentBranch.ahead} commit${currentBranch.ahead > 1 ? 's' : ''} ahead)` : ''}`} disabled={pushing}>
+            {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push{currentBranch?.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
           </button>
           <button className="gm-toolbar-btn" onClick={() => api.gitManager.openBash(activeDir)} title="Open Git Bash">
             <BashIcon />
@@ -1231,7 +1232,7 @@ const GitManagerApp: React.FC = () => {
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
-              <CiPanel projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} pendingRunId={pendingCiRunId} onNavigated={() => setPendingCiRunId(null)} />
+              <CiPanel key={activeDir} projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} pendingRunId={pendingCiRunId} onNavigated={() => setPendingCiRunId(null)} />
             </div>
           )}
         </div>
@@ -4689,10 +4690,11 @@ const PULL_DEFAULT_KEY = 'gm-default-pull-action'
 
 const PullSplitButton: React.FC<{
   activeDir: string
+  behindCount: number
   onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onOpenDialog: () => void
-}> = ({ activeDir, onError, onRefresh, onOpenDialog }) => {
+}> = ({ activeDir, behindCount, onError, onRefresh, onOpenDialog }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [defaultSub, setDefaultSub] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -4746,8 +4748,8 @@ const PullSplitButton: React.FC<{
 
   return (
     <div className="gm-pull-split" ref={ref} style={{ position: 'relative' }}>
-      <button className="gm-toolbar-btn" onClick={() => runAction(defaultAction)} title={label} disabled={busy}>
-        {busy ? <span className="gm-toolbar-spinner" /> : icon} {label}
+      <button className="gm-toolbar-btn" onClick={() => runAction(defaultAction)} title={`${label}${behindCount ? ` (${behindCount} commit${behindCount > 1 ? 's' : ''} behind)` : ''}`} disabled={busy}>
+        {busy ? <span className="gm-toolbar-spinner" /> : icon} {label}{behindCount > 0 && !defaultAction.startsWith('fetch') ? <span className="gm-toolbar-count gm-toolbar-count-behind">{behindCount}</span> : null}
       </button>
       <button className="gm-pull-split-arrow" onClick={() => setDropdownOpen((p) => !p)} title="Pull options" disabled={busy}>
         &#9662;

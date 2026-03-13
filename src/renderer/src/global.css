@@ -58,6 +58,12 @@ body {
   color: var(--text-primary);
 }
 
+/* Global scrollbar style — override per-element with more specific selectors if needed */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
 .app {
   display: flex;
   flex-direction: column;
@@ -231,8 +237,6 @@ body {
 }
 
 .ws-dropdown-recents::-webkit-scrollbar { width: 5px; }
-.ws-dropdown-recents::-webkit-scrollbar-track { background: transparent; }
-.ws-dropdown-recents::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
 .ws-dropdown-recent {
   display: flex;
@@ -690,9 +694,6 @@ body {
   flex: 1;
 }
 
-.tb-notif-list::-webkit-scrollbar { width: 6px; }
-.tb-notif-list::-webkit-scrollbar-track { background: transparent; }
-.tb-notif-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
 .tb-notif-empty {
   padding: 16px;
@@ -1147,23 +1148,6 @@ body {
   min-height: 0;
 }
 
-.modal-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.modal-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.modal-body::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.modal-body::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
-}
-
 .modal-footer {
   padding: 8px 20px;
   display: flex;
@@ -1454,18 +1438,6 @@ body {
   min-height: 0;
 }
 
-.launcher-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.launcher-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.launcher-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
 
 .launcher-item {
   display: flex;
@@ -2598,9 +2570,6 @@ body {
   min-height: 0;
 }
 
-.ci-run-list::-webkit-scrollbar { width: 6px; }
-.ci-run-list::-webkit-scrollbar-track { background: transparent; }
-.ci-run-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
 .ci-run-row {
   display: flex;
@@ -2847,8 +2816,6 @@ body {
   padding: 12px 14px;
 }
 
-.ci-detail-body::-webkit-scrollbar { width: 6px; }
-.ci-detail-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
 .ci-detail-status {
   display: flex;
@@ -2994,10 +2961,42 @@ body {
   flex: 1;
   overflow: auto;
   background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
 }
 
-.ci-log-viewer::-webkit-scrollbar { width: 6px; height: 6px; }
-.ci-log-viewer::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+.ci-log-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.ci-log-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ci-log-filter-btn:hover { background: var(--bg-tertiary); }
+.ci-log-filter-btn.ci-log-filter-active {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+.ci-log-filter-btn .ci-log-level-badge { margin-right: 2px; }
+
 
 .ci-log-content {
   margin: 0;
@@ -3018,6 +3017,8 @@ body {
   font-size: 11px;
   line-height: 1.6;
   color: var(--text-primary);
+  flex: 1;
+  overflow: auto;
 }
 
 .ci-log-line {

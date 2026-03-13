@@ -21,7 +21,8 @@ export function registerCiIpc(): void {
   ipcMain.handle(IPC.CI_CHECK_AVAILABLE, async (_event, projectDir: string) => {
     const provider = await registry.resolve(projectDir)
     if (!provider) return false
-    return provider.isAvailable(projectDir)
+    const available = await provider.isAvailable(projectDir)
+    return available ? provider.providerKey : false
   })
 
   ipcMain.handle(IPC.CI_GET_SETUP_STATUS, async (_event, projectDir: string) => {
