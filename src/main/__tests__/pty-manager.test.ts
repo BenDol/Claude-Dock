@@ -87,14 +87,20 @@ describe('PtyManager', () => {
       expect(sessionId).toBe('existing-session-123')
     })
 
-    it('calls onSessionCreated for new (non-resume) terminals', () => {
+    it('does NOT call onSessionCreated at spawn for new terminals (deferred to first write)', () => {
       manager.spawn('term-1', '/project')
+      expect(onSessionCreated).not.toHaveBeenCalled()
+    })
+
+    it('calls onSessionCreated on first write for new terminals', () => {
+      manager.spawn('term-1', '/project')
+      manager.write('term-1', 'hello')
       expect(onSessionCreated).toHaveBeenCalledWith(expect.any(String))
     })
 
-    it('does NOT call onSessionCreated for resumed terminals', () => {
+    it('calls onSessionCreated at spawn for resumed terminals', () => {
       manager.spawn('term-1', '/project', 'existing-session')
-      expect(onSessionCreated).not.toHaveBeenCalled()
+      expect(onSessionCreated).toHaveBeenCalledWith('existing-session')
     })
 
     it('queues claude launch command with session-id for new terminals', () => {
@@ -321,9 +327,12 @@ describe('PtyManager', () => {
   })
 
   describe('session ID accessors', () => {
-    it('getSessionIds returns all session IDs', () => {
+    it('getSessionIds returns all interacted session IDs', () => {
       manager.spawn('term-1', '/project')
       manager.spawn('term-2', '/project')
+      // Terminals must be interacted (via write) to appear in session IDs
+      manager.write('term-1', 'a')
+      manager.write('term-2', 'b')
 
       const ids = manager.getSessionIds()
       expect(ids).toHaveLength(2)
@@ -332,6 +341,8 @@ describe('PtyManager', () => {
     it('getOrderedSessionIds returns IDs in specified order', () => {
       manager.spawn('term-1', '/project')
       manager.spawn('term-2', '/project')
+      manager.write('term-1', 'a')
+      manager.write('term-2', 'b')
 
       const id1 = manager.getSessionId('term-1')!
       const id2 = manager.getSessionId('term-2')!
@@ -342,6 +353,7 @@ describe('PtyManager', () => {
 
     it('getOrderedSessionIds filters out non-existent terminals', () => {
       manager.spawn('term-1', '/project')
+      manager.write('term-1', 'a')
 
       const ordered = manager.getOrderedSessionIds(['term-1', 'non-existent'])
       expect(ordered).toHaveLength(1)
