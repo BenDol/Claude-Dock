@@ -7,17 +7,30 @@ interface TerminalTitleProps {
 }
 
 const RepairIcon: React.FC = () => (
-  <svg className="terminal-title-fix-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg className="terminal-title-task-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
   </svg>
 )
+
+const BeakerIcon: React.FC = () => (
+  <svg className="terminal-title-task-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" />
+    <line x1="8" y1="2" x2="16" y2="2" />
+    <line x1="6" y1="18" x2="18" y2="18" />
+  </svg>
+)
+
+const taskInfo: Record<string, { icon: React.FC; label: string }> = {
+  'ci-fix': { icon: RepairIcon, label: 'CI Fix' },
+  'write-tests': { icon: BeakerIcon, label: 'Write Tests' }
+}
 
 const TerminalTitle: React.FC<TerminalTitleProps> = ({ terminalId, title }) => {
   const [editing, setEditing] = useState(false)
   const [editValue, setEditValue] = useState(title)
   const inputRef = useRef<HTMLInputElement>(null)
   const setTerminalTitle = useDockStore((s) => s.setTerminalTitle)
-  const isCiFix = useDockStore((s) => s.ciFixTerminals.has(terminalId))
+  const taskType = useDockStore((s) => s.claudeTaskTerminals.get(terminalId))
 
   const startEditing = useCallback(() => {
     setEditValue(title)
@@ -49,10 +62,13 @@ const TerminalTitle: React.FC<TerminalTitleProps> = ({ terminalId, title }) => {
     )
   }
 
+  const task = taskType ? taskInfo[taskType] : null
+
   return (
     <span className="terminal-title" onDoubleClick={startEditing} title="Double-click to edit">
-      {isCiFix && <RepairIcon />}
+      {task && <task.icon />}
       {title}
+      {task && <span className="terminal-title-task-label">{task.label}</span>}
     </span>
   )
 }

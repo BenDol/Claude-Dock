@@ -71,6 +71,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
+  const [openPluginWindows, setOpenPluginWindows] = useState<Set<string>>(new Set())
 
   // Fetch plugin enabled states, re-fetch when toggled via settings
   useEffect(() => {
@@ -87,6 +88,24 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     fetchStates()
     window.addEventListener('plugin-state-changed', fetchStates)
     return () => window.removeEventListener('plugin-state-changed', fetchStates)
+  }, [projectDir])
+
+  // Track which plugins have open windows
+  useEffect(() => {
+    if (!projectDir) return
+    getDockApi().plugins.getOpenWindows(projectDir).then((ids) => {
+      setOpenPluginWindows(new Set(ids))
+    }).catch(() => {})
+    const cleanup = getDockApi().plugins.onWindowStateChanged(({ pluginId, projectDir: dir, open }) => {
+      if (dir.replace(/[\\/]/g, '/').toLowerCase() !== projectDir.replace(/[\\/]/g, '/').toLowerCase()) return
+      setOpenPluginWindows((prev) => {
+        const next = new Set(prev)
+        if (open) next.add(pluginId)
+        else next.delete(pluginId)
+        return next
+      })
+    })
+    return cleanup
   }, [projectDir])
 
   // Load runtime plugin toolbar actions on mount, sanitizing SVG icons
@@ -244,7 +263,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
             key={action.id}
-            className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap"
+            className={`toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap${openPluginWindows.has(action.id) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => action.onClick(projectDir)}
             title={action.title}
           >
@@ -257,7 +276,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         {runtimeActions.filter((a) => enabledPlugins === null || enabledPlugins.has(a.pluginId)).map((action) => (
           <button
             key={action.pluginId}
-            className="toolbar-btn toolbar-btn-icon"
+            className={`toolbar-btn toolbar-btn-icon${openPluginWindows.has(action.pluginId) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => getDockApi().plugins.invoke(action.action, projectDir)}
             title={action.title}
           >

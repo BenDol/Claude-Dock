@@ -337,6 +337,10 @@
   color: #f7768e;
   background: rgba(247, 118, 142, 0.15);
 }
+.gm-toolbar-count-changes {
+  color: #7aa2f7;
+  background: rgba(122, 162, 247, 0.15);
+}
 
 /* Pull split button */
 .gm-pull-split {
@@ -2113,7 +2117,9 @@
   font-family: var(--term-font-family);
   display: flex;
   align-items: center;
+  gap: 6px;
   min-width: 0;
+  flex: 1;
   color: var(--text-secondary);
 }
 
@@ -2279,6 +2285,34 @@
   background: var(--bg-secondary);
   position: sticky;
   top: 0;
+}
+
+.gm-section-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  vertical-align: middle;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: color 0.12s, background 0.12s;
+}
+
+.gm-section-refresh svg {
+  width: 11px;
+  height: 11px;
+}
+
+.gm-section-refresh:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
   z-index: 3;
 }
 
@@ -2390,7 +2424,8 @@
 
 .gm-file-entry:hover .gm-file-hover-btn,
 .gm-diff-file-header:hover .gm-file-hover-btn,
-.gm-changes-diff-title:hover .gm-file-hover-btn {
+.gm-changes-diff-header:hover .gm-file-hover-btn,
+.gm-changes-section-header:hover .gm-file-hover-btn {
   opacity: 1;
 }
 
@@ -3085,6 +3120,17 @@
 .gm-ctx-item:hover {
   background: var(--accent-color);
   color: white;
+}
+
+.gm-ctx-item-label {
+  display: flex;
+  align-items: center;
+}
+
+.gm-ctx-icon {
+  margin-right: 6px;
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .gm-ctx-item-active {

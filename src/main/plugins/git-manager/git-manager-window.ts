@@ -3,6 +3,7 @@ import * as path from 'path'
 import { getSettings } from '../../settings-store'
 import { getWindowState, saveWindowState } from '../../window-state-store'
 import { log } from '../../logger'
+import { broadcastPluginWindowState } from '../plugin-window-broadcast'
 
 // Use a prefix so git-manager window state doesn't clash with dock window state
 const STATE_KEY_PREFIX = 'gitmgr:'
@@ -48,7 +49,7 @@ export class GitManagerWindowManager {
       minWidth: 800,
       minHeight: 500,
       frame: false,
-      title: `Git - ${path.basename(projectDir)}`,
+      title: `${path.basename(projectDir)} - Git`,
       backgroundColor: isDark ? '#0f0f14' : '#f5f5f5',
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
@@ -63,6 +64,7 @@ export class GitManagerWindowManager {
     }
 
     this.windows.set(projectDir, win)
+    broadcastPluginWindowState('git-manager', projectDir, true)
 
     // Save window state on move/resize/maximize/unmaximize
     const persistState = () => {
@@ -84,6 +86,7 @@ export class GitManagerWindowManager {
 
     win.on('closed', () => {
       this.windows.delete(projectDir)
+      broadcastPluginWindowState('git-manager', projectDir, false)
       log(`[git-manager] window closed for ${projectDir}`)
     })
 
@@ -104,6 +107,11 @@ export class GitManagerWindowManager {
   getWindow(projectDir: string): BrowserWindow | null {
     const win = this.windows.get(projectDir)
     return win && !win.isDestroyed() ? win : null
+  }
+
+  isOpen(projectDir: string): boolean {
+    const win = this.windows.get(projectDir)
+    return !!win && !win.isDestroyed()
   }
 
   close(projectDir: string): void {

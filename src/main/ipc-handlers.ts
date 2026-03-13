@@ -12,6 +12,8 @@ import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, install
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
 import { PluginManager, getPluginsDir } from './plugins'
+import { GitManagerWindowManager } from './plugins/git-manager/git-manager-window'
+import { PluginWindowManager } from './plugins/plugin-window-manager'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -407,6 +409,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_OPEN_DIR, () => {
     shell.openPath(getPluginsDir())
+  })
+
+  ipcMain.handle(IPC.PLUGIN_GET_OPEN_WINDOWS, (_event, projectDir: string) => {
+    const ids: string[] = []
+    if (GitManagerWindowManager.getInstance().isOpen(projectDir)) {
+      ids.push('git-manager')
+    }
+    ids.push(...PluginWindowManager.getInstance().getOpenPluginIds(projectDir))
+    return ids
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

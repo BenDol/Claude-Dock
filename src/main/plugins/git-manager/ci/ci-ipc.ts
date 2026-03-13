@@ -5,6 +5,7 @@ import { CiManager } from './ci-manager'
 import { DockManager } from '../../../dock-manager'
 import { GitManagerWindowManager } from '../git-manager-window'
 import { log, logInfo, logError } from '../../../logger'
+import type { CiFixTask, ClaudeTaskRequest } from '../../../../shared/claude-task-types'
 
 let ciManager: CiManager | null = null
 
@@ -16,6 +17,18 @@ function getManager(): CiManager {
 }
 
 const registry = CiProviderRegistry.getInstance()
+
+function sendTaskToDock(projectDir: string, task: ClaudeTaskRequest): boolean {
+  const docks = DockManager.getInstance().getAllDocks()
+  const dock = docks.find((d) => d.projectDir === projectDir)
+  if (dock && !dock.window.isDestroyed()) {
+    dock.window.webContents.send('claude:task', task)
+    if (dock.window.isMinimized()) dock.window.restore()
+    dock.window.focus()
+    return true
+  }
+  return false
+}
 
 export function registerCiIpc(): void {
   ipcMain.handle(IPC.CI_CHECK_AVAILABLE, async (_event, projectDir: string) => {
@@ -142,16 +155,23 @@ export function registerCiIpc(): void {
   })
 
   // Forward "Fix with Claude" from plugin window to the dock window and focus it
+  // Converts untyped data into a CiFixTask and forwards through the unified claude:task channel
   ipcMain.handle(IPC.CI_FIX_WITH_CLAUDE, async (_event, projectDir: string, data: Record<string, unknown>) => {
-    const docks = DockManager.getInstance().getAllDocks()
-    const dock = docks.find((d) => d.projectDir === projectDir)
-    if (dock && !dock.window.isDestroyed()) {
-      dock.window.webContents.send('ci-fix-with-claude', data)
-      if (dock.window.isMinimized()) dock.window.restore()
-      dock.window.focus()
-      return true
+    const task: CiFixTask = {
+      type: 'ci-fix',
+      runId: data.runId as number,
+      runName: data.runName as string,
+      runNumber: data.runNumber as number,
+      headBranch: data.headBranch as string,
+      failedJobs: data.failedJobs as CiFixTask['failedJobs'],
+      primaryFailedJobId: data.primaryFailedJobId as number | undefined
     }
-    return false
+    return sendTaskToDock(projectDir, task)
+  })
+
+  // Generic Claude task handler — used by git-manager plugin and future task sources
+  ipcMain.handle(IPC.CLAUDE_SEND_TASK, async (_event, projectDir: string, task: ClaudeTaskRequest) => {
+    return sendTaskToDock(projectDir, task)
   })
 
   log('[ci] IPC handlers registered')

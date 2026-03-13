@@ -17,6 +17,7 @@ import type {
   GitSearchResponse
 } from '../shared/git-manager-types'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
+import type { ClaudeTaskRequest } from '../shared/claude-task-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -130,6 +131,8 @@ export interface DockApi {
     getDir: () => Promise<string>
     openDir: () => Promise<void>
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+    getOpenWindows: (projectDir: string) => Promise<string[]>
+    onWindowStateChanged: (callback: (data: { pluginId: string; projectDir: string; open: boolean }) => void) => () => void
   }
   gitManager: {
     isRepo: (projectDir: string) => Promise<boolean>
@@ -218,6 +221,10 @@ export interface DockApi {
   launcher: {
     setZoom: (factor: number) => void
     getZoom: () => number
+  }
+  claudeTask: {
+    send: (projectDir: string, task: ClaudeTaskRequest) => Promise<boolean>
+    onTask: (callback: (task: ClaudeTaskRequest) => void) => () => void
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -321,7 +328,13 @@ const dockApi: DockApi = {
     getToolbarActions: () => ipcRenderer.invoke(IPC.PLUGIN_GET_TOOLBAR_ACTIONS),
     getDir: () => ipcRenderer.invoke(IPC.PLUGIN_GET_DIR),
     openDir: () => ipcRenderer.invoke(IPC.PLUGIN_OPEN_DIR),
-    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    getOpenWindows: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_GET_OPEN_WINDOWS, projectDir),
+    onWindowStateChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: { pluginId: string; projectDir: string; open: boolean }) => callback(data)
+      ipcRenderer.on(IPC.PLUGIN_WINDOW_STATE, handler)
+      return () => ipcRenderer.removeListener(IPC.PLUGIN_WINDOW_STATE, handler)
+    }
   },
   gitManager: {
     isRepo: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_IS_REPO, projectDir),
@@ -428,6 +441,14 @@ const dockApi: DockApi = {
   launcher: {
     setZoom: (factor) => webFrame.setZoomFactor(factor),
     getZoom: () => webFrame.getZoomFactor()
+  },
+  claudeTask: {
+    send: (projectDir, task) => ipcRenderer.invoke(IPC.CLAUDE_SEND_TASK, projectDir, task),
+    onTask: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, task: ClaudeTaskRequest) => callback(task)
+      ipcRenderer.on('claude:task', handler)
+      return () => ipcRenderer.removeListener('claude:task', handler)
+    }
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

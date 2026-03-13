@@ -452,6 +452,14 @@ body {
   color: #9ece6a;
 }
 
+.toolbar-btn-window-open {
+  border-color: #7aa2f7;
+}
+
+.toolbar-btn-window-open:hover {
+  border-color: #7aa2f7;
+}
+
 .toolbar-btn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -642,6 +650,33 @@ body {
 
 .tp-confirm:hover {
   filter: brightness(1.1);
+}
+
+.tp-context {
+  padding: 0 14px 4px;
+}
+
+.tp-context-input {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 36px;
+  max-height: 120px;
+  outline: none;
+}
+
+.tp-context-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.tp-context-input:focus {
+  border-color: var(--accent-color);
 }
 
 /* Toolbar Notification Dropdown */
@@ -900,9 +935,18 @@ body {
   gap: 4px;
 }
 
-.terminal-title-fix-icon {
+.terminal-title-task-icon {
   color: var(--accent-color);
   flex-shrink: 0;
+}
+
+.terminal-title-task-label {
+  color: var(--accent-color);
+  font-size: 9px;
+  font-weight: 600;
+  opacity: 0.8;
+  margin-left: 3px;
+  white-space: nowrap;
 }
 
 .terminal-title-input {

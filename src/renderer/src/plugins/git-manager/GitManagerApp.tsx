@@ -23,6 +23,7 @@ import { highlightDiffHunks } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
+import type { WriteTestsTask } from '../../../../shared/claude-task-types'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
@@ -30,6 +31,18 @@ const projectDir = decodeURIComponent(params.get('projectDir') || '')
 interface NavEntry {
   dir: string
   label: string
+}
+
+/** Send a write-tests task to the dock window */
+function sendWriteTestsTask(files: string[], commitHash?: string, commitSubject?: string): void {
+  const api = getDockApi()
+  const task: WriteTestsTask = {
+    type: 'write-tests',
+    files,
+    commitHash,
+    commitSubject
+  }
+  api.claudeTask.send(projectDir, task)
 }
 
 // --- Action error with resolutions ---
@@ -359,7 +372,7 @@ const GitManagerApp: React.FC = () => {
   // Set window title based on active directory
   useEffect(() => {
     const name = activeDir.split(/[/\\]/).pop() || activeDir
-    document.title = `Git - ${name}`
+    document.title = `${name} - Git`
   }, [activeDir])
 
   // Zoom: Ctrl+MWB and Ctrl++/- with persistence
@@ -898,9 +911,15 @@ const GitManagerApp: React.FC = () => {
               setPullDialogOpen(true)
             }}
           />
-          <button className="gm-toolbar-btn" onClick={handlePush} title={`Push${currentBranch?.ahead ? ` (${currentBranch.ahead} commit${currentBranch.ahead > 1 ? 's' : ''} ahead)` : ''}`} disabled={pushing}>
-            {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push{currentBranch?.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
-          </button>
+          {currentBranch?.ahead ? (
+            <button className="gm-toolbar-btn" onClick={handlePush} title={`Push (${currentBranch.ahead} commit${currentBranch.ahead > 1 ? 's' : ''} ahead)`} disabled={pushing}>
+              {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push<span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span>
+            </button>
+          ) : (
+            <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
+              <ChangesIcon /> Changes{status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 ? <span className="gm-toolbar-count gm-toolbar-count-changes">{status.staged.length + status.unstaged.length + status.untracked.length}</span> : null}
+            </button>
+          )}
           <button className="gm-toolbar-btn" onClick={() => api.gitManager.openBash(activeDir)} title="Open Git Bash">
             <BashIcon />
           </button>
@@ -2100,7 +2119,9 @@ const LazyDiffFile: React.FC<{
   onScrolled: () => void
   onLineMouseDown: (key: string, e: React.MouseEvent) => void
   onContextMenu: (fileIdx: number, e: React.MouseEvent) => void
-}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu }) => {
+  commitHash?: string
+  commitSubject?: string
+}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu, commitHash, commitSubject }) => {
   const api = getDockApi()
   const [visible, setVisible] = useState(fi < 5) // render first 5 eagerly
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -2173,6 +2194,11 @@ const LazyDiffFile: React.FC<{
           onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
           title="Show in folder"
         ><ShowInFolderIcon /></button>
+        <button
+          className="gm-file-hover-btn"
+          onClick={() => sendWriteTestsTask([f.path], commitHash, commitSubject)}
+          title="Write tests"
+        ><WriteTestsIcon /></button>
         <span className="gm-diff-file-stats">
           {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
           {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
@@ -2619,6 +2645,8 @@ const CommitDetailPanel: React.FC<{
             onScrolled={clearScrollTo}
             onLineMouseDown={handleLineMouseDown}
             onContextMenu={handleContextMenu}
+            commitHash={detail.hash}
+            commitSubject={detail.subject}
           />
         ))}
       </div>
@@ -3458,15 +3486,20 @@ const WorkingChanges: React.FC<{
           {/* Unstaged / untracked */}
           <div className="gm-changes-section">
             <div className="gm-changes-section-header">
-              <span>Unstaged ({allUnstaged.length})</span>
+              <span>Unstaged ({allUnstaged.length}) <button className="gm-section-refresh" onClick={refreshStatus} title="Refresh"><RefreshIcon /></button></span>
               <div className="gm-section-actions">
-                <button className="gm-section-icon-btn" onClick={handleStashUnstaged} disabled={busy || allUnstaged.length === 0} title="Stash unstaged & untracked changes (keep staged)">
-                  <StashIcon />
-                </button>
                 {allUnstaged.length > 0 && (
-                  <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
-                    Stage All
-                  </button>
+                  <>
+                    <button className="gm-file-hover-btn" onClick={() => sendWriteTestsTask(allUnstaged.map(f => f.path))} title="Write tests for unstaged files">
+                      <WriteTestsIcon />
+                    </button>
+                    <button className="gm-file-hover-btn" onClick={handleStashUnstaged} disabled={busy} title="Stash unstaged & untracked changes (keep staged)">
+                      <StashIcon />
+                    </button>
+                    <button className="gm-small-btn" onClick={handleStageAll} disabled={busy}>
+                      Stage All
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -3492,15 +3525,20 @@ const WorkingChanges: React.FC<{
           {/* Staged files */}
           <div className="gm-changes-section">
             <div className="gm-changes-section-header">
-              <span>Staged ({status.staged.length})</span>
+              <span>Staged ({status.staged.length}) <button className="gm-section-refresh" onClick={refreshStatus} title="Refresh"><RefreshIcon /></button></span>
               <div className="gm-section-actions">
-                <button className="gm-section-icon-btn" onClick={handleStashStaged} disabled={busy || status.staged.length === 0} title="Stash all changes">
-                  <StashIcon />
-                </button>
                 {status.staged.length > 0 && (
-                  <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
-                    Unstage All
-                  </button>
+                  <>
+                    <button className="gm-file-hover-btn" onClick={() => sendWriteTestsTask(status.staged.map(f => f.path))} title="Write tests for staged files">
+                      <WriteTestsIcon />
+                    </button>
+                    <button className="gm-file-hover-btn" onClick={handleStashStaged} disabled={busy} title="Stash all changes">
+                      <StashIcon />
+                    </button>
+                    <button className="gm-small-btn" onClick={handleUnstageAll} disabled={busy}>
+                      Unstage All
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -3624,6 +3662,7 @@ const WorkingChanges: React.FC<{
           file={fileCtx.file}
           section={fileCtx.section}
           projectDir={projectDir}
+          selectedPaths={selectedPaths}
           onClose={() => setFileCtx(null)}
           onRefresh={onRefresh}
         />
@@ -3639,9 +3678,10 @@ const FileContextMenu: React.FC<{
   file: GitFileStatusEntry
   section: 'staged' | 'unstaged'
   projectDir: string
+  selectedPaths: Set<string>
   onClose: () => void
   onRefresh: () => void
-}> = ({ x, y, file, section, projectDir, onClose, onRefresh }) => {
+}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
 
@@ -3666,81 +3706,92 @@ const FileContextMenu: React.FC<{
   }, [])
 
   const api = getDockApi()
+  const isMulti = selectedPaths.size > 1 && selectedPaths.has(file.path)
+  const targetPaths = isMulti ? [...selectedPaths] : [file.path]
+  const count = targetPaths.length
+  const suffix = count > 1 ? ` (${count} files)` : ''
   const isUntracked = file.workTreeStatus === '?' || file.workTreeStatus === 'untracked'
   const fileName = file.path.split('/').pop() || file.path
 
-  const doStage = async () => { onClose(); await api.gitManager.stage(projectDir, [file.path]); onRefresh() }
-  const doUnstage = async () => { onClose(); await api.gitManager.unstage(projectDir, [file.path]); onRefresh() }
+  const doStage = async () => { onClose(); await api.gitManager.stage(projectDir, targetPaths); onRefresh() }
+  const doUnstage = async () => { onClose(); await api.gitManager.unstage(projectDir, targetPaths); onRefresh() }
 
   const doDiscard = async () => {
     onClose()
     if (isUntracked) {
-      await api.gitManager.deleteFiles(projectDir, [file.path])
+      await api.gitManager.deleteFiles(projectDir, targetPaths)
     } else {
-      await api.gitManager.discard(projectDir, [file.path])
+      await api.gitManager.discard(projectDir, targetPaths)
     }
     onRefresh()
   }
 
   const doDelete = async () => {
     onClose()
-    await api.gitManager.deleteFiles(projectDir, [file.path])
+    await api.gitManager.deleteFiles(projectDir, targetPaths)
     onRefresh()
   }
 
-  const doShowInFolder = () => { onClose(); api.gitManager.showInFolder(projectDir, file.path) }
-  const doOpenFile = () => { onClose(); api.app.openInExplorer(projectDir + '/' + file.path) }
+  const doShowInFolder = () => { onClose(); targetPaths.forEach(p => api.gitManager.showInFolder(projectDir, p)) }
+  const doOpenFile = () => { onClose(); targetPaths.forEach(p => api.app.openInExplorer(projectDir + '/' + p)) }
   const doCopyPath = (text: string) => { navigator.clipboard.writeText(text); onClose() }
 
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       {section === 'unstaged' ? (
-        <div className="gm-ctx-item" onClick={doStage}><span>Stage</span><span className="gm-ctx-shortcut">S</span></div>
+        <div className="gm-ctx-item" onClick={doStage}><span>Stage{suffix}</span><span className="gm-ctx-shortcut">S</span></div>
       ) : (
-        <div className="gm-ctx-item" onClick={doUnstage}><span>Unstage</span><span className="gm-ctx-shortcut">U</span></div>
+        <div className="gm-ctx-item" onClick={doUnstage}><span>Unstage{suffix}</span><span className="gm-ctx-shortcut">U</span></div>
       )}
       {section === 'unstaged' && (
         <div className="gm-ctx-item gm-ctx-danger" onClick={doDiscard}>
-          {isUntracked ? 'Delete file' : 'Discard changes'}
+          {isUntracked ? `Delete file${count > 1 ? 's' : ''}` : `Discard changes${suffix}`}
         </div>
       )}
       {section === 'staged' && !isUntracked && (
         <div className="gm-ctx-item gm-ctx-danger" onClick={async () => {
           onClose()
-          await api.gitManager.unstage(projectDir, [file.path])
-          await api.gitManager.discard(projectDir, [file.path])
+          await api.gitManager.unstage(projectDir, targetPaths)
+          await api.gitManager.discard(projectDir, targetPaths)
           onRefresh()
-        }}>Unstage and discard changes</div>
+        }}>Unstage and discard changes{suffix}</div>
       )}
       <div className="gm-ctx-separator" />
-      <div className="gm-ctx-item" onClick={doOpenFile}>Open file</div>
-      <div className="gm-ctx-item" onClick={doShowInFolder}>Show in folder</div>
+      <div className="gm-ctx-item" onClick={doOpenFile}>Open file{count > 1 ? 's' : ''}{suffix}</div>
+      <div className="gm-ctx-item" onClick={doShowInFolder}>Show in folder{count > 1 ? 's' : ''}{suffix}</div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => {
+        onClose()
+        sendWriteTestsTask(targetPaths)
+      }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests{suffix}</span></div>
       <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item gm-ctx-submenu-trigger"
         onMouseEnter={() => setCopySubmenu(true)}
         onMouseLeave={() => setCopySubmenu(false)}
       >
-        <span>Copy path(s)</span>
+        <span>Copy path{count > 1 ? 's' : ''}</span>
         <span className="gm-ctx-arrow">&#9656;</span>
         {copySubmenu && (
           <div className="gm-ctx-submenu">
-            <div className="gm-ctx-item" onClick={() => doCopyPath(file.path)}>
-              Relative: {file.path}
+            <div className="gm-ctx-item" onClick={() => doCopyPath(targetPaths.join('\n'))}>
+              Relative{count > 1 ? ` (${count})` : `: ${file.path}`}
             </div>
-            <div className="gm-ctx-item" onClick={() => doCopyPath(projectDir + '/' + file.path)}>
-              Full path
+            <div className="gm-ctx-item" onClick={() => doCopyPath(targetPaths.map(p => projectDir + '/' + p).join('\n'))}>
+              Full path{count > 1 ? ` (${count})` : ''}
             </div>
-            <div className="gm-ctx-item" onClick={() => doCopyPath(fileName)}>
-              Filename: {fileName}
-            </div>
+            {count === 1 && (
+              <div className="gm-ctx-item" onClick={() => doCopyPath(fileName)}>
+                Filename: {fileName}
+              </div>
+            )}
           </div>
         )}
       </div>
       {section === 'unstaged' && isUntracked && (
         <>
           <div className="gm-ctx-separator" />
-          <div className="gm-ctx-item gm-ctx-danger" onClick={doDelete}>Delete file</div>
+          <div className="gm-ctx-item gm-ctx-danger" onClick={doDelete}>Delete file{count > 1 ? 's' : ''}{suffix}</div>
         </>
       )}
     </div>
@@ -4104,6 +4155,11 @@ const WorkingDiffViewer: React.FC<{
                 onClick={() => api.gitManager.showInFolder(projectDir, filePath)}
                 title="Show in folder"
               ><ShowInFolderIcon /></button>
+              <button
+                className="gm-file-hover-btn"
+                onClick={() => sendWriteTestsTask([filePath])}
+                title="Write tests"
+              ><WriteTestsIcon /></button>
             </>
           )}
         </span>
@@ -4131,6 +4187,11 @@ const WorkingDiffViewer: React.FC<{
                     onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
                     title="Show in folder"
                   ><ShowInFolderIcon /></button>
+                  <button
+                    className="gm-file-hover-btn"
+                    onClick={() => sendWriteTestsTask([f.path])}
+                    title="Write tests"
+                  ><WriteTestsIcon /></button>
                   <DiffStats diffs={[f]} />
                 </div>
               )}
@@ -5357,6 +5418,14 @@ const CommitContextMenu: React.FC<{
       </div>
       <div className="gm-ctx-item" onClick={doCherryPick}>
         Cherry pick this commit...
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => {
+        onClose()
+        // Commit hash is enough — Claude will run `git show` to see the diff
+        sendWriteTestsTask([], commit.hash, commit.subject)
+      }}>
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span>
       </div>
     </div>
   )
@@ -7136,6 +7205,14 @@ const ShowInFolderIcon: React.FC = () => (
   </svg>
 )
 
+const WriteTestsIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" />
+    <line x1="8" y1="2" x2="16" y2="2" />
+    <line x1="6" y1="18" x2="18" y2="18" />
+  </svg>
+)
+
 const FolderIcon: React.FC = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
@@ -7179,6 +7256,15 @@ const PushIcon: React.FC = () => (
     <line x1="12" y1="12" x2="12" y2="21" />
     <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3" />
     <polyline points="16 16 12 12 8 16" />
+  </svg>
+)
+
+const ChangesIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="12" y1="18" x2="12" y2="12" />
+    <line x1="9" y1="15" x2="15" y2="15" />
   </svg>
 )
 

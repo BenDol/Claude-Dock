@@ -129,10 +129,17 @@ export const IPC = {
   CI_RERUN_FAILED: 'ci:rerunFailed',
   CI_NAVIGATE_TO_RUN: 'ci:navigateToRun',
 
+  // Claude Tasks
+  CLAUDE_SEND_TASK: 'claude:sendTask',
+
+  // Plugin windows
+  PLUGIN_GET_OPEN_WINDOWS: 'plugin:getOpenWindows',
+
   // Main -> Renderer (send)
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
   SETTINGS_CHANGED: 'settings:changed',
   UPDATER_PROGRESS: 'updater:progress',
-  NOTIFICATION_SHOW: 'notification:show'
+  NOTIFICATION_SHOW: 'notification:show',
+  PLUGIN_WINDOW_STATE: 'plugin:windowState'
 } as const

@@ -12,6 +12,8 @@ import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
+import type { ClaudeTaskRequest, CiFixTask } from '../../shared/claude-task-types'
+import { getTaskMeta } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
 const isLauncher = searchParams.has('launcher')
@@ -119,6 +121,98 @@ function extractErrorContext(fullLog: string, contextLines = 10): string {
   return result
 }
 
+async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnType<typeof getDockApi>, dir: string): Promise<string> {
+  try {
+    const { runName, runNumber, headBranch: branch, failedJobs } = task
+
+    // Fetch logs for all failed jobs
+    const jobLogSnippets: { name: string; log: string }[] = []
+    for (const fj of failedJobs) {
+      if (!fj.id) continue
+      try {
+        const fullLog = await api.ci.getJobLog(dir, fj.id)
+        if (fullLog) {
+          const snippet = extractErrorContext(fullLog, 10)
+          if (snippet) jobLogSnippets.push({ name: fj.name, log: snippet })
+        }
+      } catch { /* continue without log */ }
+    }
+
+    const jobList = failedJobs.map((j) => {
+      const steps = j.failedSteps.length > 0 ? ` (failed steps: ${j.failedSteps.join(', ')})` : ''
+      return `  - ${j.name}${steps}`
+    }).join('\n')
+
+    let logSection = ''
+    if (jobLogSnippets.length === 1) {
+      logSection = `\nRelevant error output from "${jobLogSnippets[0].name}":\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
+    } else if (jobLogSnippets.length > 1) {
+      logSection = '\nRelevant error output:\n' + jobLogSnippets.map(
+        (s) => `\n--- ${s.name} ---\n\`\`\`\n${s.log}\n\`\`\``
+      ).join('\n') + '\n'
+    }
+
+    const contextSection = context ? `\nAdditional instructions from the user:\n${context}\n` : ''
+
+    return `A CI build has failed and needs to be fixed.\n\n` +
+      `Workflow: ${runName || 'CI Run'} #${runNumber || 0}\n` +
+      `Branch: ${branch}\n` +
+      (jobList ? `Failed jobs:\n${jobList}\n` : '') +
+      logSection +
+      contextSection +
+      `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
+      `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
+      `The fix MUST be committed and pushed to the branch "${branch}". ` +
+      `You MUST NOT disturb the user's current working tree, staged files, or checked-out branch. ` +
+      `Use a git worktree to work in isolation:\n` +
+      `  1. Run: git worktree add ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')} ${branch}\n` +
+      `  2. cd into the worktree directory and make your fix there\n` +
+      `  IMPORTANT: The worktree will NOT have node_modules or other installed dependencies. ` +
+      `Do NOT run tests, builds, or linters from the worktree. Always run those from the original project directory if needed. ` +
+      `The worktree is ONLY for making code changes, committing, and pushing.\n` +
+      `  3. Commit and push from the worktree: git push origin ${branch}\n` +
+      `  4. cd back to the original directory and clean up: git worktree remove ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')}\n` +
+      `Pushing the fix will automatically trigger a new CI run.\n\n` +
+      `IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
+      `If you cannot fix the issue or need more information, do NOT output this marker.`
+  } catch {
+    return 'A CI build has failed. Please check the CI logs and fix the issue.\n\n' +
+      'IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line.'
+  }
+}
+
+function buildWriteTestsPrompt(task: import('../../shared/claude-task-types').WriteTestsTask, context: string): string {
+  const parts: string[] = []
+
+  if (task.commitHash) {
+    parts.push(
+      `Write tests for the changes in commit ${task.commitHash.slice(0, 8)}${task.commitSubject ? ` ("${task.commitSubject}")` : ''}.`,
+      `Run \`git show ${task.commitHash}\` to see the full diff, then read the source files to understand the full context.`
+    )
+  } else {
+    parts.push(
+      `Write tests for the following files:`,
+      task.files.map(f => `  - ${f}`).join('\n'),
+      `Read each file to understand what it does before writing tests.`
+    )
+  }
+
+  if (context) {
+    parts.push(`\nAdditional instructions:\n${context}`)
+  }
+
+  parts.push(
+    '\nBefore writing tests, carefully review the code logic for correctness. ' +
+    'If you identify any bugs, edge cases, or unsound logic, fix those issues first. ' +
+    'Then write tests that verify both the corrected behavior and the existing functionality, ' +
+    'ensuring the code is robust and sound.\n\n' +
+    'Follow the existing test patterns and conventions in this project. ' +
+    'If test files already exist for these modules, add to them; otherwise create new test files in the appropriate location.'
+  )
+
+  return parts.join('\n')
+}
+
 function DockApp() {
   const terminals = useDockStore((s) => s.terminals)
   const projectDir = useDockStore((s) => s.projectDir)
@@ -155,7 +249,7 @@ function DockApp() {
   useEffect(() => {
     if (projectDir) {
       const name = projectDir.split(/[/\\]/).pop() || projectDir
-      document.title = `Claude Dock - ${name}`
+      document.title = `${name} - Claude Dock`
     }
   }, [projectDir])
 
@@ -177,20 +271,35 @@ function DockApp() {
     return cleanup
   }, [setTerminalAlive])
 
-  // "Fix with Claude" — show terminal picker, then send prompt to chosen terminal
-  const [pendingFixData, setPendingFixData] = useState<Record<string, unknown> | null>(null)
+  // "Send to Claude" — show terminal picker, then send prompt to chosen terminal
+  const [pendingTask, setPendingTask] = useState<ClaudeTaskRequest | null>(null)
 
   useEffect(() => {
-    const handler = (data: Record<string, unknown>) => {
-      if (data?.runId) setPendingFixData(data)
-    }
-    const domHandler = (e: Event) => handler((e as CustomEvent).detail as Record<string, unknown>)
-    window.addEventListener('ci-fix-with-claude', domHandler)
     const api = getDockApi()
-    const ipcCleanup = api.ci.onFixWithClaude(handler)
+    // Listen for tasks from IPC (generic claude:task channel)
+    const ipcCleanup = api.claudeTask.onTask((task) => {
+      setPendingTask(task)
+    })
+    // Listen for CI fix from DOM events (notification-triggered)
+    const domHandler = (e: Event) => {
+      const data = (e as CustomEvent).detail as Record<string, unknown>
+      if (data?.runId) {
+        const task: CiFixTask = {
+          type: 'ci-fix',
+          runId: data.runId as number,
+          runName: data.runName as string,
+          runNumber: data.runNumber as number,
+          headBranch: data.headBranch as string,
+          failedJobs: data.failedJobs as CiFixTask['failedJobs'],
+          primaryFailedJobId: data.primaryFailedJobId as number | undefined
+        }
+        setPendingTask(task)
+      }
+    }
+    window.addEventListener('ci-fix-with-claude', domHandler)
     return () => {
-      window.removeEventListener('ci-fix-with-claude', domHandler)
       ipcCleanup()
+      window.removeEventListener('ci-fix-with-claude', domHandler)
     }
   }, [])
 
@@ -256,97 +365,49 @@ function DockApp() {
     ciFixCleanups.current.set(termId, () => { doCleanup(); exitCleanup() })
   }, [removeTerminal, stripAnsi])
 
-  const handleFixTerminalSelected = useCallback(async (terminalId: string | null) => {
-    const data = pendingFixData
-    setPendingFixData(null)
-    if (!data) return
+  const handleTaskTerminalSelected = useCallback(async (terminalId: string | null, context: string) => {
+    const task = pendingTask
+    setPendingTask(null)
+    if (!task) return
 
     const api = getDockApi()
     const dir = useDockStore.getState().projectDir
-    // Build prompt from failure data
-    let failurePrompt = ''
-    try {
-      const runName = (data.runName as string) || 'CI Run'
-      const runNumber = (data.runNumber as number) || 0
-      const branch = (data.headBranch as string) || ''
-      const failedJobs = (data.failedJobs as Array<{ id: number; name: string; failedSteps: string[] }>) || []
+    const meta = getTaskMeta(task)
 
-      // Fetch logs for all failed jobs (not just the first)
-      const jobLogSnippets: { name: string; log: string }[] = []
-      for (const fj of failedJobs) {
-        if (!fj.id) continue
-        try {
-          const fullLog = await api.ci.getJobLog(dir, fj.id)
-          if (fullLog) {
-            const snippet = extractErrorContext(fullLog, 10)
-            if (snippet) jobLogSnippets.push({ name: fj.name, log: snippet })
-          }
-        } catch { /* continue without log */ }
-      }
-
-      const jobList = failedJobs.map((j) => {
-        const steps = j.failedSteps.length > 0 ? ` (failed steps: ${j.failedSteps.join(', ')})` : ''
-        return `  - ${j.name}${steps}`
-      }).join('\n')
-
-      // Build log section — include all job logs with headers if multiple
-      let logSection = ''
-      if (jobLogSnippets.length === 1) {
-        logSection = `\nRelevant error output from "${jobLogSnippets[0].name}":\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
-      } else if (jobLogSnippets.length > 1) {
-        logSection = '\nRelevant error output:\n' + jobLogSnippets.map(
-          (s) => `\n--- ${s.name} ---\n\`\`\`\n${s.log}\n\`\`\``
-        ).join('\n') + '\n'
-      }
-
-      failurePrompt = `A CI build has failed and needs to be fixed.\n\n` +
-        `Workflow: ${runName} #${runNumber}\n` +
-        `Branch: ${branch}\n` +
-        (jobList ? `Failed jobs:\n${jobList}\n` : '') +
-        logSection +
-        `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
-        `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
-        `The fix MUST be committed and pushed to the branch "${branch}". ` +
-        `You MUST NOT disturb the user's current working tree, staged files, or checked-out branch. ` +
-        `Use a git worktree to work in isolation:\n` +
-        `  1. Run: git worktree add ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')} ${branch}\n` +
-        `  2. cd into the worktree directory and make your fix there\n` +
-        `  IMPORTANT: The worktree will NOT have node_modules or other installed dependencies. ` +
-        `Do NOT run tests, builds, or linters from the worktree. Always run those from the original project directory if needed. ` +
-        `The worktree is ONLY for making code changes, committing, and pushing.\n` +
-        `  3. Commit and push from the worktree: git push origin ${branch}\n` +
-        `  4. cd back to the original directory and clean up: git worktree remove ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')}\n` +
-        `Pushing the fix will automatically trigger a new CI run.\n\n` +
-        `IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
-        `If you cannot fix the issue or need more information, do NOT output this marker.`
-    } catch {
-      failurePrompt = 'A CI build has failed. Please check the CI logs and fix the issue.\n\n' +
-        'IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line.'
+    // Build prompt based on task type
+    let prompt = ''
+    if (task.type === 'ci-fix') {
+      prompt = await buildCiFixPrompt(task, context, api, dir)
+    } else if (task.type === 'write-tests') {
+      prompt = buildWriteTestsPrompt(task, context)
     }
 
     const sendToTerminal = (termId: string) => {
-      const paste = `\x1b[200~${failurePrompt}\x1b[201~`
+      const paste = `\x1b[200~${prompt}\x1b[201~`
       api.terminal.write(termId, paste)
       setTimeout(() => api.terminal.write(termId, '\x1b'), 400)
       setTimeout(() => api.terminal.write(termId, '\r'), 700)
     }
 
     const startMonitoring = (termId: string) => {
-      // Start monitoring after prompt is submitted (give time for paste + submit)
-      setTimeout(() => monitorForCompletion(termId, data), 1500)
+      if (meta.completionMarker) {
+        // Start monitoring after prompt is submitted (give time for paste + submit)
+        setTimeout(() => monitorForCompletion(termId, task as Record<string, unknown>), 1500)
+      }
     }
 
     if (terminalId) {
-      // Existing terminal — send prompt directly
-      useDockStore.getState().setFocusedTerminal(terminalId)
-      useDockStore.getState().setTerminalCiFix(terminalId, true)
+      // Existing terminal — send prompt directly, don't steal focus
+      useDockStore.getState().setTerminalClaudeTask(terminalId, task.type)
       sendToTerminal(terminalId)
       startMonitoring(terminalId)
     } else {
       // New terminal — create, wait for Claude to start, then send
       const termId = `term-${nextTermId++}-${Date.now()}`
+      const prevFocus = useDockStore.getState().focusedTerminalId
+      useDockStore.getState().setTerminalClaudeTask(termId, task.type)
       addTerminal(termId)
-      useDockStore.getState().setTerminalCiFix(termId, true)
+      if (prevFocus) useDockStore.getState().setFocusedTerminal(prevFocus)
 
       let sent = false
       const send = () => {
@@ -367,9 +428,9 @@ function DockApp() {
       })
       setTimeout(() => { cleanup(); send() }, 8000)
     }
-  }, [pendingFixData, addTerminal, monitorForCompletion])
+  }, [pendingTask, addTerminal, monitorForCompletion])
 
-  // Handle manual cancellation of CI fix terminals
+  // Handle manual cancellation of Claude task terminals
   useEffect(() => {
     const handler = (e: Event) => {
       const termId = (e as CustomEvent).detail as string
@@ -377,10 +438,10 @@ function DockApp() {
       // Clean up the completion monitor
       const cleanup = ciFixCleanups.current.get(termId)
       if (cleanup) cleanup()
-      useDockStore.getState().setTerminalCiFix(termId, false)
+      useDockStore.getState().setTerminalClaudeTask(termId, null)
     }
-    window.addEventListener('ci-fix-cancelled', handler)
-    return () => window.removeEventListener('ci-fix-cancelled', handler)
+    window.addEventListener('claude-task-cancelled', handler)
+    return () => window.removeEventListener('claude-task-cancelled', handler)
   }, [])
 
   // Cleanup CI fix monitors on unmount
@@ -504,9 +565,12 @@ function DockApp() {
   const handleCloseFocused = useCallback(() => {
     const state = useDockStore.getState()
     if (!state.focusedTerminalId) return
-    if (state.ciFixTerminals.has(state.focusedTerminalId)) {
-      if (!window.confirm('This terminal is running a CI fix. Close it and cancel the fix?')) return
-      window.dispatchEvent(new CustomEvent('ci-fix-cancelled', { detail: state.focusedTerminalId }))
+    const taskType = state.claudeTaskTerminals.get(state.focusedTerminalId)
+    if (taskType) {
+      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task' }
+      const label = labels[taskType] || 'a Claude task'
+      if (!window.confirm(`This terminal is running ${label}. Close it and cancel?`)) return
+      window.dispatchEvent(new CustomEvent('claude-task-cancelled', { detail: state.focusedTerminalId }))
     }
     getDockApi().terminal.kill(state.focusedTerminalId)
     removeTerminal(state.focusedTerminalId)
@@ -529,23 +593,26 @@ function DockApp() {
         <DockGrid />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {pendingFixData && (
+      {pendingTask && (
         <TerminalPicker
-          onSelect={handleFixTerminalSelected}
-          onClose={() => setPendingFixData(null)}
+          taskLabel={getTaskMeta(pendingTask).label}
+          onSelect={handleTaskTerminalSelected}
+          onClose={() => setPendingTask(null)}
         />
       )}
     </div>
   )
 }
 
-function TerminalPicker({ onSelect, onClose }: {
-  onSelect: (terminalId: string | null) => void
+function TerminalPicker({ taskLabel, onSelect, onClose }: {
+  taskLabel: string
+  onSelect: (terminalId: string | null, context: string) => void
   onClose: () => void
 }) {
   const terminals = useDockStore((s) => s.terminals)
   const maxCols = useSettingsStore((s) => s.settings.grid.maxColumns)
   const [selected, setSelected] = useState<string | null>(null) // null = new terminal
+  const [contextText, setContextText] = useState('')
 
   const backdropRef = useRef<HTMLDivElement>(null)
 
@@ -554,14 +621,17 @@ function TerminalPicker({ onSelect, onClose }: {
   const { cols, layout } = computeAutoLayout(allIds, maxCols)
   const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y)) + 1 : 1
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      if (e.key === 'Enter') onSelect(selected)
+  const handleModalKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      onClose()
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [selected, onSelect, onClose])
+    if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
+      e.preventDefault()
+      e.stopPropagation()
+      onSelect(selected, contextText)
+    }
+  }, [selected, contextText, onSelect, onClose])
 
   return (
     <div
@@ -569,9 +639,10 @@ function TerminalPicker({ onSelect, onClose }: {
       ref={backdropRef}
       onClick={(e) => { if (e.target === backdropRef.current) onClose() }}
     >
-      <div className="tp-modal">
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div className="tp-modal" onKeyDown={handleModalKeyDown}>
         <div className="tp-header">
-          <span className="tp-title">Send to terminal</span>
+          <span className="tp-title">{taskLabel} — Send to terminal</span>
           <button className="tp-close" onClick={onClose}>{'\u2715'}</button>
         </div>
         <div
@@ -610,9 +681,18 @@ function TerminalPicker({ onSelect, onClose }: {
             )
           })}
         </div>
+        <div className="tp-context">
+          <textarea
+            className="tp-context-input"
+            placeholder="Optional instructions for Claude..."
+            value={contextText}
+            onChange={(e) => setContextText(e.target.value)}
+            rows={2}
+          />
+        </div>
         <div className="tp-footer">
           <button className="tp-cancel" onClick={onClose}>Cancel</button>
-          <button className="tp-confirm" onClick={() => onSelect(selected)}>
+          <button className="tp-confirm" onClick={() => onSelect(selected, contextText)}>
             {selected === null ? 'Create & Send' : 'Send'}
           </button>
         </div>

@@ -41,7 +41,7 @@ export class DockWindow {
       show: false, // Defer show until page is ready to avoid GPU blocking
       frame: false,
       backgroundColor: '#0f0f14',
-      title: `Claude Dock - ${path.basename(projectDir)}`,
+      title: `${path.basename(projectDir)} - Claude Dock`,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,

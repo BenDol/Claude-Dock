@@ -44,7 +44,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   useEffect(() => {
     if (!spawnedRef.current) {
       spawnedRef.current = true
-      const ephemeral = useDockStore.getState().ciFixTerminals.has(terminalId)
+      const ephemeral = useDockStore.getState().claudeTaskTerminals.has(terminalId)
       getDockApi().terminal.spawn(terminalId, ephemeral ? { ephemeral: true } : undefined)
     }
   }, [terminalId])

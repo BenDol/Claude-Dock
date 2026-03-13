@@ -81,9 +81,12 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
-    if (state.ciFixTerminals.has(terminalId)) {
-      if (!window.confirm('This terminal is running a CI fix. Close it and cancel the fix?')) return
-      window.dispatchEvent(new CustomEvent('ci-fix-cancelled', { detail: terminalId }))
+    const taskType = state.claudeTaskTerminals.get(terminalId)
+    if (taskType) {
+      const labels: Record<string, string> = { 'ci-fix': 'a CI fix', 'write-tests': 'a Write Tests task' }
+      const label = labels[taskType] || 'a Claude task'
+      if (!window.confirm(`This terminal is running ${label}. Close it and cancel?`)) return
+      window.dispatchEvent(new CustomEvent('claude-task-cancelled', { detail: terminalId }))
     }
     getDockApi().terminal.kill(terminalId)
     removeTerminal(terminalId)

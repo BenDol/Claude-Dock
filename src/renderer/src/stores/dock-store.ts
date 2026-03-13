@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TerminalInfo, GridMode } from '../types'
+import type { ClaudeTaskRequest } from '../../../shared/claude-task-types'
 
 interface DockState {
   dockId: string
@@ -11,7 +12,8 @@ interface DockState {
   unlockedTerminals: Set<string>
   rcTerminals: Set<string>
   loadingTerminals: Set<string>
-  ciFixTerminals: Set<string>
+  /** Maps terminal ID → task type string for terminals running Claude tasks */
+  claudeTaskTerminals: Map<string, ClaudeTaskRequest['type']>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -26,7 +28,7 @@ interface DockState {
   focusNextTerminal: () => void
   setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
-  setTerminalCiFix: (id: string, active: boolean) => void
+  setTerminalClaudeTask: (id: string, taskType: ClaudeTaskRequest['type'] | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -39,7 +41,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   unlockedTerminals: new Set<string>(),
   rcTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
-  ciFixTerminals: new Set<string>(),
+  claudeTaskTerminals: new Map<string, ClaudeTaskRequest['type']>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -68,9 +70,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       rcTerminals.delete(id)
       const unlockedTerminals = new Set(state.unlockedTerminals)
       unlockedTerminals.delete(id)
-      const ciFixTerminals = new Set(state.ciFixTerminals)
-      ciFixTerminals.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, ciFixTerminals }
+      const claudeTaskTerminals = new Map(state.claudeTaskTerminals)
+      claudeTaskTerminals.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -129,11 +131,11 @@ export const useDockStore = create<DockState>((set, get) => ({
       return { loadingTerminals: next }
     }),
 
-  setTerminalCiFix: (id, active) =>
+  setTerminalClaudeTask: (id, taskType) =>
     set((state) => {
-      const next = new Set(state.ciFixTerminals)
-      if (active) next.add(id)
+      const next = new Map(state.claudeTaskTerminals)
+      if (taskType) next.set(id, taskType)
       else next.delete(id)
-      return { ciFixTerminals: next }
+      return { claudeTaskTerminals: next }
     })
 }))

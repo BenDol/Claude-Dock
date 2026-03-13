@@ -3,6 +3,7 @@ import * as path from 'path'
 import type { PluginManifest } from '../../shared/plugin-manifest'
 import { getSettings } from '../settings-store'
 import { log } from '../logger'
+import { broadcastPluginWindowState } from './plugin-window-broadcast'
 
 /**
  * Generic window manager for runtime plugins.
@@ -56,9 +57,11 @@ export class PluginWindowManager {
     })
 
     this.windows.set(k, win)
+    broadcastPluginWindowState(manifest.id, projectDir, true)
 
     win.on('closed', () => {
       this.windows.delete(k)
+      broadcastPluginWindowState(manifest.id, projectDir, false)
       log(`[plugin-window] ${manifest.id} window closed for ${projectDir}`)
     })
 
@@ -69,6 +72,16 @@ export class PluginWindowManager {
     })
 
     log(`[plugin-window] ${manifest.id} window opened for ${projectDir}`)
+  }
+
+  getOpenPluginIds(projectDir: string): string[] {
+    const ids: string[] = []
+    for (const [key, win] of this.windows) {
+      if (key.endsWith(`:${projectDir}`) && !win.isDestroyed()) {
+        ids.push(key.split(':')[0])
+      }
+    }
+    return ids
   }
 
   close(pluginId: string, projectDir: string): void {
