@@ -207,6 +207,10 @@ function DockApp() {
     const api = getDockApi()
     const MARKER = 'CI_FIX_COMPLETE'
     let buf = ''
+    // The prompt text we sent contains the MARKER as an instruction to Claude.
+    // The Claude CLI echoes the user prompt in the terminal output, so the first
+    // occurrence of the marker is just the echo — skip it and only act on the second.
+    let seenCount = 0
 
     const cleanup = api.terminal.onData((id, chunk) => {
       if (id !== termId) return
@@ -214,14 +218,26 @@ function DockApp() {
       // Keep buffer from growing unbounded
       if (buf.length > 5000) buf = buf.slice(-3000)
 
-      if (buf.includes(MARKER)) {
-        // Claude signalled completion — push triggers new CI run automatically
-        doCleanup()
-        window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
-        setTimeout(() => {
-          api.terminal.kill(termId)
-          removeTerminal(termId)
-        }, 2000)
+      // Count all occurrences of the marker in the buffer
+      let count = 0
+      let idx = 0
+      while ((idx = buf.indexOf(MARKER, idx)) !== -1) {
+        count++
+        idx += MARKER.length
+      }
+
+      // Only trigger on the 2nd+ occurrence (first is the echoed prompt)
+      if (count > seenCount) {
+        if (count >= 2) {
+          // Claude signalled completion — push triggers new CI run automatically
+          doCleanup()
+          window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
+          setTimeout(() => {
+            api.terminal.kill(termId)
+            removeTerminal(termId)
+          }, 2000)
+        }
+        seenCount = count
       }
     })
 
