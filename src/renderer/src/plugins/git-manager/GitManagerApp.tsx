@@ -6424,6 +6424,10 @@ const NotificationPanel: React.FC<{ projectDir: string }> = ({ projectDir }) => 
     const api = getDockApi()
     const cleanup = api.notifications.onShow((notification) => {
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
+      // Auto-mark as read if the window is focused
+      if (document.hasFocus()) {
+        setReadIds((prev) => new Set(prev).add(notification.id))
+      }
     })
     return cleanup
   }, [])
