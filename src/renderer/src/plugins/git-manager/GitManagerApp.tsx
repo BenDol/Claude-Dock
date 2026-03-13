@@ -1218,6 +1218,7 @@ const GitManagerApp: React.FC = () => {
                 stashes={stashes}
                 projectDir={activeDir}
                 syntaxHL={syntaxHL}
+                active={activeTab === 'changes'}
                 navigateTo={wcNavigateTo}
                 onNavigateHandled={() => setWcNavigateTo(null)}
                 onRefresh={refresh}
@@ -3024,6 +3025,7 @@ const WorkingChanges: React.FC<{
   stashes: GitStashEntry[]
   projectDir: string
   syntaxHL: boolean
+  active?: boolean
   navigateTo?: { path: string; staged: boolean; lineNumber?: number } | null
   onNavigateHandled?: () => void
   onRefresh: () => void
@@ -3032,7 +3034,7 @@ const WorkingChanges: React.FC<{
   onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
   onBusyChange?: (busy: boolean) => void
-}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
+}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -3070,6 +3072,19 @@ const WorkingChanges: React.FC<{
       if (onStatusRefreshed) onStatusRefreshed(s)
     } catch { /* ignore */ }
   }, [projectDir, onStatusRefreshed])
+
+  // Poll working changes status while tab is active
+  useEffect(() => {
+    if (!active) return
+    let timer: ReturnType<typeof setInterval> | null = null
+    const api = getDockApi()
+    api.plugins.getSetting(projectDir, 'git-manager', 'changesRefreshSeconds').then((val) => {
+      const seconds = typeof val === 'number' ? val : 5
+      if (seconds <= 0) return
+      timer = setInterval(refreshStatus, seconds * 1000)
+    })
+    return () => { if (timer) clearInterval(timer) }
+  }, [active, projectDir, refreshStatus])
 
   // Persist commit message to localStorage
   useEffect(() => {
@@ -6302,6 +6317,7 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
+  { key: 'changesRefreshSeconds', label: 'Working changes auto-refresh (seconds, 0 to disable)', type: 'number', default: 5 },
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
   { key: 'enableCiTab', label: 'Show CI tab', type: 'boolean', default: false },
   { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
@@ -6402,6 +6418,16 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
               </label>
             )
           ))}
+          <div className="gm-settings-divider" />
+          <button
+            className="gm-settings-action-btn"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('gm-mark-all-read'))
+              setOpen(false)
+            }}
+          >
+            Mark all notifications as read
+          </button>
         </div>
         </>
       )}
@@ -6481,6 +6507,13 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
     window.addEventListener('notification-read', handler)
     return () => window.removeEventListener('notification-read', handler)
   }, [])
+
+  // Listen for "mark all as read" from settings
+  useEffect(() => {
+    const handler = () => setReadIds(new Set(notifications.map((n) => n.id)))
+    window.addEventListener('gm-mark-all-read', handler)
+    return () => window.removeEventListener('gm-mark-all-read', handler)
+  }, [notifications])
 
   const removeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id))

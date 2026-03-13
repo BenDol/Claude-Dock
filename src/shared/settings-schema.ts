@@ -23,6 +23,7 @@ export interface Settings {
   behavior: {
     confirmCloseWithRunning: boolean
     autoSpawnFirstTerminal: boolean
+    blockedNotificationSources: string[]
   }
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
@@ -52,6 +53,11 @@ export interface Settings {
     disableGpuAcceleration: boolean
   }
 }
+
+/** Built-in (non-plugin) notification sources that can be blocked */
+export const BUILTIN_NOTIFICATION_SOURCES: { id: string; label: string }[] = [
+  { id: 'updater', label: 'App Updates' }
+]
 
 export interface TerminalColors {
   background: string
@@ -190,7 +196,8 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   behavior: {
     confirmCloseWithRunning: true,
-    autoSpawnFirstTerminal: true
+    autoSpawnFirstTerminal: true,
+    blockedNotificationSources: []
   },
   updater: {
     profile: 'latest',

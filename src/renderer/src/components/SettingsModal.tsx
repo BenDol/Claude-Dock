@@ -3,7 +3,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
-import { DEFAULT_SETTINGS } from '../../../shared/settings-schema'
+import { DEFAULT_SETTINGS, BUILTIN_NOTIFICATION_SOURCES } from '../../../shared/settings-schema'
 import PluginPanel from './PluginPanel'
 
 function formatKeybind(e: KeyboardEvent): string | null {
@@ -106,6 +106,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [mcpStatus, setMcpStatus] = useState('')
   const [pathCheckStatus, setPathCheckStatus] = useState('')
   const [pathChecking, setPathChecking] = useState(false)
+
+  const [notifSources, setNotifSources] = useState(BUILTIN_NOTIFICATION_SOURCES)
+
+  // Fetch plugins for notification source list when behavior tab is shown
+  useEffect(() => {
+    if (tab === 'behavior') {
+      getDockApi().plugins.getList().then((plugins) => {
+        const pluginSources = plugins.map((p) => ({ id: p.id, label: p.name }))
+        // Merge builtin + plugin sources, dedup by id
+        const seen = new Set(BUILTIN_NOTIFICATION_SOURCES.map((s) => s.id))
+        const merged = [...BUILTIN_NOTIFICATION_SOURCES]
+        for (const ps of pluginSources) {
+          if (!seen.has(ps.id)) {
+            merged.push(ps)
+            seen.add(ps.id)
+          }
+        }
+        setNotifSources(merged)
+      })
+    }
+  }, [tab])
 
   // Check MCP install status when behavior tab is shown
   useEffect(() => {
@@ -412,6 +433,38 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Auto-spawn first terminal
                 </label>
+                <div>
+                  <button
+                    className="settings-check-update-btn"
+                    onClick={() => window.dispatchEvent(new CustomEvent('dock-mark-all-read'))}
+                  >
+                    Mark All Notifications as Read
+                  </button>
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Block Notifications From</div>
+                <div className="settings-description">
+                  Mute toast notifications from selected sources.
+                </div>
+                {notifSources.map((src) => {
+                  const blocked = settings.behavior?.blockedNotificationSources ?? []
+                  const isBlocked = blocked.includes(src.id)
+                  return (
+                    <label key={src.id} className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={isBlocked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...blocked, src.id]
+                            : blocked.filter((s: string) => s !== src.id)
+                          updateBehavior({ blockedNotificationSources: next })
+                        }}
+                      />
+                      {src.label}
+                    </label>
+                  )
+                })}
                 <div className="settings-divider" />
                 <div className="settings-section-header">Dock MCP Server</div>
                 <div className="settings-row">

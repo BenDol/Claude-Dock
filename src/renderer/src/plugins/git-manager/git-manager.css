@@ -2792,6 +2792,30 @@
   display: none;
 }
 
+.gm-settings-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 12px;
+}
+
+.gm-settings-action-btn {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 4px 12px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.gm-settings-action-btn:hover {
+  background: var(--bg-hover);
+}
+
 /* Notification panel */
 .gm-notif-dropdown {
   position: relative;

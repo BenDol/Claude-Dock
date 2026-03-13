@@ -592,6 +592,13 @@ const NotificationDropdown: React.FC = () => {
     return () => window.removeEventListener('notification-read', handler)
   }, [])
 
+  // Listen for "mark all as read" from settings
+  useEffect(() => {
+    const handler = () => setReadIds(new Set(notifications.map((n) => n.id)))
+    window.addEventListener('dock-mark-all-read', handler)
+    return () => window.removeEventListener('dock-mark-all-read', handler)
+  }, [notifications])
+
   const removeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id))
   }, [])
