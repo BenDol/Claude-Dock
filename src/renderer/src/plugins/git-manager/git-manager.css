@@ -12,6 +12,11 @@
   overflow: hidden;
 }
 
+/* Slightly smaller toast notifications in git-manager window */
+.toast-container {
+  transform: scale(1.08);
+}
+
 /* Remove default focus outline for keyboard-navigable containers */
 .gm-commit-list-body:focus,
 .gm-virtual-file-list:focus,
@@ -1266,6 +1271,7 @@
   cursor: pointer;
   transition: background 0.08s;
   position: relative;
+  user-select: none;
 }
 
 .gm-commit-row::after {

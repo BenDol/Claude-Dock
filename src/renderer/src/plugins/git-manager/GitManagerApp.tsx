@@ -3529,18 +3529,41 @@ const WorkingChanges: React.FC<{
     } catch { /* ignore */ }
   }, [projectDir, onStatusRefreshed])
 
-  // Poll working changes status while tab is active
+  // Poll working changes status periodically — pause when unfocused, resume on focus
   useEffect(() => {
-    if (!active) return
     let timer: ReturnType<typeof setInterval> | null = null
+    let seconds = 5
+    let pending = false
     const api = getDockApi()
+
+    const poll = () => {
+      if (document.hasFocus()) {
+        pending = false
+        refreshStatus()
+      } else {
+        pending = true
+      }
+    }
+
+    const onFocus = () => {
+      if (pending) {
+        pending = false
+        refreshStatus()
+      }
+    }
+
     api.plugins.getSetting(projectDir, 'git-manager', 'changesRefreshSeconds').then((val) => {
-      const seconds = typeof val === 'number' ? val : 5
+      seconds = typeof val === 'number' ? val : 5
       if (seconds <= 0) return
-      timer = setInterval(refreshStatus, seconds * 1000)
+      timer = setInterval(poll, seconds * 1000)
     })
-    return () => { if (timer) clearInterval(timer) }
-  }, [active, projectDir, refreshStatus])
+
+    window.addEventListener('focus', onFocus)
+    return () => {
+      if (timer) clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [projectDir, refreshStatus])
 
   // Persist commit message to localStorage
   useEffect(() => {
