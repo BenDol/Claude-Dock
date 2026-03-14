@@ -128,6 +128,7 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
       type: 'info',
       source: 'git-manager',
+      projectDir: entry.projectDir,
       action: run.url ? { label: `View on ${shortProviderName(entry.provider.providerKey)}`, url: run.url } : undefined,
       data: { runId: run.id, providerKey: entry.provider.providerKey }
     })
@@ -215,6 +216,7 @@ export class CiManager {
       message: `${run.name} #${run.runNumber} on ${run.headBranch} ${statusLabel}`,
       type: notifType,
       source: 'git-manager',
+      projectDir: entry.projectDir,
       action: actions ? undefined : viewAction,
       actions,
       data: {

@@ -66,6 +66,7 @@ export interface DockNotification {
   action?: NotificationAction
   actions?: NotificationAction[]
   source?: string
+  projectDir?: string
   data?: Record<string, unknown>
 }
 

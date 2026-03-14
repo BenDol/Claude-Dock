@@ -2209,6 +2209,13 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+.gm-changes-empty {
+  padding: 10px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 /* Stash section in Working Changes */
 .gm-stash-section-header {
   user-select: none;

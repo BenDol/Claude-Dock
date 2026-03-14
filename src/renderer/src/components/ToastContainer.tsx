@@ -38,7 +38,10 @@ export default function ToastContainer() {
 
   useEffect(() => {
     const api = getDockApi()
+    const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
     const cleanup = api.notifications.onShow((notification) => {
+      // Only show notifications for this project (or global ones without projectDir)
+      if (notification.projectDir && projectDir && norm(notification.projectDir) !== norm(projectDir)) return
       const entry: ToastEntry = { ...notification, exiting: false }
       setToasts((prev) => [...prev.slice(-4), entry]) // keep max 5
 
@@ -54,7 +57,7 @@ export default function ToastContainer() {
       for (const timer of timersRef.current.values()) clearTimeout(timer)
       timersRef.current.clear()
     }
-  }, [removeToast])
+  }, [removeToast, projectDir])
 
   if (toasts.length === 0) return null
 
@@ -72,9 +75,9 @@ export default function ToastContainer() {
         return (
           <div
             key={toast.id}
-            className={`toast toast-${toast.type}${toast.exiting ? ' toast-exit' : ''}${toast.source === 'ci' && toast.data?.runId ? ' toast-clickable' : ''}`}
+            className={`toast toast-${toast.type}${toast.exiting ? ' toast-exit' : ''}${toast.data?.runId ? ' toast-clickable' : ''}`}
             onClick={() => {
-              if (toast.source === 'ci' && toast.data?.runId) {
+              if (toast.data?.runId) {
                 if (projectDir) {
                   // Dock window: route through IPC to open/focus git-manager
                   getDockApi().ci.navigateToRun(projectDir, toast.data.runId as number)

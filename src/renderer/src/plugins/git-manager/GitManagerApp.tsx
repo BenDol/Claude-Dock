@@ -3659,23 +3659,27 @@ const WorkingChanges: React.FC<{
                 )}
               </div>
             </div>
-            <VirtualFileList
-              files={allUnstaged}
-              section="unstaged"
-              selectedFile={selectedFile}
-              selectedPaths={selectedPaths}
-              stagingPaths={stagingPaths}
-              projectDir={projectDir}
-              onSelect={handleSelectFile}
-              onShiftSelect={handleShiftSelect}
-              onCtrlSelect={handleCtrlSelect}
-              onAction={handleStageFile}
-              onBatchAction={handleBatchStage}
-              onDoubleClick={handleStageFile}
-              onContextMenu={handleFileContext}
-              actionLabel="+"
-              actionTitle="Stage"
-            />
+            {allUnstaged.length > 0 ? (
+              <VirtualFileList
+                files={allUnstaged}
+                section="unstaged"
+                selectedFile={selectedFile}
+                selectedPaths={selectedPaths}
+                stagingPaths={stagingPaths}
+                projectDir={projectDir}
+                onSelect={handleSelectFile}
+                onShiftSelect={handleShiftSelect}
+                onCtrlSelect={handleCtrlSelect}
+                onAction={handleStageFile}
+                onBatchAction={handleBatchStage}
+                onDoubleClick={handleStageFile}
+                onContextMenu={handleFileContext}
+                actionLabel="+"
+                actionTitle="Stage"
+              />
+            ) : (
+              <div className="gm-changes-empty">No unstaged changes</div>
+            )}
           </div>
 
           {/* Staged files */}
@@ -3706,23 +3710,27 @@ const WorkingChanges: React.FC<{
                 )}
               </div>
             </div>
-            <VirtualFileList
-              files={status.staged}
-              section="staged"
-              selectedFile={selectedFile}
-              selectedPaths={selectedPaths}
-              stagingPaths={stagingPaths}
-              projectDir={projectDir}
-              onSelect={handleSelectFile}
-              onShiftSelect={handleShiftSelect}
-              onCtrlSelect={handleCtrlSelect}
-              onAction={handleUnstageFile}
-              onBatchAction={handleBatchUnstage}
-              onDoubleClick={handleUnstageFile}
-              onContextMenu={handleFileContext}
-              actionLabel="-"
-              actionTitle="Unstage"
-            />
+            {status.staged.length > 0 ? (
+              <VirtualFileList
+                files={status.staged}
+                section="staged"
+                selectedFile={selectedFile}
+                selectedPaths={selectedPaths}
+                stagingPaths={stagingPaths}
+                projectDir={projectDir}
+                onSelect={handleSelectFile}
+                onShiftSelect={handleShiftSelect}
+                onCtrlSelect={handleCtrlSelect}
+                onAction={handleUnstageFile}
+                onBatchAction={handleBatchUnstage}
+                onDoubleClick={handleUnstageFile}
+                onContextMenu={handleFileContext}
+                actionLabel="-"
+                actionTitle="Unstage"
+              />
+            ) : (
+              <div className="gm-changes-empty">No staged changes</div>
+            )}
           </div>
 
           {/* Stashes */}
@@ -6736,7 +6744,10 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
 
   useEffect(() => {
     const api = getDockApi()
+    const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
     const cleanup = api.notifications.onShow((notification) => {
+      // Only accept notifications for this project (or global ones without projectDir)
+      if (notification.projectDir && norm(notification.projectDir) !== norm(projectDir)) return
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
       // Auto-mark as read if the setting is enabled or window is focused
       if (markAllRead || document.hasFocus()) {
@@ -6744,7 +6755,7 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
       }
     })
     return cleanup
-  }, [markAllRead])
+  }, [markAllRead, projectDir])
 
   // Mark all as read when panel opens
   useEffect(() => {
@@ -6797,9 +6808,9 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
               notifications.map((n) => (
                 <div
                   key={n.id}
-                  className={`gm-notif-item gm-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
+                  className={`gm-notif-item gm-notif-item-${n.type}${n.data?.runId ? ' gm-notif-item-clickable' : ''}`}
                   onClick={() => {
-                    if (n.source === 'ci' && n.data?.runId) {
+                    if (n.data?.runId) {
                       window.dispatchEvent(new CustomEvent('ci-navigate-run', { detail: n.data.runId }))
                       setOpen(false)
                     }
@@ -6838,7 +6849,7 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
                       }}
                       title={resolveNotifActions(n).find((a) => a.url)?.label ?? 'Open'}
                     >
-                      {n.source === 'ci' ? <ProviderIcon provider={provider} /> : <ExternalLinkMiniIcon />}
+                      {n.data?.runId ? <ProviderIcon provider={provider} /> : <ExternalLinkMiniIcon />}
                     </button>
                   )}
                   <button

@@ -602,7 +602,10 @@ const NotificationDropdown: React.FC = () => {
 
   useEffect(() => {
     const api = getDockApi()
+    const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
     const cleanup = api.notifications.onShow((notification) => {
+      // Only accept notifications for this project (or global ones without projectDir)
+      if (notification.projectDir && projectDir && norm(notification.projectDir) !== norm(projectDir)) return
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
       // Auto-mark as read if the setting is enabled or window is focused
       if (markAllRead || document.hasFocus()) {
@@ -610,7 +613,7 @@ const NotificationDropdown: React.FC = () => {
       }
     })
     return cleanup
-  }, [markAllRead])
+  }, [markAllRead, projectDir])
 
   // Mark all as read when panel opens
   useEffect(() => {
@@ -669,9 +672,9 @@ const NotificationDropdown: React.FC = () => {
               notifications.map((n) => (
                 <div
                   key={n.id}
-                  className={`tb-notif-item tb-notif-item-${n.type}${n.source === 'ci' && n.data?.runId ? ' tb-notif-item-clickable' : ''}`}
+                  className={`tb-notif-item tb-notif-item-${n.type}${n.data?.runId ? ' tb-notif-item-clickable' : ''}`}
                   onClick={() => {
-                    if (n.source === 'ci' && n.data?.runId && projectDir) {
+                    if (n.data?.runId && projectDir) {
                       getDockApi().ci.navigateToRun(projectDir, n.data.runId as number)
                       setOpen(false)
                     }
@@ -706,7 +709,7 @@ const NotificationDropdown: React.FC = () => {
                       }}
                       title={resolveActions(n).find((a) => a.url)?.label ?? 'Open'}
                     >
-                      {n.source === 'ci' && n.data?.providerKey ? <ProviderIcon provider={n.data.providerKey as GitProvider} /> : <>&#8599;</>}
+                      {n.data?.providerKey ? <ProviderIcon provider={n.data.providerKey as GitProvider} /> : <>&#8599;</>}
                     </button>
                   )}
                   <button
