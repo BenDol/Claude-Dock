@@ -113,6 +113,8 @@ export const IPC = {
   GIT_MGR_SET_IDENTITY: 'gitMgr:setIdentity',
   GIT_MGR_SEARCH: 'gitMgr:search',
   GIT_MGR_GET_ACTIVE_TERMINALS: 'gitMgr:getActiveTerminals',
+  GIT_MGR_SAVE_FILE: 'gitMgr:saveFile',
+  GIT_MGR_RESOLVE_WITH_CLAUDE: 'gitMgr:resolveWithClaude',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',

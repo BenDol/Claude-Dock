@@ -196,6 +196,8 @@ export interface DockApi {
     setIdentity: (projectDir: string, name: string, email: string, global: boolean) => Promise<{ success: boolean; error?: string }>
     search: (projectDir: string, opts: GitSearchOptions) => Promise<GitSearchResponse>
     getActiveTerminals: (projectDir: string) => Promise<{ id: string; title: string; sessionId: string }[]>
+    saveFile: (projectDir: string, filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+    resolveWithClaude: (projectDir: string, filePath: string, instructions: string) => Promise<{ success: boolean; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -399,6 +401,8 @@ const dockApi: DockApi = {
     setIdentity: (projectDir, name, email, global) => ipcRenderer.invoke(IPC.GIT_MGR_SET_IDENTITY, projectDir, name, email, global),
     search: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_SEARCH, projectDir, opts),
     getActiveTerminals: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_ACTIVE_TERMINALS, projectDir),
+    saveFile: (projectDir, filePath, content) => ipcRenderer.invoke(IPC.GIT_MGR_SAVE_FILE, projectDir, filePath, content),
+    resolveWithClaude: (projectDir, filePath, instructions) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, projectDir, filePath, instructions),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

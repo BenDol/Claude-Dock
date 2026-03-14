@@ -19,7 +19,7 @@ import type {
   GitSearchResponse
 } from '../../../../shared/git-manager-types'
 import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../../../shared/remote-url'
-import { highlightDiffHunks } from './diff-highlight'
+import { highlightDiffHunks, highlightCode } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
@@ -232,15 +232,28 @@ function parseGitError(action: string, errorMsg: string, context: {
     })
   }
 
-  // Unmerged paths — need to resolve or abort
-  if (/unmerged|fix conflicts and run|fix them up/i.test(msg)) {
+  // Unmerged paths / dirty index from active merge — need to resolve or abort
+  if (/unmerged|fix conflicts and run|fix them up|could not write index/i.test(msg)) {
     resolutions.push({
-      label: 'Abort operation',
-      description: 'Cancel the current merge/rebase/cherry-pick',
+      label: 'Abort merge',
+      description: 'Cancel the current merge/rebase/cherry-pick and retry',
+      action: async () => {
+        await api.gitManager.abortMerge(context.projectDir)
+        if (context.retry) await context.retry()
+      }
+    })
+    resolutions.push({
+      label: 'Abort merge only',
+      description: 'Cancel the current merge/rebase/cherry-pick without retrying',
       action: async () => {
         await api.gitManager.abortMerge(context.projectDir)
       }
     })
+    return {
+      title: 'Merge in progress',
+      message: 'There is an active merge with unresolved conflicts. Resolve the conflicts or abort the merge before performing other git operations.',
+      resolutions
+    }
   }
 
   // Author identity unknown
@@ -607,6 +620,15 @@ const GitManagerApp: React.FC = () => {
     refresh()
   }, [refresh])
 
+  // Dismiss all context menus when titlebar is clicked (drag regions swallow mousedown)
+  useEffect(() => {
+    const handler = () => {
+      document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: -1, clientY: -1 }))
+    }
+    window.addEventListener('gm-dismiss-menus', handler)
+    return () => window.removeEventListener('gm-dismiss-menus', handler)
+  }, [])
+
   // Auto Fetch All: fetch on load + recurring timer based on plugin settings
   useEffect(() => {
     if (!activeDir) return
@@ -924,7 +946,7 @@ const GitManagerApp: React.FC = () => {
   return (
     <div className="gm-app">
       {/* Titlebar */}
-      <div className="gm-titlebar" onPointerDown={() => document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))}>
+      <div className="gm-titlebar" onMouseDown={() => window.dispatchEvent(new CustomEvent('gm-dismiss-menus'))} onPointerDown={() => window.dispatchEvent(new CustomEvent('gm-dismiss-menus'))}>
         <div className="gm-titlebar-left">
           <GitIcon />
           {navStack.length > 0 && (
@@ -1020,6 +1042,20 @@ const GitManagerApp: React.FC = () => {
               Resolve Conflicts
             </button>
           )}
+        </div>
+      )}
+
+      {!mergeState?.inProgress && status && status.conflicts.length > 0 && (
+        <div className="gm-merge-bar">
+          <div className="gm-merge-bar-left">
+            <WarningIcon />
+            <span>
+              {status.conflicts.length} unresolved conflict{status.conflicts.length > 1 ? 's' : ''}
+            </span>
+          </div>
+          <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
+            Resolve...
+          </button>
         </div>
       )}
 
@@ -1153,15 +1189,15 @@ const GitManagerApp: React.FC = () => {
                 </span>
               )}
             </button>
-            {mergeState?.inProgress && (
+            {(mergeState?.inProgress || (status && status.conflicts.length > 0)) && (
               <button
                 className={`gm-tab${activeTab === 'conflicts' ? ' gm-tab-active' : ''}`}
                 onClick={() => setActiveTab('conflicts')}
               >
                 <WarningIcon />
-                Merge Conflicts
-                {mergeState.conflicts.length > 0 && (
-                  <span className="gm-tab-badge gm-tab-badge-warn">{mergeState.conflicts.length}</span>
+                {mergeState?.inProgress ? 'Merge Conflicts' : 'Conflicts'}
+                {((mergeState?.inProgress ? mergeState.conflicts.length : status?.conflicts.length) ?? 0) > 0 && (
+                  <span className="gm-tab-badge gm-tab-badge-warn">{mergeState?.inProgress ? mergeState.conflicts.length : status!.conflicts.length}</span>
                 )}
               </button>
             )}
@@ -1281,9 +1317,9 @@ const GitManagerApp: React.FC = () => {
               onError={handleSmartError}
               onCheckout={handleCheckoutBranch}
             />
-          ) : activeTab === 'conflicts' && mergeState ? (
+          ) : activeTab === 'conflicts' && (mergeState?.inProgress || (status && status.conflicts.length > 0)) ? (
             <MergeConflictsPanel
-              mergeState={mergeState}
+              mergeState={mergeState?.inProgress ? mergeState : { inProgress: false, type: 'none', conflicts: status!.conflicts }}
               projectDir={activeDir}
               onRefresh={refresh}
               onError={handleSmartError}
@@ -3071,7 +3107,7 @@ const VirtualFileList: React.FC<{
 const StashSection: React.FC<{
   stashes: GitStashEntry[]
   projectDir: string
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
 }> = ({ stashes, projectDir, onError, onRefresh, onConfirm }) => {
@@ -3098,14 +3134,14 @@ const StashSection: React.FC<{
   const handleApply = async (stash: GitStashEntry) => {
     setCtxMenu(null)
     const r = await api.gitManager.stashApply(projectDir, stash.index)
-    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`, () => handleApply(stash))
     onRefresh()
   }
 
   const handlePop = async (stash: GitStashEntry) => {
     setCtxMenu(null)
     const r = await api.gitManager.stashPop(projectDir, stash.index)
-    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`, () => handlePop(stash))
     onRefresh()
   }
 
@@ -3783,30 +3819,42 @@ const WorkingChanges: React.FC<{
               <button onClick={() => setGenError(null)}>&#10005;</button>
             </div>
           )}
-          <div className="gm-commit-btn-group">
-            <button
-              className={`gm-commit-btn gm-commit-btn-left${pendingAction === 'commit' ? ' gm-commit-btn-queued' : ''}`}
-              onClick={handleCommit}
-              disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
-            >
-              {committing === 'commit'
-                ? <><span className="gm-commit-spinner" /> Committing...</>
-                : pendingAction === 'commit'
-                  ? <><span className="gm-commit-spinner" /> Commit <span className="gm-commit-queued-hint">after generate</span></>
-                  : `Commit (${status.staged.length} staged)`}
-            </button>
-            <button
-              className={`gm-commit-btn gm-commit-btn-right${pendingAction === 'commit-push' ? ' gm-commit-btn-queued' : ''}`}
-              onClick={handleCommitPush}
-              disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
-            >
-              {committing === 'commit-push'
-                ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
-                : pendingAction === 'commit-push'
-                  ? <><span className="gm-commit-spinner" /> Commit & Push <span className="gm-commit-queued-hint">after generate</span></>
-                  : 'Commit & Push'}
-            </button>
-          </div>
+          {status.staged.length === 0 && allUnstaged.length > 0 ? (
+            <div className="gm-commit-btn-group">
+              <button
+                className="gm-commit-btn gm-commit-btn-stash"
+                onClick={handleStageAll}
+                disabled={busy}
+              >
+                {busy ? <><span className="gm-commit-spinner" /> Staging...</> : `Stage All (${allUnstaged.length} files)`}
+              </button>
+            </div>
+          ) : (
+            <div className="gm-commit-btn-group">
+              <button
+                className={`gm-commit-btn gm-commit-btn-left${pendingAction === 'commit' ? ' gm-commit-btn-queued' : ''}`}
+                onClick={handleCommit}
+                disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
+              >
+                {committing === 'commit'
+                  ? <><span className="gm-commit-spinner" /> Committing...</>
+                  : pendingAction === 'commit'
+                    ? <><span className="gm-commit-spinner" /> Commit <span className="gm-commit-queued-hint">after generate</span></>
+                    : `Commit (${status.staged.length} staged)`}
+              </button>
+              <button
+                className={`gm-commit-btn gm-commit-btn-right${pendingAction === 'commit-push' ? ' gm-commit-btn-queued' : ''}`}
+                onClick={handleCommitPush}
+                disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
+              >
+                {committing === 'commit-push'
+                  ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
+                  : pendingAction === 'commit-push'
+                    ? <><span className="gm-commit-spinner" /> Commit & Push <span className="gm-commit-queued-hint">after generate</span></>
+                    : 'Commit & Push'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -6001,6 +6049,16 @@ const MergeConflictsPanel: React.FC<{
   const [conflictContent, setConflictContent] = useState<GitConflictFileContent | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [viewMode, setViewMode] = useState<'chunks' | 'edit' | 'claude'>('chunks')
+  // Manual edit state
+  const [editContent, setEditContent] = useState('')
+  const [editDirty, setEditDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  // Undo stack for chunk resolutions (stores raw file content before each resolve)
+  const [undoStack, setUndoStack] = useState<string[]>([])
+  // Claude resolve state
+  const [claudePrompt, setClaudePrompt] = useState('')
+  const [claudeSending, setClaudeSending] = useState(false)
 
   // Arrow key navigation for conflict files
   const handleConflictsKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -6024,37 +6082,60 @@ const MergeConflictsPanel: React.FC<{
     if (!selectedFile) { setConflictContent(null); return }
     let cancelled = false
     setLoadingContent(true)
+    setViewMode('chunks')
+    setEditDirty(false)
+    setUndoStack([])
     getDockApi().gitManager.getConflictContent(projectDir, selectedFile)
-      .then((content) => { if (!cancelled) setConflictContent(content) })
+      .then((content) => {
+        if (cancelled) return
+        setConflictContent(content)
+        setEditContent(content.raw)
+      })
       .catch(() => { if (!cancelled) setConflictContent(null) })
       .finally(() => { if (!cancelled) setLoadingContent(false) })
     return () => { cancelled = true }
   }, [selectedFile, projectDir])
 
-  const handleResolveChunk = useCallback(async (chunkIndex: number, resolution: 'ours' | 'theirs' | 'both') => {
+  const reloadContent = useCallback(async () => {
     if (!selectedFile) return
-    setBusy(true)
-    const r = await getDockApi().gitManager.resolveConflict(projectDir, selectedFile, resolution, chunkIndex)
-    if (!r.success) onError(`Resolve conflict failed: ${r.error || 'Unknown error'}`)
-    // Reload the file content
     try {
       const content = await getDockApi().gitManager.getConflictContent(projectDir, selectedFile)
       setConflictContent(content)
-    } catch { /* file may have no more conflicts */ }
+      setEditContent(content.raw)
+      setEditDirty(false)
+    } catch { /* ignore */ }
+  }, [selectedFile, projectDir])
+
+  const handleResolveChunk = useCallback(async (chunkIndex: number, resolution: 'ours' | 'theirs' | 'both') => {
+    if (!selectedFile) return
+    setBusy(true)
+    if (conflictContent) setUndoStack(prev => [...prev, conflictContent.raw])
+    const r = await getDockApi().gitManager.resolveConflict(projectDir, selectedFile, resolution, chunkIndex)
+    if (!r.success) onError(`Resolve conflict failed: ${r.error || 'Unknown error'}`)
+    await reloadContent()
     setBusy(false)
-  }, [selectedFile, projectDir, onError])
+  }, [selectedFile, projectDir, onError, reloadContent, conflictContent])
 
   const handleResolveAll = useCallback(async (resolution: 'ours' | 'theirs' | 'both') => {
     if (!selectedFile) return
     setBusy(true)
+    if (conflictContent) setUndoStack(prev => [...prev, conflictContent.raw])
     const r = await getDockApi().gitManager.resolveConflict(projectDir, selectedFile, resolution)
     if (!r.success) onError(`Resolve conflict failed: ${r.error || 'Unknown error'}`)
-    try {
-      const content = await getDockApi().gitManager.getConflictContent(projectDir, selectedFile)
-      setConflictContent(content)
-    } catch { /* ignore */ }
+    await reloadContent()
     setBusy(false)
-  }, [selectedFile, projectDir, onError])
+  }, [selectedFile, projectDir, onError, reloadContent, conflictContent])
+
+  const handleUndo = useCallback(async () => {
+    if (!selectedFile || undoStack.length === 0) return
+    setBusy(true)
+    const prevContent = undoStack[undoStack.length - 1]
+    setUndoStack(prev => prev.slice(0, -1))
+    const r = await getDockApi().gitManager.saveFile(projectDir, selectedFile, prevContent)
+    if (!r.success) onError(`Undo failed: ${r.error || 'Unknown error'}`)
+    await reloadContent()
+    setBusy(false)
+  }, [selectedFile, projectDir, undoStack, onError, reloadContent])
 
   const handleMarkResolved = useCallback(async () => {
     if (!selectedFile) return
@@ -6080,6 +6161,27 @@ const MergeConflictsPanel: React.FC<{
     onRefresh()
     setBusy(false)
   }, [projectDir, onRefresh, onError])
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!selectedFile) return
+    setSaving(true)
+    const r = await getDockApi().gitManager.saveFile(projectDir, selectedFile, editContent)
+    if (!r.success) {
+      onError(`Save failed: ${r.error || 'Unknown error'}`)
+    } else {
+      setEditDirty(false)
+      await reloadContent()
+    }
+    setSaving(false)
+  }, [selectedFile, projectDir, editContent, onError, reloadContent])
+
+  const handleClaudeResolve = useCallback(async () => {
+    if (!selectedFile || !claudePrompt.trim()) return
+    setClaudeSending(true)
+    const r = await getDockApi().gitManager.resolveWithClaude(projectDir, selectedFile, claudePrompt.trim())
+    if (!r.success) onError(`Failed to send to Claude: ${r.error || 'Unknown error'}`)
+    setClaudeSending(false)
+  }, [selectedFile, projectDir, claudePrompt, onError])
 
   const conflictChunks = conflictContent?.chunks.filter((c) => c.type === 'conflict') || []
   const hasConflicts = conflictChunks.length > 0
@@ -6107,19 +6209,21 @@ const MergeConflictsPanel: React.FC<{
             <div className="gm-conflicts-empty">All conflicts resolved</div>
           )}
         </div>
-        <div className="gm-conflicts-actions">
-          <button className="gm-conflicts-action-btn gm-conflicts-abort" onClick={handleAbort} disabled={busy}>
-            Abort {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
-          </button>
-          <button
-            className="gm-conflicts-action-btn gm-conflicts-continue"
-            onClick={handleContinue}
-            disabled={busy || mergeState.conflicts.length > 0}
-            title={mergeState.conflicts.length > 0 ? 'Resolve all conflicts first' : 'Continue merge'}
-          >
-            Continue {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
-          </button>
-        </div>
+        {mergeState.type !== 'none' && (
+          <div className="gm-conflicts-actions">
+            <button className="gm-conflicts-action-btn gm-conflicts-abort" onClick={handleAbort} disabled={busy}>
+              Abort {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
+            </button>
+            <button
+              className="gm-conflicts-action-btn gm-conflicts-continue"
+              onClick={handleContinue}
+              disabled={busy || mergeState.conflicts.length > 0}
+              title={mergeState.conflicts.length > 0 ? 'Resolve all conflicts first' : 'Continue merge'}
+            >
+              Continue {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Conflict detail */}
@@ -6136,11 +6240,46 @@ const MergeConflictsPanel: React.FC<{
             <div className="gm-conflicts-content-header">
               <span className="gm-conflicts-content-path">{selectedFile}</span>
               <div className="gm-conflicts-content-actions">
-                {hasConflicts && (
+                {/* View mode tabs */}
+                <div className="gm-conflicts-mode-tabs">
+                  <button
+                    className={`gm-conflicts-mode-tab${viewMode === 'chunks' ? ' gm-conflicts-mode-tab-active' : ''}`}
+                    onClick={() => setViewMode('chunks')}
+                    title="Chunk-based conflict resolver"
+                  >Chunks</button>
+                  <button
+                    className={`gm-conflicts-mode-tab${viewMode === 'edit' ? ' gm-conflicts-mode-tab-active' : ''}`}
+                    onClick={() => { setViewMode('edit'); setEditContent(conflictContent.raw); setEditDirty(false) }}
+                    title="Edit file manually with syntax highlighting"
+                  >Edit</button>
+                  <button
+                    className={`gm-conflicts-mode-tab${viewMode === 'claude' ? ' gm-conflicts-mode-tab-active' : ''}`}
+                    onClick={() => setViewMode('claude')}
+                    title="Resolve with Claude AI"
+                  ><ClaudeResolveIcon /> Claude</button>
+                </div>
+                {viewMode === 'chunks' && (
                   <>
-                    <button className="gm-small-btn" onClick={() => handleResolveAll('ours')} disabled={busy}>Accept All Ours</button>
-                    <button className="gm-small-btn" onClick={() => handleResolveAll('theirs')} disabled={busy}>Accept All Theirs</button>
+                    {undoStack.length > 0 && (
+                      <button className="gm-small-btn gm-conflicts-undo-btn" onClick={handleUndo} disabled={busy} title="Undo last resolution">
+                        &#x21A9; Undo
+                      </button>
+                    )}
+                    {hasConflicts && (
+                      <>
+                        <button className="gm-small-btn" onClick={() => handleResolveAll('ours')} disabled={busy}>Accept All Ours</button>
+                        <button className="gm-small-btn" onClick={() => handleResolveAll('theirs')} disabled={busy}>Accept All Theirs</button>
+                      </>
+                    )}
                   </>
+                )}
+                {viewMode === 'edit' && (
+                  <button
+                    className="gm-small-btn gm-conflicts-save-btn"
+                    onClick={handleSaveEdit}
+                    disabled={saving || !editDirty}
+                    title={editDirty ? 'Save changes to disk (Ctrl+S)' : 'No changes to save'}
+                  >{saving ? 'Saving...' : 'Save'}</button>
                 )}
                 <button
                   className="gm-small-btn gm-conflicts-mark-btn"
@@ -6152,17 +6291,56 @@ const MergeConflictsPanel: React.FC<{
                 </button>
               </div>
             </div>
-            <div className="gm-conflicts-chunks">
-              {conflictContent.chunks.map((chunk, ci) => (
-                <ConflictChunkView
-                  key={ci}
-                  chunk={chunk}
-                  chunkIndex={ci}
-                  onResolve={handleResolveChunk}
-                  disabled={busy}
+
+            {viewMode === 'chunks' && (
+              <div className="gm-conflicts-chunks">
+                {conflictContent.chunks.map((chunk, ci) => (
+                  <ConflictChunkView
+                    key={ci}
+                    chunk={chunk}
+                    chunkIndex={ci}
+                    onResolve={handleResolveChunk}
+                    disabled={busy}
+                    abbreviate={hasConflicts}
+                  />
+                ))}
+              </div>
+            )}
+
+            {viewMode === 'edit' && (
+              <ConflictEditor
+                content={editContent}
+                filePath={selectedFile}
+                onChange={(val) => { setEditContent(val); setEditDirty(true) }}
+                onSave={handleSaveEdit}
+              />
+            )}
+
+            {viewMode === 'claude' && (
+              <div className="gm-conflicts-claude">
+                <div className="gm-conflicts-claude-header">
+                  <ClaudeResolveIcon size={16} />
+                  <span>Describe how to resolve the conflict in <strong>{selectedFile.split(/[/\\]/).pop()}</strong></span>
+                </div>
+                <textarea
+                  className="gm-conflicts-claude-input"
+                  value={claudePrompt}
+                  onChange={(e) => setClaudePrompt(e.target.value)}
+                  placeholder={"e.g. Keep our version of the settings but add their new \"theme\" field with value \"dark\""}
+                  rows={4}
                 />
-              ))}
-            </div>
+                <div className="gm-conflicts-claude-actions">
+                  <button
+                    className="gm-small-btn gm-conflicts-claude-send"
+                    onClick={handleClaudeResolve}
+                    disabled={claudeSending || !claudePrompt.trim()}
+                  >
+                    {claudeSending ? 'Sending...' : 'Send to Claude'}
+                  </button>
+                  <span className="gm-conflicts-claude-hint">Opens the task in a Claude terminal in the dock window</span>
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
       </div>
@@ -6170,16 +6348,132 @@ const MergeConflictsPanel: React.FC<{
   )
 }
 
+// --- Conflict Editor (manual edit with syntax highlighting) ---
+
+const ConflictEditor: React.FC<{
+  content: string
+  filePath: string
+  onChange: (content: string) => void
+  onSave: () => void
+}> = ({ content, filePath, onChange, onSave }) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const preRef = useRef<HTMLPreElement>(null)
+  const gutterRef = useRef<HTMLDivElement>(null)
+
+  const highlighted = useMemo(() => highlightCode(filePath, content), [filePath, content])
+  const lines = content.split('\n')
+
+  // Sync scroll between textarea, pre, and gutter
+  const handleScroll = useCallback(() => {
+    if (textareaRef.current) {
+      if (preRef.current) {
+        preRef.current.scrollTop = textareaRef.current.scrollTop
+        preRef.current.scrollLeft = textareaRef.current.scrollLeft
+      }
+      if (gutterRef.current) {
+        gutterRef.current.scrollTop = textareaRef.current.scrollTop
+      }
+    }
+  }, [])
+
+  // Handle tab key for indentation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      onSave()
+      return
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      const ta = e.currentTarget
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      const val = ta.value
+
+      if (e.shiftKey) {
+        // Shift+Tab — dedent selected lines
+        const beforeSel = val.slice(0, start)
+        const lineStart = beforeSel.lastIndexOf('\n') + 1
+        const selected = val.slice(lineStart, end)
+        const dedented = selected.split('\n').map(l => l.startsWith('  ') ? l.slice(2) : l.startsWith('\t') ? l.slice(1) : l).join('\n')
+        const newVal = val.slice(0, lineStart) + dedented + val.slice(end)
+        onChange(newVal)
+        requestAnimationFrame(() => {
+          ta.selectionStart = start - (selected.split('\n')[0].length - dedented.split('\n')[0].length)
+          ta.selectionEnd = lineStart + dedented.length
+        })
+      } else if (start === end) {
+        // No selection — insert 2 spaces
+        const newVal = val.slice(0, start) + '  ' + val.slice(end)
+        onChange(newVal)
+        requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2 })
+      } else {
+        // Selection — indent all selected lines
+        const beforeSel = val.slice(0, start)
+        const lineStart = beforeSel.lastIndexOf('\n') + 1
+        const selected = val.slice(lineStart, end)
+        const indented = selected.split('\n').map(l => '  ' + l).join('\n')
+        const newVal = val.slice(0, lineStart) + indented + val.slice(end)
+        onChange(newVal)
+        requestAnimationFrame(() => {
+          ta.selectionStart = start + 2
+          ta.selectionEnd = lineStart + indented.length
+        })
+      }
+    }
+  }, [onChange, onSave])
+
+  return (
+    <div className="gm-conflict-editor">
+      {/* Line numbers */}
+      <div className="gm-conflict-editor-gutter" ref={gutterRef} aria-hidden>
+        {lines.map((_, i) => (
+          <div key={i} className="gm-conflict-editor-linenum">{i + 1}</div>
+        ))}
+      </div>
+      {/* Code area — textarea over highlighted pre */}
+      <div className="gm-conflict-editor-code">
+        <pre ref={preRef} className="gm-conflict-editor-pre gm-highlighted" aria-hidden>
+          <code dangerouslySetInnerHTML={highlighted
+            ? { __html: highlighted.join('\n') + '\n' }
+            : undefined
+          }>{highlighted ? undefined : content + '\n'}</code>
+        </pre>
+        <textarea
+          ref={textareaRef}
+          className="gm-conflict-editor-textarea"
+          value={content}
+          onChange={(e) => onChange(e.target.value)}
+          onScroll={handleScroll}
+          onKeyDown={handleKeyDown}
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+      </div>
+    </div>
+  )
+}
+
+const ClaudeResolveIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg className="gm-claude-resolve-icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
+    <path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" />
+  </svg>
+)
+
 const ConflictChunkView: React.FC<{
   chunk: GitConflictChunk
   chunkIndex: number
   onResolve: (index: number, resolution: 'ours' | 'theirs' | 'both') => void
   disabled: boolean
-}> = ({ chunk, chunkIndex, onResolve, disabled }) => {
+  abbreviate?: boolean
+}> = ({ chunk, chunkIndex, onResolve, disabled, abbreviate = true }) => {
   if (chunk.type === 'common') {
     const lines = chunk.commonLines || []
-    // Show abbreviated common sections (first 3 + last 3 if long)
-    const abbreviated = lines.length > 8
+    // Show abbreviated common sections (first 3 + last 3 if long), but only when there are still conflicts
+    const abbreviated = abbreviate && lines.length > 8
     const showLines = abbreviated ? [...lines.slice(0, 3), null, ...lines.slice(-3)] : lines
     return (
       <div className="gm-conflict-common">
@@ -7065,7 +7359,7 @@ const SubmoduleTreeNodeView: React.FC<{
 const StashSidebarEntry: React.FC<{
   stash: GitStashEntry
   projectDir: string
-  onError: (msg: string) => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
 }> = ({ stash, projectDir, onError, onRefresh, onConfirm }) => {
@@ -7093,14 +7387,14 @@ const StashSidebarEntry: React.FC<{
   const doApply = async () => {
     setCtxMenu(null)
     const r = await api.gitManager.stashApply(projectDir, stash.index)
-    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stash apply failed: ${r.error || 'Unknown error'}`, doApply)
     onRefresh()
   }
 
   const doPop = async () => {
     setCtxMenu(null)
     const r = await api.gitManager.stashPop(projectDir, stash.index)
-    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stash pop failed: ${r.error || 'Unknown error'}`, doPop)
     onRefresh()
   }
 

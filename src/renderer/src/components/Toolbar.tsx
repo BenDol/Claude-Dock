@@ -84,6 +84,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const rcBufsRef = useRef<Map<string, string>>(new Map())
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
+  const [warnings, setWarnings] = useState<Set<string>>(new Set())
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
   const [openPluginWindows, setOpenPluginWindows] = useState<Set<string>>(new Set())
 
@@ -129,14 +130,15 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     }).catch(() => {})
   }, [])
 
-  // Poll badges for toolbar actions that provide getBadge
+  // Poll badges and warnings for toolbar actions
   useEffect(() => {
     if (!projectDir) return
-    const actions = getToolbarActions().filter((a) => a.getBadge && (enabledPlugins === null || enabledPlugins.has(a.id)))
-    if (actions.length === 0) return
+    const badgeActions = getToolbarActions().filter((a) => a.getBadge && (enabledPlugins === null || enabledPlugins.has(a.id)))
+    const warningActions = getToolbarActions().filter((a) => a.getWarning && (enabledPlugins === null || enabledPlugins.has(a.id)))
+    if (badgeActions.length === 0 && warningActions.length === 0) return
 
     const poll = () => {
-      for (const action of actions) {
+      for (const action of badgeActions) {
         action.getBadge!(projectDir).then((val) => {
           setBadges((prev) => {
             if (val == null) {
@@ -147,6 +149,18 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             }
             if (prev[action.id] === val) return prev
             return { ...prev, [action.id]: val }
+          })
+        }).catch(() => {})
+      }
+      for (const action of warningActions) {
+        action.getWarning!(projectDir).then((warn) => {
+          setWarnings((prev) => {
+            const has = prev.has(action.id)
+            if (warn === has) return prev
+            const next = new Set(prev)
+            if (warn) next.add(action.id)
+            else next.delete(action.id)
+            return next
           })
         }).catch(() => {})
       }
@@ -282,9 +296,11 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             title={action.title}
           >
             {action.icon}
-            {badges[action.id] != null && (
+            {warnings.has(action.id) ? (
+              <span className="toolbar-warning" title="Unresolved conflicts">&#9888;</span>
+            ) : badges[action.id] != null ? (
               <span className="toolbar-badge">{badges[action.id]}</span>
-            )}
+            ) : null}
           </button>
         ))}
         {runtimeActions.filter((a) => enabledPlugins === null || enabledPlugins.has(a.pluginId)).map((action) => (

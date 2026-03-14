@@ -28,7 +28,13 @@ export interface ReferenceThisTask extends ClaudeTaskBase {
   selectedDiff?: string
 }
 
-export type ClaudeTaskRequest = CiFixTask | WriteTestsTask | ReferenceThisTask
+export interface MergeResolveTask extends ClaudeTaskBase {
+  type: 'merge-resolve'
+  filePath: string
+  instructions: string
+}
+
+export type ClaudeTaskRequest = CiFixTask | WriteTestsTask | ReferenceThisTask | MergeResolveTask
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions'
 
@@ -60,6 +66,11 @@ const REFERENCE_THIS_PERMISSIONS: TaskPermissions = {
   permissionMode: 'default'
 }
 
+const MERGE_RESOLVE_PERMISSIONS: TaskPermissions = {
+  allowedTools: ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep'],
+  permissionMode: 'acceptEdits'
+}
+
 export function getTaskMeta(task: ClaudeTaskRequest): TaskMeta {
   switch (task.type) {
     case 'ci-fix':
@@ -68,6 +79,8 @@ export function getTaskMeta(task: ClaudeTaskRequest): TaskMeta {
       return { label: 'Write Tests', defaultPermissions: WRITE_TESTS_PERMISSIONS }
     case 'reference-this':
       return { label: 'Reference This', ephemeral: false, defaultPermissions: REFERENCE_THIS_PERMISSIONS }
+    case 'merge-resolve':
+      return { label: 'Resolve Merge Conflict', defaultPermissions: MERGE_RESOLVE_PERMISSIONS }
   }
 }
 

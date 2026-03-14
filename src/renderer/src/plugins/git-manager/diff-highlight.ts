@@ -168,6 +168,19 @@ function balanceTags(lines: string[]): string[] {
 }
 
 /**
+ * Highlight raw code content and return highlighted HTML per line.
+ * Returns null if the language is unknown.
+ */
+export function highlightCode(filePath: string, code: string): string[] | null {
+  const language = getLanguageFromPath(filePath)
+  if (!language || !hljs.getLanguage(language)) return null
+  const lines = code.split('\n')
+  if (lines.length > MAX_LINES) return null
+  const highlighted = hljs.highlight(code, { language, ignoreIllegals: true })
+  return balanceTags(highlighted.value.split('\n'))
+}
+
+/**
  * Highlight diff hunks and return highlighted HTML per line, matching hunk/line structure.
  * Returns null if the language is unknown or total lines exceed the limit.
  */

@@ -30,11 +30,17 @@ function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-        // Ensure stderr is included in error message — execFile may omit it
-        // depending on Node.js version, but IPC handlers rely on err.message
+        // Ensure stderr and stdout are included in error message — execFile
+        // may omit them depending on Node.js version, and git outputs conflict
+        // details to stdout (not stderr), so we need both.
+        const extra: string[] = []
         if (stderr && !err.message.includes(stderr.trim().slice(0, 50))) {
-          err.message += '\n' + stderr
+          extra.push(stderr.trim())
         }
+        if (stdout && !err.message.includes(stdout.trim().slice(0, 50))) {
+          extra.push(stdout.trim())
+        }
+        if (extra.length > 0) err.message += '\n' + extra.join('\n')
         reject(err)
       } else {
         resolve({ stdout: stdout || '', stderr: stderr || '' })
@@ -619,6 +625,16 @@ export async function removeLockFile(cwd: string): Promise<void> {
   const pathMod = require('path') as typeof import('path')
   const lockPath = pathMod.join(cwd, '.git', 'index.lock')
   await fsP.rm(lockPath, { force: true })
+}
+
+/** Save raw content to a file (for manual conflict editing) */
+export async function saveFileContent(cwd: string, filePath: string, content: string): Promise<void> {
+  const fsP = require('fs/promises') as typeof import('fs/promises')
+  const pathMod = require('path') as typeof import('path')
+  const absPath = pathMod.resolve(cwd, filePath)
+  // Security: ensure the file is within the repo
+  if (!absPath.startsWith(pathMod.resolve(cwd))) throw new Error('Path escapes repository')
+  await fsP.writeFile(absPath, content, 'utf-8')
 }
 
 // --- Partial staging (apply patch) ---
@@ -1219,7 +1235,7 @@ export async function getConflictFileContent(cwd: string, filePath: string): Pro
 }
 
 function parseConflictMarkers(content: string): GitConflictChunk[] {
-  const lines = content.split('\n')
+  const lines = content.split('\n').map(l => l.replace(/\r$/, ''))
   const chunks: GitConflictChunk[] = []
   let commonLines: string[] = []
   let commonStart = 1

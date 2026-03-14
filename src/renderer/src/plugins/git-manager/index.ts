@@ -49,5 +49,13 @@ registerToolbarAction({
     } catch {
       return null
     }
+  },
+  getWarning: async (projectDir) => {
+    try {
+      const status = await getDockApi().gitManager.getStatus(projectDir)
+      return status.conflicts.length > 0
+    } catch {
+      return false
+    }
   }
 })

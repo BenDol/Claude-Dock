@@ -516,6 +516,33 @@ export function registerGitManagerIpc(): void {
     return active.map((t) => ({ id: t.id, title: t.title, sessionId: t.sessionId }))
   })
 
+  ipcMain.handle(IPC.GIT_MGR_SAVE_FILE, async (_event, projectDir: string, filePath: string, content: string) => {
+    try {
+      await gitOps.saveFileContent(projectDir, filePath, content)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] save file failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
+    const { DockManager } = require('../../../dock-manager')
+    const docks = DockManager.getInstance().getAllDocks()
+    const dock = docks.find((d: any) => d.projectDir === projectDir)
+    if (dock && !dock.window.isDestroyed()) {
+      dock.window.webContents.send('claude:task', {
+        type: 'merge-resolve',
+        filePath,
+        instructions
+      })
+      if (dock.window.isMinimized()) dock.window.restore()
+      dock.window.focus()
+      return { success: true }
+    }
+    return { success: false, error: 'No dock window found for this project' }
+  })
+
   registerCiIpc()
 
   log('[git-manager] IPC handlers registered')

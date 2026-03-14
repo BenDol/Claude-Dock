@@ -12,7 +12,7 @@ import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
-import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, TaskPermissions } from '../../shared/claude-task-types'
+import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, MergeResolveTask, TaskPermissions } from '../../shared/claude-task-types'
 import { getTaskMeta, buildClaudeFlags } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
@@ -249,6 +249,21 @@ function buildReferenceThisPrompt(task: ReferenceThisTask, context: string): str
   return parts.join('\n')
 }
 
+function buildMergeResolvePrompt(task: MergeResolveTask): string {
+  const parts: string[] = [
+    `Resolve the merge conflict in the file: ${task.filePath}`,
+    '',
+    `Read the file first — it contains conflict markers (<<<<<<< / ======= / >>>>>>>).`,
+    `Resolve the conflicts according to these instructions:`,
+    '',
+    task.instructions,
+    '',
+    `After resolving, write the file back with all conflict markers removed.`,
+    `Make sure the result is valid, compiles, and preserves the intent described above.`
+  ]
+  return parts.join('\n')
+}
+
 function DockApp() {
   const terminals = useDockStore((s) => s.terminals)
   const projectDir = useDockStore((s) => s.projectDir)
@@ -419,6 +434,8 @@ function DockApp() {
       prompt = buildWriteTestsPrompt(task, context)
     } else if (task.type === 'reference-this') {
       prompt = buildReferenceThisPrompt(task, context)
+    } else if (task.type === 'merge-resolve') {
+      prompt = buildMergeResolvePrompt(task)
     }
 
     const sendToTerminal = (termId: string) => {

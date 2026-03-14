@@ -137,6 +137,7 @@ body {
 .ws-dropdown {
   position: relative;
   -webkit-app-region: no-drag;
+  align-self: stretch;
 }
 
 .ws-dropdown-trigger {
@@ -149,8 +150,9 @@ body {
   font-weight: 600;
   font-size: 11px;
   line-height: 1;
-  padding: 2px 6px;
-  border-radius: 3px;
+  padding: 0 6px;
+  height: 100%;
+  border-radius: 0;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
@@ -359,8 +361,13 @@ body {
 
 /* Open prompt (This Window / New Window) */
 .ws-prompt-panel {
-  padding: 12px 14px;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(1.35);
+  padding: 16px 18px;
   text-align: center;
+  min-width: 240px;
 }
 
 .ws-prompt-title {
@@ -493,6 +500,17 @@ body {
 .toolbar-badge-notif {
   top: -1px;
   right: -3px;
+}
+
+.toolbar-warning {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  font-size: 11px;
+  line-height: 1;
+  color: #e0af68;
+  pointer-events: none;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
 }
 
 .toolbar-spinner {
