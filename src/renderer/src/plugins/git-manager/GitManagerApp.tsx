@@ -22,11 +22,13 @@ import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../..
 import { highlightDiffHunks, highlightCode } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
+import type { CiLogSearchMatch, CiSearchProgress } from './CiPanel'
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
 import type { WriteTestsTask, ReferenceThisTask } from '../../../../shared/claude-task-types'
 
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
+const standaloneCommitHash = params.get('commitHash') || ''
 
 interface NavEntry {
   dir: string
@@ -366,6 +368,11 @@ const GitManagerApp: React.FC = () => {
   const [ciLogOpen, setCiLogOpen] = useState(false)
   const [ciLogMatchInfo, setCiLogMatchInfo] = useState<{ count: number; current: number }>({ count: 0, current: 0 })
   const ciLogSearchMode = activeTab === 'ci' && ciLogOpen
+  const ciSearchMode = activeTab === 'ci' && !ciLogOpen
+
+  // CI cross-log search state
+  const [ciSearchResults, setCiSearchResults] = useState<CiLogSearchMatch[]>([])
+  const [ciSearchProgress, setCiSearchProgress] = useState<CiSearchProgress | null>(null)
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -806,6 +813,24 @@ const GitManagerApp: React.FC = () => {
     }
   }, [])
 
+  // CI cross-log search results tracking
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { results, progress } = (e as CustomEvent).detail as { results: CiLogSearchMatch[]; progress: CiSearchProgress | null }
+      setCiSearchResults(results)
+      setCiSearchProgress(progress)
+    }
+    window.addEventListener('ci-search-results', handler)
+    return () => window.removeEventListener('ci-search-results', handler)
+  }, [])
+
+  const handleCiSearchResult = useCallback((result: CiLogSearchMatch) => {
+    window.dispatchEvent(new CustomEvent('ci-open-job-log', {
+      detail: { runId: result.runId, jobId: result.jobId }
+    }))
+    setSearchOpen(false)
+  }, [])
+
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
   const repoProvider = useMemo<GitProvider>(() => {
@@ -1218,16 +1243,22 @@ const GitManagerApp: React.FC = () => {
               <input
                 ref={searchInputRef}
                 className="gm-search-input"
-                placeholder={ciLogSearchMode ? 'Find in log...' : activeTab === 'changes' ? 'Search working changes...' : 'Search commit history...'}
+                placeholder={ciLogSearchMode ? 'Find in log...' : ciSearchMode ? (ciSearchProgress?.scope === 'run' ? 'Search run job logs...' : 'Search all job logs...') : activeTab === 'changes' ? 'Search working changes...' : 'Search commit history...'}
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value)
-                  if (!ciLogSearchMode) {
+                  if (ciSearchMode) {
+                    setSearchOpen(true)
+                    setSearchFocusIdx(-1)
+                  } else if (!ciLogSearchMode) {
                     setSearchOpen(true)
                     triggerSearch(e.target.value)
                   }
                 }}
-                onFocus={() => { if (searchQuery && !ciLogSearchMode) setSearchOpen(true) }}
+                onFocus={() => {
+                  if (searchQuery && ciSearchMode) setSearchOpen(true)
+                  else if (searchQuery && !ciLogSearchMode) setSearchOpen(true)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     setSearchOpen(false)
@@ -1237,6 +1268,27 @@ const GitManagerApp: React.FC = () => {
                     if (e.key === 'Enter') {
                       e.preventDefault()
                       window.dispatchEvent(new CustomEvent('ci-log-search-nav', { detail: e.shiftKey ? 'prev' : 'next' }))
+                    }
+                  } else if (ciSearchMode) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault()
+                      if (ciSearchResults.length > 0) {
+                        setSearchOpen(true)
+                        setSearchFocusIdx((i) => i < ciSearchResults.length - 1 ? i + 1 : 0)
+                      }
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      if (ciSearchResults.length > 0) {
+                        setSearchOpen(true)
+                        setSearchFocusIdx((i) => i > 0 ? i - 1 : ciSearchResults.length - 1)
+                      }
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (searchFocusIdx >= 0 && ciSearchResults[searchFocusIdx]) {
+                        handleCiSearchResult(ciSearchResults[searchFocusIdx])
+                      } else if (ciSearchResults.length > 0) {
+                        handleCiSearchResult(ciSearchResults[0])
+                      }
                     }
                   } else if (e.key === 'ArrowDown') {
                     e.preventDefault()
@@ -1274,12 +1326,22 @@ const GitManagerApp: React.FC = () => {
               {searchQuery && (
                 <button
                   className="gm-search-clear"
-                  onClick={() => { setSearchQuery(''); setSearchResults([]); setSearchOpen(false); setSearchTruncated(false) }}
+                  onClick={() => { setSearchQuery(''); setSearchResults([]); setSearchOpen(false); setSearchTruncated(false); setCiSearchResults([]); setCiSearchProgress(null) }}
                 >
                   &times;
                 </button>
               )}
-              {searchOpen && searchQuery.trim() && !ciLogSearchMode && (
+              {searchOpen && searchQuery.trim() && ciSearchMode && (
+                <CiSearchDropdown
+                  results={ciSearchResults}
+                  progress={ciSearchProgress}
+                  query={searchQuery}
+                  focusIdx={searchFocusIdx}
+                  onSelect={handleCiSearchResult}
+                  onClose={() => setSearchOpen(false)}
+                />
+              )}
+              {searchOpen && searchQuery.trim() && !ciLogSearchMode && !ciSearchMode && (
                 <SearchDropdown
                   results={searchResults}
                   loading={searchLoading}
@@ -1348,7 +1410,7 @@ const GitManagerApp: React.FC = () => {
           {/* CI panel stays mounted to preserve state across tab switches */}
           {enableCiTab && (
             <div style={{ display: activeTab === 'ci' ? 'contents' : 'none' }}>
-              <CiPanel key={activeDir} projectDir={activeDir} provider={repoProvider} searchQuery={ciLogSearchMode ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} pendingRunId={pendingCiRunId} onNavigated={() => setPendingCiRunId(null)} />
+              <CiPanel key={activeDir} projectDir={activeDir} provider={repoProvider} searchQuery={activeTab === 'ci' ? searchQuery : undefined} currentBranch={currentBranch?.name} active={activeTab === 'ci'} pendingRunId={pendingCiRunId} onNavigated={() => setPendingCiRunId(null)} />
             </div>
           )}
         </div>
@@ -2026,6 +2088,7 @@ const CommitLog: React.FC<{
         className={`gm-commit-row${(activeHash || selectedHash) === c.hash ? ' gm-commit-row-selected' : ''}${head ? ' gm-commit-row-head' : ''}${!onCurrentBranch ? ' gm-commit-row-dimmed' : ''}${highlightHash === c.hash ? ' gm-commit-row-highlight' : ''}`}
         style={{ height: COMMIT_ROW_HEIGHT }}
         onClick={() => onSelect(c.hash)}
+        onDoubleClick={() => getDockApi().gitManager.openCommit(projectDir, c.hash)}
         onContextMenu={(e) => handleContextMenu(e, c)}
       >
         <span className="gm-col-graph gm-col-graph-lines" style={{ width: showGraph ? graphW : 24 }}>
@@ -2466,6 +2529,101 @@ const SearchDropdown: React.FC<{
   )
 }
 
+const CiSearchDropdown: React.FC<{
+  results: CiLogSearchMatch[]
+  progress: CiSearchProgress | null
+  query: string
+  focusIdx: number
+  onSelect: (result: CiLogSearchMatch) => void
+  onClose: () => void
+}> = ({ results, progress, query, focusIdx, onSelect, onClose }) => {
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        const searchBar = dropdownRef.current.closest('.gm-search-bar')
+        if (searchBar && searchBar.contains(e.target as Node)) return
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    if (focusIdx < 0 || !scrollRef.current) return
+    const top = focusIdx * SEARCH_ROW_HEIGHT
+    const el = scrollRef.current
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + SEARCH_ROW_HEIGHT > el.scrollTop + el.clientHeight) {
+      el.scrollTop = top + SEARCH_ROW_HEIGHT - el.clientHeight
+    }
+  }, [focusIdx])
+
+  const searching = progress && !progress.done
+
+  // Still loading (no progress yet, or 0/0 while fetching job lists)
+  if (!progress && results.length === 0) {
+    return null
+  }
+
+  if (searching && results.length === 0) {
+    const label = progress.total > 0
+      ? `Searching ${progress.searched}/${progress.total} job logs...`
+      : 'Fetching job list...'
+    return (
+      <div className="gm-search-dropdown" ref={dropdownRef}>
+        <div className="gm-search-dropdown-loading">
+          <span className="ci-spinner" style={{ width: 12, height: 12, marginRight: 8, display: 'inline-block', verticalAlign: 'middle' }} />
+          {label}
+        </div>
+      </div>
+    )
+  }
+
+  if (progress?.done && results.length === 0) {
+    return (
+      <div className="gm-search-dropdown" ref={dropdownRef}>
+        <div className="gm-search-dropdown-empty">No matches in {progress.total} job {progress.total === 1 ? 'log' : 'logs'}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="gm-search-dropdown" ref={dropdownRef}>
+      <div className="gm-search-dropdown-scroll" ref={scrollRef}>
+        {results.map((r, i) => (
+          <div
+            key={r.id}
+            className={`gm-search-result${i === focusIdx ? ' gm-search-result-focused' : ''}`}
+            style={{ height: SEARCH_ROW_HEIGHT }}
+            onClick={() => onSelect(r)}
+          >
+            <div className="gm-search-result-line1">
+              <span className="gm-search-result-path">
+                {r.jobName}
+              </span>
+              <span className="gm-search-badge gm-search-badge-ci">#{r.runNumber}</span>
+              <span className="gm-ci-match-count">{r.matchCount} {r.matchCount === 1 ? 'match' : 'matches'}</span>
+            </div>
+            <div className="gm-search-result-line2">
+              {highlightMatch(r.firstMatchPreview, query)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {searching && (
+        <div className="gm-search-dropdown-loading">
+          <span className="ci-spinner" style={{ width: 12, height: 12, marginRight: 8, display: 'inline-block', verticalAlign: 'middle' }} />
+          Searching {progress!.searched}/{progress!.total} job logs...
+        </div>
+      )}
+    </div>
+  )
+}
+
 const SearchIcon: React.FC = () => (
   <svg className="gm-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8" />
@@ -2482,7 +2640,8 @@ const CommitDetailPanel: React.FC<{
   onClose: () => void
   onError?: (msg: string) => void
   onRefresh?: () => void
-}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh }) => {
+  hideClose?: boolean
+}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh, hideClose }) => {
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
@@ -2636,36 +2795,70 @@ const CommitDetailPanel: React.FC<{
     const onUp = () => {
       setDragStart(null)
       isDragging.current = false
-      document.body.style.userSelect = ''
+      document.documentElement.classList.remove('gm-line-dragging')
     }
-    document.body.style.userSelect = 'none'
+    document.documentElement.classList.add('gm-line-dragging')
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     return () => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
-      document.body.style.userSelect = ''
+      document.documentElement.classList.remove('gm-line-dragging')
     }
   }, [dragStart, getLineRange])
 
+  // Track text selection on content and highlight corresponding lines
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const sel = document.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return
+      const range = sel.getRangeAt(0)
+      const container = range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement
+      if (!container?.closest('.gm-diff-hunk')) return
+      // Find all line elements that intersect the selection
+      const lineEls = document.querySelectorAll('[data-linekey]')
+      const keys = new Set<string>()
+      for (const el of lineEls) {
+        if (sel.containsNode(el, true)) {
+          const k = el.getAttribute('data-linekey')
+          if (k) keys.add(k)
+        }
+      }
+      if (keys.size > 0) setSelectedLines(keys)
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
+
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
-    e.preventDefault()
-    if (e.shiftKey && lastClickedRef.current) {
-      const range = getLineRange(lastClickedRef.current, key)
-      setSelectedLines(new Set(range))
-    } else if (e.ctrlKey) {
-      setSelectedLines((prev) => {
-        const next = new Set(prev)
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
-        return next
-      })
+    const target = e.target as HTMLElement
+    const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
+    if (isGutter) {
+      // Gutter click — full line selection mode with drag support
+      e.preventDefault()
+      if (e.shiftKey && lastClickedRef.current) {
+        const range = getLineRange(lastClickedRef.current, key)
+        setSelectedLines(new Set(range))
+      } else if (e.ctrlKey) {
+        setSelectedLines((prev) => {
+          const next = new Set(prev)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          return next
+        })
+      } else {
+        setSelectedLines(new Set([key]))
+        setDragStart(key)
+      }
+      lastClickedRef.current = key
     } else {
+      // Content click — allow native text selection, highlight this line
       setSelectedLines(new Set([key]))
-      setDragStart(key)
+      lastClickedRef.current = key
     }
-    lastClickedRef.current = key
   }, [getLineRange])
 
   const handleContextMenu = useCallback((fileIdx: number, e: React.MouseEvent) => {
@@ -2733,7 +2926,7 @@ const CommitDetailPanel: React.FC<{
               <ProviderIcon provider={provider} />
             </button>
           )}
-          <button className="gm-detail-close" onClick={onClose}>&#10005;</button>
+          {!hideClose && <button className="gm-detail-close" onClick={onClose}>&#10005;</button>}
         </span>
       </div>
       <div className="gm-detail-meta">
@@ -4195,37 +4388,67 @@ const WorkingDiffViewer: React.FC<{
     const onUp = () => {
       setDragStart(null)
       isDragging.current = false
-      document.body.style.userSelect = ''
+      document.documentElement.classList.remove('gm-line-dragging')
     }
-    document.body.style.userSelect = 'none'
+    document.documentElement.classList.add('gm-line-dragging')
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     return () => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
-      document.body.style.userSelect = ''
+      document.documentElement.classList.remove('gm-line-dragging')
     }
   }, [dragStart, getLineRange])
 
+  // Track text selection on content and highlight corresponding lines
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const sel = document.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return
+      const range = sel.getRangeAt(0)
+      const container = range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement
+      if (!container?.closest('.gm-diff-hunk')) return
+      const lineEls = document.querySelectorAll('[data-linekey]')
+      const keys = new Set<string>()
+      for (const el of lineEls) {
+        if (sel.containsNode(el, true)) {
+          const k = el.getAttribute('data-linekey')
+          if (k) keys.add(k)
+        }
+      }
+      if (keys.size > 0) setSelectedLines(keys)
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [])
+
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
-    e.preventDefault()
-
-    if (e.shiftKey && lastClickedRef.current) {
-      const range = getLineRange(lastClickedRef.current, key)
-      setSelectedLines(new Set(range))
-    } else if (e.ctrlKey) {
-      setSelectedLines((prev) => {
-        const next = new Set(prev)
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
-        return next
-      })
+    const target = e.target as HTMLElement
+    const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
+    if (isGutter) {
+      e.preventDefault()
+      if (e.shiftKey && lastClickedRef.current) {
+        const range = getLineRange(lastClickedRef.current, key)
+        setSelectedLines(new Set(range))
+      } else if (e.ctrlKey) {
+        setSelectedLines((prev) => {
+          const next = new Set(prev)
+          if (next.has(key)) next.delete(key)
+          else next.add(key)
+          return next
+        })
+      } else {
+        setSelectedLines(new Set([key]))
+        setDragStart(key)
+      }
+      lastClickedRef.current = key
     } else {
       setSelectedLines(new Set([key]))
-      setDragStart(key)
+      lastClickedRef.current = key
     }
-    lastClickedRef.current = key
   }, [getLineRange])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -7878,4 +8101,94 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString()
 }
 
-export default GitManagerApp
+// --- Standalone commit detail window ---
+
+const StandaloneCommitDetail: React.FC = () => {
+  const loadSettings = useSettingsStore((s) => s.load)
+  const [detail, setDetail] = useState<GitCommitDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const api = getDockApi()
+
+  // Apply theme + zoom (same as GitManagerApp)
+  useEffect(() => {
+    loadSettings().then(() => {
+      applyThemeToDocument(useSettingsStore.getState().settings)
+    })
+  }, [loadSettings])
+
+  useEffect(() => {
+    const ZOOM_KEY = 'gm-zoom'
+    const MIN_ZOOM = 0.5
+    const MAX_ZOOM = 2.0
+    const STEP = 0.1
+    const saved = localStorage.getItem(ZOOM_KEY)
+    let zoom = saved ? parseFloat(saved) : 1
+    if (isNaN(zoom) || zoom < MIN_ZOOM || zoom > MAX_ZOOM) zoom = 1
+    document.documentElement.style.zoom = String(zoom)
+    const applyZoom = (z: number) => {
+      zoom = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      document.documentElement.style.zoom = String(zoom)
+      localStorage.setItem(ZOOM_KEY, String(zoom))
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      applyZoom(zoom + (e.deltaY < 0 ? STEP : -STEP))
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + STEP) }
+      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - STEP) }
+      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown)
+    return () => { window.removeEventListener('wheel', onWheel); window.removeEventListener('keydown', onKeyDown) }
+  }, [])
+
+  useEffect(() => {
+    if (!standaloneCommitHash || !projectDir) return
+    setLoading(true)
+    api.gitManager.getCommitDetail(projectDir, standaloneCommitHash)
+      .then(setDetail)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load commit'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="gm-app"><div className="gm-loading">Loading commit...</div></div>
+  if (error) return <div className="gm-app"><div className="gm-error-bar"><span>{error}</span></div></div>
+  if (!detail) return <div className="gm-app"><div className="gm-loading">No commit data</div></div>
+
+  return (
+    <div className="gm-app">
+      <div className="gm-titlebar" onDoubleClick={() => api.win.maximize()}>
+        <div className="gm-titlebar-left" style={{ userSelect: 'none' }}>
+          <GitIcon />
+          <span className="gm-titlebar-project">{detail.hash.slice(0, 8)}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 4 }}>{detail.subject}</span>
+        </div>
+        <div className="gm-titlebar-center" />
+        <div className="gm-titlebar-right">
+          <div className="toolbar-separator" />
+          <div className="gm-win-controls">
+            <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
+            <button className="win-btn win-maximize" onClick={() => api.win.maximize()}>&#9744;</button>
+            <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <CommitDetailPanel
+          detail={detail}
+          projectDir={projectDir}
+          syntaxHL={true}
+          onClose={() => api.win.close()}
+          hideClose
+        />
+      </div>
+    </div>
+  )
+}
+
+export default standaloneCommitHash ? StandaloneCommitDetail : GitManagerApp

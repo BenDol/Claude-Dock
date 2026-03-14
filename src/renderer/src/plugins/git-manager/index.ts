@@ -57,5 +57,26 @@ registerToolbarAction({
     } catch {
       return false
     }
+  },
+  getStatusDot: async (projectDir) => {
+    try {
+      const api = getDockApi()
+      const provider = await api.ci.checkAvailable(projectDir)
+      if (!provider) return null
+      const workflows = await api.ci.getWorkflows(projectDir)
+      if (workflows.length === 0) return null
+      // Check the latest run from the first workflow
+      const latest = await api.ci.getWorkflowRuns(projectDir, workflows[0].id, 1, 1)
+      if (latest.length === 0) return null
+      const run = latest[0]
+      if (run.status === 'completed') {
+        if (run.conclusion === 'failure') return 'failure'
+        return null
+      }
+      // Still running/queued
+      return 'in_progress'
+    } catch {
+      return null
+    }
   }
 })

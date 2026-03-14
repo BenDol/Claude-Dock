@@ -85,6 +85,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
   const [warnings, setWarnings] = useState<Set<string>>(new Set())
+  const [statusDots, setStatusDots] = useState<Record<string, 'success' | 'failure' | 'in_progress'>>({})
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
   const [openPluginWindows, setOpenPluginWindows] = useState<Set<string>>(new Set())
 
@@ -135,7 +136,8 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     if (!projectDir) return
     const badgeActions = getToolbarActions().filter((a) => a.getBadge && (enabledPlugins === null || enabledPlugins.has(a.id)))
     const warningActions = getToolbarActions().filter((a) => a.getWarning && (enabledPlugins === null || enabledPlugins.has(a.id)))
-    if (badgeActions.length === 0 && warningActions.length === 0) return
+    const statusDotActions = getToolbarActions().filter((a) => a.getStatusDot && (enabledPlugins === null || enabledPlugins.has(a.id)))
+    if (badgeActions.length === 0 && warningActions.length === 0 && statusDotActions.length === 0) return
 
     const poll = () => {
       for (const action of badgeActions) {
@@ -161,6 +163,20 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             if (warn) next.add(action.id)
             else next.delete(action.id)
             return next
+          })
+        }).catch(() => {})
+      }
+      for (const action of statusDotActions) {
+        action.getStatusDot!(projectDir).then((dot) => {
+          setStatusDots((prev) => {
+            if (dot == null) {
+              if (!(action.id in prev)) return prev
+              const next = { ...prev }
+              delete next[action.id]
+              return next
+            }
+            if (prev[action.id] === dot) return prev
+            return { ...prev, [action.id]: dot }
           })
         }).catch(() => {})
       }
@@ -301,6 +317,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             ) : badges[action.id] != null ? (
               <span className="toolbar-badge">{badges[action.id]}</span>
             ) : null}
+            {statusDots[action.id] && (
+              <span className={`toolbar-status-dot toolbar-status-dot-${statusDots[action.id]}`} />
+            )}
           </button>
         ))}
         {runtimeActions.filter((a) => enabledPlugins === null || enabledPlugins.has(a.pluginId)).map((action) => (

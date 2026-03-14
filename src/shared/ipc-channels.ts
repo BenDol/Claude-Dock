@@ -54,6 +54,7 @@ export const IPC = {
   // Git Manager
   GIT_MGR_IS_REPO: 'gitMgr:isRepo',
   GIT_MGR_OPEN: 'gitMgr:open',
+  GIT_MGR_OPEN_COMMIT: 'gitMgr:openCommit',
   GIT_MGR_GET_LOG: 'gitMgr:getLog',
   GIT_MGR_GET_COMMIT_COUNT: 'gitMgr:getCommitCount',
   GIT_MGR_GET_COMMIT_INDEX: 'gitMgr:getCommitIndex',

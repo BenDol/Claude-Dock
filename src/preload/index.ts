@@ -137,6 +137,7 @@ export interface DockApi {
   gitManager: {
     isRepo: (projectDir: string) => Promise<boolean>
     open: (projectDir: string) => Promise<void>
+    openCommit: (projectDir: string, commitHash: string) => Promise<void>
     getLog: (projectDir: string, opts?: GitLogOptions) => Promise<GitCommitInfo[]>
     getCommitCount: (projectDir: string) => Promise<number>
     getCommitIndex: (projectDir: string, hash: string) => Promise<number>
@@ -342,6 +343,7 @@ const dockApi: DockApi = {
   gitManager: {
     isRepo: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_IS_REPO, projectDir),
     open: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN, projectDir),
+    openCommit: (projectDir: string, commitHash: string) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN_COMMIT, projectDir, commitHash),
     getLog: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_GET_LOG, projectDir, opts),
     getCommitCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_COUNT, projectDir),
     getCommitIndex: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_INDEX, projectDir, hash),

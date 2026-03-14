@@ -21,6 +21,10 @@ export function registerGitManagerIpc(): void {
     return winManager.open(projectDir)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_OPEN_COMMIT, (_event, projectDir: string, commitHash: string) => {
+    return winManager.openCommitDetail(projectDir, commitHash)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GET_LOG, async (_event, projectDir: string, opts?: GitLogOptions) => {
     return gitOps.getLog(projectDir, opts)
   })

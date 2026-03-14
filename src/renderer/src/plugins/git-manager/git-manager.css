@@ -1947,6 +1947,7 @@
   opacity: 0.5;
   user-select: none;
   padding-right: 8px;
+  cursor: pointer;
 }
 
 .gm-diff-line-no span {
@@ -1959,11 +1960,21 @@
   width: 14px;
   flex-shrink: 0;
   user-select: none;
+  cursor: pointer;
 }
 
 .gm-diff-line-content {
   flex: 1;
   min-width: 0;
+  cursor: text;
+  user-select: text;
+}
+
+/* During line-gutter drag, disable text selection globally */
+.gm-line-dragging,
+.gm-line-dragging * {
+  user-select: none !important;
+  cursor: pointer !important;
 }
 
 /* --- Syntax highlighting (highlight.js) --- */
@@ -2220,8 +2231,7 @@
 }
 
 .gm-changes-diff .gm-diff-line {
-  cursor: pointer;
-  user-select: none;
+  cursor: default;
 }
 
 .gm-diff-line-selected {
@@ -4413,6 +4423,18 @@
 .gm-search-badge-untracked {
   background: #565f8933;
   color: #565f89;
+}
+
+.gm-search-badge-ci {
+  background: var(--accent-color, #58a6ff);
+  color: #fff;
+}
+
+.gm-ci-match-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .gm-search-truncated {

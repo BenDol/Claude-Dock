@@ -5,6 +5,24 @@ import { groupJobsByMatrix } from '../../../../shared/ci-types'
 import type { GitProvider } from '../../../../shared/remote-url'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 
+export interface CiLogSearchMatch {
+  id: string
+  runId: number
+  runName: string
+  runNumber: number
+  jobId: number
+  jobName: string
+  matchCount: number
+  firstMatchPreview: string
+}
+
+export interface CiSearchProgress {
+  searched: number
+  total: number
+  done?: boolean
+  scope?: 'run' | 'all'
+}
+
 interface CiPanelProps {
   projectDir: string
   provider: GitProvider
@@ -119,6 +137,12 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const detailRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
   const lastCiRefreshRef = useRef(0)
+
+  // Cross-log search state
+  const [ciLogOpenLocal, setCiLogOpenLocal] = useState(false)
+  const [autoOpenJob, setAutoOpenJob] = useState<{ runId: number; jobId: number } | null>(null)
+  const logCacheRef = useRef<Map<number, string>>(new Map())
+  const searchAbortRef = useRef<AbortController | null>(null)
 
   const api = getDockApi()
 
@@ -344,6 +368,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const handleExpandRun = useCallback(async (runId: number) => {
     if (expandedRun === runId) {
       setExpandedRun(null)
+      setAutoOpenJob(null)
       return
     }
     setExpandedRun(runId)
@@ -488,6 +513,28 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     onNavigated?.()
   }, [pendingRunId, status, loadingRuns, navigateToRun, onNavigated])
 
+  // Track whether RunDetailPanel has a log viewer open
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setCiLogOpenLocal((e as CustomEvent).detail as boolean)
+    }
+    window.addEventListener('ci-log-view', handler)
+    return () => window.removeEventListener('ci-log-view', handler)
+  }, [])
+
+  // Listen for ci-open-job-log events (from search result clicks)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { runId, jobId } = (e as CustomEvent).detail as { runId: number; jobId: number }
+      setAutoOpenJob({ runId, jobId })
+      if (expandedRun !== runId) {
+        navigateToRun(runId)
+      }
+    }
+    window.addEventListener('ci-open-job-log', handler)
+    return () => window.removeEventListener('ci-open-job-log', handler)
+  }, [expandedRun, navigateToRun])
+
   // Apply filters — exclude runs already shown in the active section
   const activeRunIds = useMemo(() => new Set(filteredActiveRuns.map((r) => r.id)), [filteredActiveRuns])
 
@@ -526,6 +573,134 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   }, [])
 
   const hasActiveFilters = filters.status.size > 0 || filters.branches.size > 0 || filters.event !== null
+
+  // Cross-log search: search job logs when on CI tab without a specific log open
+  useEffect(() => {
+    if (!searchQuery?.trim() || ciLogOpenLocal || status !== 'ready') {
+      window.dispatchEvent(new CustomEvent('ci-search-results', { detail: { results: [], progress: null } }))
+      return
+    }
+
+    const scope: 'run' | 'all' = expandedRun !== null ? 'run' : 'all'
+
+    // When a run is selected but jobs are still loading, wait
+    if (expandedRun !== null && loadingJobs) {
+      window.dispatchEvent(new CustomEvent('ci-search-results', {
+        detail: { results: [], progress: { searched: 0, total: 0, done: false, scope } }
+      }))
+      return
+    }
+
+    const query = searchQuery.trim().toLowerCase()
+
+    // Signal that a new search is starting (null progress = pending, not "0/0")
+    window.dispatchEvent(new CustomEvent('ci-search-results', {
+      detail: { results: [], progress: null }
+    }))
+
+    searchAbortRef.current?.abort()
+    const abort = new AbortController()
+    searchAbortRef.current = abort
+
+    const timer = setTimeout(async () => {
+      if (abort.signal.aborted) return
+
+      // Determine scope: expanded run's jobs or all visible runs
+      let jobsToSearch: Array<{ job: CiJob; run: CiWorkflowRun }> = []
+
+      if (expandedRun !== null) {
+        const run = [...filteredActiveRuns, ...filteredRuns].find(r => r.id === expandedRun)
+        if (run && runJobs.length > 0) {
+          jobsToSearch = runJobs.map(job => ({ job, run }))
+        }
+      } else {
+        const visibleRuns = [...filteredActiveRuns, ...filteredRuns].slice(0, 10)
+        for (const run of visibleRuns) {
+          if (abort.signal.aborted) return
+          try {
+            const jobs = await api.ci.getRunJobs(projectDir, run.id)
+            for (const job of jobs) {
+              jobsToSearch.push({ job, run })
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      if (abort.signal.aborted) return
+
+      const total = jobsToSearch.length
+      let searched = 0
+      const results: CiLogSearchMatch[] = []
+
+      // Emit initial progress with real total
+      window.dispatchEvent(new CustomEvent('ci-search-results', {
+        detail: { results: [], progress: { searched: 0, total, done: false, scope } }
+      }))
+
+      for (const { job, run } of jobsToSearch) {
+        if (abort.signal.aborted) return
+
+        // Fetch log (cached)
+        let log = logCacheRef.current.get(job.id)
+        if (log === undefined) {
+          try {
+            log = await api.ci.getJobLog(projectDir, job.id) || ''
+          } catch {
+            log = ''
+          }
+          logCacheRef.current.set(job.id, log)
+        }
+
+        // Search log — collect match count and first match preview per job
+        if (log) {
+          let matchCount = 0
+          let firstPreview = ''
+          const lines = log.split('\n')
+          for (const line of lines) {
+            const cleanLine = line
+              .replace(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+/, '')
+              .replace(/^##\[\w+\]/, '')
+            if (cleanLine.toLowerCase().includes(query)) {
+              matchCount++
+              if (!firstPreview) firstPreview = cleanLine.trim().slice(0, 200)
+            }
+          }
+          if (matchCount > 0) {
+            results.push({
+              id: `${run.id}-${job.id}`,
+              runId: run.id,
+              runName: run.name,
+              runNumber: run.runNumber,
+              jobId: job.id,
+              jobName: job.name,
+              matchCount,
+              firstMatchPreview: firstPreview
+            })
+          }
+        }
+
+        searched++
+
+        if (!abort.signal.aborted) {
+          window.dispatchEvent(new CustomEvent('ci-search-results', {
+            detail: { results: [...results], progress: { searched, total, done: searched === total, scope } }
+          }))
+        }
+      }
+
+      // Final emit
+      if (!abort.signal.aborted) {
+        window.dispatchEvent(new CustomEvent('ci-search-results', {
+          detail: { results, progress: { searched, total, done: true, scope } }
+        }))
+      }
+    }, 500)
+
+    return () => {
+      clearTimeout(timer)
+      abort.abort()
+    }
+  }, [searchQuery, ciLogOpenLocal, expandedRun, runJobs, loadingJobs, filteredActiveRuns, filteredRuns, projectDir, status])
 
   if (status === 'loading') {
     return <div className="ci-panel-center"><div className="ci-spinner" /> Checking CI availability...</div>
@@ -750,10 +925,12 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
               searchQuery={searchQuery}
               progress={runProgress.get(selectedRun.id)}
               onToggleGroup={toggleGroup}
-              onClose={() => setExpandedRun(null)}
+              onClose={() => { setExpandedRun(null); setAutoOpenJob(null) }}
               onCancel={handleCancel}
               cancelling={cancellingRuns.has(selectedRun.id)}
               onOpenUrl={(url) => api.app.openExternal(url)}
+              autoOpenJobId={autoOpenJob?.runId === selectedRun.id ? autoOpenJob.jobId : undefined}
+              onAutoOpenHandled={() => setAutoOpenJob(null)}
             />
           </div>
         </>
@@ -762,7 +939,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   )
 }
 
-function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, cancelling, onOpenUrl }: {
+function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, cancelling, onOpenUrl, autoOpenJobId, onAutoOpenHandled }: {
   run: CiWorkflowRun
   jobs: CiJob[]
   jobGroups: CiJobGroup[]
@@ -777,6 +954,8 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
   onCancel: (runId: number) => void
   cancelling?: boolean
   onOpenUrl: (url: string) => void
+  autoOpenJobId?: number
+  onAutoOpenHandled?: () => void
 }) {
   const api = getDockApi()
   const [logJobId, setLogJobId] = useState<number | null>(null)
@@ -809,6 +988,14 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
     setLogStepFilter(null)
     window.dispatchEvent(new CustomEvent('ci-log-view', { detail: false }))
   }, [])
+
+  // Auto-open a job log when navigated from search results
+  useEffect(() => {
+    if (autoOpenJobId && !loadingJobs && jobs.length > 0) {
+      viewJobLog(autoOpenJobId)
+      onAutoOpenHandled?.()
+    }
+  }, [autoOpenJobId, loadingJobs, jobs])
 
   // Filter log text to a specific step if requested
   const displayLog = useMemo(() => {

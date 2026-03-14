@@ -76,7 +76,7 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 28px;
-  padding: 0 0 0 8px;
+  padding: 0;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
@@ -150,7 +150,7 @@ body {
   font-weight: 600;
   font-size: 11px;
   line-height: 1;
-  padding: 0 6px;
+  padding: 0 6px 0 14px;
   height: 100%;
   border-radius: 0;
   cursor: pointer;
@@ -511,6 +511,28 @@ body {
   color: #e0af68;
   pointer-events: none;
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.8));
+}
+
+.toolbar-status-dot {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.toolbar-status-dot-success { background: #9ece6a; }
+.toolbar-status-dot-failure { background: #f7768e; }
+.toolbar-status-dot-in_progress {
+  background: #e0af68;
+  animation: toolbar-ci-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes toolbar-ci-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(224, 175, 104, 0.5); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 3px rgba(224, 175, 104, 0); }
 }
 
 .toolbar-spinner {

@@ -10,6 +10,8 @@ export interface ToolbarAction {
   getBadge?: (projectDir: string) => Promise<string | number | null>
   /** Optional async warning indicator — return true to show a small warning icon overlay */
   getWarning?: (projectDir: string) => Promise<boolean>
+  /** Optional async status dot — return a color status or null to hide */
+  getStatusDot?: (projectDir: string) => Promise<'success' | 'failure' | 'in_progress' | null>
 }
 
 const actions: ToolbarAction[] = []
