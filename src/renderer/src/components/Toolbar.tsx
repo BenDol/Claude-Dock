@@ -604,8 +604,10 @@ const NotificationDropdown: React.FC = () => {
     const api = getDockApi()
     const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
     const cleanup = api.notifications.onShow((notification) => {
-      // Only accept notifications for this project (or global ones without projectDir)
-      if (notification.projectDir && projectDir && norm(notification.projectDir) !== norm(projectDir)) return
+      // Only show project-scoped notifications in the matching project window
+      if (notification.projectDir) {
+        if (!projectDir || norm(notification.projectDir) !== norm(projectDir)) return
+      }
       setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS))
       // Auto-mark as read if the setting is enabled or window is focused
       if (markAllRead || document.hasFocus()) {

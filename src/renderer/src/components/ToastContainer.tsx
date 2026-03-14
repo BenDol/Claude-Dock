@@ -40,8 +40,10 @@ export default function ToastContainer() {
     const api = getDockApi()
     const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
     const cleanup = api.notifications.onShow((notification) => {
-      // Only show notifications for this project (or global ones without projectDir)
-      if (notification.projectDir && projectDir && norm(notification.projectDir) !== norm(projectDir)) return
+      // Only show project-scoped notifications in the matching project window
+      if (notification.projectDir) {
+        if (!projectDir || norm(notification.projectDir) !== norm(projectDir)) return
+      }
       const entry: ToastEntry = { ...notification, exiting: false }
       setToasts((prev) => [...prev.slice(-4), entry]) // keep max 5
 
