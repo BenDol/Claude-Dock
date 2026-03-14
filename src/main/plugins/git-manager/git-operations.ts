@@ -848,16 +848,24 @@ export async function removeRemote(cwd: string, name: string): Promise<void> {
 // --- Commit message generation ---
 
 const COMMIT_MSG_PROMPT = [
-  'Write a single-line git commit message for the following staged changes.',
+  'Write a git commit message for the following staged changes.',
   'Use conventional commit format (feat:, fix:, refactor:, docs:, chore:, style:, test:).',
-  'Keep it under 72 characters. Return ONLY the commit message — no quotes, no explanation, no extra text.'
+  'First line: a short summary under 72 characters.',
+  'If the changes cover multiple distinct topics, add a blank line after the summary then bullet points (using -) for each change.',
+  'Return ONLY the commit message — no quotes, no explanation, no markdown fences, no extra text.'
 ].join(' ')
 
 function cleanCommitMessage(raw: string): string {
-  return raw.trim()
+  let msg = raw.trim()
     .replace(/^["']|["']$/g, '')
-    .split('\n')[0]
+    .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
+  // Ensure first line is under 72 chars
+  const lines = msg.split('\n')
+  if (lines[0].length > 72) {
+    lines[0] = lines[0].slice(0, 72).replace(/\s+\S*$/, '')
+  }
+  return lines.join('\n').trim()
 }
 
 function ollamaRequest(path: string, body?: object, timeout = 30000): Promise<any> {
@@ -915,13 +923,13 @@ async function generateViaOllama(stat: string, diff: string): Promise<string> {
   if (Date.now() < ollamaUnavailableUntil) throw new Error('ollama_unavailable')
   try {
     const model = await pickOllamaModel()
-    const shortDiff = diff.length > 2000 ? diff.slice(0, 2000) + '\n... (truncated)' : diff
+    const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
     const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
     const result = await ollamaRequest('/api/generate', {
       model,
       prompt,
       stream: false,
-      options: { temperature: 0.3, num_predict: 60 }
+      options: { temperature: 0.3, num_predict: 200 }
     }, 15000)
     const msg = cleanCommitMessage(result?.response || '')
     if (!msg) throw new Error('Empty response from Ollama')
@@ -936,8 +944,7 @@ async function generateViaOllama(stat: string, diff: string): Promise<string> {
 
 async function generateViaClaude(stat: string, diff: string): Promise<string> {
   const { spawn } = require('child_process') as typeof import('child_process')
-  // Stat-only keeps tokens minimal; include a small diff slice for extra context
-  const shortDiff = diff.length > 1500 ? diff.slice(0, 1500) + '\n... (truncated)' : diff
+  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
   const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
 
   const stdout = await new Promise<string>((resolve, reject) => {
@@ -968,12 +975,12 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set')
 
-  const shortDiff = diff.length > 1500 ? diff.slice(0, 1500) + '\n... (truncated)' : diff
+  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
   const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
 
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 100,
+    max_tokens: 300,
     messages: [{ role: 'user', content: prompt }]
   })
 
