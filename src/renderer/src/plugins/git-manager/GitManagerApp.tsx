@@ -1321,6 +1321,8 @@ const GitManagerApp: React.FC = () => {
                 scrollToFileAndLine={scrollToFileAndLine}
                 onScrollToHandled={() => setScrollToFileAndLine(null)}
                 onClose={() => setSelectedCommit(null)}
+                onError={handleSmartError}
+                onRefresh={refresh}
               />
             </div>
           </>
@@ -2173,7 +2175,8 @@ const LazyDiffFile: React.FC<{
   onContextMenu: (fileIdx: number, e: React.MouseEvent) => void
   commitHash?: string
   commitSubject?: string
-}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu, commitHash, commitSubject }) => {
+  onResetFile?: (filePath: string) => void
+}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu, commitHash, commitSubject, onResetFile }) => {
   const api = getDockApi()
   const [visible, setVisible] = useState(fi < 5) // render first 5 eagerly
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -2246,6 +2249,13 @@ const LazyDiffFile: React.FC<{
           onClick={() => api.gitManager.showInFolder(projectDir, f.path)}
           title="Show in folder"
         ><ShowInFolderIcon /></button>
+        {onResetFile && (
+          <button
+            className="gm-file-hover-btn"
+            onClick={() => onResetFile(f.path)}
+            title="Reset this file's change"
+          ><ResetChangeIcon /></button>
+        )}
         <ClaudeActionWheel files={[f.path]} commitHash={commitHash} commitSubject={commitSubject} />
         <span className="gm-diff-file-stats">
           {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
@@ -2426,7 +2436,9 @@ const CommitDetailPanel: React.FC<{
   scrollToFileAndLine?: { filePath: string; lineNumber?: number } | null
   onScrollToHandled?: () => void
   onClose: () => void
-}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose }) => {
+  onError?: (msg: string) => void
+  onRefresh?: () => void
+}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh }) => {
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
@@ -2438,6 +2450,50 @@ const CommitDetailPanel: React.FC<{
   const [fileListExpanded, setFileListExpanded] = useState(false)
   const [scrollToFileIdx, setScrollToFileIdx] = useState<number | null>(null)
   const clearScrollTo = useCallback(() => setScrollToFileIdx(null), [])
+
+  const handleResetFile = useCallback(async (filePath: string) => {
+    if (!window.confirm(`Reset "${filePath}" to its state before this commit?`)) return
+    const result = await api.gitManager.restoreFileFromCommit(projectDir, detail.hash, filePath)
+    if (result.success) {
+      onRefresh?.()
+    } else {
+      onError?.(`Reset failed: ${result.error || 'Unknown error'}`)
+    }
+  }, [api, projectDir, detail.hash, onError, onRefresh])
+
+  const handleResetLines = useCallback(async () => {
+    if (selectedLines.size === 0) return
+    const changeCount = [...selectedLines].filter(k => {
+      const [fi, hi, li] = k.split(':').map(Number)
+      const t = detail.files[fi]?.hunks[hi]?.lines[li]?.type
+      return t === 'add' || t === 'delete'
+    }).length
+    if (changeCount === 0) return
+    if (!window.confirm(`Reset ${changeCount === 1 ? '1 selected line' : `${changeCount} selected lines`} to state before this commit?`)) return
+
+    // Group selected lines by file index
+    const byFile = new Map<number, Set<string>>()
+    for (const key of selectedLines) {
+      const [fi, hi, li] = key.split(':').map(Number)
+      if (!byFile.has(fi)) byFile.set(fi, new Set())
+      byFile.get(fi)!.add(`${hi}:${li}`)
+    }
+
+    let anyFailed = false
+    for (const [fi, lineKeys] of byFile) {
+      const file = detail.files[fi]
+      if (!file) continue
+      const patch = buildPartialPatch(file, lineKeys)
+      if (!patch) continue
+      const result = await api.gitManager.applyPatch(projectDir, patch, false, true)
+      if (!result.success) {
+        anyFailed = true
+        onError?.(`Reset lines failed for ${file.path}: ${result.error || 'Unknown error'}`)
+      }
+    }
+    setSelectedLines(new Set())
+    if (!anyFailed) onRefresh?.()
+  }, [api, projectDir, detail.files, selectedLines, onError, onRefresh])
 
   // Clear selection on new commit
   useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [detail.hash])
@@ -2695,6 +2751,7 @@ const CommitDetailPanel: React.FC<{
             onContextMenu={handleContextMenu}
             commitHash={detail.hash}
             commitSubject={detail.subject}
+            onResetFile={handleResetFile}
           />
         ))}
       </div>
@@ -2712,6 +2769,7 @@ const CommitDetailPanel: React.FC<{
           onCopyPatch={() => doCopy('patch')}
           onCopyNew={() => doCopy('new')}
           onCopyOld={() => doCopy('old')}
+          onResetLines={handleResetLines}
           onClose={() => setCtxMenu(null)}
         />
       )}
@@ -2730,8 +2788,9 @@ const CommitDiffContextMenu: React.FC<{
   onCopyPatch: () => void
   onCopyNew: () => void
   onCopyOld: () => void
+  onResetLines?: () => void
   onClose: () => void
-}> = ({ x, y, selectedCount, selectedPatch, selectedFiles, commitHash, commitSubject, onCopy, onCopyPatch, onCopyNew, onCopyOld, onClose }) => {
+}> = ({ x, y, selectedCount, selectedPatch, selectedFiles, commitHash, commitSubject, onCopy, onCopyPatch, onCopyNew, onCopyOld, onResetLines, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [claudeSubmenu, setClaudeSubmenu] = useState(false)
 
@@ -2766,6 +2825,12 @@ const CommitDiffContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={onCopyPatch}>Copy patch</div>
       <div className="gm-ctx-item" onClick={onCopyNew}>Copy new version</div>
       <div className="gm-ctx-item" onClick={onCopyOld}>Copy old version</div>
+      {onResetLines && (
+        <>
+          <div className="gm-ctx-separator" />
+          <div className="gm-ctx-item" onClick={() => { onClose(); onResetLines() }}>Reset selected {label}</div>
+        </>
+      )}
       <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item gm-ctx-submenu-trigger"
@@ -7322,6 +7387,13 @@ const ShowInFolderIcon: React.FC = () => (
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <polyline points="9 14 12 17 15 14" />
     <line x1="12" y1="10" x2="12" y2="17" />
+  </svg>
+)
+
+const ResetChangeIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 105.64-11.36L1 10" />
   </svg>
 )
 

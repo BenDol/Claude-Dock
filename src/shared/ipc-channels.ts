@@ -86,6 +86,7 @@ export const IPC = {
   GIT_MGR_GET_TAGS: 'gitMgr:getTags',
   GIT_MGR_RENAME_BRANCH: 'gitMgr:renameBranch',
   GIT_MGR_DISCARD: 'gitMgr:discard',
+  GIT_MGR_RESTORE_FILE_FROM_COMMIT: 'gitMgr:restoreFileFromCommit',
   GIT_MGR_DELETE_FILES: 'gitMgr:deleteFiles',
   GIT_MGR_SHOW_IN_FOLDER: 'gitMgr:showInFolder',
   GIT_MGR_APPLY_PATCH: 'gitMgr:applyPatch',

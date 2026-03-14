@@ -600,6 +600,11 @@ export async function discardFiles(cwd: string, paths: string[]): Promise<void> 
   await gitExec(cwd, ['checkout', '--', ...paths], 10000)
 }
 
+/** Restore a file to its state before a given commit (i.e. from the commit's parent) */
+export async function restoreFileFromCommit(cwd: string, commitHash: string, filePath: string): Promise<void> {
+  await gitExec(cwd, ['checkout', `${commitHash}^`, '--', filePath], 10000)
+}
+
 export async function deleteUntrackedFiles(cwd: string, paths: string[]): Promise<void> {
   const fsP = require('fs/promises') as typeof import('fs/promises')
   const pathMod = require('path') as typeof import('path')

@@ -321,6 +321,16 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_RESTORE_FILE_FROM_COMMIT, async (_event, projectDir: string, commitHash: string, filePath: string) => {
+    try {
+      await gitOps.restoreFileFromCommit(projectDir, commitHash, filePath)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] restore file from commit failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Restore failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_REMOVE_LOCK_FILE, async (_event, projectDir: string) => {
     try {
       await gitOps.removeLockFile(projectDir)

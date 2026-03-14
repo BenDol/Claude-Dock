@@ -173,6 +173,7 @@ export interface DockApi {
     getTags: (projectDir: string) => Promise<{ name: string; hash: string; date: string }[]>
     renameBranch: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
     discard: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    restoreFileFromCommit: (projectDir: string, commitHash: string, filePath: string) => Promise<{ success: boolean; error?: string }>
     deleteFiles: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     showInFolder: (projectDir: string, filePath: string) => Promise<void>
     applyPatch: (projectDir: string, patch: string, cached: boolean, reverse: boolean) => Promise<{ success: boolean; error?: string }>
@@ -375,6 +376,7 @@ const dockApi: DockApi = {
     getTags: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_TAGS, projectDir),
     renameBranch: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName),
     discard: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DISCARD, projectDir, paths),
+    restoreFileFromCommit: (projectDir, commitHash, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_RESTORE_FILE_FROM_COMMIT, projectDir, commitHash, filePath),
     deleteFiles: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_FILES, projectDir, paths),
     showInFolder: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_SHOW_IN_FOLDER, projectDir, filePath),
     applyPatch: (projectDir, patch, cached, reverse) => ipcRenderer.invoke(IPC.GIT_MGR_APPLY_PATCH, projectDir, patch, cached, reverse),
