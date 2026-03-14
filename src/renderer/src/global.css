@@ -2400,6 +2400,8 @@ body {
   gap: 8px;
   pointer-events: none;
   max-width: 360px;
+  transform: scale(1.2);
+  transform-origin: bottom right;
 }
 
 .toast {

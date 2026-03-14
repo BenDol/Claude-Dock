@@ -2246,6 +2246,19 @@
   background: rgba(247, 118, 142, 0.25) !important;
 }
 
+/* Text-selection-based line highlighting (applied via DOM, not React state) */
+.gm-diff-line-text-selected {
+  background: rgba(122, 162, 247, 0.15) !important;
+}
+
+.gm-diff-line-text-selected.gm-diff-line-add {
+  background: rgba(158, 206, 106, 0.2) !important;
+}
+
+.gm-diff-line-text-selected.gm-diff-line-delete {
+  background: rgba(247, 118, 142, 0.2) !important;
+}
+
 .gm-ctx-shortcut {
   margin-left: 24px;
   font-size: 10px;

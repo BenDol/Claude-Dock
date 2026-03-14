@@ -2807,67 +2807,81 @@ const CommitDetailPanel: React.FC<{
     }
   }, [dragStart, getLineRange])
 
-  // Track text selection on content and highlight corresponding lines
+  // Track text selection via direct DOM manipulation (no React re-renders)
+  // Also clear all selections when clicking outside diff lines
   useEffect(() => {
+    const clearTextHighlights = () => {
+      document.querySelectorAll('.gm-diff-line-text-selected').forEach(el => el.classList.remove('gm-diff-line-text-selected'))
+    }
     const onSelectionChange = () => {
       const sel = document.getSelection()
-      if (!sel || sel.isCollapsed || !sel.rangeCount) return
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { clearTextHighlights(); return }
       const range = sel.getRangeAt(0)
       const container = range.commonAncestorContainer instanceof Element
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement
-      if (!container?.closest('.gm-diff-hunk')) return
-      // Find all line elements that intersect the selection
-      const lineEls = document.querySelectorAll('[data-linekey]')
-      const keys = new Set<string>()
-      for (const el of lineEls) {
-        if (sel.containsNode(el, true)) {
-          const k = el.getAttribute('data-linekey')
-          if (k) keys.add(k)
-        }
+      if (!container?.closest('.gm-diff-hunk')) { clearTextHighlights(); return }
+      clearTextHighlights()
+      document.querySelectorAll('[data-linekey]').forEach(el => {
+        if (sel.containsNode(el, true)) el.classList.add('gm-diff-line-text-selected')
+      })
+    }
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-linekey]') && !target.closest('.gm-ctx-menu')) {
+        clearTextHighlights()
+        setSelectedLines(new Set())
       }
-      if (keys.size > 0) setSelectedLines(keys)
     }
     document.addEventListener('selectionchange', onSelectionChange)
-    return () => document.removeEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('mousedown', onMouseDown)
+      clearTextHighlights()
+    }
   }, [])
 
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
     const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
-    if (isGutter) {
-      // Gutter click — full line selection mode with drag support
-      e.preventDefault()
-      if (e.shiftKey && lastClickedRef.current) {
-        const range = getLineRange(lastClickedRef.current, key)
-        setSelectedLines(new Set(range))
-      } else if (e.ctrlKey) {
-        setSelectedLines((prev) => {
-          const next = new Set(prev)
-          if (next.has(key)) next.delete(key)
-          else next.add(key)
-          return next
-        })
-      } else {
-        setSelectedLines(new Set([key]))
-        setDragStart(key)
-      }
-      lastClickedRef.current = key
+    if (!isGutter) return // content clicks use native text selection only
+    e.preventDefault()
+    // Clear any text-selection highlights when switching to gutter selection
+    document.querySelectorAll('.gm-diff-line-text-selected').forEach(el => el.classList.remove('gm-diff-line-text-selected'))
+    if (e.shiftKey && lastClickedRef.current) {
+      const range = getLineRange(lastClickedRef.current, key)
+      setSelectedLines(new Set(range))
+    } else if (e.ctrlKey) {
+      setSelectedLines((prev) => {
+        const next = new Set(prev)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
     } else {
-      // Content click — allow native text selection, highlight this line
       setSelectedLines(new Set([key]))
-      lastClickedRef.current = key
+      setDragStart(key)
     }
+    lastClickedRef.current = key
   }, [getLineRange])
 
   const handleContextMenu = useCallback((fileIdx: number, e: React.MouseEvent) => {
     e.preventDefault()
-    const el = (e.target as HTMLElement).closest('[data-linekey]')
-    const key = el?.getAttribute('data-linekey') || null
-    if (key && !selectedLines.has(key)) {
-      setSelectedLines(new Set([key]))
-      lastClickedRef.current = key
+    // Sync text-selection highlights into selectedLines for context menu actions
+    const textSelected = document.querySelectorAll('.gm-diff-line-text-selected[data-linekey]')
+    if (textSelected.length > 0) {
+      const keys = new Set<string>()
+      textSelected.forEach(el => { const k = el.getAttribute('data-linekey'); if (k) keys.add(k) })
+      setSelectedLines(keys)
+    } else {
+      const el = (e.target as HTMLElement).closest('[data-linekey]')
+      const key = el?.getAttribute('data-linekey') || null
+      if (key && !selectedLines.has(key)) {
+        setSelectedLines(new Set([key]))
+        lastClickedRef.current = key
+      }
     }
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
     setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, fileIdx })
@@ -4416,63 +4430,79 @@ const WorkingDiffViewer: React.FC<{
     }
   }, [dragStart, getLineRange])
 
-  // Track text selection on content and highlight corresponding lines
+  // Track text selection via direct DOM manipulation (no React re-renders)
+  // Also clear all selections when clicking outside diff lines
   useEffect(() => {
+    const clearTextHighlights = () => {
+      document.querySelectorAll('.gm-diff-line-text-selected').forEach(el => el.classList.remove('gm-diff-line-text-selected'))
+    }
     const onSelectionChange = () => {
       const sel = document.getSelection()
-      if (!sel || sel.isCollapsed || !sel.rangeCount) return
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { clearTextHighlights(); return }
       const range = sel.getRangeAt(0)
       const container = range.commonAncestorContainer instanceof Element
         ? range.commonAncestorContainer
         : range.commonAncestorContainer.parentElement
-      if (!container?.closest('.gm-diff-hunk')) return
-      const lineEls = document.querySelectorAll('[data-linekey]')
-      const keys = new Set<string>()
-      for (const el of lineEls) {
-        if (sel.containsNode(el, true)) {
-          const k = el.getAttribute('data-linekey')
-          if (k) keys.add(k)
-        }
+      if (!container?.closest('.gm-diff-hunk')) { clearTextHighlights(); return }
+      clearTextHighlights()
+      document.querySelectorAll('[data-linekey]').forEach(el => {
+        if (sel.containsNode(el, true)) el.classList.add('gm-diff-line-text-selected')
+      })
+    }
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-linekey]') && !target.closest('.gm-ctx-menu')) {
+        clearTextHighlights()
+        setSelectedLines(new Set())
       }
-      if (keys.size > 0) setSelectedLines(keys)
     }
     document.addEventListener('selectionchange', onSelectionChange)
-    return () => document.removeEventListener('selectionchange', onSelectionChange)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange)
+      document.removeEventListener('mousedown', onMouseDown)
+      clearTextHighlights()
+    }
   }, [])
 
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
     const target = e.target as HTMLElement
     const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
-    if (isGutter) {
-      e.preventDefault()
-      if (e.shiftKey && lastClickedRef.current) {
-        const range = getLineRange(lastClickedRef.current, key)
-        setSelectedLines(new Set(range))
-      } else if (e.ctrlKey) {
-        setSelectedLines((prev) => {
-          const next = new Set(prev)
-          if (next.has(key)) next.delete(key)
-          else next.add(key)
-          return next
-        })
-      } else {
-        setSelectedLines(new Set([key]))
-        setDragStart(key)
-      }
-      lastClickedRef.current = key
+    if (!isGutter) return // content clicks use native text selection only
+    e.preventDefault()
+    document.querySelectorAll('.gm-diff-line-text-selected').forEach(el => el.classList.remove('gm-diff-line-text-selected'))
+    if (e.shiftKey && lastClickedRef.current) {
+      const range = getLineRange(lastClickedRef.current, key)
+      setSelectedLines(new Set(range))
+    } else if (e.ctrlKey) {
+      setSelectedLines((prev) => {
+        const next = new Set(prev)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
     } else {
       setSelectedLines(new Set([key]))
-      lastClickedRef.current = key
+      setDragStart(key)
     }
+    lastClickedRef.current = key
   }, [getLineRange])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    const key = getKeyFromEvent(e)
-    if (key && !selectedLines.has(key)) {
-      setSelectedLines(new Set([key]))
-      lastClickedRef.current = key
+    // Sync text-selection highlights into selectedLines for context menu actions
+    const textSelected = document.querySelectorAll('.gm-diff-line-text-selected[data-linekey]')
+    if (textSelected.length > 0) {
+      const keys = new Set<string>()
+      textSelected.forEach(el => { const k = el.getAttribute('data-linekey'); if (k) keys.add(k) })
+      setSelectedLines(keys)
+    } else {
+      const key = getKeyFromEvent(e)
+      if (key && !selectedLines.has(key)) {
+        setSelectedLines(new Set([key]))
+        lastClickedRef.current = key
+      }
     }
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
     setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
