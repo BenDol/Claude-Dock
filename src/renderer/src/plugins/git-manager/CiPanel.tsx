@@ -143,6 +143,9 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const [autoOpenJob, setAutoOpenJob] = useState<{ runId: number; jobId: number } | null>(null)
   const logCacheRef = useRef<Map<number, string>>(new Map())
   const searchAbortRef = useRef<AbortController | null>(null)
+  // Refs for runs so polling doesn't restart searches
+  const filteredActiveRunsRef = useRef<CiWorkflowRun[]>([])
+  const filteredRunsRef = useRef<CiWorkflowRun[]>([])
 
   const api = getDockApi()
 
@@ -554,6 +557,10 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     })
   }, [runs, filters, activeRunIds])
 
+  // Keep refs in sync for search effect (avoids polling restarts)
+  filteredActiveRunsRef.current = filteredActiveRuns
+  filteredRunsRef.current = filteredRuns
+
   const toggleStatusFilter = useCallback((s: ConclusionFilter) => {
     setFilters((prev) => {
       const next = new Set(prev.status)
@@ -575,6 +582,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const hasActiveFilters = filters.status.size > 0 || filters.branches.size > 0 || filters.event !== null
 
   // Cross-log search: search job logs when on CI tab without a specific log open
+  // Uses refs for run lists so active-run polling doesn't restart the search.
   useEffect(() => {
     if (!searchQuery?.trim() || ciLogOpenLocal || status !== 'ready') {
       window.dispatchEvent(new CustomEvent('ci-search-results', { detail: { results: [], progress: null } }))
@@ -593,9 +601,9 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
 
     const query = searchQuery.trim().toLowerCase()
 
-    // Signal that a new search is starting (null progress = pending, not "0/0")
+    // Show loading immediately (before debounce)
     window.dispatchEvent(new CustomEvent('ci-search-results', {
-      detail: { results: [], progress: null }
+      detail: { results: [], progress: { searched: 0, total: 0, done: false, scope } }
     }))
 
     searchAbortRef.current?.abort()
@@ -605,16 +613,17 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     const timer = setTimeout(async () => {
       if (abort.signal.aborted) return
 
-      // Determine scope: expanded run's jobs or all visible runs
+      // Snapshot runs from refs (not reactive — won't restart on polling)
       let jobsToSearch: Array<{ job: CiJob; run: CiWorkflowRun }> = []
 
       if (expandedRun !== null) {
-        const run = [...filteredActiveRuns, ...filteredRuns].find(r => r.id === expandedRun)
+        const allRuns = [...filteredActiveRunsRef.current, ...filteredRunsRef.current]
+        const run = allRuns.find(r => r.id === expandedRun)
         if (run && runJobs.length > 0) {
           jobsToSearch = runJobs.map(job => ({ job, run }))
         }
       } else {
-        const visibleRuns = [...filteredActiveRuns, ...filteredRuns].slice(0, 10)
+        const visibleRuns = [...filteredActiveRunsRef.current, ...filteredRunsRef.current].slice(0, 10)
         for (const run of visibleRuns) {
           if (abort.signal.aborted) return
           try {
@@ -632,7 +641,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       let searched = 0
       const results: CiLogSearchMatch[] = []
 
-      // Emit initial progress with real total
+      // Emit progress with real total
       window.dispatchEvent(new CustomEvent('ci-search-results', {
         detail: { results: [], progress: { searched: 0, total, done: false, scope } }
       }))
@@ -651,7 +660,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
           logCacheRef.current.set(job.id, log)
         }
 
-        // Search log — collect match count and first match preview per job
+        // Search log — one result per job with match count
         if (log) {
           let matchCount = 0
           let firstPreview = ''
@@ -700,7 +709,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       clearTimeout(timer)
       abort.abort()
     }
-  }, [searchQuery, ciLogOpenLocal, expandedRun, runJobs, loadingJobs, filteredActiveRuns, filteredRuns, projectDir, status])
+  }, [searchQuery, ciLogOpenLocal, expandedRun, runJobs, loadingJobs, projectDir, status])
 
   if (status === 'loading') {
     return <div className="ci-panel-center"><div className="ci-spinner" /> Checking CI availability...</div>

@@ -3583,7 +3583,11 @@ const WorkingChanges: React.FC<{
     setGenerating(true)
     setGenError(null)
     try {
-      const result = await api.gitManager.generateCommitMsg(projectDir)
+      let result = await api.gitManager.generateCommitMsg(projectDir)
+      // Retry once on failure
+      if (!result.success) {
+        result = await api.gitManager.generateCommitMsg(projectDir)
+      }
       if (gen !== autoGenRef.current || userEditedMsgRef.current) return // superseded or user started typing
       if (result.success && result.message) {
         setCommitMsg(result.message)
@@ -3626,9 +3630,21 @@ const WorkingChanges: React.FC<{
         setGenError(result.error || 'Failed to generate')
       }
     } catch (err) {
+      // Retry once on exception
+      try {
+        const retry = await api.gitManager.generateCommitMsg(projectDir)
+        if (gen !== autoGenRef.current || userEditedMsgRef.current) return
+        if (retry.success && retry.message) {
+          setCommitMsg(retry.message)
+          setGenerating(false)
+          return
+        }
+        setGenError(retry.error || 'Failed to generate')
+      } catch {
+        setGenError(err instanceof Error ? err.message : 'Failed to generate')
+      }
       pendingActionRef.current = null
       setPendingAction(null)
-      setGenError(err instanceof Error ? err.message : 'Failed to generate')
     } finally {
       setGenerating(false)
     }
