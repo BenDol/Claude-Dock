@@ -7336,6 +7336,17 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
 
   useEffect(() => {
     try { localStorage.setItem(gmNotifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
+    // Sync read state to the dock app's notification panel so both stay in sync
+    try {
+      const dockReadKey = `dock-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+      const existing = localStorage.getItem(dockReadKey)
+      const dockReadIds: Set<string> = existing ? new Set(JSON.parse(existing)) : new Set()
+      let changed = false
+      for (const id of readIds) {
+        if (!dockReadIds.has(id)) { dockReadIds.add(id); changed = true }
+      }
+      if (changed) localStorage.setItem(dockReadKey, JSON.stringify([...dockReadIds]))
+    } catch { /* ignore */ }
   }, [readIds, projectDir])
 
   useEffect(() => {
