@@ -542,6 +542,7 @@ const GitManagerApp: React.FC = () => {
   }, [sidebarFocusIdx])
 
   const refreshGenRef = useRef(0)
+  const initialLoadRef = useRef(true)
   const submoduleGenRef = useRef(0)
   const lastRefreshRef = useRef(0)
   const lastFetchRef = useRef(0)
@@ -586,6 +587,13 @@ const GitManagerApp: React.FC = () => {
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
         setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
+      }
+      // On initial load, switch to changes tab if there are staged/unstaged changes
+      if (initialLoadRef.current) {
+        initialLoadRef.current = false
+        if (statusData.staged.length + statusData.unstaged.length + statusData.untracked.length > 0) {
+          setActiveTab('changes')
+        }
       }
       lastRefreshRef.current = Date.now()
     } catch (err) {
