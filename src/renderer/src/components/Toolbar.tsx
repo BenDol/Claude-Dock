@@ -621,6 +621,19 @@ const NotificationDropdown: React.FC = () => {
     setReadIds(loadStoredReadIds(projectDir))
   }, [projectDir])
 
+  // Sync read state from other windows (e.g. git-manager marking notifications as read)
+  useEffect(() => {
+    if (!projectDir) return
+    const key = notifReadKey(projectDir)
+    const handler = (e: StorageEvent) => {
+      if (e.key === key && e.newValue) {
+        try { setReadIds(new Set(JSON.parse(e.newValue))) } catch { /* ignore */ }
+      }
+    }
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [projectDir])
+
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length
 
   // Persist notifications (project-scoped)
