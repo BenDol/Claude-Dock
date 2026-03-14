@@ -21,7 +21,10 @@ function handleAction(action: NotificationAction, toast: DockNotification) {
 export default function ToastContainer() {
   const [toasts, setToasts] = useState<ToastEntry[]>([])
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  const projectDir = useDockStore((s) => s.projectDir)
+  const storeProjectDir = useDockStore((s) => s.projectDir)
+  // In plugin windows (e.g. git-manager), projectDir comes from URL params, not dock store
+  const urlProjectDir = new URLSearchParams(window.location.search).get('projectDir')
+  const projectDir = storeProjectDir || (urlProjectDir ? decodeURIComponent(urlProjectDir) : '')
 
   const removeToast = useCallback((id: string) => {
     // Start exit animation
