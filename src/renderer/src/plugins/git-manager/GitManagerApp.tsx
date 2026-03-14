@@ -445,6 +445,38 @@ const GitManagerApp: React.FC = () => {
     document.title = `${name} - Git`
   }, [activeDir])
 
+  // F12 (DEV only): replay last notification from the panel or create a sample one
+  useEffect(() => {
+    if (typeof __DEV__ !== 'undefined' && !__DEV__) return
+    const api = getDockApi()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'F12') return
+      e.preventDefault()
+      // Try to get the last notification from the notification panel's localStorage
+      let lastNotif: import('../../../../shared/ci-types').DockNotification | null = null
+      try {
+        const key = `gm-notifications:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
+        const stored = localStorage.getItem(key)
+        if (stored) {
+          const list = JSON.parse(stored)
+          if (Array.isArray(list) && list.length > 0) lastNotif = list[0]
+        }
+      } catch { /* ignore */ }
+      const replay = lastNotif
+        ? { ...lastNotif, id: `replay-${Date.now()}`, projectDir: undefined }
+        : {
+            id: `debug-${Date.now()}`,
+            title: 'Sample Notification',
+            message: 'This is a test notification triggered by F12.',
+            type: 'info' as const,
+            source: 'git-manager'
+          }
+      api.notifications.emit(replay as import('../../../../shared/ci-types').DockNotification)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Zoom: Ctrl+MWB and Ctrl++/- with persistence
   useEffect(() => {
     const ZOOM_KEY = 'gm-zoom'
