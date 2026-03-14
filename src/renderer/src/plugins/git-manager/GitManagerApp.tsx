@@ -2493,7 +2493,7 @@ const CommitDetailPanel: React.FC<{
       if (!file) continue
       const patch = buildPartialPatch(file, lineKeys)
       if (!patch) continue
-      const result = await api.gitManager.applyPatch(projectDir, patch, false, true)
+      const result = await api.gitManager.applyPatch(projectDir, patch, false, true, true)
       if (!result.success) {
         anyFailed = true
         onError?.(`Reset lines failed for ${file.path}: ${result.error || 'Unknown error'}`)
@@ -3355,7 +3355,7 @@ const WorkingChanges: React.FC<{
     setGenError(null)
     try {
       const result = await api.gitManager.generateCommitMsg(projectDir)
-      if (gen !== autoGenRef.current) return // superseded by a newer generation
+      if (gen !== autoGenRef.current || userEditedMsgRef.current) return // superseded or user started typing
       if (result.success && result.message) {
         setCommitMsg(result.message)
         // Execute queued action if any
@@ -3371,7 +3371,6 @@ const WorkingChanges: React.FC<{
               const pushResult = await api.gitManager.push(projectDir)
               if (!pushResult.success) {
                 setBusy(false)
-                setGenerating(false)
                 if (onCommitted && commitResult.hash) { onCommitted(commitResult.hash) } else { onRefresh() }
                 onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
                   const r = await api.gitManager.push(projectDir)
@@ -3401,8 +3400,9 @@ const WorkingChanges: React.FC<{
       pendingActionRef.current = null
       setPendingAction(null)
       setGenError(err instanceof Error ? err.message : 'Failed to generate')
+    } finally {
+      setGenerating(false)
     }
-    setGenerating(false)
   }
 
   const cancelGenerate = () => {
@@ -3410,6 +3410,8 @@ const WorkingChanges: React.FC<{
     pendingActionRef.current = null
     setPendingAction(null)
     setGenerating(false)
+    // Treat cancel as user intent to type manually — prevent auto-re-triggering
+    userEditedMsgRef.current = true
   }
 
   const [batchProgress, setBatchProgress] = useState<string | null>(null)
@@ -3764,7 +3766,6 @@ const WorkingChanges: React.FC<{
               placeholder={generating ? '' : 'Commit message...'}
               value={commitMsg}
               onChange={(e) => { setCommitMsg(e.target.value); userEditedMsgRef.current = true }}
-              disabled={generating}
             />
             <button
               className={`gm-generate-btn${generating ? ' gm-generate-btn-active' : ''}`}

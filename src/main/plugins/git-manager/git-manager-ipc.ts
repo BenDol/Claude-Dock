@@ -351,9 +351,9 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_APPLY_PATCH, async (_event, projectDir: string, patch: string, cached: boolean, reverse: boolean) => {
+  ipcMain.handle(IPC.GIT_MGR_APPLY_PATCH, async (_event, projectDir: string, patch: string, cached: boolean, reverse: boolean, fuzzy?: boolean) => {
     try {
-      await gitOps.applyPatch(projectDir, patch, cached, reverse)
+      await gitOps.applyPatch(projectDir, patch, cached, reverse, fuzzy)
       return { success: true }
     } catch (err) {
       logError('[git-manager] apply patch failed:', err)

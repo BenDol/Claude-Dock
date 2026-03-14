@@ -623,8 +623,9 @@ export async function removeLockFile(cwd: string): Promise<void> {
 
 // --- Partial staging (apply patch) ---
 
-export async function applyPatch(cwd: string, patch: string, cached: boolean, reverse: boolean): Promise<void> {
-  const args = ['apply', '--unidiff-zero', '--whitespace=nowarn']
+export async function applyPatch(cwd: string, patch: string, cached: boolean, reverse: boolean, fuzzy?: boolean): Promise<void> {
+  const args = ['apply', '--whitespace=nowarn']
+  if (!fuzzy) args.push('--unidiff-zero')
   if (cached) args.push('--cached')
   if (reverse) args.push('--reverse')
   await gitExecStdin(cwd, args, patch)

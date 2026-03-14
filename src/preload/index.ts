@@ -176,7 +176,7 @@ export interface DockApi {
     restoreFileFromCommit: (projectDir: string, commitHash: string, filePath: string) => Promise<{ success: boolean; error?: string }>
     deleteFiles: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     showInFolder: (projectDir: string, filePath: string) => Promise<void>
-    applyPatch: (projectDir: string, patch: string, cached: boolean, reverse: boolean) => Promise<{ success: boolean; error?: string }>
+    applyPatch: (projectDir: string, patch: string, cached: boolean, reverse: boolean, fuzzy?: boolean) => Promise<{ success: boolean; error?: string }>
     openBash: (projectDir: string) => Promise<void>
     addSubmodule: (projectDir: string, url: string, localPath?: string, branch?: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
     removeSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; error?: string }>
@@ -379,7 +379,7 @@ const dockApi: DockApi = {
     restoreFileFromCommit: (projectDir, commitHash, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_RESTORE_FILE_FROM_COMMIT, projectDir, commitHash, filePath),
     deleteFiles: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_FILES, projectDir, paths),
     showInFolder: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_SHOW_IN_FOLDER, projectDir, filePath),
-    applyPatch: (projectDir, patch, cached, reverse) => ipcRenderer.invoke(IPC.GIT_MGR_APPLY_PATCH, projectDir, patch, cached, reverse),
+    applyPatch: (projectDir, patch, cached, reverse, fuzzy) => ipcRenderer.invoke(IPC.GIT_MGR_APPLY_PATCH, projectDir, patch, cached, reverse, fuzzy),
     openBash: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN_BASH, projectDir),
     addSubmodule: (projectDir, url, localPath, branch, force) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_SUBMODULE, projectDir, url, localPath, branch, force),
     removeSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_SUBMODULE, projectDir, subPath),
