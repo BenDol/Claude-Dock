@@ -89,18 +89,13 @@ if (!gotLock) {
     log('second-instance event, argv:', argv.slice(1).join(' '))
     const manager = DockManager.getInstance()
     const launchDir = getLaunchDirFromArgs(argv)
-    if (launchDir) {
-      log('second-instance: launching with primed dir', launchDir)
-      await manager.showLauncher(launchDir)
+    const dir = launchDir || getProjectDirFromArgs(argv)
+    if (dir) {
+      log('second-instance: launching with primed dir', dir)
+      await manager.showLauncher(dir)
     } else {
-      const dir = getProjectDirFromArgs(argv)
-      if (dir) {
-        log('second-instance: creating dock for', dir)
-        await manager.createDock(dir)
-      } else {
-        log('second-instance: showing launcher')
-        await manager.showLauncher()
-      }
+      log('second-instance: showing launcher')
+      await manager.showLauncher()
     }
     log('second-instance: handler complete')
   })
@@ -128,17 +123,8 @@ if (!gotLock) {
     try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
 
     const manager = DockManager.getInstance()
-    const launchDir = getLaunchDirFromArgs(process.argv)
-    if (launchDir) {
-      await manager.showLauncher(launchDir)
-    } else {
-      const dir = getProjectDirFromArgs(process.argv)
-      if (dir) {
-        await manager.createDock(dir)
-      } else {
-        await manager.showLauncher()
-      }
-    }
+    const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv)
+    await manager.showLauncher(launchDir || undefined)
 
     // macOS: re-create window when dock icon clicked
     app.on('activate', async () => {
