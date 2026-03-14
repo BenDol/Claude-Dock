@@ -1303,7 +1303,7 @@ const GitManagerApp: React.FC = () => {
                 onRefresh={refresh}
                 onError={handleSmartError}
                 onConfirm={setConfirmModal}
-                onCommitted={(hash) => { refresh().then(() => navigateToCommit(hash)) }}
+                onCommitted={(hash) => { wcBusyRef.current = false; setWcBusy(false); refresh().then(() => navigateToCommit(hash)) }}
                 onStatusRefreshed={setStatus}
                 onBusyChange={(busy) => { wcBusyRef.current = busy; setWcBusy(busy) }}
               />
