@@ -659,15 +659,15 @@ export async function previewGitignorePattern(cwd: string, pattern: string): Pro
   if (!pattern.trim()) return []
 
   return withTempExcludeFile(pattern, async (tmpFile) => {
-    // git ls-files --ignored --exclude-from=<file> shows files matched by ONLY
-    // the patterns in that file (standard ignore rules are NOT auto-activated).
-    // --cached gives tracked matches, --others gives untracked matches.
-    const { stdout } = await gitExec(cwd, [
-      'ls-files', '--cached', '--others', '--ignored',
-      '--exclude-from', tmpFile, '-z'
-    ], 10000)
-    const files = stdout.split('\0').filter(Boolean)
-    return files.slice(0, 200)
+    // Get files matching our pattern AND files already ignored, then subtract
+    const [matchResult, alreadyIgnoredResult] = await Promise.all([
+      gitExec(cwd, ['ls-files', '--cached', '--others', '--ignored', '--exclude-from', tmpFile, '-z'], 10000),
+      gitExec(cwd, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'], 10000)
+    ])
+    const matched = matchResult.stdout.split('\0').filter(Boolean)
+    const alreadyIgnored = new Set(alreadyIgnoredResult.stdout.split('\0').filter(Boolean))
+    const filtered = matched.filter(f => !alreadyIgnored.has(f))
+    return filtered.slice(0, 200)
   })
 }
 
