@@ -705,7 +705,7 @@ export async function addToGitignore(cwd: string, pattern: string, removeFromInd
   if (toRemove.length > 0) {
     const BATCH = 50
     for (let i = 0; i < toRemove.length; i += BATCH) {
-      await gitExec(cwd, ['rm', '--cached', '--', ...toRemove.slice(i, i + BATCH)], 10000)
+      await gitExec(cwd, ['rm', '--cached', '--force', '--', ...toRemove.slice(i, i + BATCH)], 10000)
     }
   }
 }
