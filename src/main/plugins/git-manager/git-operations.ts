@@ -639,70 +639,36 @@ export async function saveFileContent(cwd: string, filePath: string, content: st
 
 // --- Gitignore ---
 
-/** Convert a gitignore pattern to a RegExp for matching against repo-relative paths */
-function gitignorePatternToRegex(pattern: string): RegExp | null {
-  let p = pattern.trim()
-  if (!p || p.startsWith('#')) return null
-
-  const negated = p.startsWith('!')
-  if (negated) p = p.slice(1)
-
-  const dirOnly = p.endsWith('/')
-  if (dirOnly) p = p.slice(0, -1)
-
-  // Remove leading slash (anchored to root)
-  const anchored = p.startsWith('/')
-  if (anchored) p = p.slice(1)
-
-  // Check for slashes AFTER stripping trailing / and leading / — determines anchoring
-  const hasSlash = p.includes('/')
-
-  // Escape regex special chars except * and ?
-  let regex = p.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-  // Convert gitignore globs to regex
-  regex = regex.replace(/\*\*/g, '\0DOUBLESTAR\0')
-  regex = regex.replace(/\*/g, '[^/]*')
-  regex = regex.replace(/\?/g, '[^/]')
-  regex = regex.replace(/\0DOUBLESTAR\0/g, '.*')
-
-  if (!hasSlash && !anchored) {
-    // No slash in pattern -> match as a path component anywhere
-    // e.g. "dist" matches file "dist", dir "foo/dist/bar", "foo/dist"
-    regex = `(?:^|/)${regex}(?:/|$)`
-  } else {
-    // Has slash or anchored -> match against full path from root
-    regex = `^${regex}${dirOnly ? '(?:/|$)' : '$'}`
-  }
-
+/** Write pattern to a temp file, run a callback with the path, then clean up */
+async function withTempExcludeFile<T>(pattern: string, fn: (tmpPath: string) => Promise<T>): Promise<T> {
+  const fsP = require('fs/promises') as typeof import('fs/promises')
+  const osMod = require('os') as typeof import('os')
+  const pathMod = require('path') as typeof import('path')
+  const tmpDir = await fsP.mkdtemp(pathMod.join(osMod.tmpdir(), 'gm-gitignore-'))
+  const tmpFile = pathMod.join(tmpDir, 'exclude')
+  await fsP.writeFile(tmpFile, pattern + '\n', 'utf-8')
   try {
-    return new RegExp(regex)
-  } catch {
-    return null
+    return await fn(tmpFile)
+  } finally {
+    await fsP.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
   }
 }
 
-/** Get all tracked + untracked files, then filter by a gitignore-style pattern */
+/** Use git itself to find files matching a gitignore-style pattern */
 export async function previewGitignorePattern(cwd: string, pattern: string): Promise<string[]> {
   if (!pattern.trim()) return []
 
-  const re = gitignorePatternToRegex(pattern)
-  if (!re) return []
-
-  // Get tracked files + untracked non-ignored files
-  const [tracked, untracked] = await Promise.all([
-    gitExec(cwd, ['ls-files', '-z'], 10000).then(r => r.stdout.split('\0').filter(Boolean)),
-    gitExec(cwd, ['ls-files', '--others', '--exclude-standard', '-z'], 10000).then(r => r.stdout.split('\0').filter(Boolean))
-  ])
-
-  const allFiles = [...tracked, ...untracked]
-  const matched: string[] = []
-  for (const f of allFiles) {
-    if (re.test(f)) {
-      matched.push(f)
-      if (matched.length >= 200) break
-    }
-  }
-  return matched
+  return withTempExcludeFile(pattern, async (tmpFile) => {
+    // git ls-files --ignored --exclude-from=<file> shows files matched by ONLY
+    // the patterns in that file (standard ignore rules are NOT auto-activated).
+    // --cached gives tracked matches, --others gives untracked matches.
+    const { stdout } = await gitExec(cwd, [
+      'ls-files', '--cached', '--others', '--ignored',
+      '--exclude-from', tmpFile, '-z'
+    ], 10000)
+    const files = stdout.split('\0').filter(Boolean)
+    return files.slice(0, 200)
+  })
 }
 
 /** Append a pattern to .gitignore and optionally rm --cached the matched tracked files */
@@ -710,6 +676,19 @@ export async function addToGitignore(cwd: string, pattern: string, removeFromInd
   const fsP = require('fs/promises') as typeof import('fs/promises')
   const pathMod = require('path') as typeof import('path')
   const gitignorePath = pathMod.join(cwd, '.gitignore')
+
+  // If removing from index, find tracked matches BEFORE writing .gitignore
+  // (after writing, git would already ignore them and ls-files --cached --ignored
+  //  with the repo's own .gitignore would behave differently)
+  let toRemove: string[] = []
+  if (removeFromIndex) {
+    toRemove = await withTempExcludeFile(pattern, async (tmpFile) => {
+      const { stdout } = await gitExec(cwd, [
+        'ls-files', '--cached', '--ignored', '--exclude-from', tmpFile, '-z'
+      ], 10000)
+      return stdout.split('\0').filter(Boolean)
+    })
+  }
 
   // Read existing content (if any)
   let existing = ''
@@ -722,19 +701,11 @@ export async function addToGitignore(cwd: string, pattern: string, removeFromInd
   const toAppend = (needsNewline ? '\n' : '') + pattern + '\n'
   await fsP.appendFile(gitignorePath, toAppend, 'utf-8')
 
-  // Optionally remove matched files from the index (keeps them on disk)
-  if (removeFromIndex) {
-    const re = gitignorePatternToRegex(pattern)
-    if (re) {
-      const { stdout } = await gitExec(cwd, ['ls-files', '-z'], 10000)
-      const tracked = stdout.split('\0').filter(Boolean)
-      const toRemove = tracked.filter(f => re.test(f))
-      if (toRemove.length > 0) {
-        const BATCH = 50
-        for (let i = 0; i < toRemove.length; i += BATCH) {
-          await gitExec(cwd, ['rm', '--cached', '--', ...toRemove.slice(i, i + BATCH)], 10000)
-        }
-      }
+  // Remove matched tracked files from the index (keeps them on disk)
+  if (toRemove.length > 0) {
+    const BATCH = 50
+    for (let i = 0; i < toRemove.length; i += BATCH) {
+      await gitExec(cwd, ['rm', '--cached', '--', ...toRemove.slice(i, i + BATCH)], 10000)
     }
   }
 }
