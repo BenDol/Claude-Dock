@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useTerminal } from '../hooks/useTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
 import { useDockStore } from '../stores/dock-store'
+import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 
 interface TerminalViewProps {
@@ -11,10 +12,11 @@ interface TerminalViewProps {
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, focus, gotDataRef } = useTerminal({ terminalId })
+  const { initTerminal, fit, focus, gotDataRef, scrolledUp, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
+  const showScrollBtn = useSettingsStore((s) => s.settings.terminal.scrollToBottom)
 
   // Sync loading state to store
   useEffect(() => {
@@ -69,6 +71,16 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [isFocused, loading, focus])
 
+  const handleScrollBtn = useCallback(() => {
+    if (autoScroll) {
+      disableAutoScroll()
+    } else {
+      enableAutoScroll()
+    }
+  }, [autoScroll, enableAutoScroll, disableAutoScroll])
+
+  const showButton = showScrollBtn && scrolledUp && !loading
+
   return (
     <div className="terminal-view-wrapper">
       {loading && (
@@ -86,6 +98,17 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
           focus()
         }}
       />
+      {showButton && (
+        <button
+          className={`scroll-to-bottom-btn${autoScroll ? ' scroll-to-bottom-btn-active' : ''}`}
+          onClick={handleScrollBtn}
+          title={autoScroll ? 'Auto-scrolling (click to stop)' : 'Scroll to bottom (click to auto-scroll)'}
+        >
+          <svg width="40" height="12" viewBox="0 0 40 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="2,2 20,10 38,2" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

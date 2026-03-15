@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
@@ -38,6 +38,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const gotDataRef = useRef(false)
   const undoRef = useRef(new InputUndoManager())
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [scrolledUp, setScrolledUp] = useState(false)
+  const [autoScroll, setAutoScroll] = useState(false)
+  const autoScrollRef = useRef(false)
+  const programmaticScrollRef = useRef(false)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -73,6 +77,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
       if (termRef.current) {
         termRef.current.write(data)
+        if (autoScrollRef.current) {
+          programmaticScrollRef.current = true
+          termRef.current.scrollToBottom()
+          requestAnimationFrame(() => { programmaticScrollRef.current = false })
+        }
       } else {
         dataBufferRef.current.push(data)
       }
@@ -119,6 +128,23 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
       termRef.current = term
       fitAddonRef.current = fitAddon
+
+      // Scroll detection via xterm viewport
+      const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
+      if (viewport) {
+        const SCROLL_THRESHOLD = 80
+        viewport.addEventListener('scroll', () => {
+          const gap = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
+          const isAtBottom = gap < SCROLL_THRESHOLD
+          setScrolledUp(!isAtBottom)
+
+          // If user scrolls away from bottom while auto-scroll is on, disable it
+          if (!isAtBottom && autoScrollRef.current && !programmaticScrollRef.current) {
+            autoScrollRef.current = false
+            setAutoScroll(false)
+          }
+        })
+      }
 
       // Replay buffered data
       if (dataBufferRef.current.length > 0) {
@@ -314,5 +340,25 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }
   }, [])
 
-  return { initTerminal, fit, focus, termRef, gotDataRef }
+  const scrollToBottom = useCallback(() => {
+    if (termRef.current) {
+      programmaticScrollRef.current = true
+      termRef.current.scrollToBottom()
+      setScrolledUp(false)
+      requestAnimationFrame(() => { programmaticScrollRef.current = false })
+    }
+  }, [])
+
+  const enableAutoScroll = useCallback(() => {
+    autoScrollRef.current = true
+    setAutoScroll(true)
+    scrollToBottom()
+  }, [scrollToBottom])
+
+  const disableAutoScroll = useCallback(() => {
+    autoScrollRef.current = false
+    setAutoScroll(false)
+  }, [])
+
+  return { initTerminal, fit, focus, termRef, gotDataRef, scrolledUp, autoScroll, scrollToBottom, enableAutoScroll, disableAutoScroll }
 }

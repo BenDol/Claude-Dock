@@ -14,6 +14,7 @@ export interface Settings {
     cursorStyle: 'block' | 'underline' | 'bar'
     cursorBlink: boolean
     scrollback: number
+    scrollToBottom: boolean
   }
   grid: {
     maxColumns: number
@@ -189,7 +190,8 @@ export const DEFAULT_SETTINGS: Settings = {
     lineHeight: 1.2,
     cursorStyle: 'block',
     cursorBlink: true,
-    scrollback: 5000
+    scrollback: 5000,
+    scrollToBottom: true
   },
   grid: {
     maxColumns: 4,

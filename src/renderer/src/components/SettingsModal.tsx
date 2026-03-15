@@ -311,6 +311,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Cursor Blink
                 </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.terminal.scrollToBottom}
+                    onChange={(e) => updateTerminal({ scrollToBottom: e.target.checked })}
+                  />
+                  Scroll to Bottom Button
+                </label>
                 <label>
                   Scrollback Lines
                   <input
