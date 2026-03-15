@@ -717,7 +717,16 @@ export async function applyPatch(cwd: string, patch: string, cached: boolean, re
   if (!fuzzy) args.push('--unidiff-zero')
   if (cached) args.push('--cached')
   if (reverse) args.push('--reverse')
-  await gitExecStdin(cwd, args, patch)
+  try {
+    await gitExecStdin(cwd, args, patch)
+  } catch (err) {
+    if (!fuzzy) throw err
+    // Retry with --3way to handle context mismatches (e.g. file modified since commit)
+    const args3 = ['apply', '--whitespace=nowarn', '--3way']
+    if (cached) args3.push('--cached')
+    if (reverse) args3.push('--reverse')
+    await gitExecStdin(cwd, args3, patch)
+  }
 }
 
 // --- Reset / Revert / Cherry-pick ---

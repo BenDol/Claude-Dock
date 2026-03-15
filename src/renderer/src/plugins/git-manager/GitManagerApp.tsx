@@ -4361,7 +4361,6 @@ function buildPartialPatch(
   }
 
   let hasAnyChanges = false
-  let cumulativeOffset = 0
 
   for (let hi = 0; hi < diff.hunks.length; hi++) {
     const hunk = diff.hunks[hi]
@@ -4399,10 +4398,8 @@ function buildPartialPatch(
     }
 
     if (hunkHasChanges) {
-      const newStart = hunk.oldStart + cumulativeOffset
-      parts.push(`@@ -${hunk.oldStart},${oldCount} +${newStart},${newCount} @@`)
+      parts.push(`@@ -${hunk.oldStart},${oldCount} +${hunk.newStart},${newCount} @@`)
       parts.push(...hunkLines)
-      cumulativeOffset += (newCount - oldCount)
       hasAnyChanges = true
     }
   }
