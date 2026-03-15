@@ -3739,10 +3739,12 @@ const WorkingChanges: React.FC<{
     const paths = allUnstaged.map((f) => f.path)
     setStagingPaths(new Set(paths))
     const BATCH = 50
+    let failed = false
     for (let i = 0; i < paths.length; i += BATCH) {
       const chunk = paths.slice(i, i + BATCH)
       setBatchProgress(`Staging ${Math.min(i + BATCH, paths.length)}/${paths.length}...`)
-      await api.gitManager.stage(projectDir, chunk)
+      const r = await api.gitManager.stage(projectDir, chunk)
+      if (!r.success) { handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`); failed = true; break }
       if (paths.length > BATCH) await refreshStatus()
     }
     setBatchProgress(null)
@@ -3750,7 +3752,7 @@ const WorkingChanges: React.FC<{
     setStagingPaths(new Set())
     setBusy(false)
     scrollToTop()
-    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
+    if (!failed && autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleUnstageAll = async () => {
@@ -3831,10 +3833,11 @@ const WorkingChanges: React.FC<{
 
   const handleStageFile = async (filePath: string) => {
     setStagingPaths((prev) => new Set(prev).add(filePath))
-    await api.gitManager.stage(projectDir, [filePath])
+    const r = await api.gitManager.stage(projectDir, [filePath])
+    if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
     await refreshStatus()
     setStagingPaths((prev) => { const n = new Set(prev); n.delete(filePath); return n })
-    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
+    if (r.success && autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleUnstageFile = async (filePath: string) => {
@@ -3899,12 +3902,13 @@ const WorkingChanges: React.FC<{
 
   const handleBatchStage = async (paths: string[]) => {
     setStagingPaths(new Set(paths))
-    await api.gitManager.stage(projectDir, paths)
+    const r = await api.gitManager.stage(projectDir, paths)
+    if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
     await refreshStatus()
     setStagingPaths(new Set())
     setSelectedPaths(new Set())
     setSelectedFile(null)
-    if (autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
+    if (r.success && autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
 
   const handleBatchUnstage = async (paths: string[]) => {
@@ -4164,6 +4168,7 @@ const WorkingChanges: React.FC<{
           selectedPaths={selectedPaths}
           onClose={() => setFileCtx(null)}
           onRefresh={onRefresh}
+          onError={onError}
         />
       )}
     </div>
@@ -4180,7 +4185,8 @@ const FileContextMenu: React.FC<{
   selectedPaths: Set<string>
   onClose: () => void
   onRefresh: () => void
-}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh }) => {
+  onError: (msg: string) => void
+}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh, onError }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
   const [claudeSubmenu, setClaudeSubmenu] = useState(false)
@@ -4213,8 +4219,8 @@ const FileContextMenu: React.FC<{
   const isUntracked = file.workTreeStatus === '?' || file.workTreeStatus === 'untracked'
   const fileName = file.path.split('/').pop() || file.path
 
-  const doStage = async () => { onClose(); await api.gitManager.stage(projectDir, targetPaths); onRefresh() }
-  const doUnstage = async () => { onClose(); await api.gitManager.unstage(projectDir, targetPaths); onRefresh() }
+  const doStage = async () => { onClose(); const r = await api.gitManager.stage(projectDir, targetPaths); if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`); onRefresh() }
+  const doUnstage = async () => { onClose(); const r = await api.gitManager.unstage(projectDir, targetPaths); if (!r.success) onError(`Unstage failed: ${r.error || 'Unknown error'}`); onRefresh() }
 
   const doDiscard = async () => {
     onClose()
