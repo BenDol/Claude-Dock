@@ -530,6 +530,25 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_PREVIEW_GITIGNORE, async (_event, projectDir: string, pattern: string) => {
+    try {
+      return await gitOps.previewGitignorePattern(projectDir, pattern)
+    } catch (err) {
+      logError('[git-manager] preview gitignore failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_ADD_TO_GITIGNORE, async (_event, projectDir: string, pattern: string, removeFromIndex: boolean) => {
+    try {
+      await gitOps.addToGitignore(projectDir, pattern, removeFromIndex)
+      return { success: true }
+    } catch (err) {
+      logError('[git-manager] add to gitignore failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Add to gitignore failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
     const { DockManager } = require('../../../dock-manager')
     const docks = DockManager.getInstance().getAllDocks()

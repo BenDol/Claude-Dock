@@ -116,6 +116,8 @@ export const IPC = {
   GIT_MGR_GET_ACTIVE_TERMINALS: 'gitMgr:getActiveTerminals',
   GIT_MGR_SAVE_FILE: 'gitMgr:saveFile',
   GIT_MGR_RESOLVE_WITH_CLAUDE: 'gitMgr:resolveWithClaude',
+  GIT_MGR_PREVIEW_GITIGNORE: 'gitMgr:previewGitignore',
+  GIT_MGR_ADD_TO_GITIGNORE: 'gitMgr:addToGitignore',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',

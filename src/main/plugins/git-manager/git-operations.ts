@@ -637,6 +637,106 @@ export async function saveFileContent(cwd: string, filePath: string, content: st
   await fsP.writeFile(absPath, content, 'utf-8')
 }
 
+// --- Gitignore ---
+
+/** Convert a gitignore pattern to a RegExp for matching against repo-relative paths */
+function gitignorePatternToRegex(pattern: string): RegExp | null {
+  let p = pattern.trim()
+  if (!p || p.startsWith('#')) return null
+
+  const negated = p.startsWith('!')
+  if (negated) p = p.slice(1)
+
+  // Determine if the pattern should match against the full path or just the basename
+  const hasSlash = p.includes('/')
+  const dirOnly = p.endsWith('/')
+  if (dirOnly) p = p.slice(0, -1)
+
+  // Remove leading slash (anchored to root)
+  const anchored = p.startsWith('/')
+  if (anchored) p = p.slice(1)
+
+  // Escape regex special chars except * and ?
+  let regex = p.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  // Convert gitignore globs to regex
+  regex = regex.replace(/\*\*/g, '\0DOUBLESTAR\0')
+  regex = regex.replace(/\*/g, '[^/]*')
+  regex = regex.replace(/\?/g, '[^/]')
+  regex = regex.replace(/\0DOUBLESTAR\0/g, '.*')
+
+  if (!hasSlash && !anchored) {
+    // No slash in pattern -> match against basename anywhere in the path
+    regex = `(?:^|/)${regex}${dirOnly ? '(?:/|$)' : '$'}`
+  } else {
+    // Has slash or anchored -> match against full path from root
+    regex = `^${regex}${dirOnly ? '(?:/|$)' : '$'}`
+  }
+
+  try {
+    return new RegExp(regex)
+  } catch {
+    return null
+  }
+}
+
+/** Get all tracked + untracked files, then filter by a gitignore-style pattern */
+export async function previewGitignorePattern(cwd: string, pattern: string): Promise<string[]> {
+  if (!pattern.trim()) return []
+
+  const re = gitignorePatternToRegex(pattern)
+  if (!re) return []
+
+  // Get tracked files + untracked non-ignored files
+  const [tracked, untracked] = await Promise.all([
+    gitExec(cwd, ['ls-files', '-z'], 10000).then(r => r.stdout.split('\0').filter(Boolean)),
+    gitExec(cwd, ['ls-files', '--others', '--exclude-standard', '-z'], 10000).then(r => r.stdout.split('\0').filter(Boolean))
+  ])
+
+  const allFiles = [...tracked, ...untracked]
+  const matched: string[] = []
+  for (const f of allFiles) {
+    if (re.test(f)) {
+      matched.push(f)
+      if (matched.length >= 200) break
+    }
+  }
+  return matched
+}
+
+/** Append a pattern to .gitignore and optionally rm --cached the matched tracked files */
+export async function addToGitignore(cwd: string, pattern: string, removeFromIndex: boolean): Promise<void> {
+  const fsP = require('fs/promises') as typeof import('fs/promises')
+  const pathMod = require('path') as typeof import('path')
+  const gitignorePath = pathMod.join(cwd, '.gitignore')
+
+  // Read existing content (if any)
+  let existing = ''
+  try {
+    existing = await fsP.readFile(gitignorePath, 'utf-8')
+  } catch { /* file doesn't exist yet */ }
+
+  // Ensure we start on a new line
+  const needsNewline = existing.length > 0 && !existing.endsWith('\n')
+  const toAppend = (needsNewline ? '\n' : '') + pattern + '\n'
+  await fsP.appendFile(gitignorePath, toAppend, 'utf-8')
+
+  // Optionally remove matched files from the index (keeps them on disk)
+  if (removeFromIndex) {
+    const re = gitignorePatternToRegex(pattern)
+    if (re) {
+      const { stdout } = await gitExec(cwd, ['ls-files', '-z'], 10000)
+      const tracked = stdout.split('\0').filter(Boolean)
+      const toRemove = tracked.filter(f => re.test(f))
+      if (toRemove.length > 0) {
+        const BATCH = 50
+        for (let i = 0; i < toRemove.length; i += BATCH) {
+          await gitExec(cwd, ['rm', '--cached', '--', ...toRemove.slice(i, i + BATCH)], 10000)
+        }
+      }
+    }
+  }
+}
+
 // --- Partial staging (apply patch) ---
 
 export async function applyPatch(cwd: string, patch: string, cached: boolean, reverse: boolean, fuzzy?: boolean): Promise<void> {

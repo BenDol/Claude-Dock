@@ -199,6 +199,8 @@ export interface DockApi {
     getActiveTerminals: (projectDir: string) => Promise<{ id: string; title: string; sessionId: string }[]>
     saveFile: (projectDir: string, filePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     resolveWithClaude: (projectDir: string, filePath: string, instructions: string) => Promise<{ success: boolean; error?: string }>
+    previewGitignore: (projectDir: string, pattern: string) => Promise<string[]>
+    addToGitignore: (projectDir: string, pattern: string, removeFromIndex: boolean) => Promise<{ success: boolean; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -406,6 +408,8 @@ const dockApi: DockApi = {
     getActiveTerminals: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_ACTIVE_TERMINALS, projectDir),
     saveFile: (projectDir, filePath, content) => ipcRenderer.invoke(IPC.GIT_MGR_SAVE_FILE, projectDir, filePath, content),
     resolveWithClaude: (projectDir, filePath, instructions) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, projectDir, filePath, instructions),
+    previewGitignore: (projectDir, pattern) => ipcRenderer.invoke(IPC.GIT_MGR_PREVIEW_GITIGNORE, projectDir, pattern),
+    addToGitignore: (projectDir, pattern, removeFromIndex) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_TO_GITIGNORE, projectDir, pattern, removeFromIndex),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

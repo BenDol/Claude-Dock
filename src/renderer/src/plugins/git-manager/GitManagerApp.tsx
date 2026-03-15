@@ -3504,6 +3504,7 @@ const WorkingChanges: React.FC<{
   const [autoGen, setAutoGen] = useState(false)
   const userEditedMsgRef = useRef(false)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
+  const [gitignoreModal, setGitignoreModal] = useState<{ pattern: string; hasTracked: boolean } | null>(null)
   const [selectedFile, setSelectedFile] = useState<{ path: string; staged: boolean } | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [fileDiffs, setFileDiffs] = useState<GitFileDiff[]>([])
@@ -4169,6 +4170,17 @@ const WorkingChanges: React.FC<{
           onClose={() => setFileCtx(null)}
           onRefresh={onRefresh}
           onError={onError}
+          onGitignore={(pattern, hasTracked) => setGitignoreModal({ pattern, hasTracked })}
+        />
+      )}
+      {gitignoreModal && (
+        <GitignoreModal
+          projectDir={projectDir}
+          initialPattern={gitignoreModal.pattern}
+          hasTrackedFiles={gitignoreModal.hasTracked}
+          onClose={() => setGitignoreModal(null)}
+          onDone={onRefresh}
+          onError={onError}
         />
       )}
     </div>
@@ -4186,7 +4198,8 @@ const FileContextMenu: React.FC<{
   onClose: () => void
   onRefresh: () => void
   onError: (msg: string) => void
-}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh, onError }) => {
+  onGitignore: (pattern: string, hasTracked: boolean) => void
+}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh, onError, onGitignore }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
   const [claudeSubmenu, setClaudeSubmenu] = useState(false)
@@ -4262,6 +4275,20 @@ const FileContextMenu: React.FC<{
           onRefresh()
         }}>Unstage and discard changes{suffix}</div>
       )}
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => {
+        onClose()
+        // Smart default: single file → its path, multiple files with shared extension → *.ext, else first file path
+        let defaultPattern: string
+        if (count === 1) {
+          defaultPattern = file.path
+        } else {
+          const exts = new Set(targetPaths.map(p => { const i = p.lastIndexOf('.'); return i > -1 ? p.slice(i) : '' }).filter(Boolean))
+          defaultPattern = exts.size === 1 ? `*${[...exts][0]}` : file.path
+        }
+        const hasTracked = !isUntracked
+        onGitignore(defaultPattern, hasTracked)
+      }}>Add to .gitignore</div>
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item" onClick={doOpenFile}>Open file{count > 1 ? 's' : ''}{suffix}</div>
       <div className="gm-ctx-item" onClick={doShowInFolder}>Show in folder{count > 1 ? 's' : ''}{suffix}</div>
@@ -7016,6 +7043,95 @@ const IdentitySetupModal: React.FC<{
           >
             {busy ? 'Saving...' : 'Save & Retry'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Gitignore modal ---
+
+const GitignoreModal: React.FC<{
+  projectDir: string
+  initialPattern: string
+  hasTrackedFiles: boolean
+  onClose: () => void
+  onDone: () => void
+  onError: (msg: string) => void
+}> = ({ projectDir, initialPattern, hasTrackedFiles, onClose, onDone, onError }) => {
+  const api = getDockApi()
+  const [pattern, setPattern] = useState(initialPattern)
+  const [preview, setPreview] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [removeFromIndex, setRemoveFromIndex] = useState(hasTrackedFiles)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    const p = pattern.trim()
+    if (!p) { setPreview([]); return }
+    setLoading(true)
+    debounceRef.current = setTimeout(async () => {
+      const result = await api.gitManager.previewGitignore(projectDir, p)
+      setPreview(result)
+      setLoading(false)
+    }, 200)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [pattern, projectDir])
+
+  const handleIgnore = async () => {
+    const p = pattern.trim()
+    if (!p) return
+    const r = await api.gitManager.addToGitignore(projectDir, p, removeFromIndex)
+    if (!r.success) { onError(`Add to .gitignore failed: ${r.error || 'Unknown error'}`); return }
+    onDone()
+    onClose()
+  }
+
+  return (
+    <div className="gm-modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="gm-modal gm-gitignore-modal">
+        <div className="gm-modal-header">
+          <span>Add to .gitignore</span>
+          <button className="gm-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="gm-modal-body">
+          <fieldset className="gm-gitignore-fieldset">
+            <legend>Enter a file pattern to ignore</legend>
+            <input
+              className="gm-gitignore-input"
+              value={pattern}
+              onChange={(e) => setPattern(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleIgnore() }}
+              autoFocus
+              spellCheck={false}
+            />
+          </fieldset>
+          <fieldset className="gm-gitignore-fieldset">
+            <legend>Preview</legend>
+            <div className="gm-gitignore-preview">
+              {preview.length > 0 ? preview.map((f) => (
+                <div key={f} className="gm-gitignore-preview-item">{f}</div>
+              )) : (
+                <div className="gm-gitignore-preview-empty">
+                  {loading ? 'Searching...' : pattern.trim() ? 'No files matched' : 'Type a pattern above'}
+                </div>
+              )}
+            </div>
+            {preview.length > 0 && (
+              <div className="gm-gitignore-count">{preview.length >= 200 ? '200+ ' : preview.length} file{preview.length !== 1 ? 's' : ''} matched</div>
+            )}
+          </fieldset>
+          {hasTrackedFiles && (
+            <label className="gm-gitignore-checkbox">
+              <input type="checkbox" checked={removeFromIndex} onChange={(e) => setRemoveFromIndex(e.target.checked)} />
+              Also remove matched files from tracking (keeps files on disk)
+            </label>
+          )}
+        </div>
+        <div className="gm-modal-footer">
+          <button className="gm-modal-btn" onClick={onClose}>Cancel</button>
+          <button className="gm-modal-btn gm-modal-btn-primary" onClick={handleIgnore} disabled={!pattern.trim()}>Ignore</button>
         </div>
       </div>
     </div>
