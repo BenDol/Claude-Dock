@@ -647,14 +647,15 @@ function gitignorePatternToRegex(pattern: string): RegExp | null {
   const negated = p.startsWith('!')
   if (negated) p = p.slice(1)
 
-  // Determine if the pattern should match against the full path or just the basename
-  const hasSlash = p.includes('/')
   const dirOnly = p.endsWith('/')
   if (dirOnly) p = p.slice(0, -1)
 
   // Remove leading slash (anchored to root)
   const anchored = p.startsWith('/')
   if (anchored) p = p.slice(1)
+
+  // Check for slashes AFTER stripping trailing / and leading / — determines anchoring
+  const hasSlash = p.includes('/')
 
   // Escape regex special chars except * and ?
   let regex = p.replace(/[.+^${}()|[\]\\]/g, '\\$&')
@@ -665,8 +666,9 @@ function gitignorePatternToRegex(pattern: string): RegExp | null {
   regex = regex.replace(/\0DOUBLESTAR\0/g, '.*')
 
   if (!hasSlash && !anchored) {
-    // No slash in pattern -> match against basename anywhere in the path
-    regex = `(?:^|/)${regex}${dirOnly ? '(?:/|$)' : '$'}`
+    // No slash in pattern -> match as a path component anywhere
+    // e.g. "dist" matches file "dist", dir "foo/dist/bar", "foo/dist"
+    regex = `(?:^|/)${regex}(?:/|$)`
   } else {
     // Has slash or anchored -> match against full path from root
     regex = `^${regex}${dirOnly ? '(?:/|$)' : '$'}`
