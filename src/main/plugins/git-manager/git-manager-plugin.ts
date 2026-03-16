@@ -1,7 +1,7 @@
 import type { DockPlugin } from '../plugin'
 import type { PluginEventBus } from '../plugin-events'
 import type { PluginSettingDef } from '../../../shared/plugin-types'
-import { registerGitManagerIpc } from './git-manager-ipc'
+import { registerGitManagerIpc, disposeGitManagerIpc } from './git-manager-ipc'
 import { GitManagerWindowManager } from './git-manager-window'
 import { disposeCi, stopCiPollingForProject } from './ci/ci-ipc'
 import { getServices } from './services'
@@ -76,6 +76,7 @@ export class GitManagerPlugin implements DockPlugin {
 
   dispose(): void {
     disposeCi()
+    disposeGitManagerIpc()
     GitManagerWindowManager.getInstance().closeAll()
   }
 }

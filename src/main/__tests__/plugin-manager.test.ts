@@ -1,14 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('electron', () => {
-  const ipcMain = {
+vi.mock('electron', () => ({
+  ipcMain: {
     handle: vi.fn(),
     removeHandler: vi.fn()
   }
-  // Make handle configurable so Object.defineProperty in plugin-manager works
-  Object.defineProperty(ipcMain, 'handle', { value: vi.fn(), writable: true, configurable: true })
-  return { ipcMain }
-})
+}))
 
 vi.mock('electron-store', () => ({
   default: vi.fn().mockImplementation(() => ({

@@ -15,38 +15,6 @@ import type { PluginManifest } from '../../shared/plugin-manifest'
 import type { DockWindow } from '../dock-window'
 import { log, logError } from '../logger'
 
-/**
- * Global IPC channel tracking — patches ipcMain.handle once at module load
- * to record every channel registration. During plugin register(), the active
- * plugin ID is set so channels are attributed to the correct plugin.
- *
- * This works regardless of whether plugins import ipcMain directly, because
- * the patch is on the shared ipcMain instance (or its prototype).
- */
-let _activePluginId: string | null = null
-const _pluginChannels = new Map<string, string[]>()
-
-// Patch ipcMain.handle to intercept registrations. Try own property first,
-// then prototype — Electron may define handle on either.
-;(() => {
-  const target = Object.getOwnPropertyDescriptor(ipcMain, 'handle')
-    ? ipcMain
-    : Object.getPrototypeOf(ipcMain)
-  const original = ipcMain.handle.bind(ipcMain)
-
-  Object.defineProperty(target, 'handle', {
-    value: function trackedHandle(channel: string, listener: any) {
-      if (_activePluginId) {
-        const list = _pluginChannels.get(_activePluginId)
-        if (list) list.push(channel)
-      }
-      return original(channel, listener)
-    },
-    writable: true,
-    configurable: true
-  })
-})()
-
 export class PluginManager {
   private static instance: PluginManager
   private plugins: DockPlugin[] = []
@@ -61,28 +29,8 @@ export class PluginManager {
 
   register(plugin: DockPlugin): void {
     this.plugins.push(plugin)
-    this.registerWithTracking(plugin)
+    plugin.register(this.bus)
     log(`[plugin-manager] registered plugin: ${plugin.id}`)
-  }
-
-  /**
-   * Calls plugin.register() while tracking IPC channels.
-   * Sets _activePluginId so the patched ipcMain.handle knows which plugin
-   * to attribute calls to.
-   */
-  private registerWithTracking(plugin: DockPlugin): void {
-    _pluginChannels.set(plugin.id, _pluginChannels.get(plugin.id) || [])
-    _activePluginId = plugin.id
-
-    try {
-      plugin.register(this.bus)
-    } finally {
-      _activePluginId = null
-      const channels = _pluginChannels.get(plugin.id) || []
-      if (channels.length > 0) {
-        log(`[plugin-manager] tracked ${channels.length} IPC channel(s) for ${plugin.id}`)
-      }
-    }
   }
 
   getPluginInfoList(): PluginInfo[] {
@@ -212,9 +160,9 @@ export class PluginManager {
   }
 
   /**
-   * Hot-reload a plugin: dispose the old instance, remove its IPC handlers
-   * and event bus subscriptions, then register the new instance in its place.
-   * IPC channels are cleaned up automatically using the tracked list from register().
+   * Hot-reload a plugin: dispose the old instance (which must remove its own
+   * IPC handlers), remove its event bus subscriptions, then register the new
+   * instance in its place.
    */
   reload(pluginId: string, newPlugin: DockPlugin): boolean {
     const index = this.plugins.findIndex((p) => p.id === pluginId)
@@ -227,7 +175,8 @@ export class PluginManager {
     const old = this.plugins[index]
     log(`[plugin-manager] hot-reloading plugin: ${pluginId}`)
 
-    // 1. Dispose the old plugin (closes windows, stops timers, etc.)
+    // 1. Dispose the old plugin — this must remove its IPC handlers, close
+    //    windows, stop timers, etc. The plugin owns its own cleanup.
     try { old.dispose?.() } catch (err) {
       logError(`[plugin-manager] dispose failed for ${pluginId}:`, err)
     }
@@ -235,16 +184,9 @@ export class PluginManager {
     // 2. Remove event bus handlers for this plugin
     this.bus.off(pluginId)
 
-    // 3. Remove IPC handlers tracked during the original register() call
-    const channels = _pluginChannels.get(pluginId) || []
-    for (const channel of channels) {
-      try { ipcMain.removeHandler(channel) } catch { /* not registered */ }
-    }
-    _pluginChannels.delete(pluginId)
-
-    // 4. Replace the plugin in the list and register with tracking
+    // 3. Replace the plugin in the list and register the new one
     this.plugins[index] = newPlugin
-    this.registerWithTracking(newPlugin)
+    newPlugin.register(this.bus)
     log(`[plugin-manager] hot-reload complete for ${pluginId}`)
     return true
   }

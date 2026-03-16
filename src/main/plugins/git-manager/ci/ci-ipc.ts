@@ -171,6 +171,13 @@ export function registerCiIpc(): void {
 export function disposeCi(): void {
   ciManager?.stopAll()
   ciManager = null
+
+  // Remove all CI_* and CLAUDE_SEND_TASK handlers (for hot-reload)
+  for (const [key, channel] of Object.entries(IPC)) {
+    if (key.startsWith('CI_') || key === 'CLAUDE_SEND_TASK') {
+      ipcMain.removeHandler(channel as string)
+    }
+  }
 }
 
 export function stopCiPollingForProject(projectDir: string): void {
