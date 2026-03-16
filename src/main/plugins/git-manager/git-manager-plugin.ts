@@ -6,6 +6,9 @@ import { GitManagerWindowManager } from './git-manager-window'
 import { disposeCi, stopCiPollingForProject } from './ci/ci-ipc'
 import { getServices } from './services'
 
+// Re-export setServices so standalone builds can receive service injection from the host app
+export { setServices } from './services'
+
 export class GitManagerPlugin implements DockPlugin {
   readonly id = 'git-manager'
   readonly name = 'Git Manager'

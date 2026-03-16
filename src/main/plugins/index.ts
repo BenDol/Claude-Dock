@@ -18,12 +18,17 @@ const pluginModules = import.meta.glob<Record<string, unknown>>(
   { eager: true }
 )
 
+interface OverrideResult {
+  plugin: DockPlugin
+  module: Record<string, unknown>
+}
+
 /**
  * Checks if a valid plugin override exists for the given built-in plugin.
  * If valid, loads and returns the override module as a DockPlugin instance.
  * If invalid (hash mismatch, missing files), deletes the override and returns null.
  */
-function tryLoadOverride(pluginId: string): DockPlugin | null {
+function tryLoadOverride(pluginId: string): OverrideResult | null {
   const overrideDir = path.join(app.getPath('userData'), 'plugin-overrides', pluginId)
   const metaPath = path.join(overrideDir, 'meta.json')
 
@@ -57,7 +62,7 @@ function tryLoadOverride(pluginId: string): DockPlugin | null {
       if (typeof exp === 'function' && (exp as any).prototype?.register) {
         const plugin = new (exp as new () => DockPlugin)()
         log(`[plugins] loaded override for ${pluginId} v${meta.version}`)
-        return plugin
+        return { plugin, module: mod }
       }
     }
 
@@ -75,10 +80,21 @@ function tryLoadOverride(pluginId: string): DockPlugin | null {
   }
 }
 
-/** Inject services for built-in plugins that require them (before register()) */
-function injectPluginServices(pluginId: string): void {
+/**
+ * Inject services for built-in plugins that require them (before register()).
+ * If an override module is provided, calls its setServices export instead of
+ * the bundled one — override bundles have their own copy of services.ts.
+ */
+function injectPluginServices(pluginId: string, overrideModule?: Record<string, unknown>): void {
   if (pluginId === 'git-manager') {
-    setGitManagerServices(createGitManagerServices())
+    const services = createGitManagerServices()
+    if (overrideModule && typeof overrideModule.setServices === 'function') {
+      // Override module has its own services holder — inject into that
+      ;(overrideModule.setServices as typeof setGitManagerServices)(services)
+    } else {
+      // Bundled module — inject into the bundled services holder
+      setGitManagerServices(services)
+    }
   }
 }
 
@@ -97,12 +113,14 @@ export function registerPlugins(): void {
 
           // Check for a plugin override before registering the bundled version
           const override = tryLoadOverride(plugin.id)
-          const pluginToRegister = override || plugin
+          const pluginToRegister = override?.plugin || plugin
 
           if (pluginToRegister.lazyLoad) {
             deferred.push(pluginToRegister)
+            // Store override module for deferred injection
+            if (override) (pluginToRegister as any)._overrideModule = override.module
           } else {
-            injectPluginServices(pluginToRegister.id)
+            injectPluginServices(pluginToRegister.id, override?.module)
             manager.register(pluginToRegister)
           }
         } catch (e) {
@@ -117,7 +135,9 @@ export function registerPlugins(): void {
   setImmediate(async () => {
     for (const plugin of deferred) {
       try {
-        injectPluginServices(plugin.id)
+        const overrideModule = (plugin as any)._overrideModule as Record<string, unknown> | undefined
+        delete (plugin as any)._overrideModule
+        injectPluginServices(plugin.id, overrideModule)
         manager.register(plugin)
       } catch (e) {
         log(`[plugins] Failed to register deferred plugin ${plugin.id}: ${e}`)
