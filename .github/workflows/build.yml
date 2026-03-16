@@ -112,6 +112,7 @@ jobs:
 
   build:
     needs: detect
+    if: needs.detect.outputs.plugins_only != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -131,13 +132,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
-        if: needs.detect.outputs.plugins_only != 'true'
         id: setup-python
         with:
           python-version: '3.12'
 
       - name: Install setuptools (needed by node-gyp)
-        if: needs.detect.outputs.plugins_only != 'true'
         run: pip install setuptools
 
       - uses: actions/setup-node@v4
@@ -148,7 +147,6 @@ jobs:
       # and electron/electron-builder downloads. On cache hit this skips
       # npm ci entirely, saving ~2-3 minutes on Windows.
       - name: Cache node_modules & Electron
-        if: needs.detect.outputs.plugins_only != 'true'
         id: cache-deps
         uses: actions/cache@v4
         with:
@@ -163,26 +161,24 @@ jobs:
           key: deps-${{ matrix.platform }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
-        if: needs.detect.outputs.plugins_only != 'true' && steps.cache-deps.outputs.cache-hit != 'true'
+        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Run tests
-        if: needs.detect.outputs.plugins_only != 'true' && inputs.skip_tests != true
+        if: inputs.skip_tests != true
         run: npx vitest run
 
       - name: Build app
-        if: needs.detect.outputs.plugins_only != 'true'
         run: npx electron-vite build
         env:
           UPDATE_PROFILE: bleeding-edge
           PRODUCTION_BUILD: '1'
 
       - name: Generate plugin archive
-        if: needs.detect.outputs.plugins_only != 'true'
         run: node scripts/generate-plugin-archive.js
 
       - name: Import macOS signing certificate
-        if: needs.detect.outputs.plugins_only != 'true' && matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
+        if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
         env:
           MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
@@ -202,7 +198,6 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Package (${{ matrix.platform }})
-        if: needs.detect.outputs.plugins_only != 'true'
         run: npx electron-builder --${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -214,13 +209,12 @@ jobs:
           SKIP_NOTARIZE: 'true' # ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
       - name: Zip win-unpacked directory
-        if: needs.detect.outputs.plugins_only != 'true' && matrix.platform == 'win'
+        if: matrix.platform == 'win'
         working-directory: dist/win-unpacked
         run: 7z a -tzip "../Claude-Dock-win-unpacked.zip" .
         shell: bash
 
       - name: Upload app artifacts
-        if: needs.detect.outputs.plugins_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: claude-dock-${{ matrix.platform }}
@@ -233,7 +227,7 @@ jobs:
 
       # --- Full build publish: app + plugins + SHA ---
       - name: Publish full build to bleeding-edge release
-        if: needs.detect.outputs.plugins_only != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
