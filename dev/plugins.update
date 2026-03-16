@@ -1,23 +1,23 @@
 {
   "schemaVersion": 1,
-  "buildSha": "dev-test-sha",
+  "buildSha": "6820fea97659595af3b584d0e8e78b4624a481cf",
   "buildDate": "2026-03-16",
   "plugins": {
     "git-sync": {
-      "version": "1.1.0",
-      "buildSha": "fake-new-git-sync-sha",
-      "hash": "f3f725d41267a90b3c1d72fe69bcd15cd935e6e5846abdd4ea6665c2421cbb26",
+      "version": "1.0.0",
+      "buildSha": "4b07b5ed80ccc050dc771ff59e6e10ce1cc6e7e0",
+      "hash": "0394f1ba0537100a2c06205e6964b9d10e7d516a20e03eb913917534f881f11c",
       "archivePath": "git-sync/",
-      "changelog": "- Fixed race condition in upstream detection\n- Added support for sparse-checkout repos\n- Improved submodule sync performance",
+      "changelog": "",
       "requiresAppUpdate": false
     },
     "git-manager": {
-      "version": "1.2.0",
-      "buildSha": "fake-new-git-manager-sha",
-      "hash": "e7d7887be0939ed517022587796f834fc8788b188fd4bf1eb1360a9ac7c980ad",
+      "version": "1.0.0",
+      "buildSha": "6820fea97659595af3b584d0e8e78b4624a481cf",
+      "hash": "edb2baf84fdba0f5e9607ee1f93e4b4332d3915286bd95c7631ac6fea7a9fe2c",
       "archivePath": "git-manager/",
-      "changelog": "- New conflict resolution UI\n- Performance improvements for large repos\n- Added inline blame annotations",
-      "requiresAppUpdate": true
+      "changelog": "",
+      "requiresAppUpdate": false
     }
   }
 }

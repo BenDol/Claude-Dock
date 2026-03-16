@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+vi.mock('electron', () => ({
+  ipcMain: {
+    handle: vi.fn(),
+    removeHandler: vi.fn()
+  }
+}))
+
 vi.mock('electron-store', () => ({
   default: vi.fn().mockImplementation(() => ({
     get: vi.fn(),

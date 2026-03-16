@@ -136,6 +136,8 @@ export class PluginUpdateService {
 
       if (entry.source === 'builtin') {
         await this.installBuiltinUpdate(entry)
+        // Hot-reload the plugin without requiring app restart
+        this.hotReloadPlugin(pluginId)
       } else {
         await this.installExternalUpdate(entry)
       }
@@ -519,6 +521,63 @@ export class PluginUpdateService {
 
     // Clean up temp dir
     fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+
+  // --- Hot-reload ---
+
+  /**
+   * Hot-reload a built-in plugin from its override directory.
+   * Loads the new module, injects services if needed, and swaps it into
+   * the PluginManager — no app restart required.
+   */
+  private hotReloadPlugin(pluginId: string): void {
+    const overrideDir = this.getOverrideDir(pluginId)
+    const mainPath = path.join(overrideDir, 'index.js')
+
+    if (!fs.existsSync(mainPath)) {
+      log(`[plugin-updater] hot-reload skipped for ${pluginId}: no index.js in override`)
+      return
+    }
+
+    try {
+      // Clear Node's require cache for the old module so it re-evaluates
+      const resolved = require.resolve(mainPath)
+      delete require.cache[resolved]
+
+      // Load the new module
+      const mod = require(mainPath)
+      let newPlugin: import('./plugin').DockPlugin | null = null
+      for (const exp of Object.values(mod)) {
+        if (typeof exp === 'function' && (exp as any).prototype?.register) {
+          newPlugin = new (exp as new () => import('./plugin').DockPlugin)()
+          break
+        }
+      }
+
+      if (!newPlugin) {
+        log(`[plugin-updater] hot-reload failed for ${pluginId}: no DockPlugin export found`)
+        return
+      }
+
+      // Inject services for plugins that need them (e.g. git-manager)
+      if (pluginId === 'git-manager') {
+        try {
+          // The override module should export setServices, or we use the bundled services
+          const { setServices } = mod.setServices ? mod : require('./git-manager/services')
+          const { createBundledServices } = require('./git-manager/bundled-services')
+          setServices(createBundledServices())
+        } catch (err) {
+          log(`[plugin-updater] service injection for ${pluginId}: ${err}`)
+        }
+      }
+
+      // Swap the plugin in the manager (dispose old, register new)
+      PluginManager.getInstance().reload(pluginId, newPlugin)
+      log(`[plugin-updater] hot-reloaded ${pluginId} successfully`)
+    } catch (err) {
+      logError(`[plugin-updater] hot-reload failed for ${pluginId}:`, err)
+      // Non-fatal — the old plugin stays active, user can restart later
+    }
   }
 
   // --- Helpers ---

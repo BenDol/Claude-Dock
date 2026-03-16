@@ -523,6 +523,18 @@ body {
   pointer-events: none;
 }
 
+.toolbar-update-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--bg-primary);
+}
+
 .toolbar-status-dot-success { background: #9ece6a; }
 .toolbar-status-dot-failure { background: #f7768e; }
 .toolbar-status-dot-in_progress {

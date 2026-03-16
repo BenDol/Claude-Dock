@@ -31,6 +31,7 @@ export interface Settings {
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
     autoUpdate: boolean
+    autoUpdatePlugins: boolean
   }
   keybindings: {
     focusUp: string
@@ -208,7 +209,8 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   updater: {
     profile: 'latest',
-    autoUpdate: false
+    autoUpdate: false,
+    autoUpdatePlugins: false
   },
   keybindings: {
     focusUp: 'Ctrl+Shift+ArrowUp',

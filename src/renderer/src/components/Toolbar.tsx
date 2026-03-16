@@ -88,6 +88,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const [statusDots, setStatusDots] = useState<Record<string, 'success' | 'failure' | 'in_progress'>>({})
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
   const [openPluginWindows, setOpenPluginWindows] = useState<Set<string>>(new Set())
+  const [hasPluginUpdates, setHasPluginUpdates] = useState(false)
 
   // Fetch plugin enabled states, re-fetch when toggled via settings
   useEffect(() => {
@@ -186,6 +187,20 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
     const interval = setInterval(poll, 10000)
     return () => clearInterval(interval)
   }, [projectDir, enabledPlugins])
+
+  // Track whether plugin updates are available (for settings button indicator)
+  useEffect(() => {
+    const api = getDockApi()
+    // Check cached updates on mount
+    api.pluginUpdater.getAvailable().then((updates) => {
+      setHasPluginUpdates(updates.some((u) => u.status === 'available'))
+    }).catch(() => {})
+    // Listen for state changes (install, dismiss, new check)
+    const cleanup = api.pluginUpdater.onStateChanged((updates) => {
+      setHasPluginUpdates(updates.some((u) => u.status === 'available'))
+    })
+    return cleanup
+  }, [])
 
   // Listen for RC disconnect only while RC terminals exist
   useEffect(() => {
@@ -339,8 +354,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         >
           <FolderIcon />
         </button>
-        <button className="toolbar-btn toolbar-btn-icon" onClick={onOpenSettings} title="Settings (Ctrl+,)">
+        <button className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           <SettingsIcon />
+          {hasPluginUpdates && <span className="toolbar-update-dot" />}
         </button>
         <NotificationDropdown />
         <div className="toolbar-separator" />

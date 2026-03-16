@@ -421,6 +421,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   Plugins run when this project directory opens. Enable or disable per-project.
                 </div>
                 <PluginPanel projectDir={projectDir} />
+                <div className="settings-divider" />
+                <div>
+                  <button
+                    className="settings-check-update-btn"
+                    onClick={() => window.dispatchEvent(new CustomEvent('plugin-update-open'))}
+                  >
+                    Check for Plugin Updates
+                  </button>
+                </div>
               </div>
             )}
             {tab === 'behavior' && (
@@ -595,12 +604,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => updateUpdater({ autoUpdate: e.target.checked })}
                     disabled={__DEV__}
                   />
-                  Automatically update
+                  Automatically update app
                 </label>
                 <div className="settings-description">
                   {__DEV__
                     ? 'Automatic updates are disabled in dev builds.'
-                    : 'When enabled, updates are downloaded and installed automatically on launch.'}
+                    : 'When enabled, app updates are downloaded and installed automatically on launch.'}
+                </div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.updater?.autoUpdatePlugins ?? false}
+                    onChange={(e) => updateUpdater({ autoUpdatePlugins: e.target.checked })}
+                  />
+                  Automatically update plugins
+                </label>
+                <div className="settings-description">
+                  When enabled, plugin updates are installed automatically on launch. A restart notification is shown when complete.
                 </div>
                 <div>
                   <button

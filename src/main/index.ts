@@ -241,10 +241,45 @@ function schedulePluginUpdateCheck(): void {
   setTimeout(() => {
     // Run entirely in the background — .catch() ensures unhandled rejections
     // never propagate to the process-level handler.
-    PluginUpdateService.getInstance()
+    const service = PluginUpdateService.getInstance()
+    service
       .checkForUpdates(getSetting('updater')?.profile || 'latest')
-      .then((updates) => {
-        if (updates.length > 0) {
+      .then(async (updates) => {
+        if (updates.length === 0) return
+
+        const autoUpdatePlugins = getSetting('updater')?.autoUpdatePlugins ?? false
+        const installable = updates.filter((u) => u.status === 'available' && !u.requiresAppUpdate)
+
+        if (autoUpdatePlugins && installable.length > 0) {
+          // Auto-update: install all silently, then notify when done
+          log(`[plugin-updater] auto-updating ${installable.length} plugin(s)...`)
+          const result = await service.installAll()
+          const successNames = result.success.map(
+            (id) => updates.find((u) => u.pluginId === id)?.pluginName || id
+          )
+          const failedNames = result.failed.map((f) => f.pluginId)
+
+          if (successNames.length > 0) {
+            NotificationManager.getInstance().notify({
+              title: 'Plugins Updated',
+              message: `${successNames.join(', ')} updated successfully.`,
+              type: 'success',
+              source: 'plugin-updater',
+              timeout: 8000
+            })
+          }
+          if (failedNames.length > 0) {
+            NotificationManager.getInstance().notify({
+              title: 'Plugin Update Failed',
+              message: `Failed to update: ${failedNames.join(', ')}`,
+              type: 'error',
+              source: 'plugin-updater',
+              timeout: 10000,
+              action: { label: 'View Details', event: 'plugin-update-open' }
+            })
+          }
+        } else {
+          // Manual mode: show notification with action buttons
           const names = updates.map((u) => u.pluginName)
           NotificationManager.getInstance().notify({
             title: 'Plugin Updates Available',

@@ -59,6 +59,13 @@ function App() {
     return () => window.removeEventListener('plugin-update-all', handler)
   }, [])
 
+  // Handle "Restart Now" action from auto-update notification
+  useEffect(() => {
+    const handler = () => getDockApi().app.restart()
+    window.addEventListener('app-restart', handler)
+    return () => window.removeEventListener('app-restart', handler)
+  }, [])
+
   // When a dock window opens, check if there are pending plugin updates and re-notify
   useEffect(() => {
     if (isLauncher || pluginView) return

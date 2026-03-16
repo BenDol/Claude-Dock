@@ -131,15 +131,7 @@ export default function PluginUpdaterModal({ onClose }: Props) {
 
         {hasInstalled && (
           <div className="modal-footer">
-            <span>Restart to apply updates</span>
-            <button
-              className="plugin-update-restart-btn"
-              onClick={() => {
-                getDockApi().updater.install()
-              }}
-            >
-              Restart Now
-            </button>
+            <span>{'\u2713'} Updates applied</span>
           </div>
         )}
       </div>
@@ -192,7 +184,7 @@ function PluginUpdateCard({
             <span className="plugin-update-progress-text">Installing...</span>
           )}
           {entry.status === 'installed' && (
-            <span className="plugin-update-installed">{'\u2713'} Restart to apply</span>
+            <span className="plugin-update-installed">{'\u2713'} Updated</span>
           )}
           {entry.status === 'failed' && (
             <>
