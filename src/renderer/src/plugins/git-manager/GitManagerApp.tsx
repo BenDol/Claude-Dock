@@ -4167,9 +4167,11 @@ const WorkingChanges: React.FC<{
           section={fileCtx.section}
           projectDir={projectDir}
           selectedPaths={selectedPaths}
+          status={status}
           onClose={() => setFileCtx(null)}
           onRefresh={onRefresh}
           onError={onError}
+          onConfirm={onConfirm}
           onGitignore={(pattern, hasTracked) => setGitignoreModal({ pattern, hasTracked })}
         />
       )}
@@ -4195,11 +4197,13 @@ const FileContextMenu: React.FC<{
   section: 'staged' | 'unstaged'
   projectDir: string
   selectedPaths: Set<string>
+  status: GitStatusResult
   onClose: () => void
   onRefresh: () => void
   onError: (msg: string) => void
+  onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
   onGitignore: (pattern: string, hasTracked: boolean) => void
-}> = ({ x, y, file, section, projectDir, selectedPaths, onClose, onRefresh, onError, onGitignore }) => {
+}> = ({ x, y, file, section, projectDir, selectedPaths, status, onClose, onRefresh, onError, onConfirm, onGitignore }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [copySubmenu, setCopySubmenu] = useState(false)
   const [claudeSubmenu, setClaudeSubmenu] = useState(false)
@@ -4232,23 +4236,80 @@ const FileContextMenu: React.FC<{
   const isUntracked = file.workTreeStatus === '?' || file.workTreeStatus === 'untracked'
   const fileName = file.path.split('/').pop() || file.path
 
+  // Build lookup for file statuses to handle mixed selections correctly
+  const allUnstaged = [...status.unstaged, ...status.untracked]
+  const sectionFiles = section === 'staged' ? status.staged : allUnstaged
+  const fileMap = new Map(sectionFiles.map(f => [f.path, f]))
+
+  // Classify target paths by type
+  const untrackedPaths = targetPaths.filter(p => {
+    const f = fileMap.get(p)
+    return f && (f.workTreeStatus === '?' || f.workTreeStatus === 'untracked')
+  })
+  const trackedPaths = targetPaths.filter(p => !untrackedPaths.includes(p))
+  const addedStagedPaths = targetPaths.filter(p => {
+    const f = fileMap.get(p)
+    return f && f.indexStatus === 'added'
+  })
+  const nonAddedStagedPaths = targetPaths.filter(p => !addedStagedPaths.includes(p))
+  const allUntracked = untrackedPaths.length === targetPaths.length
+  const hasUntracked = untrackedPaths.length > 0
+
   const doStage = async () => { onClose(); const r = await api.gitManager.stage(projectDir, targetPaths); if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`); onRefresh() }
   const doUnstage = async () => { onClose(); const r = await api.gitManager.unstage(projectDir, targetPaths); if (!r.success) onError(`Unstage failed: ${r.error || 'Unknown error'}`); onRefresh() }
 
-  const doDiscard = async () => {
+  const doDiscard = () => {
     onClose()
-    if (isUntracked) {
-      await api.gitManager.deleteFiles(projectDir, targetPaths)
+    if (hasUntracked) {
+      // Show confirmation for files that will be permanently deleted
+      onConfirm({
+        title: 'Delete untracked files',
+        message: (<>
+          {trackedPaths.length > 0 && <p>{trackedPaths.length} modified file{trackedPaths.length > 1 ? 's' : ''} will have changes discarded.</p>}
+          <p>{untrackedPaths.length} untracked file{untrackedPaths.length > 1 ? 's' : ''} will be <strong>permanently deleted</strong>:</p>
+          <ul style={{ margin: '4px 0', paddingLeft: 20, maxHeight: 200, overflow: 'auto' }}>
+            {untrackedPaths.map(p => <li key={p} style={{ fontSize: 11 }}>{p}</li>)}
+          </ul>
+        </>),
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: async () => {
+          if (trackedPaths.length > 0) {
+            const r = await api.gitManager.discard(projectDir, trackedPaths)
+            if (!r.success) { onError(`Discard failed: ${r.error || 'Unknown error'}`); return }
+          }
+          const r = await api.gitManager.deleteFiles(projectDir, untrackedPaths)
+          if (!r.success) onError(`Delete failed: ${r.error || 'Unknown error'}`)
+          onRefresh()
+        }
+      })
     } else {
-      await api.gitManager.discard(projectDir, targetPaths)
+      // All tracked — discard normally
+      api.gitManager.discard(projectDir, trackedPaths).then(r => {
+        if (!r.success) onError(`Discard failed: ${r.error || 'Unknown error'}`)
+        onRefresh()
+      })
     }
-    onRefresh()
   }
 
-  const doDelete = async () => {
+  const doDelete = () => {
     onClose()
-    await api.gitManager.deleteFiles(projectDir, targetPaths)
-    onRefresh()
+    onConfirm({
+      title: `Delete file${count > 1 ? 's' : ''}`,
+      message: (<>
+        <p>{count} file{count > 1 ? 's' : ''} will be <strong>permanently deleted</strong>:</p>
+        <ul style={{ margin: '4px 0', paddingLeft: 20, maxHeight: 200, overflow: 'auto' }}>
+          {targetPaths.map(p => <li key={p} style={{ fontSize: 11 }}>{p}</li>)}
+        </ul>
+      </>),
+      confirmLabel: 'Delete',
+      danger: true,
+      onConfirm: async () => {
+        const r = await api.gitManager.deleteFiles(projectDir, targetPaths)
+        if (!r.success) onError(`Delete failed: ${r.error || 'Unknown error'}`)
+        onRefresh()
+      }
+    })
   }
 
   const doShowInFolder = () => { onClose(); targetPaths.forEach(p => api.gitManager.showInFolder(projectDir, p)) }
@@ -4264,15 +4325,46 @@ const FileContextMenu: React.FC<{
       )}
       {section === 'unstaged' && (
         <div className="gm-ctx-item gm-ctx-danger" onClick={doDiscard}>
-          {isUntracked ? `Delete file${count > 1 ? 's' : ''}` : `Discard changes${suffix}`}
+          {allUntracked ? `Delete file${count > 1 ? 's' : ''}` : `Discard changes${suffix}`}
         </div>
       )}
-      {section === 'staged' && !isUntracked && (
-        <div className="gm-ctx-item gm-ctx-danger" onClick={async () => {
+      {section === 'staged' && (
+        <div className="gm-ctx-item gm-ctx-danger" onClick={() => {
           onClose()
-          await api.gitManager.unstage(projectDir, targetPaths)
-          await api.gitManager.discard(projectDir, targetPaths)
-          onRefresh()
+          if (addedStagedPaths.length > 0) {
+            // Some files are newly added — after unstaging they become untracked and must be deleted
+            onConfirm({
+              title: 'Unstage and discard changes',
+              message: (<>
+                {nonAddedStagedPaths.length > 0 && <p>{nonAddedStagedPaths.length} modified file{nonAddedStagedPaths.length > 1 ? 's' : ''} will be unstaged and have changes discarded.</p>}
+                <p>{addedStagedPaths.length} newly added file{addedStagedPaths.length > 1 ? 's' : ''} will be unstaged and <strong>permanently deleted</strong>:</p>
+                <ul style={{ margin: '4px 0', paddingLeft: 20, maxHeight: 200, overflow: 'auto' }}>
+                  {addedStagedPaths.map(p => <li key={p} style={{ fontSize: 11 }}>{p}</li>)}
+                </ul>
+              </>),
+              confirmLabel: 'Delete',
+              danger: true,
+              onConfirm: async () => {
+                const ur = await api.gitManager.unstage(projectDir, targetPaths)
+                if (!ur.success) { onError(`Unstage failed: ${ur.error || 'Unknown error'}`); onRefresh(); return }
+                if (nonAddedStagedPaths.length > 0) {
+                  const dr = await api.gitManager.discard(projectDir, nonAddedStagedPaths)
+                  if (!dr.success) { onError(`Discard failed: ${dr.error || 'Unknown error'}`); onRefresh(); return }
+                }
+                const del = await api.gitManager.deleteFiles(projectDir, addedStagedPaths)
+                if (!del.success) onError(`Delete failed: ${del.error || 'Unknown error'}`)
+                onRefresh()
+              }
+            })
+          } else {
+            // All files are modifications/deletions to tracked files — safe to unstage + discard
+            api.gitManager.unstage(projectDir, targetPaths).then(async ur => {
+              if (!ur.success) { onError(`Unstage failed: ${ur.error || 'Unknown error'}`); onRefresh(); return }
+              const dr = await api.gitManager.discard(projectDir, targetPaths)
+              if (!dr.success) onError(`Discard failed: ${dr.error || 'Unknown error'}`)
+              onRefresh()
+            })
+          }
         }}>Unstage and discard changes{suffix}</div>
       )}
       <div className="gm-ctx-separator" />
