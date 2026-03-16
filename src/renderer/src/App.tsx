@@ -39,6 +39,58 @@ function App() {
   // Right-click Cut/Copy/Paste menu on all text inputs and textareas
   useInputContextMenu()
 
+  const [showPluginUpdater, setShowPluginUpdater] = useState(false)
+
+  // Listen for plugin update open event (from notification action) — works in all window types
+  useEffect(() => {
+    const handler = () => setShowPluginUpdater(true)
+    window.addEventListener('plugin-update-open', handler)
+    return () => window.removeEventListener('plugin-update-open', handler)
+  }, [])
+
+  // Handle "Update All" action from notification toast
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        await getDockApi().pluginUpdater.installAll()
+      } catch { /* errors shown via state change broadcast */ }
+    }
+    window.addEventListener('plugin-update-all', handler)
+    return () => window.removeEventListener('plugin-update-all', handler)
+  }, [])
+
+  // When a dock window opens, check if there are pending plugin updates and re-notify
+  useEffect(() => {
+    if (isLauncher || pluginView) return
+    const timer = setTimeout(async () => {
+      try {
+        const updates = await getDockApi().pluginUpdater.getAvailable()
+        if (updates.length > 0 && updates.some((u) => u.status === 'available')) {
+          const names = updates.filter((u) => u.status === 'available').map((u) => u.pluginName)
+          getDockApi().notifications.emit({
+            id: `plugin-updates-${Date.now()}`,
+            title: 'Plugin Updates Available',
+            message: names.length <= 3
+              ? names.join(', ')
+              : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more...`,
+            type: 'info',
+            source: 'plugin-updater',
+            timeout: 0,
+            actions: [
+              { label: 'View Updates', event: 'plugin-update-open' },
+              { label: 'Update All', event: 'plugin-update-all' }
+            ]
+          })
+        }
+      } catch { /* ignore — service may not be ready */ }
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const pluginUpdaterModal = showPluginUpdater
+    ? <PluginUpdaterModal onClose={() => setShowPluginUpdater(false)} />
+    : null
+
   if (pluginView) {
     const PluginComponent = pluginView.component
     return (
@@ -47,6 +99,7 @@ function App() {
           <PluginComponent />
         </Suspense>
         <ToastContainer />
+        {pluginUpdaterModal}
       </>
     )
   }
@@ -55,6 +108,7 @@ function App() {
       <>
         <LauncherApp />
         <ToastContainer />
+        {pluginUpdaterModal}
       </>
     )
   }
@@ -62,6 +116,7 @@ function App() {
     <>
       <DockApp />
       <ToastContainer />
+      {pluginUpdaterModal}
     </>
   )
 }
@@ -277,7 +332,6 @@ function DockApp() {
   const autoSpawn = useSettingsStore((s) => s.settings.behavior.autoSpawnFirstTerminal)
 
   const [showSettings, setShowSettings] = useState(false)
-  const [showPluginUpdater, setShowPluginUpdater] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
 
@@ -323,13 +377,6 @@ function DockApp() {
     })
     return cleanup
   }, [setTerminalAlive])
-
-  // Listen for plugin update open event (from notification action)
-  useEffect(() => {
-    const handler = () => setShowPluginUpdater(true)
-    window.addEventListener('plugin-update-open', handler)
-    return () => window.removeEventListener('plugin-update-open', handler)
-  }, [])
 
   // "Send to Claude" — show terminal picker, then send prompt to chosen terminal
   const [pendingTask, setPendingTask] = useState<ClaudeTaskRequest | null>(null)
@@ -664,7 +711,6 @@ function DockApp() {
         <DockGrid />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showPluginUpdater && <PluginUpdaterModal onClose={() => setShowPluginUpdater(false)} />}
       {pendingTask && (
         <TerminalPicker
           taskLabel={getTaskMeta(pendingTask).label}

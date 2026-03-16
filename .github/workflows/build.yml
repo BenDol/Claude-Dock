@@ -68,6 +68,14 @@ jobs:
             exit 0
           fi
 
+          # [full-build] in commit message forces a full build
+          COMMIT_MSG=$(git log -1 --format=%s HEAD)
+          if echo "$COMMIT_MSG" | grep -qi '\[full-build\]'; then
+            echo "plugins_only=false" >> "$GITHUB_OUTPUT"
+            echo "Forced full build via [full-build] in commit message: $COMMIT_MSG"
+            exit 0
+          fi
+
           # Compare against the previous commit on push
           CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "FORCE_FULL")
 

@@ -254,7 +254,10 @@ function schedulePluginUpdateCheck(): void {
             type: 'info',
             source: 'plugin-updater',
             timeout: 0,
-            action: { label: 'View Updates', event: 'plugin-update-open' }
+            actions: [
+              { label: 'View Updates', event: 'plugin-update-open' },
+              { label: 'Update All', event: 'plugin-update-all' }
+            ]
           })
         }
       })
