@@ -7,6 +7,7 @@ import { IPC } from '../../shared/ipc-channels'
 import { fetchJSON, downloadFile, extractHostname } from '../http-utils'
 import { log, logError } from '../logger'
 import { PluginManager } from './plugin-manager'
+import { createBundledServices as createGitManagerBundledServices } from './git-manager/bundled-services'
 import { trustPlugin } from './plugin-loader'
 import {
   getLastChecked,
@@ -560,15 +561,8 @@ export class PluginUpdateService {
       }
 
       // Inject services for plugins that need them (e.g. git-manager)
-      if (pluginId === 'git-manager') {
-        try {
-          // The override module should export setServices, or we use the bundled services
-          const { setServices } = mod.setServices ? mod : require('./git-manager/services')
-          const { createBundledServices } = require('./git-manager/bundled-services')
-          setServices(createBundledServices())
-        } catch (err) {
-          log(`[plugin-updater] service injection for ${pluginId}: ${err}`)
-        }
+      if (pluginId === 'git-manager' && typeof mod.setServices === 'function') {
+        mod.setServices(createGitManagerBundledServices())
       }
 
       // Swap the plugin in the manager (dispose old, register new)

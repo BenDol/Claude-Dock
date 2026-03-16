@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "buildSha": "6820fea97659595af3b584d0e8e78b4624a481cf",
+  "buildSha": "020f05badaca7f26e6431c50d56203d2c721bf7f",
   "buildDate": "2026-03-16",
   "plugins": {
     "git-sync": {
@@ -13,8 +13,8 @@
     },
     "git-manager": {
       "version": "1.0.0",
-      "buildSha": "6820fea97659595af3b584d0e8e78b4624a481cf",
-      "hash": "edb2baf84fdba0f5e9607ee1f93e4b4332d3915286bd95c7631ac6fea7a9fe2c",
+      "buildSha": "020f05badaca7f26e6431c50d56203d2c721bf7f",
+      "hash": "9a8dbcd59abaf4d589e2904a55ae044c26026a6cae87d365ab021edd625100ae",
       "archivePath": "git-manager/",
       "changelog": "",
       "requiresAppUpdate": false
