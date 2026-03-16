@@ -2,9 +2,7 @@ import type { CiProvider } from './ci-provider'
 import type { CiWorkflowRun } from '../../../../shared/ci-types'
 import type { NotificationType } from '../../../../shared/ci-types'
 import { CiProviderRegistry } from './ci-provider-registry'
-import { NotificationManager } from '../../../notification-manager'
-import { getPluginSetting } from '../../plugin-store'
-import { log } from '../../../logger'
+import { getServices } from '../services'
 
 const ACTIVE_POLL_MS = 10_000
 const IDLE_POLL_MS = 60_000
@@ -35,11 +33,11 @@ export class CiManager {
 
   async startPolling(projectDir: string): Promise<void> {
     if (this.projects.has(projectDir)) return
-    log('[ci-manager] start polling', projectDir)
+    getServices().log('[ci-manager] start polling', projectDir)
 
     const provider = await CiProviderRegistry.getInstance().resolve(projectDir)
     if (!provider) {
-      log('[ci-manager] no provider for', projectDir)
+      getServices().log('[ci-manager] no provider for', projectDir)
       return
     }
 
@@ -58,7 +56,7 @@ export class CiManager {
   stopPolling(projectDir: string): void {
     const entry = this.projects.get(projectDir)
     if (!entry) return
-    log('[ci-manager] stop polling', projectDir)
+    getServices().log('[ci-manager] stop polling', projectDir)
     if (entry.timer) clearTimeout(entry.timer)
     this.projects.delete(projectDir)
   }
@@ -105,7 +103,7 @@ export class CiManager {
       }
       entry.initialized = true
     } catch (err) {
-      log('[ci-manager] tick error:', err)
+      getServices().log('[ci-manager] tick error:', err)
     }
 
     entry.ticking = false
@@ -118,12 +116,11 @@ export class CiManager {
   }
 
   private emitStartedNotification(entry: ProjectPolling, run: CiWorkflowRun): void {
-    const categories = getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
+    const categories = getServices().getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
     const enabledCategories = categories ?? DEFAULT_NOTIFICATION_CATEGORIES
     if (!enabledCategories.includes('started')) return
 
-    const nm = NotificationManager.getInstance()
-    nm.notify({
+    getServices().notify({
       title: 'CI Run Started',
       message: `${run.name} #${run.runNumber} on ${run.headBranch}`,
       type: 'info',
@@ -135,7 +132,7 @@ export class CiManager {
   }
 
   private async emitCompletionNotification(entry: ProjectPolling, run: CiWorkflowRun): Promise<void> {
-    const categories = getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
+    const categories = getServices().getPluginSetting(entry.projectDir, 'git-manager', 'ciNotificationTypes') as string[] | undefined
     const enabledCategories = categories ?? DEFAULT_NOTIFICATION_CATEGORIES
     if (enabledCategories.length === 0) return
 
@@ -146,7 +143,7 @@ export class CiManager {
         const updated = await entry.provider.getRun(entry.projectDir, run.id)
         if (updated) conclusion = updated.conclusion
       } catch {
-        log('[ci-manager] failed to fetch run conclusion for', run.id)
+        getServices().log('[ci-manager] failed to fetch run conclusion for', run.id)
       }
     }
 
@@ -198,11 +195,10 @@ export class CiManager {
           }
         }
       } catch (err) {
-        log('[ci-manager] failed to fetch job details for failure context:', err)
+        getServices().log('[ci-manager] failed to fetch job details for failure context:', err)
       }
     }
 
-    const nm = NotificationManager.getInstance()
     const viewAction = run.url ? { label: `View on ${shortProviderName(entry.provider.providerKey)}`, url: run.url } : undefined
     const actions = conclusion === 'failure' && failureContext
       ? [
@@ -211,7 +207,7 @@ export class CiManager {
         ]
       : undefined
 
-    nm.notify({
+    getServices().notify({
       title: `CI Run ${conclusion === 'success' ? 'Passed' : conclusion === 'failure' ? 'Failed' : conclusion === 'cancelled' ? 'Cancelled' : 'Completed'}`,
       message: `${run.name} #${run.runNumber} on ${run.headBranch} ${statusLabel}`,
       type: notifType,

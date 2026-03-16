@@ -80,10 +80,13 @@ vi.mock('electron-store', () => {
   return { default: MockStore }
 })
 
-vi.mock('../../../../logger', () => ({
-  log: vi.fn(),
-  logInfo: vi.fn(),
-  logError: vi.fn()
+vi.mock('../../services', () => ({
+  getServices: () => ({
+    log: vi.fn(),
+    logInfo: vi.fn(),
+    logError: vi.fn(),
+    createSafeStore: () => mockStore
+  })
 }))
 
 import { BitbucketPipelinesProvider } from '../bitbucket-pipelines-provider'

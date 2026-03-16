@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // Hoisted mocks
-const { mockProvider, mockNotificationManager, mockRegistryResolve } = vi.hoisted(() => {
+const { mockProvider, mockNotificationManager, mockRegistryResolve, mockGetPluginSetting } = vi.hoisted(() => {
   const mockProvider = {
     name: 'GitHub Actions',
     providerKey: 'github',
@@ -23,7 +23,8 @@ const { mockProvider, mockNotificationManager, mockRegistryResolve } = vi.hoiste
     notify: vi.fn()
   }
   const mockRegistryResolve = vi.fn().mockResolvedValue(mockProvider)
-  return { mockProvider, mockNotificationManager, mockRegistryResolve }
+  const mockGetPluginSetting = vi.fn().mockReturnValue(undefined)
+  return { mockProvider, mockNotificationManager, mockRegistryResolve, mockGetPluginSetting }
 })
 
 vi.mock('../ci-provider-registry', () => ({
@@ -34,20 +35,14 @@ vi.mock('../ci-provider-registry', () => ({
   }
 }))
 
-vi.mock('../../../../notification-manager', () => ({
-  NotificationManager: {
-    getInstance: () => mockNotificationManager
-  }
-}))
-
-vi.mock('../../../plugin-store', () => ({
-  getPluginSetting: vi.fn().mockReturnValue(undefined)
-}))
-
-vi.mock('../../../../logger', () => ({
-  log: vi.fn(),
-  logInfo: vi.fn(),
-  logError: vi.fn()
+vi.mock('../../services', () => ({
+  getServices: () => ({
+    log: vi.fn(),
+    logInfo: vi.fn(),
+    logError: vi.fn(),
+    notify: mockNotificationManager.notify,
+    getPluginSetting: mockGetPluginSetting
+  })
 }))
 
 import { CiManager } from '../ci-manager'
@@ -268,8 +263,7 @@ describe('CiManager', () => {
 
     it('emits cancelled notification with warning type when category enabled', async () => {
       // Default categories don't include 'cancelled', so enable it explicitly
-      const { getPluginSetting } = await import('../../../plugin-store')
-      ;(getPluginSetting as any).mockReturnValue(['started', 'success', 'failure', 'cancelled'])
+      mockGetPluginSetting.mockReturnValue(['started', 'success', 'failure', 'cancelled'])
 
       const activeRun = makeRun({ id: 8 })
       mockProvider.getActiveRuns.mockResolvedValueOnce([activeRun])
@@ -365,8 +359,7 @@ describe('CiManager', () => {
   describe('notification filtering', () => {
     it('respects disabled notification categories', async () => {
       // Mock getPluginSetting to return empty array (all notifications disabled)
-      const { getPluginSetting } = await import('../../../plugin-store')
-      ;(getPluginSetting as any).mockReturnValue([])
+      mockGetPluginSetting.mockReturnValue([])
 
       mockProvider.getActiveRuns.mockResolvedValueOnce([])
       await manager.startPolling('/project')

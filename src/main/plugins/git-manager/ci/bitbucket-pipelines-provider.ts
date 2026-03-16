@@ -7,8 +7,7 @@ import { safeStorage, shell } from 'electron'
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
 import { parseOwnerRepo } from '../../../../shared/remote-url'
-import { log, logInfo, logError } from '../../../logger'
-import { createSafeStore } from '../../../safe-store'
+import { getServices } from '../services'
 
 const execFileAsync = promisify(execFile)
 
@@ -18,10 +17,15 @@ const BEARER_USERNAME = 'x-token-auth'
 /**
  * Credential store using OS-level encryption (DPAPI on Windows, Keychain on macOS, libsecret on Linux).
  * Values are stored as base64-encoded encrypted blobs — only the current OS user can decrypt.
+ * Lazy-initialized because createSafeStore comes from services (not available at import time).
  */
-const credStore = createSafeStore<Record<string, unknown>>({
-  name: 'ci-credentials'
-})
+let _credStore: ReturnType<typeof getServices extends () => infer S ? S['createSafeStore'] : never> | null = null
+function credStore(): any {
+  if (!_credStore) {
+    _credStore = getServices().createSafeStore<Record<string, unknown>>({ name: 'ci-credentials' })
+  }
+  return _credStore
+}
 
 function encryptValue(value: string): string {
   if (!safeStorage.isEncryptionAvailable()) return value
@@ -39,8 +43,8 @@ function decryptValue(blob: string): string {
 }
 
 function getBitbucketCredentials(): { username: string; password: string } | null {
-  const usernameBlob = credStore.get('bb.username') as string | undefined
-  const tokenBlob = credStore.get('bb.token') as string | undefined
+  const usernameBlob = credStore().get('bb.username') as string | undefined
+  const tokenBlob = credStore().get('bb.token') as string | undefined
   if (usernameBlob && tokenBlob) {
     return { username: decryptValue(usernameBlob), password: decryptValue(tokenBlob) }
   }
@@ -48,13 +52,13 @@ function getBitbucketCredentials(): { username: string; password: string } | nul
 }
 
 function storeBitbucketCredentials(username: string, token: string): void {
-  credStore.set('bb.username', encryptValue(username))
-  credStore.set('bb.token', encryptValue(token))
+  credStore().set('bb.username', encryptValue(username))
+  credStore().set('bb.token', encryptValue(token))
 }
 
 function clearBitbucketCredentials(): void {
-  credStore.delete('bb.username')
-  credStore.delete('bb.token')
+  credStore().delete('bb.username')
+  credStore().delete('bb.token')
 }
 
 /** Build the Authorization header — Bearer for API tokens, Basic for legacy app passwords */
@@ -312,18 +316,18 @@ export class BitbucketPipelinesProvider implements CiProvider {
     let hasAuth = false
     if (hasRemote) {
       const creds = getBitbucketCredentials()
-      logInfo('[ci-bitbucket] creds found:', !!creds, creds ? `user=${creds.username} authType=${creds.username === BEARER_USERNAME ? 'Bearer' : 'Basic'}` : '')
+      getServices().logInfo('[ci-bitbucket] creds found:', !!creds, creds ? `user=${creds.username} authType=${creds.username === BEARER_USERNAME ? 'Bearer' : 'Basic'}` : '')
       if (creds) {
         // Verify credentials work
         try {
           const apiPath = `repositories/${slug!.owner}/${slug!.repo}`
-          logInfo('[ci-bitbucket] verifying via API:', apiPath, 'auth:', buildAuthHeader(creds).slice(0, 15) + '...')
+          getServices().logInfo('[ci-bitbucket] verifying via API:', apiPath, 'auth:', buildAuthHeader(creds).slice(0, 15) + '...')
           await bbApi(apiPath, creds)
           hasAuth = true
-          logInfo('[ci-bitbucket] API verification succeeded')
+          getServices().logInfo('[ci-bitbucket] API verification succeeded')
         } catch (err) {
           // Credentials exist but are invalid — clear them
-          logError('[ci-bitbucket] API verification failed:', err)
+          getServices().logError('[ci-bitbucket] API verification failed:', err)
           clearBitbucketCredentials()
         }
       }
@@ -382,7 +386,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
   }
 
   async runSetupAction(_projectDir: string, actionId: string, data?: Record<string, string>): Promise<{ success: boolean; error?: string }> {
-    logInfo('[ci-bitbucket] runSetupAction:', actionId, 'data keys:', data ? Object.keys(data) : 'none')
+    getServices().logInfo('[ci-bitbucket] runSetupAction:', actionId, 'data keys:', data ? Object.keys(data) : 'none')
     if (actionId === 'store-credentials' && data?.token) {
       const token = data.token
       const username = data.username?.trim() || ''
@@ -402,18 +406,18 @@ export class BitbucketPipelinesProvider implements CiProvider {
       attempts.push({ label: 'Bearer', auth: { username: BEARER_USERNAME, password: token } })
 
       for (const attempt of attempts) {
-        logInfo('[ci-bitbucket] trying', attempt.label, 'auth:', buildAuthHeader(attempt.auth).slice(0, 15) + '...')
+        getServices().logInfo('[ci-bitbucket] trying', attempt.label, 'auth:', buildAuthHeader(attempt.auth).slice(0, 15) + '...')
         try {
           await bbApi(`repositories/${slug.owner}/${slug.repo}`, attempt.auth)
-          logInfo('[ci-bitbucket]', attempt.label, 'auth succeeded')
+          getServices().logInfo('[ci-bitbucket]', attempt.label, 'auth succeeded')
 
           // Store the working credentials
           storeBitbucketCredentials(attempt.auth.username, attempt.auth.password)
-          logInfo('[ci-bitbucket] credentials stored')
+          getServices().logInfo('[ci-bitbucket] credentials stored')
           return { success: true }
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : 'API verification failed'
-          logInfo('[ci-bitbucket]', attempt.label, 'auth failed:', errMsg)
+          getServices().logInfo('[ci-bitbucket]', attempt.label, 'auth failed:', errMsg)
 
           // 403 = auth worked but missing scopes — parse and show which scopes are needed
           if (errMsg.includes('403')) {
@@ -435,11 +439,11 @@ export class BitbucketPipelinesProvider implements CiProvider {
       }
 
       clearBitbucketCredentials()
-      logError('[ci-bitbucket] all auth methods failed')
+      getServices().logError('[ci-bitbucket] all auth methods failed')
       return { success: false, error: 'Authentication failed — check your username and token' }
     }
     if (actionId === 'store-credentials') {
-      logInfo('[ci-bitbucket] no token provided, opening help URL')
+      getServices().logInfo('[ci-bitbucket] no token provided, opening help URL')
       await shell.openExternal('https://id.atlassian.com/manage-profile/security/api-tokens')
       return { success: true }
     }
@@ -454,10 +458,10 @@ export class BitbucketPipelinesProvider implements CiProvider {
       const template = await generatePipelinesYml(_projectDir)
       try {
         await fs.promises.writeFile(ymlPath, template, 'utf-8')
-        logInfo('[ci-bitbucket] generated bitbucket-pipelines.yml')
+        getServices().logInfo('[ci-bitbucket] generated bitbucket-pipelines.yml')
         return { success: true }
       } catch (err) {
-        logError('[ci-bitbucket] failed to write pipelines yml:', err)
+        getServices().logError('[ci-bitbucket] failed to write pipelines yml:', err)
         return { success: false, error: err instanceof Error ? err.message : 'Failed to write file' }
       }
     }
@@ -474,7 +478,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
       await bbApi(`repositories/${slug.owner}/${slug.repo}/pipelines/?pagelen=1`, creds)
       return true
     } catch (err) {
-      log('[ci-bitbucket] not available:', err instanceof Error ? err.message : err)
+      getServices().log('[ci-bitbucket] not available:', err instanceof Error ? err.message : err)
       return false
     }
   }
@@ -503,7 +507,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
       const data = JSON.parse(body)
       return ((data.values as Array<Record<string, unknown>>) || []).map((p) => mapPipeline(p, slug))
     } catch (err) {
-      logError('[ci-bitbucket] getWorkflowRuns failed:', err)
+      getServices().logError('[ci-bitbucket] getWorkflowRuns failed:', err)
       return []
     }
   }
@@ -523,7 +527,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
       const data = JSON.parse(runningBody)
       return ((data.values as Array<Record<string, unknown>>) || []).map((p) => mapPipeline(p, slug))
     } catch (err) {
-      logError('[ci-bitbucket] getActiveRuns failed:', err)
+      getServices().logError('[ci-bitbucket] getActiveRuns failed:', err)
       return []
     }
   }
@@ -541,7 +545,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
       )
       return mapPipeline(JSON.parse(body), slug)
     } catch (err) {
-      logError('[ci-bitbucket] getRun failed:', err)
+      getServices().logError('[ci-bitbucket] getRun failed:', err)
       return null
     }
   }
@@ -584,7 +588,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
         }
       })
     } catch (err) {
-      logError('[ci-bitbucket] getRunJobs failed:', err)
+      getServices().logError('[ci-bitbucket] getRunJobs failed:', err)
       return []
     }
   }
@@ -663,7 +667,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
 
       const info = bbStepLookup.get(jobId)
       if (!info) {
-        log('[ci-bitbucket] no step UUID mapping for jobId', jobId)
+        getServices().log('[ci-bitbucket] no step UUID mapping for jobId', jobId)
         return ''
       }
 
@@ -673,7 +677,7 @@ export class BitbucketPipelinesProvider implements CiProvider {
       )
       return body
     } catch (err) {
-      logError('[ci-bitbucket] getJobLog failed:', err)
+      getServices().logError('[ci-bitbucket] getJobLog failed:', err)
       return ''
     }
   }

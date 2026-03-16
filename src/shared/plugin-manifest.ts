@@ -21,4 +21,6 @@ export interface PluginManifest {
     minWidth?: number
     minHeight?: number
   }
+  updateUrl?: string // URL to update manifest JSON (external plugins set this in plugin.json)
+  buildSha?: string // git SHA that produced this version
 }

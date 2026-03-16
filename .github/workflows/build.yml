@@ -96,6 +96,9 @@ jobs:
           UPDATE_PROFILE: bleeding-edge
           PRODUCTION_BUILD: '1'
 
+      - name: Generate plugin archive
+        run: node scripts/generate-plugin-archive.js
+
       - name: Import macOS signing certificate
         if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
         env:
@@ -159,8 +162,11 @@ jobs:
           # Write platform SHA file
           echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
 
-          # Upload main artifacts first, then SHA files last so they appear at the bottom
+          # Upload main artifacts first, then plugin archives, then SHA files last
           for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
+            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+          done
+          for f in dist/plugins.zip dist/plugins.update; do
             [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
           done
           for f in dist/*-sha.txt; do

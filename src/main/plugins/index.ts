@@ -1,7 +1,13 @@
+import * as fs from 'fs'
+import * as path from 'path'
+import { app } from 'electron'
 import { PluginManager } from './plugin-manager'
 import type { DockPlugin } from './plugin'
 import { loadRuntimePlugins, getPluginsDir } from './plugin-loader'
+import { getOverrides, removeOverride } from './plugin-update-store'
 import { log } from '../logger'
+import { setServices as setGitManagerServices } from './git-manager/services'
+import { createBundledServices as createGitManagerServices } from './git-manager/bundled-services'
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.
@@ -11,6 +17,70 @@ const pluginModules = import.meta.glob<Record<string, unknown>>(
   './*/*-plugin.ts',
   { eager: true }
 )
+
+/**
+ * Checks if a valid plugin override exists for the given built-in plugin.
+ * If valid, loads and returns the override module as a DockPlugin instance.
+ * If invalid (hash mismatch, missing files), deletes the override and returns null.
+ */
+function tryLoadOverride(pluginId: string): DockPlugin | null {
+  const overrideDir = path.join(app.getPath('userData'), 'plugin-overrides', pluginId)
+  const metaPath = path.join(overrideDir, 'meta.json')
+
+  if (!fs.existsSync(metaPath)) return null
+
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+    const overrides = getOverrides()
+    const storedEntry = overrides[pluginId]
+
+    // Verify the stored hash matches
+    if (!storedEntry || storedEntry.hash !== meta.hash) {
+      log(`[plugins] override hash mismatch for ${pluginId}, removing override`)
+      fs.rmSync(overrideDir, { recursive: true, force: true })
+      removeOverride(pluginId)
+      return null
+    }
+
+    // Look for a main entry point in the override directory
+    const mainPath = path.join(overrideDir, 'index.js')
+    if (!fs.existsSync(mainPath)) {
+      log(`[plugins] override for ${pluginId} has no index.js, removing`)
+      fs.rmSync(overrideDir, { recursive: true, force: true })
+      removeOverride(pluginId)
+      return null
+    }
+
+    // Load the override module
+    const mod = require(mainPath)
+    for (const exp of Object.values(mod)) {
+      if (typeof exp === 'function' && (exp as any).prototype?.register) {
+        const plugin = new (exp as new () => DockPlugin)()
+        log(`[plugins] loaded override for ${pluginId} v${meta.version}`)
+        return plugin
+      }
+    }
+
+    log(`[plugins] override for ${pluginId} has no valid DockPlugin export, removing`)
+    fs.rmSync(overrideDir, { recursive: true, force: true })
+    removeOverride(pluginId)
+    return null
+  } catch (err) {
+    log(`[plugins] failed to load override for ${pluginId}: ${err}`)
+    try {
+      fs.rmSync(overrideDir, { recursive: true, force: true })
+      removeOverride(pluginId)
+    } catch { /* ignore */ }
+    return null
+  }
+}
+
+/** Inject services for built-in plugins that require them (before register()) */
+function injectPluginServices(pluginId: string): void {
+  if (pluginId === 'git-manager') {
+    setGitManagerServices(createGitManagerServices())
+  }
+}
 
 export function registerPlugins(): void {
   const manager = PluginManager.getInstance()
@@ -24,10 +94,16 @@ export function registerPlugins(): void {
       if (typeof exp === 'function' && exp.prototype?.register) {
         try {
           const plugin = new (exp as new () => DockPlugin)()
-          if (plugin.lazyLoad) {
-            deferred.push(plugin)
+
+          // Check for a plugin override before registering the bundled version
+          const override = tryLoadOverride(plugin.id)
+          const pluginToRegister = override || plugin
+
+          if (pluginToRegister.lazyLoad) {
+            deferred.push(pluginToRegister)
           } else {
-            manager.register(plugin)
+            injectPluginServices(pluginToRegister.id)
+            manager.register(pluginToRegister)
           }
         } catch (e) {
           log(`[plugins] Failed to register built-in plugin from ${path}: ${e}`)
@@ -41,6 +117,7 @@ export function registerPlugins(): void {
   setImmediate(async () => {
     for (const plugin of deferred) {
       try {
+        injectPluginServices(plugin.id)
         manager.register(plugin)
       } catch (e) {
         log(`[plugins] Failed to register deferred plugin ${plugin.id}: ${e}`)

@@ -13,10 +13,29 @@ function getBuildInfo() {
   }
 }
 
+/**
+ * Get the last git commit SHA that modified files in the given directory.
+ * This produces a stable per-plugin SHA that only changes when that plugin's
+ * source code actually changes, avoiding false update notifications.
+ */
+function getPluginBuildSha(pluginSrcDir: string): string {
+  try {
+    return execSync(`git log -1 --format=%H -- "${pluginSrcDir}"`, { encoding: 'utf-8' }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
 const { sha, fullSha, date } = getBuildInfo()
 const isDev = process.env.PRODUCTION_BUILD !== '1'
 const updateProfile = process.env.UPDATE_PROFILE || 'latest'
 const debugDefault = updateProfile === 'bleeding-edge'
+
+// Per-plugin build SHAs: only change when the plugin's own source directory is modified
+const pluginBuildShas: Record<string, string> = {
+  'git-sync': getPluginBuildSha('src/main/plugins/git-sync'),
+  'git-manager': getPluginBuildSha('src/main/plugins/git-manager')
+}
 
 export default defineConfig({
   main: {
@@ -25,7 +44,8 @@ export default defineConfig({
       __BUILD_SHA__: JSON.stringify(fullSha),
       __DEV__: JSON.stringify(isDev),
       __UPDATE_PROFILE__: JSON.stringify(updateProfile),
-      __DEBUG_DEFAULT__: JSON.stringify(debugDefault)
+      __DEBUG_DEFAULT__: JSON.stringify(debugDefault),
+      __PLUGIN_BUILD_SHAS__: JSON.stringify(pluginBuildShas)
     },
     build: {
       outDir: 'out/main',

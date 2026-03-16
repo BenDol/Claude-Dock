@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "allowedHosts": [
+    "github.com",
+    "raw.githubusercontent.com",
+    "api.github.com",
+    "objects.githubusercontent.com"
+  ]
+}

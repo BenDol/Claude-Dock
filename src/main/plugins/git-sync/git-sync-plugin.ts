@@ -95,6 +95,9 @@ export class GitSyncPlugin implements DockPlugin {
   readonly name = 'Git Sync'
   readonly description = 'Pull remote changes when opening a project'
   readonly defaultEnabled = false
+  get version(): string {
+    try { return require('electron').app.getVersion() } catch { return '0.0.0' }
+  }
   readonly settingsSchema: PluginSettingDef[] = [
     {
       key: 'syncSubmodules',

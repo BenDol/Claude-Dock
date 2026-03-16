@@ -13,6 +13,8 @@ export interface PluginInfo {
   name: string
   description: string
   defaultEnabled: boolean
+  version: string
+  source: 'builtin' | 'external'
   /** Keys of plugin-specific settings for the UI to render */
   settingsSchema?: PluginSettingDef[]
 }

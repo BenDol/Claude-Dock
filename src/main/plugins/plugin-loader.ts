@@ -45,7 +45,7 @@ function isTrusted(pluginId: string, manifestHash: string): boolean {
   return entry?.hash === manifestHash
 }
 
-function trustPlugin(pluginId: string, manifestHash: string): void {
+export function trustPlugin(pluginId: string, manifestHash: string): void {
   const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
   entries[pluginId] = { hash: manifestHash }
   safeWriteSync(() => getTrustedStore().set('entries', entries))

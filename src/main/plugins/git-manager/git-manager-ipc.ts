@@ -5,10 +5,8 @@ import { IPC } from '../../../shared/ipc-channels'
 import { GitManagerWindowManager } from './git-manager-window'
 import * as gitOps from './git-operations'
 import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manager-types'
-import { log, logError } from '../../logger'
-import { getPluginSetting } from '../plugin-store'
+import { getServices } from './services'
 import { registerCiIpc } from './ci/ci-ipc'
-import { ActivityTracker } from '../../activity-tracker'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -58,7 +56,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.stageFiles(projectDir, paths)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] stage failed:', err)
+      getServices().logError('[git-manager] stage failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Stage failed' }
     }
   })
@@ -68,7 +66,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.unstageFiles(projectDir, paths)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] unstage failed:', err)
+      getServices().logError('[git-manager] unstage failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Unstage failed' }
     }
   })
@@ -78,7 +76,7 @@ export function registerGitManagerIpc(): void {
       const result = await gitOps.createCommit(projectDir, message)
       return { success: true, hash: result.hash }
     } catch (err) {
-      logError('[git-manager] commit failed:', err)
+      getServices().logError('[git-manager] commit failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Commit failed' }
     }
   })
@@ -88,7 +86,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.checkoutBranch(projectDir, name)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] checkout failed:', err)
+      getServices().logError('[git-manager] checkout failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Checkout failed' }
     }
   })
@@ -98,7 +96,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.createBranch(projectDir, name, startPoint)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] create branch failed:', err)
+      getServices().logError('[git-manager] create branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Create branch failed' }
     }
   })
@@ -108,7 +106,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.deleteBranch(projectDir, name, force)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] delete branch failed:', err)
+      getServices().logError('[git-manager] delete branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Delete branch failed' }
     }
   })
@@ -118,7 +116,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.pull(projectDir, mode as 'merge' | 'rebase' | undefined)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] pull failed:', err)
+      getServices().logError('[git-manager] pull failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Pull failed' }
     }
   })
@@ -128,7 +126,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.pullAdvanced(projectDir, remote, branch, rebase, autostash, tags, prune)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] pull advanced failed:', err)
+      getServices().logError('[git-manager] pull advanced failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Pull failed' }
     }
   })
@@ -138,7 +136,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.fetchSimple(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] fetch simple failed:', err)
+      getServices().logError('[git-manager] fetch simple failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Fetch failed' }
     }
   })
@@ -148,7 +146,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.fetchAll(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] fetch all failed:', err)
+      getServices().logError('[git-manager] fetch all failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Fetch all failed' }
     }
   })
@@ -158,7 +156,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.fetchPruneAll(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] fetch prune all failed:', err)
+      getServices().logError('[git-manager] fetch prune all failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Fetch and prune all failed' }
     }
   })
@@ -168,7 +166,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.push(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] push failed:', err)
+      getServices().logError('[git-manager] push failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Push failed' }
     }
   })
@@ -178,7 +176,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.pushForceWithLease(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] push --force-with-lease failed:', err)
+      getServices().logError('[git-manager] push --force-with-lease failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Force push failed' }
     }
   })
@@ -188,7 +186,7 @@ export function registerGitManagerIpc(): void {
       const output = await gitOps.fetch(projectDir)
       return { success: true, output }
     } catch (err) {
-      logError('[git-manager] fetch failed:', err)
+      getServices().logError('[git-manager] fetch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Fetch failed' }
     }
   })
@@ -202,7 +200,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.stashSave(projectDir, message, flags)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] stash save failed:', err)
+      getServices().logError('[git-manager] stash save failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Stash failed' }
     }
   })
@@ -212,7 +210,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.stashApply(projectDir, index)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] stash apply failed:', err)
+      getServices().logError('[git-manager] stash apply failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Stash apply failed' }
     }
   })
@@ -222,7 +220,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.stashPop(projectDir, index)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] stash pop failed:', err)
+      getServices().logError('[git-manager] stash pop failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Stash pop failed' }
     }
   })
@@ -232,7 +230,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.stashDrop(projectDir, index)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] stash drop failed:', err)
+      getServices().logError('[git-manager] stash drop failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Stash drop failed' }
     }
   })
@@ -246,7 +244,7 @@ export function registerGitManagerIpc(): void {
       const message = await gitOps.generateCommitMessage(projectDir)
       return { success: true, message }
     } catch (err) {
-      logError('[git-manager] generate commit message failed:', err)
+      getServices().logError('[git-manager] generate commit message failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Generation failed' }
     }
   })
@@ -256,7 +254,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.resetBranch(projectDir, hash, mode as 'soft' | 'mixed' | 'keep' | 'merge' | 'hard')
       return { success: true }
     } catch (err) {
-      logError('[git-manager] reset failed:', err)
+      getServices().logError('[git-manager] reset failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Reset failed' }
     }
   })
@@ -266,7 +264,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.revertCommit(projectDir, hash)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] revert failed:', err)
+      getServices().logError('[git-manager] revert failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Revert failed' }
     }
   })
@@ -276,7 +274,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.cherryPick(projectDir, hash)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] cherry-pick failed:', err)
+      getServices().logError('[git-manager] cherry-pick failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Cherry pick failed' }
     }
   })
@@ -286,7 +284,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.createTag(projectDir, name, hash, message)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] create tag failed:', err)
+      getServices().logError('[git-manager] create tag failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Create tag failed' }
     }
   })
@@ -300,7 +298,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.deleteTag(projectDir, name)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] delete tag failed:', err)
+      getServices().logError('[git-manager] delete tag failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Delete tag failed' }
     }
   })
@@ -310,7 +308,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.renameBranch(projectDir, oldName, newName)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] rename branch failed:', err)
+      getServices().logError('[git-manager] rename branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Rename branch failed' }
     }
   })
@@ -320,7 +318,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.discardFiles(projectDir, paths)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] discard failed:', err)
+      getServices().logError('[git-manager] discard failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Discard failed' }
     }
   })
@@ -330,7 +328,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.restoreFileFromCommit(projectDir, commitHash, filePath)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] restore file from commit failed:', err)
+      getServices().logError('[git-manager] restore file from commit failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Restore failed' }
     }
   })
@@ -340,7 +338,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.removeLockFile(projectDir)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] remove lock file failed:', err)
+      getServices().logError('[git-manager] remove lock file failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Remove lock file failed' }
     }
   })
@@ -350,7 +348,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.deleteUntrackedFiles(projectDir, paths)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] delete files failed:', err)
+      getServices().logError('[git-manager] delete files failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Delete failed' }
     }
   })
@@ -360,7 +358,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.applyPatch(projectDir, patch, cached, reverse, fuzzy)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] apply patch failed:', err)
+      getServices().logError('[git-manager] apply patch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Apply patch failed' }
     }
   })
@@ -374,7 +372,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.addSubmodule(projectDir, url, localPath, branch, force)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] add submodule failed:', err)
+      getServices().logError('[git-manager] add submodule failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Add submodule failed' }
     }
   })
@@ -384,7 +382,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.removeSubmodule(projectDir, subPath)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] remove submodule failed:', err)
+      getServices().logError('[git-manager] remove submodule failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Remove submodule failed' }
     }
   })
@@ -398,7 +396,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.addRemote(projectDir, name, url)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] add remote failed:', err)
+      getServices().logError('[git-manager] add remote failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Add remote failed' }
     }
   })
@@ -408,7 +406,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.removeRemote(projectDir, name)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] remove remote failed:', err)
+      getServices().logError('[git-manager] remove remote failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Remove remote failed' }
     }
   })
@@ -426,7 +424,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.resolveConflictFile(projectDir, filePath, resolution as 'ours' | 'theirs' | 'both', chunkIndex)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] resolve conflict failed:', err)
+      getServices().logError('[git-manager] resolve conflict failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Resolve conflict failed' }
     }
   })
@@ -436,7 +434,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.abortMerge(projectDir)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] abort merge failed:', err)
+      getServices().logError('[git-manager] abort merge failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Abort merge failed' }
     }
   })
@@ -446,7 +444,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.continueMerge(projectDir)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] continue merge failed:', err)
+      getServices().logError('[git-manager] continue merge failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Continue merge failed' }
     }
   })
@@ -456,7 +454,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.mergeBranch(projectDir, branchName)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] merge branch failed:', err)
+      getServices().logError('[git-manager] merge branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Merge failed' }
     }
   })
@@ -466,7 +464,7 @@ export function registerGitManagerIpc(): void {
   })
 
   ipcMain.handle(IPC.GIT_MGR_GET_SETTING, (_event, projectDir: string, key: string) => {
-    return getPluginSetting(projectDir, 'git-manager', key)
+    return getServices().getPluginSetting(projectDir, 'git-manager', key)
   })
 
   ipcMain.handle(IPC.GIT_MGR_OPEN_BASH, (_event, projectDir: string) => {
@@ -506,7 +504,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.setGitIdentity(projectDir, name, email, global)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] set identity failed:', err)
+      getServices().logError('[git-manager] set identity failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set identity' }
     }
   })
@@ -516,8 +514,8 @@ export function registerGitManagerIpc(): void {
   })
 
   ipcMain.handle(IPC.GIT_MGR_GET_ACTIVE_TERMINALS, async (_event, projectDir: string) => {
-    const active = ActivityTracker.getInstance().getActiveTerminals(projectDir)
-    return active.map((t) => ({ id: t.id, title: t.title, sessionId: t.sessionId }))
+    const active = getServices().getActiveTerminals(projectDir)
+    return active.map((t: any) => ({ id: t.id, title: t.title, sessionId: t.sessionId }))
   })
 
   ipcMain.handle(IPC.GIT_MGR_SAVE_FILE, async (_event, projectDir: string, filePath: string, content: string) => {
@@ -525,7 +523,7 @@ export function registerGitManagerIpc(): void {
       await gitOps.saveFileContent(projectDir, filePath, content)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] save file failed:', err)
+      getServices().logError('[git-manager] save file failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Save failed' }
     }
   })
@@ -534,7 +532,7 @@ export function registerGitManagerIpc(): void {
     try {
       return await gitOps.previewGitignorePattern(projectDir, pattern)
     } catch (err) {
-      logError('[git-manager] preview gitignore failed:', err)
+      getServices().logError('[git-manager] preview gitignore failed:', err)
       return []
     }
   })
@@ -544,29 +542,23 @@ export function registerGitManagerIpc(): void {
       await gitOps.addToGitignore(projectDir, pattern, removeFromIndex)
       return { success: true }
     } catch (err) {
-      logError('[git-manager] add to gitignore failed:', err)
+      getServices().logError('[git-manager] add to gitignore failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Add to gitignore failed' }
     }
   })
 
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
-    const { DockManager } = require('../../../dock-manager')
-    const docks = DockManager.getInstance().getAllDocks()
-    const dock = docks.find((d: any) => d.projectDir === projectDir)
-    if (dock && !dock.window.isDestroyed()) {
-      dock.window.webContents.send('claude:task', {
-        type: 'merge-resolve',
-        filePath,
-        instructions
-      })
-      if (dock.window.isMinimized()) dock.window.restore()
-      dock.window.focus()
-      return { success: true }
-    }
-    return { success: false, error: 'No dock window found for this project' }
+    const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
+      type: 'merge-resolve',
+      filePath,
+      instructions
+    })
+    return sent
+      ? { success: true }
+      : { success: false, error: 'No dock window found for this project' }
   })
 
   registerCiIpc()
 
-  log('[git-manager] IPC handlers registered')
+  getServices().log('[git-manager] IPC handlers registered')
 }

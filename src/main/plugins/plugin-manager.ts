@@ -38,6 +38,8 @@ export class PluginManager {
       name: p.name,
       description: p.description,
       defaultEnabled: p.defaultEnabled,
+      version: p.version || '0.0.0',
+      source: ((p as any).manifest ? 'external' : 'builtin') as 'builtin' | 'external',
       settingsSchema: p.settingsSchema
     }))
   }

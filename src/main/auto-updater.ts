@@ -4,6 +4,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { app } from 'electron'
 import { spawn } from 'child_process'
+import { fetchJSON, fetchText as fetchTextShared } from './http-utils'
 
 declare const __BUILD_SHA__: string
 // test: force updater rebuild
@@ -40,33 +41,6 @@ const noUpdate: UpdateInfo = {
   downloadUrl: '',
   assetName: '',
   assetSize: 0
-}
-
-function fetchJSON<T>(url: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, { headers: { 'User-Agent': 'Claude-Dock-Updater', Accept: 'application/json' } }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          return fetchJSON<T>(res.headers.location!).then(resolve, reject)
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`GitHub API returned HTTP ${res.statusCode}`))
-        }
-        let data = ''
-        res.on('data', (chunk) => {
-          data += chunk
-        })
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data))
-          } catch (e) {
-            reject(e)
-          }
-        })
-        res.on('error', reject)
-      })
-      .on('error', reject)
-  })
 }
 
 /**
@@ -117,22 +91,7 @@ function getPlatformShaAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
   return assets.find((a) => a.name === `${prefix}-sha.txt`)
 }
 
-function fetchText(url: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, { headers: { 'User-Agent': 'Claude-Dock-Updater', Accept: 'application/octet-stream' } }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          return fetchText(res.headers.location!).then(resolve, reject)
-        }
-        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
-        let data = ''
-        res.on('data', (chunk) => { data += chunk })
-        res.on('end', () => resolve(data.trim()))
-        res.on('error', reject)
-      })
-      .on('error', reject)
-  })
-}
+const fetchText = fetchTextShared
 
 function parseVersion(tag: string): number[] | null {
   const m = tag.match(/v?(\d+)\.(\d+)\.(\d+)/)

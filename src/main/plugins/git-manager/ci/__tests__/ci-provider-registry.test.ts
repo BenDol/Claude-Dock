@@ -59,10 +59,12 @@ vi.mock('electron-store', () => {
   return { default: MockStore }
 })
 
-vi.mock('../../../../logger', () => ({
-  log: vi.fn(),
-  logInfo: vi.fn(),
-  logError: vi.fn()
+vi.mock('../../services', () => ({
+  getServices: () => ({
+    log: vi.fn(),
+    logInfo: vi.fn(),
+    logError: vi.fn()
+  })
 }))
 
 import { CiProviderRegistry } from '../ci-provider-registry'

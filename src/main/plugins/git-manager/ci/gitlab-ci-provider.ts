@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { promisify } from 'util'
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
-import { log, logError } from '../../../logger'
+import { getServices } from '../services'
 
 const execFileAsync = promisify(execFile)
 
@@ -18,7 +18,7 @@ function resolveGlab(): string {
     const result = execFileSync(cmd, ['glab'], { timeout: 5000, encoding: 'utf-8' }).trim().split('\n')[0].trim()
     if (result) {
       glabPath = result
-      log('[ci-gitlab] found glab at:', glabPath)
+      getServices().log('[ci-gitlab] found glab at:', glabPath)
       return glabPath
     }
   } catch { /* not in PATH */ }
@@ -36,7 +36,7 @@ function resolveGlab(): string {
   for (const p of candidates) {
     if (existsSync(p)) {
       glabPath = p
-      log('[ci-gitlab] found glab at:', glabPath)
+      getServices().log('[ci-gitlab] found glab at:', glabPath)
       return glabPath
     }
   }
@@ -212,7 +212,7 @@ export class GitLabCiProvider implements CiProvider {
       }
       return { success: true }
     } catch (err) {
-      logError('[ci-gitlab] auth login failed:', err)
+      getServices().logError('[ci-gitlab] auth login failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Failed to open terminal' }
     }
   }
@@ -223,7 +223,7 @@ export class GitLabCiProvider implements CiProvider {
       await glab(['repo', 'view'], projectDir)
       return true
     } catch (err) {
-      log('[ci-gitlab] not available:', err instanceof Error ? err.message : err)
+      getServices().log('[ci-gitlab] not available:', err instanceof Error ? err.message : err)
       return false
     }
   }
@@ -247,7 +247,7 @@ export class GitLabCiProvider implements CiProvider {
       const raw = JSON.parse(stdout) as Array<Record<string, unknown>>
       return (raw || []).map(mapPipeline)
     } catch (err) {
-      logError('[ci-gitlab] getWorkflowRuns failed:', err)
+      getServices().logError('[ci-gitlab] getWorkflowRuns failed:', err)
       return []
     }
   }
@@ -268,7 +268,7 @@ export class GitLabCiProvider implements CiProvider {
 
       return [...(running || []), ...(pending || [])].map(mapPipeline)
     } catch (err) {
-      logError('[ci-gitlab] getActiveRuns failed:', err)
+      getServices().logError('[ci-gitlab] getActiveRuns failed:', err)
       return []
     }
   }
@@ -282,7 +282,7 @@ export class GitLabCiProvider implements CiProvider {
       const raw = JSON.parse(stdout) as Record<string, unknown>
       return mapPipeline(raw)
     } catch (err) {
-      logError('[ci-gitlab] getRun failed:', err)
+      getServices().logError('[ci-gitlab] getRun failed:', err)
       return null
     }
   }
@@ -295,7 +295,7 @@ export class GitLabCiProvider implements CiProvider {
         projectDir
       )
       const jobs = JSON.parse(stdout) as Array<Record<string, unknown>>
-      log('[ci-gitlab] getRunJobs: got', jobs.length, 'jobs for pipeline', runId)
+      getServices().log('[ci-gitlab] getRunJobs: got', jobs.length, 'jobs for pipeline', runId)
       return (jobs || []).map((j) => {
         const name = (j.name as string) || ''
         const { matrixKey, matrixValues } = parseMatrixJobName(name)
@@ -314,7 +314,7 @@ export class GitLabCiProvider implements CiProvider {
         }
       })
     } catch (err) {
-      logError('[ci-gitlab] getRunJobs failed:', err)
+      getServices().logError('[ci-gitlab] getRunJobs failed:', err)
       return []
     }
   }
@@ -336,7 +336,7 @@ export class GitLabCiProvider implements CiProvider {
       ], { cwd: projectDir, timeout: 30_000, maxBuffer: 5 * 1024 * 1024 })
       return stdout
     } catch (err) {
-      logError('[ci-gitlab] getJobLog failed:', err)
+      getServices().logError('[ci-gitlab] getJobLog failed:', err)
       return ''
     }
   }

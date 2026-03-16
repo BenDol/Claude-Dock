@@ -24,7 +24,7 @@ import type {
   GitSearchResult,
   SearchResultSource
 } from '../../../shared/git-manager-types'
-import { log, logError } from '../../logger'
+import { getServices } from './services'
 
 function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -116,7 +116,7 @@ export async function getLog(cwd: string, opts: GitLogOptions = {}): Promise<Git
     const { stdout } = await gitExec(cwd, args, 15000)
     return parseLogOutput(stdout)
   } catch (err) {
-    logError('[git-manager] getLog failed:', err)
+    getServices().logError('[git-manager] getLog failed:', err)
     return []
   }
 }
@@ -175,7 +175,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
       })
     }
   } catch (err) {
-    logError('[git-manager] getBranches (local) failed:', err)
+    getServices().logError('[git-manager] getBranches (local) failed:', err)
   }
 
   // Remote branches
@@ -199,7 +199,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
       })
     }
   } catch (err) {
-    logError('[git-manager] getBranches (remote) failed:', err)
+    getServices().logError('[git-manager] getBranches (remote) failed:', err)
   }
 
   return branches
@@ -300,7 +300,7 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
       }
     }
   } catch (err) {
-    logError('[git-manager] getStatus failed:', err)
+    getServices().logError('[git-manager] getStatus failed:', err)
     // Try fallback for branch name
     try {
       const { stdout } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
@@ -488,7 +488,7 @@ export async function getDiff(cwd: string, filePath?: string, staged?: boolean):
     }
     return diffs
   } catch (err) {
-    logError('[git-manager] getDiff failed:', err)
+    getServices().logError('[git-manager] getDiff failed:', err)
     return []
   }
 }
@@ -531,7 +531,7 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
 
     return commit
   } catch (err) {
-    logError('[git-manager] getCommitDetail failed:', err)
+    getServices().logError('[git-manager] getCommitDetail failed:', err)
     return null
   }
 }
@@ -1130,7 +1130,7 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
 
   const diff = diffResult.stdout
 
-  log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars`)
+  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars`)
   const t0 = Date.now()
 
   // Race all available providers — use whichever responds first
@@ -1139,17 +1139,17 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
 
   if (!ollamaSkipped) {
     providers.push(generateViaOllama(stat, diff).then((r) => {
-      log(`[git-manager] Ollama responded in ${Date.now() - t0}ms`)
+      getServices().log(`[git-manager] Ollama responded in ${Date.now() - t0}ms`)
       return r
     }))
   }
   providers.push(generateViaClaude(stat, diff).then((r) => {
-    log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
+    getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
     return r
   }))
   if (process.env.ANTHROPIC_API_KEY) {
     providers.push(generateViaAnthropicAPI(stat, diff).then((r) => {
-      log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
+      getServices().log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
       return r
     }))
   }
@@ -1159,7 +1159,7 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     return await Promise.any(providers)
   } catch (agg) {
     const errors = agg instanceof AggregateError ? agg.errors : [agg]
-    for (const e of errors) log(`[git-manager] provider failed: ${e instanceof Error ? e.message : e}`)
+    for (const e of errors) getServices().log(`[git-manager] provider failed: ${e instanceof Error ? e.message : e}`)
     throw new Error(
       'Could not generate commit message. Ensure the Claude CLI is installed, Ollama is running, or ANTHROPIC_API_KEY is set.'
     )
@@ -1174,7 +1174,7 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
     // discards stdout, so we call execFile directly here.
     const stdout = await new Promise<string>((resolve) => {
       execFile('git', ['submodule', 'status'], { cwd, timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (err, out) => {
-        if (err) log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])
+        if (err) getServices().log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])
         resolve(out || '')
       })
     })
@@ -1224,7 +1224,7 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
             })
           }
         }
-        if (submodules.length > 0) log(`[git-manager] getSubmodules: recovered ${submodules.length} submodule(s) from .gitmodules fallback`)
+        if (submodules.length > 0) getServices().log(`[git-manager] getSubmodules: recovered ${submodules.length} submodule(s) from .gitmodules fallback`)
       } catch {
         // No .gitmodules or config parse failed — truly no submodules
       }
@@ -1257,7 +1257,7 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
 
     return submodules
   } catch (err) {
-    logError('[git-manager] getSubmodules failed:', err)
+    getServices().logError('[git-manager] getSubmodules failed:', err)
     return []
   }
 }
@@ -1664,7 +1664,7 @@ async function searchWorking(cwd: string, query: string, maxResults: number, gen
       }
     }
   } catch (err) {
-    logError('[git-manager] searchWorking failed:', err)
+    getServices().logError('[git-manager] searchWorking failed:', err)
   }
 
   if (isSearchStale(cwd, gen)) return { results: [], truncated: false }

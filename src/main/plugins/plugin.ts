@@ -10,6 +10,7 @@ export interface DockPlugin {
   readonly name: string
   readonly description: string
   readonly defaultEnabled: boolean
+  readonly version: string
   readonly settingsSchema?: PluginSettingDef[]
 
   /**

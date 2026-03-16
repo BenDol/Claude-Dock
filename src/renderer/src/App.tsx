@@ -5,6 +5,7 @@ import EmptyState from './components/EmptyState'
 import SettingsModal from './components/SettingsModal'
 import Launcher from './components/Launcher'
 import ToastContainer from './components/ToastContainer'
+import PluginUpdaterModal from './components/PluginUpdaterModal'
 import { useDockStore } from './stores/dock-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
@@ -276,6 +277,7 @@ function DockApp() {
   const autoSpawn = useSettingsStore((s) => s.settings.behavior.autoSpawnFirstTerminal)
 
   const [showSettings, setShowSettings] = useState(false)
+  const [showPluginUpdater, setShowPluginUpdater] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
 
@@ -321,6 +323,13 @@ function DockApp() {
     })
     return cleanup
   }, [setTerminalAlive])
+
+  // Listen for plugin update open event (from notification action)
+  useEffect(() => {
+    const handler = () => setShowPluginUpdater(true)
+    window.addEventListener('plugin-update-open', handler)
+    return () => window.removeEventListener('plugin-update-open', handler)
+  }, [])
 
   // "Send to Claude" — show terminal picker, then send prompt to chosen terminal
   const [pendingTask, setPendingTask] = useState<ClaudeTaskRequest | null>(null)
@@ -655,6 +664,7 @@ function DockApp() {
         <DockGrid />
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showPluginUpdater && <PluginUpdaterModal onClose={() => setShowPluginUpdater(false)} />}
       {pendingTask && (
         <TerminalPicker
           taskLabel={getTaskMeta(pendingTask).label}

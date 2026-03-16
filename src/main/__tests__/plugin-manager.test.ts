@@ -58,6 +58,7 @@ function createMockPlugin(overrides: Partial<DockPlugin> = {}): DockPlugin {
     name: 'Test Plugin',
     description: 'A test plugin',
     defaultEnabled: true,
+    version: '1.0.0',
     register: vi.fn(),
     ...overrides
   }
@@ -122,6 +123,8 @@ describe('PluginManager', () => {
           name: 'My Plugin',
           description: 'Desc',
           defaultEnabled: false,
+          version: '1.0.0',
+          source: 'builtin',
           settingsSchema: [
             { key: 'enabled', label: 'Enable', type: 'boolean', defaultValue: true }
           ]

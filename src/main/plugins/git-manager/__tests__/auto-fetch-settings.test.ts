@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 
-vi.mock('../../../logger', () => ({
-  log: () => {},
-  logInfo: () => {},
-  logError: () => {}
+vi.mock('../services', () => ({
+  getServices: () => ({
+    log: () => {},
+    logInfo: () => {},
+    logError: () => {}
+  })
 }))
 
 vi.mock('../git-manager-ipc', () => ({

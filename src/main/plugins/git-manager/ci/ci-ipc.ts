@@ -2,9 +2,8 @@ import { ipcMain } from 'electron'
 import { IPC } from '../../../../shared/ipc-channels'
 import { CiProviderRegistry } from './ci-provider-registry'
 import { CiManager } from './ci-manager'
-import { DockManager } from '../../../dock-manager'
 import { GitManagerWindowManager } from '../git-manager-window'
-import { log, logInfo, logError } from '../../../logger'
+import { getServices } from '../services'
 import type { CiFixTask, ClaudeTaskRequest } from '../../../../shared/claude-task-types'
 
 let ciManager: CiManager | null = null
@@ -19,15 +18,7 @@ function getManager(): CiManager {
 const registry = CiProviderRegistry.getInstance()
 
 function sendTaskToDock(projectDir: string, task: ClaudeTaskRequest): boolean {
-  const docks = DockManager.getInstance().getAllDocks()
-  const dock = docks.find((d) => d.projectDir === projectDir)
-  if (dock && !dock.window.isDestroyed()) {
-    dock.window.webContents.send('claude:task', task)
-    if (dock.window.isMinimized()) dock.window.restore()
-    dock.window.focus()
-    return true
-  }
-  return false
+  return getServices().sendTaskToDock(projectDir, 'claude:task', task)
 }
 
 export function registerCiIpc(): void {
@@ -56,7 +47,7 @@ export function registerCiIpc(): void {
   })
 
   ipcMain.handle(IPC.CI_RUN_SETUP_ACTION, async (_event, projectDir: string, actionId: string, data?: Record<string, string>) => {
-    logInfo('[ci] runSetupAction IPC received:', actionId, 'data:', data ? JSON.stringify(Object.keys(data)) : 'undefined')
+    getServices().logInfo('[ci] runSetupAction IPC received:', actionId, 'data:', data ? JSON.stringify(Object.keys(data)) : 'undefined')
     const provider = await registry.resolve(projectDir)
     if (!provider) return { success: false, error: 'No CI provider for this project' }
     return provider.runSetupAction(projectDir, actionId, data)
@@ -92,7 +83,7 @@ export function registerCiIpc(): void {
     try {
       return await provider.getJobLog(projectDir, jobId)
     } catch (err) {
-      logError('[ci] getJobLog failed:', err)
+      getServices().logError('[ci] getJobLog failed:', err)
       return ''
     }
   })
@@ -104,7 +95,7 @@ export function registerCiIpc(): void {
       await provider.cancelRun(projectDir, runId)
       return { success: true }
     } catch (err) {
-      logError('[ci] cancel run failed:', err)
+      getServices().logError('[ci] cancel run failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Cancel failed' }
     }
   })
@@ -124,7 +115,7 @@ export function registerCiIpc(): void {
       await provider.rerunFailedJobs(projectDir, runId)
       return { success: true }
     } catch (err) {
-      logError('[ci] rerunFailed failed:', err)
+      getServices().logError('[ci] rerunFailed failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Rerun failed' }
     }
   })
@@ -174,7 +165,7 @@ export function registerCiIpc(): void {
     return sendTaskToDock(projectDir, task)
   })
 
-  log('[ci] IPC handlers registered')
+  getServices().log('[ci] IPC handlers registered')
 }
 
 export function disposeCi(): void {

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "buildSha": "dev-test-sha",
+  "buildDate": "2026-03-16",
+  "plugins": {
+    "git-sync": {
+      "version": "1.1.0",
+      "buildSha": "fake-new-git-sync-sha",
+      "hash": "f3f725d41267a90b3c1d72fe69bcd15cd935e6e5846abdd4ea6665c2421cbb26",
+      "archivePath": "git-sync/",
+      "changelog": "- Fixed race condition in upstream detection\n- Added support for sparse-checkout repos\n- Improved submodule sync performance",
+      "requiresAppUpdate": false
+    },
+    "git-manager": {
+      "version": "1.2.0",
+      "buildSha": "fake-new-git-manager-sha",
+      "hash": "e7d7887be0939ed517022587796f834fc8788b188fd4bf1eb1360a9ac7c980ad",
+      "archivePath": "git-manager/",
+      "changelog": "- New conflict resolution UI\n- Performance improvements for large repos\n- Added inline blame annotations",
+      "requiresAppUpdate": true
+    }
+  }
+}

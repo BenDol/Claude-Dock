@@ -4,13 +4,16 @@ import type { PluginSettingDef } from '../../../shared/plugin-types'
 import { registerGitManagerIpc } from './git-manager-ipc'
 import { GitManagerWindowManager } from './git-manager-window'
 import { disposeCi, stopCiPollingForProject } from './ci/ci-ipc'
-import { log } from '../../logger'
+import { getServices } from './services'
 
 export class GitManagerPlugin implements DockPlugin {
   readonly id = 'git-manager'
   readonly name = 'Git Manager'
   readonly description = 'Visual git repository manager with commit log, branches, and diff viewer'
   readonly defaultEnabled = false
+  get version(): string {
+    try { return require('electron').app.getVersion() } catch { return '0.0.0' }
+  }
   readonly lazyLoad = true
   readonly settingsSchema: PluginSettingDef[] = [
     {
@@ -68,7 +71,7 @@ export class GitManagerPlugin implements DockPlugin {
       }
     })
 
-    log('[git-manager] plugin registered')
+    getServices().log('[git-manager] plugin registered')
   }
 
   dispose(): void {

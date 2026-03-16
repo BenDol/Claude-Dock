@@ -12,6 +12,7 @@ import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, install
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
 import { PluginManager, getPluginsDir } from './plugins'
+import { PluginUpdateService } from './plugins/plugin-updater'
 import { GitManagerWindowManager } from './plugins/git-manager/git-manager-window'
 import { PluginWindowManager } from './plugins/plugin-window-manager'
 import { log, logError, setDebug, getLogDir } from './logger'
@@ -419,6 +420,43 @@ export function registerIpcHandlers(): void {
     }
     ids.push(...PluginWindowManager.getInstance().getOpenPluginIds(projectDir))
     return ids
+  })
+
+  // Plugin Update System
+  const pluginUpdateService = PluginUpdateService.getInstance()
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_CHECK, async () => {
+    try {
+      return await pluginUpdateService.checkForUpdates()
+    } catch (err) {
+      logError('pluginUpdate:check failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_GET_AVAILABLE, () => {
+    return pluginUpdateService.getAvailableUpdates()
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_INSTALL, async (_event, pluginId: string) => {
+    try {
+      await pluginUpdateService.installUpdate(pluginId)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_INSTALL_ALL, async () => {
+    try {
+      return await pluginUpdateService.installAll()
+    } catch (err) {
+      return { success: [], failed: [{ pluginId: 'all', error: err instanceof Error ? err.message : String(err) }] }
+    }
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_DISMISS, (_event, pluginId: string, version: string) => {
+    pluginUpdateService.dismissUpdate(pluginId, version)
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

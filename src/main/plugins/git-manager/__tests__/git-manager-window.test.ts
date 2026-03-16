@@ -4,21 +4,21 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn()
 }))
 
-vi.mock('../../../settings-store', () => ({
-  getSettings: vi.fn().mockReturnValue({ theme: { mode: 'dark' } })
-}))
-
-vi.mock('../../../window-state-store', () => ({
-  getWindowState: vi.fn().mockReturnValue(null),
-  saveWindowState: vi.fn()
-}))
-
-vi.mock('../../../logger', () => ({
-  log: vi.fn()
-}))
-
-vi.mock('../../plugin-window-broadcast', () => ({
-  broadcastPluginWindowState: vi.fn()
+vi.mock('../services', () => ({
+  getServices: () => ({
+    log: vi.fn(),
+    logInfo: vi.fn(),
+    logError: vi.fn(),
+    getSettings: vi.fn().mockReturnValue({ theme: { mode: 'dark' } }),
+    getWindowState: vi.fn().mockReturnValue(null),
+    saveWindowState: vi.fn(),
+    broadcastPluginWindowState: vi.fn(),
+    paths: {
+      preload: '/mock/preload/index.js',
+      rendererHtml: '/mock/renderer/index.html',
+      rendererUrl: undefined
+    }
+  })
 }))
 
 import { GitManagerWindowManager } from '../git-manager-window'

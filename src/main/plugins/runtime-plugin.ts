@@ -17,6 +17,7 @@ export class RuntimePlugin implements DockPlugin {
   readonly name: string
   readonly description: string
   readonly defaultEnabled: boolean
+  readonly version: string
   readonly settingsSchema?: PluginSettingDef[]
 
   readonly manifest: PluginManifest
@@ -29,6 +30,7 @@ export class RuntimePlugin implements DockPlugin {
     this.name = manifest.name
     this.description = manifest.description
     this.defaultEnabled = manifest.defaultEnabled
+    this.version = manifest.version
     this.settingsSchema = manifest.settingsSchema
     this.module = mod
     this.manifest = manifest

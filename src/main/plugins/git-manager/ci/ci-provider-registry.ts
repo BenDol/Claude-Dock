@@ -6,7 +6,7 @@ import type { GitProvider } from '../../../../shared/remote-url'
 import { GitHubActionsProvider } from './github-actions-provider'
 import { GitLabCiProvider } from './gitlab-ci-provider'
 import { BitbucketPipelinesProvider } from './bitbucket-pipelines-provider'
-import { log } from '../../../logger'
+import { getServices } from '../services'
 
 const execFileAsync = promisify(execFile)
 
@@ -32,7 +32,7 @@ export class CiProviderRegistry {
       })
       remoteUrl = stdout.trim()
     } catch {
-      log('[ci-registry] no origin remote for', projectDir)
+      getServices().log('[ci-registry] no origin remote for', projectDir)
     }
 
     if (!remoteUrl) {
@@ -42,7 +42,7 @@ export class CiProviderRegistry {
 
     const gitProvider = detectProvider(remoteUrl)
     const provider = this.createProvider(gitProvider)
-    log('[ci-registry] resolved provider for', projectDir, '->', provider?.name ?? 'none')
+    getServices().log('[ci-registry] resolved provider for', projectDir, '->', provider?.name ?? 'none')
     this.cache.set(projectDir, provider)
     return provider
   }

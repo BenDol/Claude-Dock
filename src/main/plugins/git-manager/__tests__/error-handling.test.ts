@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-vi.mock('../../../logger', () => ({
-  log: () => {},
-  logInfo: () => {},
-  logError: () => {}
+vi.mock('../services', () => ({
+  getServices: () => ({
+    log: () => {},
+    logInfo: () => {},
+    logError: () => {}
+  })
 }))
 
 import { createTestRepo, createBareRemote, commitFile, writeFile, run, type TestRepo } from './setup'

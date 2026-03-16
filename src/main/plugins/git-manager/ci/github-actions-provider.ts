@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { promisify } from 'util'
 import type { CiProvider } from './ci-provider'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobStep, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
-import { log, logError } from '../../../logger'
+import { getServices } from '../services'
 
 const execFileAsync = promisify(execFile)
 
@@ -18,7 +18,7 @@ export function resolveGh(): string {
     const result = execFileSync(cmd, ['gh'], { timeout: 5000, encoding: 'utf-8' }).trim().split('\n')[0].trim()
     if (result) {
       ghPath = result
-      log('[ci-github] found gh at:', ghPath)
+      getServices().log('[ci-github] found gh at:', ghPath)
       return ghPath
     }
   } catch { /* not in PATH */ }
@@ -36,7 +36,7 @@ export function resolveGh(): string {
   for (const p of candidates) {
     if (existsSync(p)) {
       ghPath = p
-      log('[ci-github] found gh at:', ghPath)
+      getServices().log('[ci-github] found gh at:', ghPath)
       return ghPath
     }
   }
@@ -159,7 +159,7 @@ export class GitHubActionsProvider implements CiProvider {
       }
       return { success: true }
     } catch (err) {
-      logError('[ci-github] auth login failed:', err)
+      getServices().logError('[ci-github] auth login failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Failed to open terminal' }
     }
   }
@@ -204,7 +204,7 @@ export class GitHubActionsProvider implements CiProvider {
       const { stdout } = await gh(['repo', 'view', '--json', 'name', '-q', '.name'], projectDir)
       return stdout.trim().length > 0
     } catch (err) {
-      log('[ci-github] not available:', err instanceof Error ? err.message : err)
+      getServices().log('[ci-github] not available:', err instanceof Error ? err.message : err)
       return false
     }
   }
@@ -225,7 +225,7 @@ export class GitHubActionsProvider implements CiProvider {
         state: w.state as CiWorkflow['state']
       }))
     } catch (err) {
-      logError('[ci-github] getWorkflows failed:', err)
+      getServices().logError('[ci-github] getWorkflows failed:', err)
       return []
     }
   }
@@ -253,7 +253,7 @@ export class GitHubActionsProvider implements CiProvider {
       }
       return all
     } catch (err) {
-      logError('[ci-github] getWorkflowRuns failed:', err)
+      getServices().logError('[ci-github] getWorkflowRuns failed:', err)
       return []
     }
   }
@@ -275,7 +275,7 @@ export class GitHubActionsProvider implements CiProvider {
 
       return [...inProgress, ...queued].map(mapRun)
     } catch (err) {
-      logError('[ci-github] getActiveRuns failed:', err)
+      getServices().logError('[ci-github] getActiveRuns failed:', err)
       return []
     }
   }
@@ -290,7 +290,7 @@ export class GitHubActionsProvider implements CiProvider {
       const raw = JSON.parse(stdout) as Record<string, unknown>
       return mapRun(raw)
     } catch (err) {
-      logError('[ci-github] getRun failed:', err)
+      getServices().logError('[ci-github] getRun failed:', err)
       return null
     }
   }
@@ -308,7 +308,7 @@ export class GitHubActionsProvider implements CiProvider {
           steps: Array<{ name: string; number: number; status: string; conclusion: string }>
         }>
       }
-      log('[ci-github] getRunJobs: got', data.jobs.length, 'jobs for run', runId)
+      getServices().log('[ci-github] getRunJobs: got', data.jobs.length, 'jobs for run', runId)
       return data.jobs.map((j) => {
         const { matrixKey, matrixValues } = parseMatrixJobName(j.name)
         return {
@@ -329,7 +329,7 @@ export class GitHubActionsProvider implements CiProvider {
         }
       })
     } catch (err) {
-      logError('[ci-github] getRunJobs failed:', err)
+      getServices().logError('[ci-github] getRunJobs failed:', err)
       return []
     }
   }
@@ -350,7 +350,7 @@ export class GitHubActionsProvider implements CiProvider {
       ], { cwd: projectDir, timeout: 30_000, maxBuffer: 5 * 1024 * 1024 })
       return stdout
     } catch (err) {
-      logError('[ci-github] getJobLog failed:', err)
+      getServices().logError('[ci-github] getJobLog failed:', err)
       return ''
     }
   }

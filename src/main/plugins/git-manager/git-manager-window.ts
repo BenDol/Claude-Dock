@@ -1,9 +1,8 @@
 import { BrowserWindow } from 'electron'
 import * as path from 'path'
-import { getSettings } from '../../settings-store'
-import { getWindowState, saveWindowState } from '../../window-state-store'
-import { log } from '../../logger'
-import { broadcastPluginWindowState } from '../plugin-window-broadcast'
+import { getServices } from './services'
+
+const svc = () => getServices()
 
 // Use a prefix so git-manager window state doesn't clash with dock window state
 const STATE_KEY_PREFIX = 'gitmgr:'
@@ -34,13 +33,13 @@ export class GitManagerWindowManager {
       return
     }
 
-    const settings = getSettings()
+    const settings = svc().getSettings()
     const isDark = settings.theme.mode === 'dark' ||
       (settings.theme.mode === 'system')
 
     // Restore saved window state
     const stateKey = STATE_KEY_PREFIX + projectDir
-    const saved = getWindowState(stateKey)
+    const saved = svc().getWindowState(stateKey)
 
     const win = new BrowserWindow({
       width: saved?.width ?? 1100,
@@ -53,7 +52,7 @@ export class GitManagerWindowManager {
       title: `${path.basename(projectDir)} - Git`,
       backgroundColor: isDark ? '#0f0f14' : '#f5f5f5',
       webPreferences: {
-        preload: path.join(__dirname, '../preload/index.js'),
+        preload: svc().paths.preload,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false
@@ -65,13 +64,13 @@ export class GitManagerWindowManager {
     }
 
     this.windows.set(projectDir, win)
-    broadcastPluginWindowState('git-manager', projectDir, true)
+    svc().broadcastPluginWindowState('git-manager', projectDir, true)
 
     // Save window state on move/resize/maximize/unmaximize
     const persistState = () => {
       if (win.isDestroyed()) return
       const bounds = win.getNormalBounds()
-      saveWindowState(stateKey, {
+      svc().saveWindowState(stateKey, {
         x: bounds.x,
         y: bounds.y,
         width: bounds.width,
@@ -95,32 +94,32 @@ export class GitManagerWindowManager {
         }
         this.commitDetailWindows.delete(projectDir)
       }
-      broadcastPluginWindowState('git-manager', projectDir, false)
-      log(`[git-manager] window closed for ${projectDir}`)
+      svc().broadcastPluginWindowState('git-manager', projectDir, false)
+      svc().log(`[git-manager] window closed for ${projectDir}`)
     })
 
     const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}`
 
-    if (process.env.ELECTRON_RENDERER_URL) {
-      await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}${queryParam}`)
+    if (svc().paths.rendererUrl) {
+      await win.loadURL(`${svc().paths.rendererUrl}${queryParam}`)
     } else {
       await win.loadFile(
-        path.join(__dirname, '../renderer/index.html'),
+        svc().paths.rendererHtml,
         { search: queryParam.slice(1) }
       )
     }
 
-    log(`[git-manager] window opened for ${projectDir}`)
+    svc().log(`[git-manager] window opened for ${projectDir}`)
   }
 
   async openCommitDetail(projectDir: string, commitHash: string): Promise<void> {
-    const settings = getSettings()
+    const settings = svc().getSettings()
     const isDark = settings.theme.mode === 'dark' ||
       (settings.theme.mode === 'system')
 
     // Size to 80% of the git-manager window (or its saved state)
     const stateKey = STATE_KEY_PREFIX + projectDir
-    const gmState = getWindowState(stateKey)
+    const gmState = svc().getWindowState(stateKey)
     const baseW = gmState?.width ?? 1100
     const baseH = gmState?.height ?? 750
     const w = Math.round(baseW * 0.8)
@@ -135,7 +134,7 @@ export class GitManagerWindowManager {
       title: `${commitHash.slice(0, 8)} - Commit`,
       backgroundColor: isDark ? '#0f0f14' : '#f5f5f5',
       webPreferences: {
-        preload: path.join(__dirname, '../preload/index.js'),
+        preload: svc().paths.preload,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false
@@ -150,21 +149,21 @@ export class GitManagerWindowManager {
 
     win.on('closed', () => {
       this.commitDetailWindows.get(projectDir)?.delete(win)
-      log(`[git-manager] commit detail window closed for ${commitHash.slice(0, 8)}`)
+      svc().log(`[git-manager] commit detail window closed for ${commitHash.slice(0, 8)}`)
     })
 
     const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}&commitHash=${encodeURIComponent(commitHash)}`
 
-    if (process.env.ELECTRON_RENDERER_URL) {
-      await win.loadURL(`${process.env.ELECTRON_RENDERER_URL}${queryParam}`)
+    if (svc().paths.rendererUrl) {
+      await win.loadURL(`${svc().paths.rendererUrl}${queryParam}`)
     } else {
       await win.loadFile(
-        path.join(__dirname, '../renderer/index.html'),
+        svc().paths.rendererHtml,
         { search: queryParam.slice(1) }
       )
     }
 
-    log(`[git-manager] commit detail window opened for ${commitHash.slice(0, 8)}`)
+    svc().log(`[git-manager] commit detail window opened for ${commitHash.slice(0, 8)}`)
   }
 
   getWindow(projectDir: string): BrowserWindow | null {

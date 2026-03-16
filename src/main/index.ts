@@ -7,6 +7,8 @@ import { createAppMenu } from './menu'
 import { ActivityTracker } from './activity-tracker'
 import { migrateIfNeeded } from './linked-mode'
 import { registerPlugins, PluginManager } from './plugins'
+import { PluginUpdateService } from './plugins/plugin-updater'
+import { NotificationManager } from './notification-manager'
 import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 import { updateJumpList } from './recent-store'
@@ -126,6 +128,10 @@ if (!gotLock) {
     const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv)
     await manager.showLauncher(launchDir || undefined)
 
+    // Fire-and-forget plugin update check — fully async, never blocks the launcher.
+    // Wrapped in its own error boundary so a failure can never affect the app.
+    schedulePluginUpdateCheck()
+
     // macOS: re-create window when dock icon clicked
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -221,4 +227,39 @@ function installCliUnix(): void {
   } catch {
     // No permission for /usr/local/bin - that's ok, user can add wrapperDir to PATH manually
   }
+}
+
+declare const __DEV__: boolean
+
+/**
+ * Schedules a fire-and-forget plugin update check.
+ * Completely async — never blocks the launcher or any window.
+ * All errors are caught internally; a failure here must never affect the app.
+ */
+function schedulePluginUpdateCheck(): void {
+  const delay = (typeof __DEV__ !== 'undefined' && __DEV__) ? 3000 : 15000
+  setTimeout(() => {
+    // Run entirely in the background — .catch() ensures unhandled rejections
+    // never propagate to the process-level handler.
+    PluginUpdateService.getInstance()
+      .checkForUpdates(getSetting('updater')?.profile || 'latest')
+      .then((updates) => {
+        if (updates.length > 0) {
+          const names = updates.map((u) => u.pluginName)
+          NotificationManager.getInstance().notify({
+            title: 'Plugin Updates Available',
+            message: names.length <= 3
+              ? names.join(', ')
+              : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more...`,
+            type: 'info',
+            source: 'plugin-updater',
+            timeout: 0,
+            action: { label: 'View Updates', event: 'plugin-update-open' }
+          })
+        }
+      })
+      .catch((err) => {
+        log(`[plugin-updater] startup check failed: ${err}`)
+      })
+  }, delay)
 }

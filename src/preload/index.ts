@@ -18,6 +18,7 @@ import type {
 } from '../shared/git-manager-types'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
 import type { ClaudeTaskRequest } from '../shared/claude-task-types'
+import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -232,6 +233,15 @@ export interface DockApi {
   claudeTask: {
     send: (projectDir: string, task: ClaudeTaskRequest) => Promise<boolean>
     onTask: (callback: (task: ClaudeTaskRequest) => void) => () => void
+  }
+  pluginUpdater: {
+    check: () => Promise<PluginUpdateEntry[]>
+    getAvailable: () => Promise<PluginUpdateEntry[]>
+    install: (pluginId: string) => Promise<{ success: boolean; error?: string }>
+    installAll: () => Promise<{ success: string[]; failed: { pluginId: string; error: string }[] }>
+    dismiss: (pluginId: string, version: string) => Promise<void>
+    onProgress: (callback: (pluginId: string, downloaded: number, total: number) => void) => () => void
+    onStateChanged: (callback: (updates: PluginUpdateEntry[]) => void) => () => void
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -464,6 +474,27 @@ const dockApi: DockApi = {
       const handler = (_event: Electron.IpcRendererEvent, task: ClaudeTaskRequest) => callback(task)
       ipcRenderer.on('claude:task', handler)
       return () => ipcRenderer.removeListener('claude:task', handler)
+    }
+  },
+  pluginUpdater: {
+    check: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_CHECK),
+    getAvailable: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_GET_AVAILABLE),
+    install: (pluginId) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_INSTALL, pluginId),
+    installAll: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_INSTALL_ALL),
+    dismiss: (pluginId, version) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_DISMISS, pluginId, version),
+    onProgress: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, pluginId: string, downloaded: number, total: number) => {
+        callback(pluginId, downloaded, total)
+      }
+      ipcRenderer.on(IPC.PLUGIN_UPDATE_PROGRESS, handler)
+      return () => ipcRenderer.removeListener(IPC.PLUGIN_UPDATE_PROGRESS, handler)
+    },
+    onStateChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, updates: PluginUpdateEntry[]) => {
+        callback(updates)
+      }
+      ipcRenderer.on(IPC.PLUGIN_UPDATE_STATE_CHANGED, handler)
+      return () => ipcRenderer.removeListener(IPC.PLUGIN_UPDATE_STATE_CHANGED, handler)
     }
   },
   debug: {

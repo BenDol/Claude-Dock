@@ -141,7 +141,16 @@ export const IPC = {
   // Plugin windows
   PLUGIN_GET_OPEN_WINDOWS: 'plugin:getOpenWindows',
 
+  // Plugin Update System
+  PLUGIN_UPDATE_CHECK: 'pluginUpdate:check',
+  PLUGIN_UPDATE_GET_AVAILABLE: 'pluginUpdate:getAvailable',
+  PLUGIN_UPDATE_INSTALL: 'pluginUpdate:install',
+  PLUGIN_UPDATE_INSTALL_ALL: 'pluginUpdate:installAll',
+  PLUGIN_UPDATE_DISMISS: 'pluginUpdate:dismiss',
+
   // Main -> Renderer (send)
+  PLUGIN_UPDATE_PROGRESS: 'pluginUpdate:progress',
+  PLUGIN_UPDATE_STATE_CHANGED: 'pluginUpdate:stateChanged',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
   SETTINGS_CHANGED: 'settings:changed',

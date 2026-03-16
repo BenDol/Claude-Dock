@@ -59,7 +59,8 @@ export interface Settings {
 
 /** Built-in (non-plugin) notification sources that can be blocked */
 export const BUILTIN_NOTIFICATION_SOURCES: { id: string; label: string }[] = [
-  { id: 'updater', label: 'App Updates' }
+  { id: 'updater', label: 'App Updates' },
+  { id: 'plugin-updater', label: 'Plugin Updates' }
 ]
 
 export interface TerminalColors {
