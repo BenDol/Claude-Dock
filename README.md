@@ -1,8 +1,8 @@
+<h1 align="center">Claude Dock</h1>
+
 <p align="center">
   <img src="assets/launcher.png" alt="Claude Dock" width="300" />
 </p> 
-
-<h1 align="center">Claude Dock</h1>
 
 <p align="center">
   A terminal dock for managing multiple Claude Code CLI instances side by side.
