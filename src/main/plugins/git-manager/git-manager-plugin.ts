@@ -71,7 +71,7 @@ export class GitManagerPlugin implements DockPlugin {
       }
     })
 
-    getServices().log('[git-manager] plugin registered')
+    getServices().log('[git-manager] plugin registered (services-decoupled build)')
   }
 
   dispose(): void {
