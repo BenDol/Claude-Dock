@@ -84,7 +84,7 @@ function App() {
             source: 'plugin-updater',
             timeout: 0,
             actions: [
-              { label: 'View Updates', event: 'plugin-update-open' },
+              { label: 'View', event: 'plugin-update-open' },
               { label: 'Update All', event: 'plugin-update-all' }
             ]
           })

@@ -237,7 +237,7 @@ declare const __DEV__: boolean
  * All errors are caught internally; a failure here must never affect the app.
  */
 function schedulePluginUpdateCheck(): void {
-  const delay = (typeof __DEV__ !== 'undefined' && __DEV__) ? 3000 : 15000
+  const delay = (typeof __DEV__ !== 'undefined' && __DEV__) ? 2000 : 5000
   setTimeout(() => {
     // Run entirely in the background — .catch() ensures unhandled rejections
     // never propagate to the process-level handler.
@@ -290,7 +290,7 @@ function schedulePluginUpdateCheck(): void {
             source: 'plugin-updater',
             timeout: 0,
             actions: [
-              { label: 'View Updates', event: 'plugin-update-open' },
+              { label: 'View', event: 'plugin-update-open' },
               { label: 'Update All', event: 'plugin-update-all' }
             ]
           })

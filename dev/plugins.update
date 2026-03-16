@@ -13,7 +13,7 @@
     },
     "git-manager": {
       "version": "1.0.0",
-      "buildSha": "020f05badaca7f26e6431c50d56203d2c721bf7f",
+      "buildSha": "fake-test-sha-for-update",
       "hash": "9a8dbcd59abaf4d589e2904a55ae044c26026a6cae87d365ab021edd625100ae",
       "archivePath": "git-manager/",
       "changelog": "",

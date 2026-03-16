@@ -32,7 +32,11 @@ function tryLoadOverride(pluginId: string): OverrideResult | null {
   const overrideDir = path.join(app.getPath('userData'), 'plugin-overrides', pluginId)
   const metaPath = path.join(overrideDir, 'meta.json')
 
-  if (!fs.existsSync(metaPath)) return null
+  if (!fs.existsSync(metaPath)) {
+    // Clean stale store entry if the directory was deleted externally
+    removeOverride(pluginId)
+    return null
+  }
 
   try {
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))

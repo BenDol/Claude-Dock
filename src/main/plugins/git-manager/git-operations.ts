@@ -1197,8 +1197,11 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
 
       const parts = rest.split(/\s+/)
       const hash = parts[0] || ''
-      const subPath = parts[1] || ''
+      let subPath = parts[1] || ''
       if (!subPath) continue
+      // Normalize: strip leading './' and reject self-referential paths
+      subPath = subPath.replace(/^\.\//, '')
+      if (!subPath || subPath === '.' || subPath === '/') continue
 
       submodules.push({
         name: subPath.split('/').pop() || subPath,
@@ -1215,7 +1218,8 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
         for (const cfgLine of cfgOut.split('\n')) {
           const match = cfgLine.match(/^submodule\.(.+)\.path\s+(.+)$/)
           if (match) {
-            const subPath = match[2].trim()
+            let subPath = match[2].trim().replace(/^\.\//, '')
+            if (!subPath || subPath === '.' || subPath === '/') continue
             submodules.push({
               name: subPath.split('/').pop() || subPath,
               path: subPath,

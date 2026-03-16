@@ -981,6 +981,7 @@ const GitManagerApp: React.FC = () => {
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
     setActiveDir(activeDir + '/' + sub.path)
     setSelectedCommit(null)
+    setSubmodules([])
   }, [activeDir])
 
   const navigateBack = useCallback(() => {
@@ -990,6 +991,7 @@ const GitManagerApp: React.FC = () => {
       if (entry) {
         setActiveDir(entry.dir)
         setSelectedCommit(null)
+        setSubmodules([])
       }
       return next
     })

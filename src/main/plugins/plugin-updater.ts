@@ -18,6 +18,7 @@ import {
   setVerifiedHosts,
   getOverrides,
   setOverride,
+  removeOverride,
   type PluginOverrideEntry
 } from './plugin-update-store'
 import type {
@@ -569,8 +570,13 @@ export class PluginUpdateService {
       PluginManager.getInstance().reload(pluginId, newPlugin)
       log(`[plugin-updater] hot-reloaded ${pluginId} successfully`)
     } catch (err) {
-      logError(`[plugin-updater] hot-reload failed for ${pluginId}:`, err)
-      // Non-fatal — the old plugin stays active, user can restart later
+      logError(`[plugin-updater] hot-reload failed for ${pluginId}, rolling back override:`, err)
+      // Roll back: remove the broken override so it doesn't persist across restarts.
+      // The bundled plugin continues to work; the update can be retried later.
+      try {
+        fs.rmSync(overrideDir, { recursive: true, force: true })
+        removeOverride(pluginId)
+      } catch { /* best effort */ }
     }
   }
 
