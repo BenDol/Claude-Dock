@@ -32,9 +32,78 @@ on:
         description: 'Skip tests'
         type: boolean
         default: false
+      force_full_build:
+        description: 'Force full app build even if only plugins changed'
+        type: boolean
+        default: false
 
 jobs:
+  # Determine whether this push only touches plugin source directories.
+  # If so, we can skip the expensive electron-builder packaging step and
+  # only rebuild + publish the plugin archives.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      plugins_only: ${{ steps.check.outputs.plugins_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if changes are plugin-only
+        id: check
+        shell: bash
+        run: |
+          # workflow_dispatch with force flag always does a full build
+          if [ "${{ inputs.force_full_build }}" = "true" ]; then
+            echo "plugins_only=false" >> "$GITHUB_OUTPUT"
+            echo "Forced full build via workflow_dispatch"
+            exit 0
+          fi
+
+          # PRs always do a full build (we want to verify packaging works)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "plugins_only=false" >> "$GITHUB_OUTPUT"
+            echo "PR build — always full"
+            exit 0
+          fi
+
+          # Compare against the previous commit on push
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "FORCE_FULL")
+
+          if [ "$CHANGED" = "FORCE_FULL" ]; then
+            echo "plugins_only=false" >> "$GITHUB_OUTPUT"
+            echo "Could not diff — full build"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # Plugin-only paths: files exclusively inside plugin subdirectories
+          # or the plugin archive script. Everything else triggers a full build.
+          # Note: src/shared/* changes trigger a full build because both the app
+          # and plugins depend on shared types — we can't be sure it's safe to
+          # only rebuild plugins.
+          PLUGINS_ONLY=true
+          while IFS= read -r file; do
+            case "$file" in
+              src/main/plugins/git-manager/*) ;;
+              src/main/plugins/git-sync/*) ;;
+              scripts/generate-plugin-archive.js) ;;
+              *)
+                echo "Non-plugin file changed: $file"
+                PLUGINS_ONLY=false
+                break
+                ;;
+            esac
+          done <<< "$CHANGED"
+
+          echo "plugins_only=$PLUGINS_ONLY" >> "$GITHUB_OUTPUT"
+          echo "Result: plugins_only=$PLUGINS_ONLY"
+
   build:
+    needs: detect
     strategy:
       fail-fast: false
       matrix:
@@ -54,11 +123,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: needs.detect.outputs.plugins_only != 'true'
         id: setup-python
         with:
           python-version: '3.12'
 
       - name: Install setuptools (needed by node-gyp)
+        if: needs.detect.outputs.plugins_only != 'true'
         run: pip install setuptools
 
       - uses: actions/setup-node@v4
@@ -69,6 +140,7 @@ jobs:
       # and electron/electron-builder downloads. On cache hit this skips
       # npm ci entirely, saving ~2-3 minutes on Windows.
       - name: Cache node_modules & Electron
+        if: needs.detect.outputs.plugins_only != 'true'
         id: cache-deps
         uses: actions/cache@v4
         with:
@@ -83,24 +155,26 @@ jobs:
           key: deps-${{ matrix.platform }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
+        if: needs.detect.outputs.plugins_only != 'true' && steps.cache-deps.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Run tests
-        if: inputs.skip_tests != true
+        if: needs.detect.outputs.plugins_only != 'true' && inputs.skip_tests != true
         run: npx vitest run
 
       - name: Build app
+        if: needs.detect.outputs.plugins_only != 'true'
         run: npx electron-vite build
         env:
           UPDATE_PROFILE: bleeding-edge
           PRODUCTION_BUILD: '1'
 
       - name: Generate plugin archive
+        if: needs.detect.outputs.plugins_only != 'true'
         run: node scripts/generate-plugin-archive.js
 
       - name: Import macOS signing certificate
-        if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
+        if: needs.detect.outputs.plugins_only != 'true' && matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
         env:
           MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
@@ -120,6 +194,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
 
       - name: Package (${{ matrix.platform }})
+        if: needs.detect.outputs.plugins_only != 'true'
         run: npx electron-builder --${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,12 +206,13 @@ jobs:
           SKIP_NOTARIZE: 'true' # ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
 
       - name: Zip win-unpacked directory
-        if: matrix.platform == 'win'
+        if: needs.detect.outputs.plugins_only != 'true' && matrix.platform == 'win'
         working-directory: dist/win-unpacked
         run: 7z a -tzip "../Claude-Dock-win-unpacked.zip" .
         shell: bash
 
-      - name: Upload artifacts
+      - name: Upload app artifacts
+        if: needs.detect.outputs.plugins_only != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: claude-dock-${{ matrix.platform }}
@@ -147,8 +223,9 @@ jobs:
             dist/Claude-Dock-win-unpacked.zip
           if-no-files-found: error
 
-      - name: Publish to bleeding-edge release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      # --- Full build publish: app + plugins + SHA ---
+      - name: Publish full build to bleeding-edge release
+        if: needs.detect.outputs.plugins_only != 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -183,3 +260,58 @@ jobs:
           Commit: ${{ github.sha }}
           EOF
           )"
+
+  # Plugins-only build: lightweight job that only rebuilds and publishes
+  # the plugin archives. Runs on a single platform (plugins are platform-
+  # independent JS bundles) and does NOT touch the exe or SHA files, so
+  # the app auto-updater won't prompt users for a full download.
+  plugins-only:
+    needs: detect
+    if: needs.detect.outputs.plugins_only == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (minimal)
+        run: npm ci --ignore-scripts
+
+      - name: Install esbuild
+        run: npx esbuild --version
+
+      - name: Generate plugin archive
+        run: node scripts/generate-plugin-archive.js
+
+      - name: Upload plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins
+          path: |
+            dist/plugins.zip
+            dist/plugins.update
+          if-no-files-found: error
+
+      - name: Publish plugins to bleeding-edge release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Ensure the release exists
+          gh release view bleeding-edge &>/dev/null || \
+            gh release create bleeding-edge --prerelease \
+              --title "Bleeding Edge Build" \
+              --notes "Automated build from the latest commit on \`main\`."
+
+          # Upload only plugin archives — do NOT touch exe or SHA files
+          for f in dist/plugins.zip dist/plugins.update; do
+            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+          done
+
+          echo "Plugins-only publish complete. App binaries and SHA files unchanged."
