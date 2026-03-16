@@ -15,12 +15,42 @@ import type { PluginManifest } from '../../shared/plugin-manifest'
 import type { DockWindow } from '../dock-window'
 import { log, logError } from '../logger'
 
+/**
+ * Global IPC channel tracking — patches ipcMain.handle once at module load
+ * to record every channel registration. During plugin register(), the active
+ * plugin ID is set so channels are attributed to the correct plugin.
+ *
+ * This works regardless of whether plugins import ipcMain directly, because
+ * the patch is on the shared ipcMain instance (or its prototype).
+ */
+let _activePluginId: string | null = null
+const _pluginChannels = new Map<string, string[]>()
+
+// Patch ipcMain.handle to intercept registrations. Try own property first,
+// then prototype — Electron may define handle on either.
+;(() => {
+  const target = Object.getOwnPropertyDescriptor(ipcMain, 'handle')
+    ? ipcMain
+    : Object.getPrototypeOf(ipcMain)
+  const original = ipcMain.handle.bind(ipcMain)
+
+  Object.defineProperty(target, 'handle', {
+    value: function trackedHandle(channel: string, listener: any) {
+      if (_activePluginId) {
+        const list = _pluginChannels.get(_activePluginId)
+        if (list) list.push(channel)
+      }
+      return original(channel, listener)
+    },
+    writable: true,
+    configurable: true
+  })
+})()
+
 export class PluginManager {
   private static instance: PluginManager
   private plugins: DockPlugin[] = []
   private bus = new PluginEventBus()
-  /** IPC channels registered by each plugin (tracked automatically during register()) */
-  private pluginIpcChannels = new Map<string, string[]>()
 
   static getInstance(): PluginManager {
     if (!PluginManager.instance) {
@@ -36,25 +66,19 @@ export class PluginManager {
   }
 
   /**
-   * Wraps ipcMain.handle during plugin.register() to track which IPC channels
-   * the plugin registers. This allows reload() to clean them up automatically.
+   * Calls plugin.register() while tracking IPC channels.
+   * Sets _activePluginId so the patched ipcMain.handle knows which plugin
+   * to attribute calls to.
    */
   private registerWithTracking(plugin: DockPlugin): void {
-    const channels: string[] = []
-    const originalHandle = ipcMain.handle.bind(ipcMain)
-
-    // Monkey-patch ipcMain.handle to intercept registrations
-    ipcMain.handle = (channel: string, listener: any) => {
-      channels.push(channel)
-      return originalHandle(channel, listener)
-    }
+    _pluginChannels.set(plugin.id, _pluginChannels.get(plugin.id) || [])
+    _activePluginId = plugin.id
 
     try {
       plugin.register(this.bus)
     } finally {
-      // Restore original — the patch only lives for the duration of register()
-      ipcMain.handle = originalHandle
-      this.pluginIpcChannels.set(plugin.id, channels)
+      _activePluginId = null
+      const channels = _pluginChannels.get(plugin.id) || []
       if (channels.length > 0) {
         log(`[plugin-manager] tracked ${channels.length} IPC channel(s) for ${plugin.id}`)
       }
@@ -212,11 +236,11 @@ export class PluginManager {
     this.bus.off(pluginId)
 
     // 3. Remove IPC handlers tracked during the original register() call
-    const channels = this.pluginIpcChannels.get(pluginId) || []
+    const channels = _pluginChannels.get(pluginId) || []
     for (const channel of channels) {
       try { ipcMain.removeHandler(channel) } catch { /* not registered */ }
     }
-    this.pluginIpcChannels.delete(pluginId)
+    _pluginChannels.delete(pluginId)
 
     // 4. Replace the plugin in the list and register with tracking
     this.plugins[index] = newPlugin
