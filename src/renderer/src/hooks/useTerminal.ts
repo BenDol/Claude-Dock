@@ -126,6 +126,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
       fitAddon.fit()
 
+      // Send real terminal dimensions to PTY immediately (not the default 80x24)
+      const { cols, rows } = term
+      getDockApi().terminal.resize(terminalId, cols, rows)
+
       termRef.current = term
       fitAddonRef.current = fitAddon
 
@@ -152,6 +156,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           term.write(chunk)
         }
         dataBufferRef.current = []
+        // Scroll to bottom so the user sees the current state (critical for resumed sessions
+        // where large amounts of buffered data push the active prompt off-screen)
+        term.scrollToBottom()
       }
 
       const api = getDockApi()

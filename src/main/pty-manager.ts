@@ -245,10 +245,12 @@ export class PtyManager {
         }, 50)
       }
     }
-    // Poke after Claude has started rendering (1.5s) and after it has likely
-    // finished restoring the conversation (4s)
+    // Poke after Claude has started rendering (1.5s), after it has likely
+    // finished restoring the conversation (4s), and a late poke for slow
+    // systems like Windows 10 where ConPTY layout may settle later (7s)
     setTimeout(poke, 1500)
     setTimeout(poke, 4000)
+    setTimeout(poke, 7000)
   }
 
   kill(terminalId: string): void {

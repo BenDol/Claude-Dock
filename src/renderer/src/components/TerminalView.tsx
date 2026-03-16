@@ -12,7 +12,7 @@ interface TerminalViewProps {
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, focus, gotDataRef, scrolledUp, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
+  const { initTerminal, fit, focus, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
@@ -59,10 +59,13 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
   // hammering the PTY with multiple resize events during Claude's TUI init
   useEffect(() => {
     if (!loading) {
-      const timer = setTimeout(() => fit(), 150)
+      const timer = setTimeout(() => {
+        fit()
+        scrollToBottom()
+      }, 150)
       return () => clearTimeout(timer)
     }
-  }, [loading, fit])
+  }, [loading, fit, scrollToBottom])
 
   useEffect(() => {
     if (isFocused && !loading) {
