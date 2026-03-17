@@ -4,8 +4,11 @@ import { app } from 'electron'
 import { PluginManager } from './plugin-manager'
 import type { DockPlugin } from './plugin'
 import { loadRuntimePlugins, getPluginsDir } from './plugin-loader'
-import { getOverrides, removeOverride } from './plugin-update-store'
+import { getOverrides, removeOverride, getSeenOverrideHashes } from './plugin-update-store'
+import { createSafeStore } from '../safe-store'
 import { log } from '../logger'
+
+declare const __BUILD_SHA__: string
 import { setServices as setGitManagerServices } from './git-manager/services'
 import { createBundledServices as createGitManagerServices } from './git-manager/bundled-services'
 
@@ -102,7 +105,39 @@ function injectPluginServices(pluginId: string, overrideModule?: Record<string, 
   }
 }
 
+/**
+ * If the app binary was updated (different __BUILD_SHA__), clear all plugin
+ * overrides — the new exe bundles the latest plugin code, so overrides from
+ * an older plugin-only update are now stale.
+ */
+function clearStaleOverridesOnAppUpdate(): void {
+  try {
+    const store = createSafeStore<{ lastAppSha: string }>({
+      name: 'plugin-app-version',
+      defaults: { lastAppSha: '' }
+    })
+    const lastSha = store.get('lastAppSha', '')
+    const currentSha = typeof __BUILD_SHA__ !== 'undefined' ? __BUILD_SHA__ : ''
+
+    if (lastSha && currentSha && lastSha !== currentSha) {
+      log(`[plugins] app updated (${lastSha.slice(0, 7)} -> ${currentSha.slice(0, 7)}), clearing plugin overrides`)
+      const overrides = getOverrides()
+      const overrideBaseDir = path.join(app.getPath('userData'), 'plugin-overrides')
+      for (const pluginId of Object.keys(overrides)) {
+        const overrideDir = path.join(overrideBaseDir, pluginId)
+        try { fs.rmSync(overrideDir, { recursive: true, force: true }) } catch { /* ignore */ }
+        removeOverride(pluginId)
+      }
+    }
+
+    if (currentSha) store.set('lastAppSha', currentSha)
+  } catch (err) {
+    log(`[plugins] failed to check app version for stale overrides: ${err}`)
+  }
+}
+
 export function registerPlugins(): void {
+  clearStaleOverridesOnAppUpdate()
   const manager = PluginManager.getInstance()
 
   // Phase 1: Register essential (non-lazy) built-in plugins synchronously.
