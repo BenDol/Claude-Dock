@@ -1316,6 +1316,88 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Terminal Search Bar */
+.terminal-search-bar {
+  position: absolute;
+  top: 4px;
+  right: 14px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  padding: 3px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-search-input {
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 3px 6px;
+  width: 180px;
+  outline: none;
+}
+
+.terminal-search-input:focus {
+  border-color: var(--accent-color);
+}
+
+.terminal-search-info {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  padding: 0 4px;
+  min-width: 60px;
+  text-align: center;
+}
+
+.terminal-search-opt {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.terminal-search-opt:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
+}
+
+.terminal-search-opt.active {
+  color: var(--accent-color);
+  border-color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+}
+
+.terminal-search-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 3px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.terminal-search-nav:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
+}
+
 /* Empty State */
 .empty-state {
   flex: 1;

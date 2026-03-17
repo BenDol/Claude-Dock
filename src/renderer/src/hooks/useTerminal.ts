@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
@@ -32,6 +33,7 @@ interface UseTerminalOptions {
 export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const searchAddonRef = useRef<SearchAddon | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const spawnedRef = useRef(false)
   const dataBufferRef = useRef<string[]>([])
@@ -41,6 +43,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [autoScroll, setAutoScroll] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   const autoScrollRef = useRef(false)
   const programmaticScrollRef = useRef(false)
 
@@ -120,6 +123,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.loadAddon(new WebLinksAddon((_event, url) => {
         getDockApi().app.openExternal(url)
       }))
+
+      // Search in scrollback buffer (Ctrl+F)
+      const searchAddon = new SearchAddon()
+      term.loadAddon(searchAddon)
+      searchAddonRef.current = searchAddon
 
       term.open(container)
 
@@ -229,6 +237,12 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             // For printable keys, let xterm process the new character normally
             return true
           }
+        }
+
+        // Ctrl+F: open search
+        if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
+          setSearchOpen(true)
+          return false
         }
 
         // Ctrl+Shift+C: copy
@@ -373,5 +387,5 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     setAutoScroll(false)
   }, [])
 
-  return { initTerminal, fit, focus, termRef, gotDataRef, scrolledUp, autoScroll, scrollToBottom, enableAutoScroll, disableAutoScroll }
+  return { initTerminal, fit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, autoScroll, scrollToBottom, enableAutoScroll, disableAutoScroll }
 }
