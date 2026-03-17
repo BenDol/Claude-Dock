@@ -863,6 +863,21 @@ export async function pullAdvanced(
 }
 
 export async function push(cwd: string): Promise<string> {
+  // If the current branch has no upstream, push with --set-upstream to origin
+  try {
+    const { stdout: trackOut } = await gitExec(cwd, [
+      'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'
+    ], 5000)
+    if (!trackOut.trim()) throw new Error('no upstream')
+  } catch {
+    // No upstream — push with --set-upstream
+    const { stdout: branchOut } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+    const branch = branchOut.trim()
+    if (branch && branch !== 'HEAD') {
+      const { stdout, stderr } = await gitExec(cwd, ['push', '--set-upstream', 'origin', branch], 60000)
+      return (stdout + stderr).trim()
+    }
+  }
   const { stdout, stderr } = await gitExec(cwd, ['push'], 60000)
   return (stdout + stderr).trim()
 }

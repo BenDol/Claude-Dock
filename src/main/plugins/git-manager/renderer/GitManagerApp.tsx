@@ -1079,9 +1079,9 @@ const GitManagerApp: React.FC = () => {
               setPullDialogOpen(true)
             }}
           />
-          {currentBranch?.ahead || currentBranch?.behind ? (
-            <button className="gm-toolbar-btn" onClick={handlePush} title={`Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`} disabled={pushing}>
-              {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} Push{currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}{currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
+          {currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
+            <button className="gm-toolbar-btn" onClick={handlePush} title={!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`} disabled={pushing}>
+              {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} {!currentBranch.tracking ? 'Publish' : 'Push'}{currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}{currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
             </button>
           ) : (
             <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
