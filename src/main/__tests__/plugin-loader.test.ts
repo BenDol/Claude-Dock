@@ -121,13 +121,18 @@ describe('plugin-loader validation', () => {
 
   describe('manifest validation', () => {
     // Reimplementation for direct testing
+    function looksLikeFilePath(icon: string): boolean {
+      const trimmed = icon.trim()
+      return !trimmed.startsWith('<') && /\.svg$/i.test(trimmed)
+    }
+
     function validateManifest(data: any, dir: string): boolean {
       if (!data.id || typeof data.id !== 'string') return false
       if (!data.name || typeof data.name !== 'string') return false
       if (!data.version || typeof data.version !== 'string') return false
 
       const DANGEROUS_SVG = /<script|on\w+\s*=|javascript\s*:|data\s*:\s*text\/html/i
-      if (data.toolbar?.icon && DANGEROUS_SVG.test(data.toolbar.icon)) return false
+      if (data.toolbar?.icon && !looksLikeFilePath(data.toolbar.icon) && DANGEROUS_SVG.test(data.toolbar.icon)) return false
 
       function isPathInsideDir(d: string, relativePath: string): boolean {
         const resolved = path.resolve(d, relativePath)
@@ -135,6 +140,7 @@ describe('plugin-loader validation', () => {
         return resolved.startsWith(normalizedDir) || resolved === path.resolve(d)
       }
 
+      if (data.toolbar?.icon && looksLikeFilePath(data.toolbar.icon) && !isPathInsideDir(dir, data.toolbar.icon)) return false
       if (data.main && !isPathInsideDir(dir, data.main)) return false
       if (data.window?.entry && !isPathInsideDir(dir, data.window.entry)) return false
 
@@ -209,6 +215,50 @@ describe('plugin-loader validation', () => {
           '/plugins/x'
         )
       ).toBe(false)
+    })
+
+    it('accepts toolbar icon as file path', () => {
+      expect(
+        validateManifest(
+          {
+            id: 'x',
+            name: 'X',
+            version: '1.0.0',
+            toolbar: { icon: './icon.svg', title: 't', action: 'a' }
+          },
+          '/plugins/x'
+        )
+      ).toBe(true)
+    })
+
+    it('rejects path-traversal in toolbar icon file path', () => {
+      expect(
+        validateManifest(
+          {
+            id: 'x',
+            name: 'X',
+            version: '1.0.0',
+            toolbar: { icon: '../../evil.svg', title: 't', action: 'a' }
+          },
+          '/plugins/x'
+        )
+      ).toBe(false)
+    })
+
+    it('does not apply dangerous SVG check to file path icons', () => {
+      // A file path ending in .svg that happens to contain "onload" should not be rejected
+      // (validation checks the file contents separately, not the path string)
+      expect(
+        validateManifest(
+          {
+            id: 'x',
+            name: 'X',
+            version: '1.0.0',
+            toolbar: { icon: './icons/onload.svg', title: 't', action: 'a' }
+          },
+          '/plugins/x'
+        )
+      ).toBe(true)
     })
 
     it('accepts valid manifest with toolbar and window', () => {

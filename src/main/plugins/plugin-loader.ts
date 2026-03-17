@@ -66,6 +66,36 @@ export function getPluginsDir(): string {
 /** Pattern to detect script injection in SVG strings */
 const DANGEROUS_SVG = /<script|on\w+\s*=|javascript\s*:|data\s*:\s*text\/html/i
 
+/** Check if an icon value looks like a file path rather than inline SVG markup */
+function looksLikeFilePath(icon: string): boolean {
+  const trimmed = icon.trim()
+  return !trimmed.startsWith('<') && /\.svg$/i.test(trimmed)
+}
+
+/**
+ * If toolbar.icon is a file path (e.g. "./icon.svg"), read the file and
+ * replace the manifest value with the SVG content. Validates the file
+ * content against the same dangerous-SVG check used for inline icons.
+ */
+function resolveToolbarIcon(manifest: PluginManifest, pluginDir: string): void {
+  if (!manifest.toolbar?.icon) return
+  if (!looksLikeFilePath(manifest.toolbar.icon)) return
+
+  const iconPath = path.resolve(pluginDir, manifest.toolbar.icon)
+  try {
+    const content = fs.readFileSync(iconPath, 'utf-8')
+    if (DANGEROUS_SVG.test(content)) {
+      log(`[plugin-loader] BLOCKED ${manifest.id}: toolbar icon file contains dangerous content`)
+      manifest.toolbar.icon = ''
+      return
+    }
+    manifest.toolbar.icon = content.trim()
+  } catch {
+    log(`[plugin-loader] ${manifest.id}: toolbar icon file not found: ${iconPath}`)
+    manifest.toolbar.icon = ''
+  }
+}
+
 function validateManifest(data: any, dir: string): data is PluginManifest {
   if (!data.id || typeof data.id !== 'string') {
     log(`[plugin-loader] invalid manifest in ${dir}: missing or invalid id`)
@@ -79,9 +109,14 @@ function validateManifest(data: any, dir: string): data is PluginManifest {
     log(`[plugin-loader] invalid manifest in ${dir}: missing or invalid version`)
     return false
   }
-  // Reject manifests with suspicious toolbar icon content
-  if (data.toolbar?.icon && DANGEROUS_SVG.test(data.toolbar.icon)) {
+  // Reject manifests with suspicious toolbar icon content (only check inline SVG strings)
+  if (data.toolbar?.icon && !looksLikeFilePath(data.toolbar.icon) && DANGEROUS_SVG.test(data.toolbar.icon)) {
     log(`[plugin-loader] BLOCKED ${dir}: toolbar icon contains potentially dangerous content`)
+    return false
+  }
+  // Path traversal check for icon file reference
+  if (data.toolbar?.icon && looksLikeFilePath(data.toolbar.icon) && !isPathInsideDir(dir, data.toolbar.icon)) {
+    log(`[plugin-loader] BLOCKED ${dir}: toolbar icon path escapes plugin directory: ${data.toolbar.icon}`)
     return false
   }
   // Path traversal check: main and window.entry must resolve inside the plugin directory
@@ -191,6 +226,9 @@ export async function loadRuntimePlugins(): Promise<RuntimePlugin[]> {
       const manifest = JSON.parse(raw)
 
       if (!validateManifest(manifest, pluginDir)) continue
+
+      // Resolve file-based toolbar icon to inline SVG content
+      resolveToolbarIcon(manifest, pluginDir)
 
       // Set defaults for optional fields
       manifest.defaultEnabled = manifest.defaultEnabled ?? true

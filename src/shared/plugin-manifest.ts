@@ -10,7 +10,7 @@ export interface PluginManifest {
   settingsSchema?: PluginSettingDef[]
   toolbar?: {
     title: string
-    icon: string // SVG markup string
+    icon: string // SVG markup string, or relative path to an .svg file in the plugin directory
     action: string // IPC channel to invoke with (projectDir)
     order?: number
   }

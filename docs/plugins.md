@@ -209,7 +209,23 @@ Add a button to the dock's toolbar bar by including a `toolbar` field in your ma
 | `action` | Yes | IPC channel invoked with `(projectDir)` when clicked. |
 | `order` | No | Sort order (default 100). Lower values appear further left. |
 
-### SVG Icon Requirements
+### Icon Format
+
+The `icon` field can be either **inline SVG markup** or a **file path** to an `.svg` file in your plugin directory:
+
+```json
+"icon": "<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><circle cx='12' cy='12' r='10'/></svg>"
+```
+
+```json
+"icon": "./assets/icon.svg"
+```
+
+If a file path is used, the file is read at load time and its contents replace the path — the renderer always receives inline SVG. The file path must resolve within the plugin directory (path traversal is blocked).
+
+### SVG Requirements
+
+Whether inline or from a file:
 
 - **Must include** `xmlns='http://www.w3.org/2000/svg'`
 - **Must include** `width='14' height='14'` (the toolbar icon size)
