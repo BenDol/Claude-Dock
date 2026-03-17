@@ -104,9 +104,10 @@ function injectPluginServices(pluginId: string, overrideModule?: Record<string, 
   const services = entry.factory()
   if (overrideModule && typeof overrideModule.setServices === 'function') {
     overrideModule.setServices(services)
-  } else {
-    entry.setServices(services)
   }
+  // Always set bundled services too — if the override is stale and doesn't
+  // export setServices, the fallback to the bundled plugin needs them ready.
+  entry.setServices(services)
 }
 
 /**
@@ -155,16 +156,28 @@ export function registerPlugins(): void {
           const plugin = new (exp as new () => DockPlugin)()
 
           // Check for a plugin override before registering the bundled version
-          const override = tryLoadOverride(plugin.id)
-          const pluginToRegister = override?.plugin || plugin
+          let override = tryLoadOverride(plugin.id)
 
-          if (pluginToRegister.lazyLoad) {
-            deferred.push(pluginToRegister)
+          // Verify override is compatible: plugins that require service injection
+          // must export setServices. If the override is from an older build that
+          // doesn't, discard it and use the bundled plugin instead.
+          if (override && getServiceEntry(plugin.id) && typeof override.module.setServices !== 'function') {
+            log(`[plugins] override for ${plugin.id} is incompatible (missing setServices), using bundled version`)
+            const overrideDir = path.join(app.getPath('userData'), 'plugin-overrides', plugin.id)
+            try { fs.rmSync(overrideDir, { recursive: true, force: true }) } catch { /* ignore */ }
+            removeOverride(plugin.id)
+            override = null
+          }
+
+          const finalPlugin = override ? override.plugin : plugin
+
+          if (finalPlugin.lazyLoad) {
+            deferred.push(finalPlugin)
             // Store override module for deferred injection
-            if (override) (pluginToRegister as any)._overrideModule = override.module
+            if (effectiveOverride) (finalPlugin as any)._overrideModule = effectiveOverride.module
           } else {
-            injectPluginServices(pluginToRegister.id, override?.module)
-            manager.register(pluginToRegister)
+            injectPluginServices(finalPlugin.id, effectiveOverride?.module)
+            manager.register(finalPlugin)
           }
         } catch (e) {
           log(`[plugins] Failed to register built-in plugin from ${path}: ${e}`)
