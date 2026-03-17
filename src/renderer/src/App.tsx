@@ -368,6 +368,7 @@ function DockApp() {
   const [showSettings, setShowSettings] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
+  const [isResumingSession, setIsResumingSession] = useState(false)
 
   // Initialize dock info and settings
   useEffect(() => {
@@ -378,6 +379,7 @@ function DockApp() {
         setDockInfo(info.id, info.projectDir)
         if (info.savedSessionCount > 0) {
           setInitialTerminalCount(info.savedSessionCount)
+          setIsResumingSession(true)
         }
       }
       await loadSettings()
@@ -398,7 +400,13 @@ function DockApp() {
   useEffect(() => {
     if (initialized && autoSpawn && terminals.length === 0) {
       for (let i = 0; i < initialTerminalCount; i++) {
-        handleAddTerminal()
+        const id = `term-${nextTermId++}-${Date.now()}`
+        addTerminal(id)
+        // Mark terminals created from saved sessions so the loading overlay
+        // can show "Resuming session..." and wait longer for ConPTY to settle
+        if (isResumingSession) {
+          useDockStore.getState().markTerminalResumed(id)
+        }
       }
     }
   }, [initialized, autoSpawn])

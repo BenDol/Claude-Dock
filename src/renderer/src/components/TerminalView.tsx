@@ -16,6 +16,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
+  const isResumed = useDockStore((s) => s.resumedTerminals.has(terminalId))
   const showScrollBtn = useSettingsStore((s) => s.settings.terminal.scrollToBottom)
 
   // Sync loading state to store
@@ -33,10 +34,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     [resizeRef, initTerminal]
   )
 
-  // Poll gotDataRef until enough data arrives + minimum display time, then dismiss loading
+  // Poll gotDataRef until enough data arrives + minimum display time, then dismiss loading.
+  // Resumed sessions use a longer minimum to give ConPTY resize pokes time to settle
+  // the cursor position (especially needed on Windows 10).
   useEffect(() => {
     if (!loading) return
-    const MIN_DISPLAY_MS = 800
+    const MIN_DISPLAY_MS = isResumed ? 3500 : 800
     const interval = setInterval(() => {
       const elapsed = Date.now() - mountTimeRef.current
       if (gotDataRef.current && elapsed >= MIN_DISPLAY_MS) {
@@ -53,7 +56,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
       clearInterval(interval)
       clearTimeout(timeout)
     }
-  }, [loading, gotDataRef])
+  }, [loading, gotDataRef, isResumed])
 
   // Re-fit when loading dismissed — single fit after layout settles to avoid
   // hammering the PTY with multiple resize events during Claude's TUI init
@@ -89,7 +92,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
       {loading && (
         <div className="terminal-loading">
           <div className="terminal-spinner" />
-          <span>Starting claude...</span>
+          <span>{isResumed ? 'Resuming session...' : 'Starting claude...'}</span>
         </div>
       )}
       <div

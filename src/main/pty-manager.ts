@@ -330,13 +330,13 @@ export class PtyManager {
   }
 
   /**
-   * After a resumed Claude session starts on Windows, send a resize poke to force
-   * the TUI to recalculate its layout. We briefly resize to cols-1 then back to
-   * the real size, which guarantees SIGWINCH is delivered even if the current
-   * dimensions already match.
+   * After a resumed Claude session starts on Windows, send resize pokes to force
+   * the TUI to recalculate its layout. We briefly change dimensions then restore,
+   * which guarantees SIGWINCH is delivered even if the current dimensions already match.
+   * Both column-based and row-based pokes are used because some ConPTY versions
+   * (notably Windows 10) only trigger a full TUI relayout on row changes.
    */
   private scheduleResizePoke(terminalId: string): void {
-    // Column-based poke: shrink cols by 1, restore after a short delay
     const pokeCols = (restoreDelay = 50) => {
       const inst = this.ptys.get(terminalId)
       if (!inst) return
@@ -350,8 +350,6 @@ export class PtyManager {
         }, restoreDelay)
       }
     }
-    // Row-based poke: some ConPTY implementations (notably Windows 10) only
-    // trigger a full TUI relayout on row changes, not column changes
     const pokeRows = (restoreDelay = 50) => {
       const inst = this.ptys.get(terminalId)
       if (!inst) return
@@ -365,14 +363,17 @@ export class PtyManager {
         }, restoreDelay)
       }
     }
-    // Early pokes for fast systems (1.5s, 4s)
-    setTimeout(pokeCols, 1500)
-    setTimeout(pokeCols, 4000)
-    // Late pokes for slow systems (Windows 10) with row-based pokes for better
-    // coverage — some ConPTY versions need a row change to reposition the cursor
-    setTimeout(pokeRows, 7000)
-    setTimeout(() => pokeCols(100), 10000)
-    setTimeout(() => pokeRows(100), 13000)
+    // Both col and row pokes at each interval for broad ConPTY compatibility.
+    // Row pokes are staggered 100ms after col pokes to avoid interference.
+    const pokeBoth = (restoreDelay = 50) => {
+      pokeCols(restoreDelay)
+      setTimeout(() => pokeRows(restoreDelay), restoreDelay + 100)
+    }
+    // Staggered pokes covering early render (1.5s), conversation restore (3s),
+    // and late settling for slow systems like Windows 10 (5s)
+    setTimeout(() => pokeBoth(), 1500)
+    setTimeout(() => pokeBoth(), 3000)
+    setTimeout(() => pokeBoth(100), 5000)
   }
 
   kill(terminalId: string): void {

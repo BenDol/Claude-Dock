@@ -20,6 +20,8 @@ interface DockState {
   claudePersistentTaskTerminals: Set<string>
   /** Set of terminal IDs that are currently receiving data */
   activeTerminals: Set<string>
+  /** Set of terminal IDs that were spawned from saved sessions (resume) */
+  resumedTerminals: Set<string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -38,6 +40,7 @@ interface DockState {
   setTerminalClaudeFlags: (id: string, flags: string | null) => void
   setTerminalPersistentTask: (id: string, persistent: boolean) => void
   setTerminalActive: (id: string, active: boolean) => void
+  markTerminalResumed: (id: string) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -54,6 +57,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   claudeTaskFlags: new Map<string, string>(),
   claudePersistentTaskTerminals: new Set<string>(),
   activeTerminals: new Set<string>(),
+  resumedTerminals: new Set<string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -177,5 +181,12 @@ export const useDockStore = create<DockState>((set, get) => ({
       if (active) next.add(id)
       else next.delete(id)
       return { activeTerminals: next }
+    }),
+
+  markTerminalResumed: (id) =>
+    set((state) => {
+      const next = new Set(state.resumedTerminals)
+      next.add(id)
+      return { resumedTerminals: next }
     })
 }))
