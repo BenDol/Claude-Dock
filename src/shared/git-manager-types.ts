@@ -89,7 +89,9 @@ export interface GitSubmoduleInfo {
   status: 'current' | 'modified' | 'uninitialized'
   hasDirtyWorkTree?: boolean // submodule working tree has uncommitted changes
   changeCount?: number // number of working changes inside the submodule
-  branch?: string // current branch of the submodule
+  branch?: string // current branch of the submodule (undefined if detached)
+  isDetached?: boolean // true when HEAD is detached (e.g. after git submodule update)
+  trackingBranch?: string // branch configured in .gitmodules
 }
 
 /** Conflicted file entry */

@@ -178,6 +178,25 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
     getServices().logError('[git-manager] getBranches (local) failed:', err)
   }
 
+  // If no local branch is marked as current, HEAD is detached — add a synthetic entry
+  if (!branches.some((b) => b.current)) {
+    try {
+      const { stdout: hashOut } = await gitExec(cwd, ['rev-parse', '--short', 'HEAD'], 5000)
+      const shortHash = hashOut.trim()
+      if (shortHash) {
+        branches.unshift({
+          name: `(detached at ${shortHash})`,
+          current: true,
+          remote: false,
+          ahead: 0,
+          behind: 0
+        })
+      }
+    } catch {
+      // ignore — empty repo or other edge case
+    }
+  }
+
   // Remote branches
   try {
     const { stdout } = await gitExec(cwd, [
@@ -784,6 +803,27 @@ export async function renameBranch(cwd: string, oldName: string, newName: string
 // --- Remote operations ---
 
 export async function pull(cwd: string, mode?: 'merge' | 'rebase'): Promise<string> {
+  // Check if HEAD is detached — git pull fails in detached HEAD state.
+  // This commonly happens in submodules after `git submodule update`.
+  // Auto-checkout the branch that matches HEAD's commit if possible.
+  try {
+    const { stdout: headRef } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+    if (headRef.trim() === 'HEAD') {
+      // Detached — find a local branch pointing at the same commit
+      const { stdout: headSha } = await gitExec(cwd, ['rev-parse', 'HEAD'], 5000)
+      const { stdout: branchList } = await gitExec(cwd, ['branch', '--points-at', headSha.trim()], 5000)
+      const localBranch = branchList.split('\n').map((l) => l.replace(/^\*?\s*/, '').trim()).filter(Boolean)[0]
+      if (localBranch) {
+        await gitExec(cwd, ['checkout', localBranch], 10000)
+      } else {
+        throw new Error('Cannot pull: HEAD is detached and no local branch points at this commit. Checkout a branch first.')
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Cannot pull')) throw err
+    // If the detached check fails, proceed with the pull and let git report the error
+  }
+
   const args = ['pull']
   if (mode === 'rebase') args.push('--rebase', '--autostash')
   else if (mode === 'merge') args.push('--no-rebase')
@@ -1234,11 +1274,31 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
       }
     }
 
-    // Check dirty working tree, change count, and current branch for each initialized submodule
+    // Read tracking branches from .gitmodules for all submodules
+    const trackingBranches = new Map<string, string>()
+    try {
+      const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.branch$'], 5000)
+      for (const cfgLine of cfgOut.split('\n')) {
+        const match = cfgLine.match(/^submodule\.(.+)\.branch\s+(.+)$/)
+        if (match) {
+          // Key is the submodule name in .gitmodules, value is the branch
+          const subPath = match[1].trim()
+          trackingBranches.set(subPath, match[2].trim())
+        }
+      }
+    } catch {
+      // No .gitmodules or no branch config — that's fine
+    }
+
+    // Check dirty working tree, change count, current branch, and detached HEAD for each initialized submodule
     const pathMod = require('path') as typeof import('path')
     await Promise.allSettled(
       submodules.map(async (sub) => {
         if (sub.status === 'uninitialized') return
+
+        // Set tracking branch from .gitmodules
+        sub.trackingBranch = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
+
         try {
           const subCwd = pathMod.join(cwd, sub.path)
           const { stdout: porcelain } = await gitExec(subCwd, ['status', '--porcelain'], 5000)
@@ -1252,7 +1312,13 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
           const subCwd = pathMod.join(cwd, sub.path)
           const { stdout: branchOut } = await gitExec(subCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
           const branch = branchOut.trim()
-          if (branch && branch !== 'HEAD') sub.branch = branch
+          if (branch && branch !== 'HEAD') {
+            sub.branch = branch
+            sub.isDetached = false
+          } else {
+            // Detached HEAD — common after git submodule update
+            sub.isDetached = true
+          }
         } catch {
           // ignore
         }
