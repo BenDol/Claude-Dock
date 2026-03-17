@@ -9,6 +9,7 @@ import { log, logError } from '../logger'
 import { PluginManager } from './plugin-manager'
 import { getServiceEntry } from './plugin-service-registry'
 import { trustPlugin } from './plugin-loader'
+import { isAppUpdateInProgress } from '../pending-project'
 import {
   getLastChecked,
   setLastChecked,
@@ -104,6 +105,11 @@ export class PluginUpdateService {
   // --- Public API ---
 
   async checkForUpdates(profile?: string): Promise<PluginUpdateEntry[]> {
+    if (isAppUpdateInProgress()) {
+      log('[plugin-updater] skipping check — app update in progress')
+      return []
+    }
+
     // If a check is already running, return that promise instead of starting another
     if (this.checkInProgress) {
       log('[plugin-updater] check already in progress, waiting...')
@@ -145,6 +151,10 @@ export class PluginUpdateService {
   }
 
   async installUpdate(pluginId: string): Promise<void> {
+    if (isAppUpdateInProgress()) {
+      throw new Error('Plugin updates are blocked while an app update is in progress')
+    }
+
     const entry = this.updates.get(pluginId)
     if (!entry) throw new Error(`No update found for plugin: ${pluginId}`)
     if (entry.status === 'installed') return
@@ -170,6 +180,11 @@ export class PluginUpdateService {
   }
 
   async installAll(): Promise<{ success: string[]; failed: { pluginId: string; error: string }[] }> {
+    if (isAppUpdateInProgress()) {
+      log('[plugin-updater] skipping installAll — app update in progress')
+      return { success: [], failed: [] }
+    }
+
     const success: string[] = []
     const failed: { pluginId: string; error: string }[] = []
 

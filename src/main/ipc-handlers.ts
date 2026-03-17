@@ -8,7 +8,7 @@ import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
-import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLock } from './pending-project'
+import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLock, setAppUpdateInProgress } from './pending-project'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit, checkClaudePath, fixClaudePath } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
@@ -235,6 +235,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.UPDATER_DOWNLOAD, async (event, url: string, assetName: string) => {
     if (__DEV__) throw new Error('Updates are disabled in dev mode')
+    setAppUpdateInProgress()
     const win = BrowserWindow.fromWebContents(event.sender)
     try {
       const filePath = await downloadUpdate(url, assetName, (downloaded, total) => {

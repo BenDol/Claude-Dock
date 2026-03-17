@@ -65,6 +65,20 @@ export function clearPendingProject(): void {
   } catch { /* ignore */ }
 }
 
+// --- App update in-progress flag (in-memory, same-process coordination) ---
+// Set when app update download begins. Never cleared — the app restarts on install.
+
+let _appUpdateInProgress = false
+
+export function setAppUpdateInProgress(): void {
+  _appUpdateInProgress = true
+  log('[update] app update in progress — plugin updates will be blocked')
+}
+
+export function isAppUpdateInProgress(): boolean {
+  return _appUpdateInProgress
+}
+
 // --- Update lock (PID-based) ---
 
 function isPidAlive(pid: number): boolean {
