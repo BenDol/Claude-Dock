@@ -422,6 +422,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </div>
                 <PluginPanel projectDir={projectDir} />
                 <div className="settings-divider" />
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.updater?.autoUpdatePlugins ?? false}
+                    onChange={(e) => updateUpdater({ autoUpdatePlugins: e.target.checked })}
+                  />
+                  Automatically update plugins
+                </label>
+                <div className="settings-description">
+                  When enabled, plugin updates are installed automatically on launch.
+                </div>
                 <div>
                   <button
                     className="settings-check-update-btn"

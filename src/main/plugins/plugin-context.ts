@@ -55,7 +55,7 @@ export function createPluginContext(
           appLogError(`${prefix} BLOCKED: cannot register handler on reserved channel "${channel}"`)
           return
         }
-        ipcMain.handle(channel, handler)
+        ipcMain.handle(channel, (_event, ...args) => handler(...args))
         registeredHandlers.push(channel)
       },
       removeHandler: (channel: string) => {

@@ -87,7 +87,13 @@ describe('createPluginContext', () => {
       const handler = vi.fn()
 
       ctx.ipc.handle('my-custom:action', handler)
-      expect(ipcMain.handle).toHaveBeenCalledWith('my-custom:action', handler)
+      expect(ipcMain.handle).toHaveBeenCalledWith('my-custom:action', expect.any(Function))
+
+      // The wrapper should strip the IPC event and forward remaining args
+      const wrapper = (ipcMain.handle as ReturnType<typeof vi.fn>).mock.calls[0][1]
+      const fakeEvent = { sender: {} }
+      wrapper(fakeEvent, 'arg1', 'arg2')
+      expect(handler).toHaveBeenCalledWith('arg1', 'arg2')
     })
 
     it('blocks removeHandler on reserved channels', () => {
