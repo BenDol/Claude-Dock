@@ -90,7 +90,21 @@ If Claude Dock is already running, the command opens a new dock window in the ex
 - **Windows** — A `claude-dock.cmd` shim is created next to the app executable and its directory is added to the user `PATH` via the registry.
 - **macOS / Linux** — A wrapper script is placed in the app's user data directory and symlinked to `/usr/local/bin/claude-dock`. If `/usr/local/bin` isn't writable, you can manually add the wrapper directory to your `PATH`.
 
-## Known Issues 
+## Plugins
+
+Claude Dock has a plugin system that lets you extend the app with toolbar buttons, windows, IPC handlers, lifecycle event listeners, and per-project settings. Plugins are loaded from the user plugins directory:
+
+| Platform | Directory |
+|----------|-----------|
+| Windows  | `%APPDATA%/claude-dock/plugins/` |
+| macOS    | `~/Library/Application Support/claude-dock/plugins/` |
+| Linux    | `~/.config/claude-dock/plugins/` |
+
+A minimal plugin is three files: `plugin.json` (manifest), `main.js` (logic), and optionally `index.html` (window UI). Drop the folder in the plugins directory, restart the app, approve the consent dialog, and it loads.
+
+See the **[Plugin Development Guide](docs/plugins.md)** for the full API reference, examples, and security model.
+
+## Known Issues
 
 - **Portable build does not support multiple dock instances on Windows** — The portable `.exe` cannot detect an already-running instance, so each launch starts a separate process. Use the NSIS installer build for full multi-instance support.
 
