@@ -564,7 +564,7 @@ export function registerGitManagerIpc(): void {
 
   registerCiIpc()
 
-  getServices().log('[git-manager] IPC handlers registered')
+  getServices().log('[git-manager] IPC handlers registered (v2)')
 }
 
 /** Remove all IPC handlers registered by git-manager (for hot-reload) */
