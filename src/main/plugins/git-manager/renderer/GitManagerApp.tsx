@@ -332,6 +332,7 @@ const GitManagerApp: React.FC = () => {
   const [wcBusy, setWcBusy] = useState(false)
   const wcBusyRef = useRef(false)
   const [syntaxHL, setSyntaxHL] = useState(true)
+  const [escToHide, setEscToHide] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<ActionError | null>(null)
   const actionBusyRef = useRef(false)
@@ -390,6 +391,9 @@ const GitManagerApp: React.FC = () => {
     api.plugins.getSetting(projectDir, 'git-manager', 'syntaxHighlighting')
       .then((v) => setSyntaxHL(typeof v === 'boolean' ? v : true))
       .catch(() => {})
+    api.plugins.getSetting(projectDir, 'git-manager', 'escToHide')
+      .then((v) => setEscToHide(typeof v === 'boolean' ? v : true))
+      .catch(() => {})
   }, [projectDir])
 
   // React to setting changes from the settings dropdown
@@ -402,10 +406,26 @@ const GitManagerApp: React.FC = () => {
         if (!enabled) setActiveTab((t) => t === 'ci' ? 'history' : t)
       } else if (key === 'syntaxHighlighting') {
         setSyntaxHL(!!value)
+      } else if (key === 'escToHide') {
+        setEscToHide(!!value)
       }
     }
     window.addEventListener('gm-setting-changed', handler)
     return () => window.removeEventListener('gm-setting-changed', handler)
+  }, [])
+
+  // Esc to hide: close/hide the window when Escape is pressed and no modal is open
+  const escToHideRef = useRef(escToHide)
+  escToHideRef.current = escToHide
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !escToHideRef.current) return
+      // Don't hide if a modal, search, or dropdown is consuming Escape
+      if (document.querySelector('.modal-overlay, .gm-dropdown-backdrop, .gm-search-dropdown')) return
+      getDockApi().win.close()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   // Listen for CI status changes from CiPanel
@@ -7635,6 +7655,7 @@ const AddRemoteModal: React.FC<{
 // --- Settings dropdown ---
 
 const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' | 'multiselect'; default?: unknown; options?: { value: string; label: string }[] }[] = [
+  { key: 'escToHide', label: 'Press Esc to hide window', type: 'boolean', default: true },
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
