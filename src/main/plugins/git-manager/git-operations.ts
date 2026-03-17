@@ -395,17 +395,17 @@ function parseDiffOutput(output: string): GitFileDiff[] {
     const path = pathMatch ? pathMatch[2] : headerLine
     const oldPath = pathMatch && pathMatch[1] !== pathMatch[2] ? pathMatch[1] : undefined
 
-    // Detect binary
-    if (block.includes('Binary files')) {
-      files.push({ path, oldPath, status: 'binary', hunks: [], isBinary: true })
-      continue
-    }
-
     // Detect status from diff header lines
     let status = 'modified'
     if (block.includes('new file mode')) status = 'added'
     else if (block.includes('deleted file mode')) status = 'deleted'
     else if (oldPath) status = 'renamed'
+
+    // Detect binary
+    if (block.includes('Binary files')) {
+      files.push({ path, oldPath, status, hunks: [], isBinary: true })
+      continue
+    }
 
     const hunks: GitDiffHunk[] = []
     let currentHunk: GitDiffHunk | null = null
@@ -480,28 +480,35 @@ export async function getDiff(cwd: string, filePath?: string, staged?: boolean):
         const absPath = pathMod.join(cwd, filePath)
         const stat = await fsP.stat(absPath)
         if (stat.isFile() && stat.size < 512 * 1024) { // skip files > 512KB
-          const content = await fsP.readFile(absPath, 'utf-8')
-          const lines = content.split('\n')
-          // Remove trailing empty line from final newline
-          if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
-          const diffLines: GitDiffLine[] = lines.map((line, i) => ({
-            type: 'add' as const,
-            content: line,
-            newLineNo: i + 1
-          }))
-          diffs.push({
-            path: filePath,
-            status: 'added',
-            isBinary: false,
-            hunks: [{
-              oldStart: 0,
-              oldLines: 0,
-              newStart: 1,
-              newLines: lines.length,
-              header: 'new file',
-              lines: diffLines
-            }]
-          })
+          const buf = await fsP.readFile(absPath)
+          // Binary detection: check for null bytes in first 8KB (same heuristic as git)
+          const isBin = buf.subarray(0, 8000).includes(0)
+          if (isBin) {
+            diffs.push({ path: filePath, status: 'added', isBinary: true, hunks: [] })
+          } else {
+            const content = buf.toString('utf-8')
+            const lines = content.split('\n')
+            // Remove trailing empty line from final newline
+            if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+            const diffLines: GitDiffLine[] = lines.map((line, i) => ({
+              type: 'add' as const,
+              content: line,
+              newLineNo: i + 1
+            }))
+            diffs.push({
+              path: filePath,
+              status: 'added',
+              isBinary: false,
+              hunks: [{
+                oldStart: 0,
+                oldLines: 0,
+                newStart: 1,
+                newLines: lines.length,
+                header: 'new file',
+                lines: diffLines
+              }]
+            })
+          }
         }
       } catch { /* file unreadable — leave empty */ }
     }

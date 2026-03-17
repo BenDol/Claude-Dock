@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron'
 import * as path from 'path'
 import { getServices } from './services'
+import { loadPluginWindow } from '../plugin-renderer-utils'
 
 const svc = () => getServices()
 
@@ -99,15 +100,7 @@ export class GitManagerWindowManager {
     })
 
     const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}`
-
-    if (svc().paths.rendererUrl) {
-      await win.loadURL(`${svc().paths.rendererUrl}${queryParam}`)
-    } else {
-      await win.loadFile(
-        svc().paths.rendererHtml,
-        { search: queryParam.slice(1) }
-      )
-    }
+    await loadPluginWindow(win, svc().paths, queryParam)
 
     svc().log(`[git-manager] window opened for ${projectDir}`)
   }
@@ -153,15 +146,7 @@ export class GitManagerWindowManager {
     })
 
     const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}&commitHash=${encodeURIComponent(commitHash)}`
-
-    if (svc().paths.rendererUrl) {
-      await win.loadURL(`${svc().paths.rendererUrl}${queryParam}`)
-    } else {
-      await win.loadFile(
-        svc().paths.rendererHtml,
-        { search: queryParam.slice(1) }
-      )
-    }
+    await loadPluginWindow(win, svc().paths, queryParam)
 
     svc().log(`[git-manager] commit detail window opened for ${commitHash.slice(0, 8)}`)
   }

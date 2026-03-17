@@ -16,6 +16,7 @@ import { broadcastPluginWindowState } from '../plugin-window-broadcast'
 import { ActivityTracker } from '../../activity-tracker'
 import { createSafeStore } from '../../safe-store'
 import * as path from 'path'
+import { resolveRendererOverride } from '../plugin-renderer-utils'
 import type { GitManagerServices } from './services'
 
 export function createBundledServices(): GitManagerServices {
@@ -56,7 +57,8 @@ export function createBundledServices(): GitManagerServices {
     paths: {
       preload: path.join(__dirname, '../preload/index.js'),
       rendererHtml: path.join(__dirname, '../renderer/index.html'),
-      rendererUrl: process.env.ELECTRON_RENDERER_URL
+      rendererUrl: process.env.ELECTRON_RENDERER_URL,
+      rendererOverrideHtml: resolveRendererOverride('git-manager')
     }
   }
 }

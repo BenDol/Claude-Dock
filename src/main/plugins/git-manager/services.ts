@@ -49,6 +49,7 @@ export interface GitManagerServices {
     preload: string
     rendererHtml: string
     rendererUrl: string | undefined
+    rendererOverrideHtml: string | undefined
   }
 }
 

@@ -29,7 +29,8 @@ const SRC_PLUGINS = path.join(ROOT, 'src', 'main', 'plugins')
 // Built-in plugins to package
 const BUILTIN_PLUGINS = [
   { id: 'git-sync', srcDir: 'git-sync', entry: 'git-sync-plugin.ts' },
-  { id: 'git-manager', srcDir: 'git-manager', entry: 'git-manager-plugin.ts' }
+  { id: 'git-manager', srcDir: 'git-manager', entry: 'git-manager-plugin.ts',
+    rendererEntry: 'src/renderer/src/plugins/git-manager/standalone-entry.tsx' }
 ]
 
 /**
@@ -151,6 +152,38 @@ function main() {
       // Write a placeholder so the staging dir has valid structure for hashing
       fs.writeFileSync(outPath, `// Standalone build not available — update via full app update\nmodule.exports = {};\n`)
       requiresAppUpdate = true
+    }
+
+    // Build standalone renderer bundle if this plugin has a rendererEntry
+    if (plugin.rendererEntry) {
+      const rendererEntryPath = path.join(ROOT, plugin.rendererEntry)
+      if (fs.existsSync(rendererEntryPath)) {
+        const rendererStaging = path.join(pluginStaging, 'renderer')
+        fs.mkdirSync(rendererStaging, { recursive: true })
+
+        try {
+          execSync(
+            `npx esbuild "${rendererEntryPath}" --bundle --platform=browser --format=iife --jsx=automatic --loader:.css=css --outfile="${path.join(rendererStaging, 'bundle.js')}"`,
+            { cwd: ROOT, encoding: 'utf-8', stdio: 'pipe' }
+          )
+          console.log(`  Built standalone renderer bundle for ${plugin.id}`)
+
+          // Copy standalone HTML shell
+          const htmlSrc = path.join(path.dirname(rendererEntryPath), 'standalone-index.html')
+          if (fs.existsSync(htmlSrc)) {
+            fs.copyFileSync(htmlSrc, path.join(rendererStaging, 'index.html'))
+          } else {
+            console.warn(`  standalone-index.html not found at ${htmlSrc}`)
+          }
+        } catch (err) {
+          console.warn(`  ${plugin.id}: renderer build failed — override renderer will not be available`)
+          console.warn(`  ${err.message || err}`)
+          // Clean up partial renderer dir
+          if (fs.existsSync(rendererStaging)) {
+            fs.rmSync(rendererStaging, { recursive: true })
+          }
+        }
+      }
     }
 
     // Generate plugin.json — does NOT contain buildSha so hash stays stable

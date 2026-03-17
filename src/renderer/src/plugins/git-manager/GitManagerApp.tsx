@@ -2546,7 +2546,7 @@ const LazyDiffFile: React.FC<{
     <div className="gm-diff-file" ref={sentinelRef}>
       <div className="gm-diff-file-header">
         <FileStatusBadge status={f.status} />
-        <span>{f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path}</span>
+        <EllipsisPath className="gm-diff-file-path" text={f.oldPath ? `${f.oldPath} -> ${f.path}` : f.path} />
         <button
           className="gm-file-hover-btn"
           onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
@@ -3176,10 +3176,9 @@ const CommitDetailPanel: React.FC<{
                   key={f.path}
                   className="gm-detail-file-list-item"
                   onClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
-                  title={f.path}
                 >
                   <FileStatusBadge status={f.status} />
-                  <span className="gm-detail-file-list-name">{f.path}</span>
+                  <EllipsisPath className="gm-detail-file-list-name" text={f.path} />
                   <span className="gm-diff-file-stats">
                     {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
                     {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
@@ -3476,7 +3475,7 @@ const VirtualFileList: React.FC<{
                   <FileStatusBadge status={isStaged ? f.indexStatus : (f.workTreeStatus === '?' ? 'untracked' : f.workTreeStatus)} />
                 )}
                 <span className="gm-file-path-wrap">
-                  <span className="gm-file-path">{f.path}</span>
+                  <EllipsisPath className="gm-file-path" text={f.path} />
                   <button
                     className="gm-file-hover-btn"
                     onClick={() => {
@@ -5017,7 +5016,7 @@ const WorkingDiffViewer: React.FC<{
             <div key={f.path} className="gm-diff-file" style={{ '--line-no-ch': lineNoDigits(f.hunks) } as React.CSSProperties}>
               {multiFile && (
                 <div className="gm-diff-file-header">
-                  <span className="gm-diff-file-path">{f.path}</span>
+                  <EllipsisPath className="gm-diff-file-path" text={f.path} />
                   <button
                     className="gm-file-hover-btn"
                     onClick={() => api.app.openInExplorer(projectDir + '/' + f.path)}
@@ -5196,6 +5195,39 @@ const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> 
       <div className="gm-diff-large-gate-text">File changes are very large ({lineCount.toLocaleString()} lines)</div>
       <button className="gm-modal-btn gm-modal-btn-primary" onClick={() => setExpanded(true)}>Load diff</button>
     </div>
+  )
+}
+
+/** Shows ellipsed text with a hover tooltip that reveals the full text after a delay */
+const EllipsisPath: React.FC<{ text: string; className?: string }> = ({ text, className }) => {
+  const spanRef = useRef<HTMLSpanElement>(null)
+  const [show, setShow] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const onEnter = useCallback(() => {
+    const el = spanRef.current
+    if (!el || el.scrollWidth <= el.clientWidth) return
+    timerRef.current = setTimeout(() => setShow(true), 400)
+  }, [])
+
+  const onLeave = useCallback(() => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+    setShow(false)
+  }, [])
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+
+  return (
+    <span
+      ref={spanRef}
+      className={className}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ position: 'relative' }}
+    >
+      {text}
+      {show && <span className="gm-ellipsis-tooltip">{text}</span>}
+    </span>
   )
 }
 

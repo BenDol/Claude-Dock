@@ -4,6 +4,7 @@ import type { PluginManifest } from '../../shared/plugin-manifest'
 import { getSettings } from '../settings-store'
 import { log } from '../logger'
 import { broadcastPluginWindowState } from './plugin-window-broadcast'
+import { resolveRendererOverride } from './plugin-renderer-utils'
 
 /**
  * Generic window manager for runtime plugins.
@@ -65,8 +66,9 @@ export class PluginWindowManager {
       log(`[plugin-window] ${manifest.id} window closed for ${projectDir}`)
     })
 
-    // Load the plugin's renderer HTML from its directory
-    const htmlPath = path.resolve(pluginDir, manifest.window.entry)
+    // Check for a renderer override first, then fall back to the plugin's own HTML
+    const overrideHtml = resolveRendererOverride(manifest.id)
+    const htmlPath = overrideHtml ?? path.resolve(pluginDir, manifest.window.entry)
     await win.loadFile(htmlPath, {
       search: `pluginId=${manifest.id}&projectDir=${encodeURIComponent(projectDir)}`
     })

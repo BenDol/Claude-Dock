@@ -199,23 +199,13 @@ export function highlightDiffHunks(
   for (const h of hunks) totalLines += h.lines.length
   if (totalLines > MAX_LINES) return null
 
-  // Join all line contents (strip the diff +/- prefix — content field already lacks it)
-  const allContent = hunks.flatMap(h => h.lines.map(l => l.content))
-  const joined = allContent.join('\n')
-
-  // Highlight
-  const highlighted = hljs.highlight(joined, { language, ignoreIllegals: true })
-  const htmlLines = balanceTags(highlighted.value.split('\n'))
-
-  // Split back into hunk/line structure
+  // Highlight each hunk independently so that code skipped between hunks
+  // (e.g. unclosed block comments, template strings) doesn't poison later hunks.
   const result: string[][] = []
-  let idx = 0
   for (const h of hunks) {
-    const hunkLines: string[] = []
-    for (let i = 0; i < h.lines.length; i++) {
-      hunkLines.push(htmlLines[idx++] || '')
-    }
-    result.push(hunkLines)
+    const content = h.lines.map(l => l.content).join('\n')
+    const highlighted = hljs.highlight(content, { language, ignoreIllegals: true })
+    result.push(balanceTags(highlighted.value.split('\n')))
   }
 
   return result
