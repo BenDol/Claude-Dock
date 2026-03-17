@@ -220,9 +220,16 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
     for (const fj of failedJobs) {
       if (!fj.id) continue
       try {
-        const fullLog = await api.ci.getJobLog(dir, fj.id)
+        // Try sourceDir first (submodule may have its own CI), fall back to dock projectDir
+        let fullLog = ''
+        if (task.sourceDir && task.sourceDir !== dir) {
+          try { fullLog = await api.ci.getJobLog(task.sourceDir, fj.id) } catch { /* fall through */ }
+        }
+        if (!fullLog) {
+          try { fullLog = await api.ci.getJobLog(dir, fj.id) } catch { /* continue */ }
+        }
         if (fullLog) {
-          const snippet = extractErrorContext(fullLog, 10)
+          const snippet = extractErrorContext(fullLog, 15)
           if (snippet) jobLogSnippets.push({ name: fj.name, log: snippet })
         }
       } catch { /* continue without log */ }
@@ -235,11 +242,16 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
 
     let logSection = ''
     if (jobLogSnippets.length === 1) {
-      logSection = `\nRelevant error output from "${jobLogSnippets[0].name}":\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
+      logSection = `\nThe error log from "${jobLogSnippets[0].name}" is provided below — start your analysis from this output. ` +
+        `If you need more context, you can check the full CI log yourself.\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
     } else if (jobLogSnippets.length > 1) {
-      logSection = '\nRelevant error output:\n' + jobLogSnippets.map(
+      logSection = '\nThe error logs from the failed jobs are provided below — start your analysis from this output. ' +
+        'If you need more context, you can check the full CI logs yourself.\n' + jobLogSnippets.map(
         (s) => `\n--- ${s.name} ---\n\`\`\`\n${s.log}\n\`\`\``
       ).join('\n') + '\n'
+    } else {
+      logSection = '\nCI logs could not be fetched automatically. Please check the CI pipeline logs yourself ' +
+        `(e.g. \`gh run view ${task.runId} --log-failed\`) to find the error.\n`
     }
 
     const contextSection = context ? `\nAdditional instructions from the user:\n${context}\n` : ''
@@ -261,7 +273,10 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
       logSection +
       submoduleSection +
       contextSection +
-      `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
+      (jobLogSnippets.length > 0
+        ? `\nThe error logs above contain the relevant failure output. Use them to identify the issue directly — do NOT re-fetch the CI pipeline logs unless the provided output is insufficient.\n`
+        : '') +
+      `Find the relevant code and fix the issue.\n\n` +
       `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
       `The fix MUST be committed and pushed to the branch "${branch}". ` +
       `You MUST NOT disturb the user's current working tree, staged files, or checked-out branch. ` +
