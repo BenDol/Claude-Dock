@@ -4491,6 +4491,14 @@ const FileContextMenu: React.FC<{
       ) : (
         <div className="gm-ctx-item" onClick={doUnstage}><span>Unstage{suffix}</span><span className="gm-ctx-shortcut">U</span></div>
       )}
+      {file.isSubmodule && count === 1 && (
+        <div className="gm-ctx-item" onClick={async () => {
+          onClose()
+          const r = await api.gitManager.registerSubmodule(projectDir, file.path)
+          if (!r.success) onError(`Add as submodule failed: ${r.error || 'Unknown error'}`)
+          onRefresh()
+        }}>Add as submodule</div>
+      )}
       {section === 'unstaged' && (
         <div className="gm-ctx-item gm-ctx-danger" onClick={doDiscard}>
           {allUntracked ? `Delete file${count > 1 ? 's' : ''}` : `Discard changes${suffix}`}

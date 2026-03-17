@@ -381,6 +381,16 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_REGISTER_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
+    try {
+      await gitOps.registerSubmodule(projectDir, subPath)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[git-manager] register submodule failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Register submodule failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_REMOVE_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
     try {
       await gitOps.removeSubmodule(projectDir, subPath)

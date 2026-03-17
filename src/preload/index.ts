@@ -183,6 +183,7 @@ export interface DockApi {
     applyPatch: (projectDir: string, patch: string, cached: boolean, reverse: boolean, fuzzy?: boolean) => Promise<{ success: boolean; error?: string }>
     openBash: (projectDir: string) => Promise<void>
     addSubmodule: (projectDir: string, url: string, localPath?: string, branch?: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
+    registerSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; error?: string }>
     removeSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; error?: string }>
     getRemotes: (projectDir: string) => Promise<{ name: string; fetchUrl: string; pushUrl: string }[]>
     addRemote: (projectDir: string, name: string, url: string) => Promise<{ success: boolean; error?: string }>
@@ -405,6 +406,7 @@ const dockApi: DockApi = {
     applyPatch: (projectDir, patch, cached, reverse, fuzzy) => ipcRenderer.invoke(IPC.GIT_MGR_APPLY_PATCH, projectDir, patch, cached, reverse, fuzzy),
     openBash: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN_BASH, projectDir),
     addSubmodule: (projectDir, url, localPath, branch, force) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_SUBMODULE, projectDir, url, localPath, branch, force),
+    registerSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REGISTER_SUBMODULE, projectDir, subPath),
     removeSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_SUBMODULE, projectDir, subPath),
     getRemotes: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_REMOTES, projectDir),
     addRemote: (projectDir, name, url) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_REMOTE, projectDir, name, url),

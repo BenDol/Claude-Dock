@@ -1383,6 +1383,20 @@ export async function addSubmodule(cwd: string, url: string, localPath?: string,
   await gitExec(cwd, args, 60000)
 }
 
+export async function registerSubmodule(cwd: string, subPath: string): Promise<void> {
+  // Read the remote URL from the nested git repo
+  const absPath = path.resolve(cwd, subPath)
+  const { stdout } = await gitExec(absPath, ['remote', 'get-url', 'origin'], 5000)
+  const url = stdout.trim()
+  if (!url) throw new Error('Submodule has no remote "origin" configured')
+
+  // Unstage the gitlink entry if it's currently staged
+  try { await gitExec(cwd, ['reset', 'HEAD', '--', subPath], 5000) } catch { /* not staged — ok */ }
+
+  // Properly register via git submodule add (--force because dir already exists)
+  await gitExec(cwd, ['submodule', 'add', '--force', url, subPath], 60000)
+}
+
 export async function removeSubmodule(cwd: string, subPath: string): Promise<void> {
   await gitExec(cwd, ['rm', '-f', subPath], 30000)
 }

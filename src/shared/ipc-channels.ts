@@ -95,6 +95,7 @@ export const IPC = {
   GIT_MGR_GET_FILE_BLOB: 'gitMgr:getFileBlob',
   GIT_MGR_OPEN_BASH: 'gitMgr:openBash',
   GIT_MGR_ADD_SUBMODULE: 'gitMgr:addSubmodule',
+  GIT_MGR_REGISTER_SUBMODULE: 'gitMgr:registerSubmodule',
   GIT_MGR_REMOVE_SUBMODULE: 'gitMgr:removeSubmodule',
   GIT_MGR_GET_REMOTES: 'gitMgr:getRemotes',
   GIT_MGR_ADD_REMOTE: 'gitMgr:addRemote',
