@@ -200,17 +200,26 @@ export class PtyManager {
 
   /**
    * Build the resume command with a failure marker that triggers when Claude
-   * exits non-zero (e.g. session not found). Uses shell-appropriate syntax.
+   * exits non-zero (e.g. session not found). The marker is encoded in the
+   * command so the shell echo (which shows the raw typed text) does NOT
+   * contain the decoded marker string — only the actual output does.
    */
   private buildResumeCmd(shell: string, sessionId: string): string {
-    const marker = 'echo __DOCK_RESUME_FAILED__'
     const lower = shell.toLowerCase()
     if (lower.includes('powershell') || lower.includes('pwsh')) {
-      return `claude --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { ${marker} }\r`
+      // PowerShell: string concatenation hides marker from command echo
+      return `claude --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { Write-Host ('__DOCK' + '_RF__') }\r`
     }
-    // bash, zsh, cmd.exe all support ||
-    return `claude --resume ${sessionId} || ${marker}\r`
+    if (lower.includes('cmd')) {
+      // cmd.exe: ^ escape is consumed during parsing, not in PTY echo
+      return `claude --resume ${sessionId} || echo __DOCK^_RF__\r`
+    }
+    // bash/zsh: printf with hex escape — echo shows \x5f, output shows _
+    return `claude --resume ${sessionId} || printf '__DOCK\\x5fRF__\\n'\r`
   }
+
+  // The decoded marker that appears in actual output but NOT in command echo
+  private static readonly RESUME_FAIL_MARKER = '__DOCK_RF__'
 
   /**
    * Check buffered PTY output for the resume failure marker.
@@ -222,7 +231,7 @@ export class PtyManager {
 
     // Combine tail of previous chunk with current chunk to handle boundary splits
     const combined = watcher.tail + data
-    if (combined.includes('__DOCK_RESUME_FAILED__')) {
+    if (combined.includes(PtyManager.RESUME_FAIL_MARKER)) {
       clearTimeout(watcher.timer)
       this.resumeWatchers.delete(terminalId)
       this.handleResumeFailed(terminalId)

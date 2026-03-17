@@ -76,21 +76,33 @@ const Launcher: React.FC = () => {
   useEffect(() => {
     const api = getDockApi()
 
-    // Start update check
-    api.settings.get().then((settings) => {
-      const profile = settings.updater?.profile || 'latest'
-      autoUpdateRef.current = __DEV__ ? false : (settings.updater?.autoUpdate ?? false)
-      api.updater
-        .check(profile)
-        .then((info) => {
-          setUpdateInfo(info)
-          setUpdatePhase(info.available ? 'available' : 'skipped')
-        })
-        .catch(() => {
-          setUpdatePhase('skipped')
-        })
+    // Start update check (skip if another instance is already installing)
+    const doUpdateCheck = () => {
+      api.settings.get().then((settings) => {
+        const profile = settings.updater?.profile || 'latest'
+        autoUpdateRef.current = __DEV__ ? false : (settings.updater?.autoUpdate ?? false)
+        api.updater
+          .check(profile)
+          .then((info) => {
+            setUpdateInfo(info)
+            setUpdatePhase(info.available ? 'available' : 'skipped')
+          })
+          .catch(() => {
+            setUpdatePhase('skipped')
+          })
+      }).catch(() => {
+        setUpdatePhase('skipped')
+      })
+    }
+
+    api.updater.isLocked().then((locked) => {
+      if (locked) {
+        setUpdatePhase('skipped')
+      } else {
+        doUpdateCheck()
+      }
     }).catch(() => {
-      setUpdatePhase('skipped')
+      doUpdateCheck()
     })
 
     // Check Git first (Claude check happens after git resolves via second useEffect)
@@ -231,7 +243,10 @@ const Launcher: React.FC = () => {
     }
   }
 
-  const doInstall = () => {
+  const doInstall = async () => {
+    if (autoOpenDir) {
+      try { await getDockApi().updater.savePendingProject(autoOpenDir) } catch { /* best-effort */ }
+    }
     getDockApi().updater.install().catch(() => {
       setUpdateError('Failed to install update')
       setUpdatePhase('error')
@@ -439,9 +454,13 @@ const Launcher: React.FC = () => {
   const showGitBanner = gitPhase !== 'installed' && gitPhase !== 'skipped'
   const showClaudeBanner = claudePhase !== 'skipped'
 
+  const updateBlocking = autoOpenDir
+    ? (updatePhase === 'checking' || updatePhase === 'available' || updatePhase === 'downloading' || updatePhase === 'ready')
+    : autoUpdating
+
   const isBlocked = gitPhase === 'checking' || gitPhase === 'not-installed' || gitPhase === 'installing'
     || claudePhase === 'checking' || claudePhase === 'not-installed' || claudePhase === 'installing'
-    || autoUpdating
+    || updateBlocking
 
   // Auto-open project from taskbar jump list once checks finish
   const autoOpenFired = useRef(false)
@@ -515,7 +534,7 @@ const Launcher: React.FC = () => {
                         Download & Update
                       </button>
                       <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
-                        Skip
+                        {autoOpenDir ? 'Remind Me Later' : 'Skip'}
                       </button>
                     </>
                   )}
@@ -567,7 +586,7 @@ const Launcher: React.FC = () => {
                         Install & Restart
                       </button>
                       <button className="updater-btn updater-btn-secondary" onClick={skipUpdate}>
-                        Later
+                        {autoOpenDir ? 'Remind Me Later' : 'Later'}
                       </button>
                     </>
                   )}

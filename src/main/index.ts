@@ -13,6 +13,7 @@ import { initLogger, log, logInfo, logError } from './logger'
 import { getSetting } from './settings-store'
 import { updateJumpList } from './recent-store'
 import { enrichPathWithKnownDirs } from './claude-cli'
+import { loadPendingProject, cleanStaleLock } from './pending-project'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -124,8 +125,10 @@ if (!gotLock) {
     updateJumpList()
     try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
 
+    cleanStaleLock()
+
     const manager = DockManager.getInstance()
-    const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv)
+    const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv) || loadPendingProject()
     await manager.showLauncher(launchDir || undefined)
 
     // Fire-and-forget plugin update check — fully async, never blocks the launcher.

@@ -72,7 +72,8 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   try {
     await gitExec(cwd, ['rev-parse', '--is-inside-work-tree'], 5000)
     return true
-  } catch {
+  } catch (err) {
+    getServices().log(`[git-manager] isGitRepo(${cwd}): false —`, err instanceof Error ? err.message.split('\n')[0] : err)
     return false
   }
 }
@@ -1314,8 +1315,8 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
           const lines = porcelain.trim().split('\n').filter(Boolean)
           sub.hasDirtyWorkTree = lines.length > 0
           sub.changeCount = lines.length
-        } catch {
-          // ignore — submodule might not be accessible
+        } catch (err) {
+          getServices().log(`[git-manager] getSubmodules: status failed for ${sub.path}:`, err instanceof Error ? err.message.split('\n')[0] : err)
         }
         try {
           const subCwd = pathMod.join(cwd, sub.path)
@@ -1328,8 +1329,8 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
             // Detached HEAD — common after git submodule update
             sub.isDetached = true
           }
-        } catch {
-          // ignore
+        } catch (err) {
+          getServices().log(`[git-manager] getSubmodules: branch check failed for ${sub.path}:`, err instanceof Error ? err.message.split('\n')[0] : err)
         }
       })
     )
@@ -1382,24 +1383,80 @@ export async function addSubmodule(cwd: string, url: string, localPath?: string,
   if (force) args.push('--force')
   args.push(url)
   if (localPath) args.push(localPath)
+  getServices().log(`[git-manager] addSubmodule: git ${args.join(' ')} in ${cwd}`)
   await gitExec(cwd, args, 60000)
 }
 
 export async function registerSubmodule(cwd: string, subPath: string): Promise<void> {
-  // Read the remote URL from the nested git repo
+  const svc = getServices()
   const absPath = path.resolve(cwd, subPath)
+  svc.log(`[git-manager] registerSubmodule: cwd=${cwd} subPath=${subPath} absPath=${absPath}`)
+
+  // Verify the directory exists and is a git repo
+  const gitEntry = path.join(absPath, '.git')
+  const gitExists = fs.existsSync(gitEntry)
+  const gitIsDir = gitExists && fs.statSync(gitEntry).isDirectory()
+  svc.log(`[git-manager] registerSubmodule: .git exists=${gitExists} isDir=${gitIsDir}`)
+  if (!gitExists) throw new Error(`No .git found in ${absPath} — not a git repository`)
+
+  // Read the remote URL from the nested git repo
   const { stdout } = await gitExec(absPath, ['remote', 'get-url', 'origin'], 5000)
   const url = stdout.trim()
+  svc.log(`[git-manager] registerSubmodule: remote origin url=${url}`)
   if (!url) throw new Error('Submodule has no remote "origin" configured')
 
   // Unstage the gitlink entry if it's currently staged
-  try { await gitExec(cwd, ['reset', 'HEAD', '--', subPath], 5000) } catch { /* not staged — ok */ }
+  try {
+    await gitExec(cwd, ['reset', 'HEAD', '--', subPath], 5000)
+    svc.log('[git-manager] registerSubmodule: unstaged existing gitlink')
+  } catch {
+    svc.log('[git-manager] registerSubmodule: no staged gitlink to reset (ok)')
+  }
 
   // Properly register via git submodule add (--force because dir already exists)
+  svc.log(`[git-manager] registerSubmodule: running git submodule add --force ${url} ${subPath}`)
   await gitExec(cwd, ['submodule', 'add', '--force', url, subPath], 60000)
+
+  // Verify the submodule is still a valid git repo after absorption
+  const postGitExists = fs.existsSync(gitEntry)
+  const postGitIsFile = postGitExists && fs.statSync(gitEntry).isFile()
+  const postGitIsDir = postGitExists && fs.statSync(gitEntry).isDirectory()
+  svc.log(`[git-manager] registerSubmodule: post-add .git exists=${postGitExists} isFile=${postGitIsFile} isDir=${postGitIsDir}`)
+
+  if (!postGitExists) {
+    // .git was absorbed but the gitdir file wasn't created — try to recover
+    svc.logError('[git-manager] registerSubmodule: .git missing after submodule add, attempting recovery')
+    try {
+      await gitExec(cwd, ['submodule', 'absorbgitdirs', '--', subPath], 10000)
+      svc.log('[git-manager] registerSubmodule: absorbgitdirs recovery attempted')
+    } catch (absErr) {
+      svc.logError('[git-manager] registerSubmodule: absorbgitdirs recovery failed:', absErr)
+    }
+
+    // If still missing, try init + update to recreate
+    if (!fs.existsSync(gitEntry)) {
+      svc.log('[git-manager] registerSubmodule: .git still missing, trying submodule init + update')
+      try {
+        await gitExec(cwd, ['submodule', 'init', '--', subPath], 10000)
+        await gitExec(cwd, ['submodule', 'update', '--', subPath], 60000)
+        svc.log('[git-manager] registerSubmodule: init + update completed')
+      } catch (initErr) {
+        svc.logError('[git-manager] registerSubmodule: init + update failed:', initErr)
+        throw new Error(`Submodule registered in .gitmodules but .git is missing — the repository may need manual repair: ${initErr instanceof Error ? initErr.message : initErr}`)
+      }
+    }
+  }
+
+  // Final verification
+  const valid = await isGitRepo(absPath)
+  svc.log(`[git-manager] registerSubmodule: final isGitRepo check = ${valid}`)
+  if (!valid) {
+    throw new Error('Submodule was registered but the directory is no longer a valid git repository — check .git/modules/ for absorbed content')
+  }
 }
 
 export async function removeSubmodule(cwd: string, subPath: string): Promise<void> {
+  getServices().log(`[git-manager] removeSubmodule: ${subPath} in ${cwd}`)
   await gitExec(cwd, ['rm', '-f', subPath], 30000)
 }
 

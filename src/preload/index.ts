@@ -95,6 +95,8 @@ export interface DockApi {
     check: (profile: string) => Promise<UpdateInfo>
     download: (url: string, assetName: string) => Promise<string>
     install: () => Promise<void>
+    savePendingProject: (dir: string) => Promise<void>
+    isLocked: () => Promise<boolean>
     onProgress: (callback: (downloaded: number, total: number) => void) => () => void
   }
   git: {
@@ -308,6 +310,8 @@ const dockApi: DockApi = {
     check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),
     download: (url, assetName) => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD, url, assetName),
     install: () => ipcRenderer.invoke(IPC.UPDATER_INSTALL),
+    savePendingProject: (dir) => ipcRenderer.invoke(IPC.UPDATER_SAVE_PENDING_PROJECT, dir),
+    isLocked: () => ipcRenderer.invoke(IPC.UPDATER_IS_LOCKED),
     onProgress: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, downloaded: number, total: number) => {
         callback(downloaded, total)

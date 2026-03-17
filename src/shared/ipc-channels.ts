@@ -23,6 +23,8 @@ export const IPC = {
   UPDATER_CHECK: 'updater:check',
   UPDATER_DOWNLOAD: 'updater:download',
   UPDATER_INSTALL: 'updater:install',
+  UPDATER_SAVE_PENDING_PROJECT: 'updater:savePendingProject',
+  UPDATER_IS_LOCKED: 'updater:isLocked',
   GIT_CHECK: 'git:check',
   GIT_INSTALL: 'git:install',
   GIT_CLONE: 'git:clone',

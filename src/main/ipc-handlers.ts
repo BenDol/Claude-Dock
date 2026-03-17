@@ -8,6 +8,7 @@ import { getSettings, setSettings } from './settings-store'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
+import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLock } from './pending-project'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit, checkClaudePath, fixClaudePath } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { ActivityTracker } from './activity-tracker'
@@ -524,11 +525,23 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.UPDATER_SAVE_PENDING_PROJECT, (_event, dir: string) => {
+    savePendingProject(dir)
+  })
+
+  ipcMain.handle(IPC.UPDATER_IS_LOCKED, () => {
+    return isUpdateLocked()
+  })
+
   ipcMain.handle(IPC.UPDATER_INSTALL, () => {
     if (__DEV__) throw new Error('Updates are disabled in dev mode')
+    if (!acquireUpdateLock()) {
+      throw new Error('Another update is already in progress')
+    }
     try {
       installAndRestart()
     } catch (err) {
+      releaseUpdateLock()
       throw new Error(err instanceof Error ? err.message : 'Install failed')
     }
   })
