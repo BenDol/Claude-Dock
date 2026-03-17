@@ -1332,6 +1332,41 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
   }
 }
 
+/**
+ * Get file content as a base64 data URL. If ref is given, reads from that git ref;
+ * otherwise reads from the working tree.
+ */
+export async function getFileBlob(cwd: string, filePath: string, ref?: string): Promise<string | null> {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  const mimeMap: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon',
+    avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff',
+    pdf: 'application/pdf'
+  }
+  const mime = mimeMap[ext] || 'application/octet-stream'
+
+  try {
+    if (ref) {
+      // Read from git object store
+      const buf = await new Promise<Buffer>((resolve, reject) => {
+        execFile('git', ['show', `${ref}:${filePath}`], { cwd, maxBuffer: 50 * 1024 * 1024, encoding: 'buffer' }, (err, out) => {
+          if (err) reject(err)
+          else resolve(out as unknown as Buffer)
+        })
+      })
+      return `data:${mime};base64,${buf.toString('base64')}`
+    } else {
+      // Read from working tree
+      const absPath = path.join(cwd, filePath)
+      const buf = await fs.promises.readFile(absPath)
+      return `data:${mime};base64,${buf.toString('base64')}`
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function addSubmodule(cwd: string, url: string, localPath?: string, branch?: string, force?: boolean): Promise<void> {
   const args = ['submodule', 'add']
   if (branch) args.push('-b', branch)

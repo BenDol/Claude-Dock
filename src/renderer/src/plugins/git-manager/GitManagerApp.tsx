@@ -2303,6 +2303,173 @@ const GraphToggleIcon: React.FC = () => (
   </svg>
 )
 
+// ── Binary file viewer system ──────────────────────────────────────────────────
+// Extensible registry: add new viewer types by appending to FILE_VIEWERS.
+
+/** Props shared by all binary file viewer components */
+interface FileViewerProps {
+  file: GitFileDiff
+  projectDir: string
+  oldSrc: string | null
+  newSrc: string | null
+}
+
+/** Hook that fetches old/new blob data URLs for a binary file diff */
+function useFileBlobs(
+  file: GitFileDiff,
+  projectDir: string,
+  commitHash?: string,
+  staged?: boolean
+): { oldSrc: string | null; newSrc: string | null; loading: boolean } {
+  const [oldSrc, setOldSrc] = useState<string | null>(null)
+  const [newSrc, setNewSrc] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const api = getDockApi()
+  const filePath = file.path
+  const oldPath = file.oldPath || file.path
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setOldSrc(null)
+    setNewSrc(null)
+
+    const load = async (): Promise<void> => {
+      const isAdded = file.status === 'added'
+      const isDeleted = file.status === 'deleted'
+
+      let oldData: string | null = null
+      let newData: string | null = null
+
+      if (commitHash) {
+        if (!isAdded) oldData = await api.gitManager.getFileBlob(projectDir, oldPath, `${commitHash}~1`)
+        if (!isDeleted) newData = await api.gitManager.getFileBlob(projectDir, filePath, commitHash)
+      } else if (staged) {
+        if (!isAdded) oldData = await api.gitManager.getFileBlob(projectDir, oldPath, 'HEAD')
+        if (!isDeleted) newData = await api.gitManager.getFileBlob(projectDir, filePath, ':0:' + filePath)
+      } else {
+        if (!isAdded) oldData = await api.gitManager.getFileBlob(projectDir, oldPath, 'HEAD')
+        if (!isDeleted) newData = await api.gitManager.getFileBlob(projectDir, filePath)
+      }
+
+      if (cancelled) return
+      setOldSrc(oldData)
+      setNewSrc(newData)
+      setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [filePath, oldPath, commitHash, staged, projectDir, file.status])
+
+  return { oldSrc, newSrc, loading }
+}
+
+/** Image viewer — renders before/after image previews */
+const ImageFileViewer: React.FC<FileViewerProps> = ({ file, oldSrc, newSrc }) => {
+  const onlyNew = !oldSrc && newSrc
+  const onlyOld = oldSrc && !newSrc
+  return (
+    <div className="gm-image-diff">
+      {onlyNew ? (
+        <div className="gm-image-diff-single gm-image-diff-added">
+          <img src={newSrc!} alt={file.path} />
+        </div>
+      ) : onlyOld ? (
+        <div className="gm-image-diff-single gm-image-diff-deleted">
+          <img src={oldSrc!} alt={file.oldPath || file.path} />
+        </div>
+      ) : (
+        <div className="gm-image-diff-side-by-side">
+          <div className="gm-image-diff-panel gm-image-diff-deleted">
+            <div className="gm-image-diff-label">Before</div>
+            <img src={oldSrc!} alt={`${file.oldPath || file.path} (before)`} />
+          </div>
+          <div className="gm-image-diff-panel gm-image-diff-added">
+            <div className="gm-image-diff-label">After</div>
+            <img src={newSrc!} alt={`${file.path} (after)`} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** PDF viewer — renders before/after embedded PDF previews */
+const PdfFileViewer: React.FC<FileViewerProps> = ({ file, oldSrc, newSrc }) => {
+  const onlyNew = !oldSrc && newSrc
+  const onlyOld = oldSrc && !newSrc
+  return (
+    <div className="gm-pdf-diff">
+      {onlyNew ? (
+        <div className="gm-pdf-diff-single">
+          <embed src={newSrc!} type="application/pdf" className="gm-pdf-embed" />
+        </div>
+      ) : onlyOld ? (
+        <div className="gm-pdf-diff-single">
+          <embed src={oldSrc!} type="application/pdf" className="gm-pdf-embed" />
+        </div>
+      ) : (
+        <div className="gm-pdf-diff-side-by-side">
+          <div className="gm-pdf-diff-panel gm-image-diff-deleted">
+            <div className="gm-image-diff-label">Before</div>
+            <embed src={oldSrc!} type="application/pdf" className="gm-pdf-embed" />
+          </div>
+          <div className="gm-pdf-diff-panel gm-image-diff-added">
+            <div className="gm-image-diff-label">After</div>
+            <embed src={newSrc!} type="application/pdf" className="gm-pdf-embed" />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Registry entry mapping file extensions to a viewer component */
+interface FileViewerEntry {
+  extensions: Set<string>
+  component: React.FC<FileViewerProps>
+  label: string // shown while loading
+}
+
+const FILE_VIEWERS: FileViewerEntry[] = [
+  {
+    extensions: new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico', 'avif', 'tif', 'tiff']),
+    component: ImageFileViewer,
+    label: 'image'
+  },
+  {
+    extensions: new Set(['pdf']),
+    component: PdfFileViewer,
+    label: 'PDF'
+  }
+]
+
+function getFileViewer(filePath: string): FileViewerEntry | null {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  for (const entry of FILE_VIEWERS) {
+    if (entry.extensions.has(ext)) return entry
+  }
+  return null
+}
+
+/** Dispatcher — picks the right viewer for a binary file, or falls back to "Binary file" text */
+const BinaryFileViewer: React.FC<{
+  file: GitFileDiff
+  projectDir: string
+  commitHash?: string
+  staged?: boolean
+}> = ({ file, projectDir, commitHash, staged }) => {
+  const entry = getFileViewer(file.path)
+  const { oldSrc, newSrc, loading } = useFileBlobs(file, projectDir, commitHash, staged)
+
+  if (!entry) return <div className="gm-diff-binary">Binary file</div>
+  if (loading) return <div className="gm-diff-binary">Loading {entry.label}...</div>
+  if (!oldSrc && !newSrc) return <div className="gm-diff-binary">Binary file ({entry.label} not available)</div>
+
+  const Viewer = entry.component
+  return <Viewer file={file} projectDir={projectDir} oldSrc={oldSrc} newSrc={newSrc} />
+}
+
 /** Renders a single file diff lazily — only mounts content when scrolled into view */
 const LazyDiffFile: React.FC<{
   file: GitFileDiff
@@ -2406,7 +2573,7 @@ const LazyDiffFile: React.FC<{
       {!visible ? (
         <div className="gm-diff-lazy-placeholder" style={{ height: lineCount * 20 + 8 }} />
       ) : f.isBinary ? (
-        <div className="gm-diff-binary">Binary file</div>
+        <BinaryFileViewer file={f} projectDir={projectDir} commitHash={commitHash} />
       ) : (
         <LargeDiffGate lineCount={lineCount}>
           <div className="gm-diff-file-body" style={{ '--line-no-ch': lineNoDigits(f.hunks) } as React.CSSProperties}>
@@ -4866,7 +5033,7 @@ const WorkingDiffViewer: React.FC<{
                 </div>
               )}
               {f.isBinary ? (
-                <div className="gm-diff-binary">Binary file</div>
+                <BinaryFileViewer file={f} projectDir={projectDir} staged={staged} />
               ) : (
                 <LargeDiffGate lineCount={f.hunks.reduce((n, h) => n + h.lines.length, 0)}>
                   {f.hunks.map((h, hi) => (
