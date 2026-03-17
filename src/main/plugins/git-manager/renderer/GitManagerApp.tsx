@@ -4599,7 +4599,7 @@ const FileContextMenu: React.FC<{
           </div>
         )}
       </div>
-      {section === 'unstaged' && isUntracked && (
+      {section === 'unstaged' && isUntracked && !allUntracked && (
         <>
           <div className="gm-ctx-separator" />
           <div className="gm-ctx-item gm-ctx-danger" onClick={doDelete}>Delete file{count > 1 ? 's' : ''}{suffix}</div>

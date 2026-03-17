@@ -29,6 +29,8 @@ export class PtyManager {
   // Data batching to reduce IPC overhead
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  // Resume failure detection — watches early output for marker indicating session not found
+  private resumeWatchers = new Map<string, { tail: string; timer: ReturnType<typeof setTimeout> }>()
   // Utility process hosting node-pty
   private host: UtilityProcess | null = null
 
@@ -122,7 +124,7 @@ export class PtyManager {
     })
 
     const cmd = resumeId
-      ? `claude --resume ${sessionId}\r`
+      ? this.buildResumeCmd(shell, sessionId)
       : ephemeral
         ? `claude${claudeFlags ? ' ' + claudeFlags : ''}\r`
         : `claude --session-id ${sessionId}\r`
@@ -131,6 +133,14 @@ export class PtyManager {
     if (resumeId && !ephemeral) {
       this.interactedIds.add(terminalId)
       this.onSessionCreated(sessionId)
+    }
+
+    // Set up resume failure watcher (auto-expires after 60s)
+    if (resumeId) {
+      this.resumeWatchers.set(terminalId, {
+        tail: '',
+        timer: setTimeout(() => this.resumeWatchers.delete(terminalId), 60000)
+      })
     }
 
     // Queue the claude launch to run serially
@@ -169,6 +179,10 @@ export class PtyManager {
   }
 
   private bufferData(terminalId: string, data: string): void {
+    // Check for resume failure before buffering (suppresses error output on detection)
+    if (this.resumeWatchers.has(terminalId) && this.detectResumeFailed(terminalId, data)) {
+      return
+    }
     const existing = this.pendingData.get(terminalId)
     this.pendingData.set(terminalId, existing ? existing + data : data)
     if (!this.flushTimer) {
@@ -182,6 +196,72 @@ export class PtyManager {
       this.onData(terminalId, data)
     }
     this.pendingData.clear()
+  }
+
+  /**
+   * Build the resume command with a failure marker that triggers when Claude
+   * exits non-zero (e.g. session not found). Uses shell-appropriate syntax.
+   */
+  private buildResumeCmd(shell: string, sessionId: string): string {
+    const marker = 'echo __DOCK_RESUME_FAILED__'
+    const lower = shell.toLowerCase()
+    if (lower.includes('powershell') || lower.includes('pwsh')) {
+      return `claude --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { ${marker} }\r`
+    }
+    // bash, zsh, cmd.exe all support ||
+    return `claude --resume ${sessionId} || ${marker}\r`
+  }
+
+  /**
+   * Check buffered PTY output for the resume failure marker.
+   * Returns true if failure detected (caller should suppress the data chunk).
+   */
+  private detectResumeFailed(terminalId: string, data: string): boolean {
+    const watcher = this.resumeWatchers.get(terminalId)
+    if (!watcher) return false
+
+    // Combine tail of previous chunk with current chunk to handle boundary splits
+    const combined = watcher.tail + data
+    if (combined.includes('__DOCK_RESUME_FAILED__')) {
+      clearTimeout(watcher.timer)
+      this.resumeWatchers.delete(terminalId)
+      this.handleResumeFailed(terminalId)
+      return true
+    }
+
+    // Keep tail for cross-boundary matching
+    watcher.tail = data.length > 100 ? data.slice(-100) : data
+    return false
+  }
+
+  /**
+   * Handle a detected resume failure: clear the terminal, generate a fresh
+   * session, and relaunch Claude without --resume.
+   */
+  private handleResumeFailed(terminalId: string): void {
+    const instance = this.ptys.get(terminalId)
+    if (!instance) return
+
+    log(`PtyManager: resume failed for ${terminalId}, restarting with fresh session`)
+
+    // Clear any pending error output that hasn't been flushed yet
+    this.pendingData.delete(terminalId)
+
+    // Send ANSI clear screen + clear scrollback + cursor home directly to renderer
+    this.onData(terminalId, '\x1b[2J\x1b[3J\x1b[H')
+
+    // Generate new session and launch fresh after shell settles
+    const newSessionId = crypto.randomUUID()
+    instance.sessionId = newSessionId
+    instance.isResume = false
+
+    setTimeout(() => {
+      if (!this.ptys.has(terminalId)) return
+      this.sendToHost({ type: 'write', terminalId, data: `claude --session-id ${newSessionId}\r` })
+      if (!this.suppressSessionChanges) {
+        this.onSessionsChanged()
+      }
+    }, 500)
   }
 
   getSessionIds(): string[] {
@@ -255,6 +335,11 @@ export class PtyManager {
 
   kill(terminalId: string): void {
     if (this.ptys.has(terminalId)) {
+      const watcher = this.resumeWatchers.get(terminalId)
+      if (watcher) {
+        clearTimeout(watcher.timer)
+        this.resumeWatchers.delete(terminalId)
+      }
       this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
@@ -268,6 +353,10 @@ export class PtyManager {
 
   killAll(): void {
     this.suppressSessionChanges = true
+    for (const [, watcher] of this.resumeWatchers) {
+      clearTimeout(watcher.timer)
+    }
+    this.resumeWatchers.clear()
     if (this.flushTimer) {
       clearTimeout(this.flushTimer)
       this.flushTimer = null

@@ -310,11 +310,13 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
           theirsStatus: xy[1]
         })
       } else if (entry.startsWith('? ')) {
-        const path = entry.slice(2)
+        const filePath = entry.slice(2)
+        const isNestedRepo = filePath.endsWith('/') && fs.existsSync(path.join(cwd, filePath, '.git'))
         result.untracked.push({
-          path,
+          path: filePath,
           indexStatus: '?',
-          workTreeStatus: '?'
+          workTreeStatus: '?',
+          isSubmodule: isNestedRepo || undefined
         })
       }
     }

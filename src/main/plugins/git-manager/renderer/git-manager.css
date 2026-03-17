@@ -2560,7 +2560,7 @@
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  padding: 2px 8px;
+  padding: 5px 8px;
   border-radius: 3px;
   cursor: pointer;
   transition: color 0.12s, background 0.12s;
