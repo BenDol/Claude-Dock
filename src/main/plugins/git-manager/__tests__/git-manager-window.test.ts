@@ -28,6 +28,8 @@ function mockWindow(destroyed = false) {
     isDestroyed: () => destroyed,
     isMinimized: () => false,
     close: vi.fn(),
+    destroy: vi.fn(),
+    hide: vi.fn(),
     focus: vi.fn(),
     show: vi.fn(),
     restore: vi.fn(),

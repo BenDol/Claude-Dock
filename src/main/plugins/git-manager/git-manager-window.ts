@@ -15,6 +15,8 @@ export class GitManagerWindowManager {
   private static instance: GitManagerWindowManager
   private windows = new Map<string, BrowserWindow>()
   private commitDetailWindows = new Map<string, Set<BrowserWindow>>()
+  /** Tracks which windows are being force-closed (project close / plugin disable / app quit). */
+  private forceClosing = new Set<string>()
 
   static getInstance(): GitManagerWindowManager {
     if (!GitManagerWindowManager.instance) {
@@ -24,13 +26,14 @@ export class GitManagerWindowManager {
   }
 
   async open(projectDir: string): Promise<void> {
-    // Focus existing window if already open
+    // Re-show existing window if still alive (hidden or minimized)
     const existing = this.windows.get(projectDir)
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore()
       existing.show()
       existing.focus()
       existing.webContents.send('git-manager:reopen')
+      svc().broadcastPluginWindowState('git-manager', projectDir, true)
       return
     }
 
@@ -85,8 +88,21 @@ export class GitManagerWindowManager {
     win.on('maximize', persistState)
     win.on('unmaximize', persistState)
 
+    // Intercept user-initiated close (X button, Alt+F4, taskbar close) and hide
+    // instead of destroying the window, so reopening is instant.
+    // Force-closes (project close, plugin disable, app quit) bypass this via
+    // the forceClosing flag and use win.destroy().
+    win.on('close', (event) => {
+      if (this.forceClosing.has(projectDir)) return // let it close normally
+      event.preventDefault()
+      win.hide()
+      svc().broadcastPluginWindowState('git-manager', projectDir, false)
+      svc().log(`[git-manager] window hidden for ${projectDir}`)
+    })
+
     win.on('closed', () => {
       this.windows.delete(projectDir)
+      this.forceClosing.delete(projectDir)
       // Close all commit detail windows for this project
       const detailWins = this.commitDetailWindows.get(projectDir)
       if (detailWins) {
@@ -164,18 +180,22 @@ export class GitManagerWindowManager {
   close(projectDir: string): void {
     const win = this.windows.get(projectDir)
     if (win && !win.isDestroyed()) {
-      win.close()
+      this.forceClosing.add(projectDir)
+      win.destroy()
     }
   }
 
   closeAll(): void {
-    for (const win of this.windows.values()) {
-      if (!win.isDestroyed()) win.close()
+    for (const [dir, win] of this.windows) {
+      if (!win.isDestroyed()) {
+        this.forceClosing.add(dir)
+        win.destroy()
+      }
     }
     this.windows.clear()
     for (const set of this.commitDetailWindows.values()) {
       for (const win of set) {
-        if (!win.isDestroyed()) win.close()
+        if (!win.isDestroyed()) win.destroy()
       }
     }
     this.commitDetailWindows.clear()
