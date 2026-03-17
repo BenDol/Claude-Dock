@@ -251,6 +251,11 @@ export interface DockApi {
     onProgress: (callback: (pluginId: string, downloaded: number, total: number) => void) => () => void
     onStateChanged: (callback: (updates: PluginUpdateEntry[]) => void) => () => void
   }
+  contextMenu: {
+    check: () => Promise<{ registered: boolean }>
+    register: () => Promise<{ success: boolean; error?: string }>
+    unregister: () => Promise<{ success: boolean; error?: string }>
+  }
   debug: {
     write: (text: string) => Promise<void>
     openDevTools: () => Promise<void>
@@ -512,6 +517,11 @@ const dockApi: DockApi = {
       ipcRenderer.on(IPC.PLUGIN_UPDATE_STATE_CHANGED, handler)
       return () => ipcRenderer.removeListener(IPC.PLUGIN_UPDATE_STATE_CHANGED, handler)
     }
+  },
+  contextMenu: {
+    check: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_CHECK),
+    register: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_REGISTER),
+    unregister: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_UNREGISTER)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

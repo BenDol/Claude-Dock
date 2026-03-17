@@ -14,6 +14,7 @@ import { getSetting } from './settings-store'
 import { updateJumpList } from './recent-store'
 import { enrichPathWithKnownDirs } from './claude-cli'
 import { loadPendingProject, cleanStaleLock } from './pending-project'
+import { refreshContextMenuIfNeeded } from './context-menu-integration'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -123,6 +124,7 @@ if (!gotLock) {
     registerPlugins()
     installCli()
     updateJumpList()
+    refreshContextMenuIfNeeded()
     try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
 
     cleanStaleLock()

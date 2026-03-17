@@ -11,6 +11,7 @@ import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } 
 import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLock, setAppUpdateInProgress } from './pending-project'
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit, checkClaudePath, fixClaudePath } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
+import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } from './context-menu-integration'
 import { ActivityTracker } from './activity-tracker'
 import { PluginManager, getPluginsDir } from './plugins'
 import { PluginUpdateService } from './plugins/plugin-updater'
@@ -362,6 +363,18 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to fix PATH' }
     }
+  })
+
+  ipcMain.handle(IPC.CONTEXT_MENU_CHECK, () => {
+    return { registered: isContextMenuRegistered() }
+  })
+
+  ipcMain.handle(IPC.CONTEXT_MENU_REGISTER, () => {
+    return registerContextMenu()
+  })
+
+  ipcMain.handle(IPC.CONTEXT_MENU_UNREGISTER, () => {
+    return unregisterContextMenu()
   })
 
   ipcMain.handle(IPC.LINKED_CHECK_MCP, (event) => {

@@ -66,6 +66,9 @@
         "portable"
       ]
     },
+    "nsis": {
+      "include": "build/installer.nsh"
+    },
     "portable": {
       "artifactName": "${productName}-${version}.Portable.${ext}"
     },

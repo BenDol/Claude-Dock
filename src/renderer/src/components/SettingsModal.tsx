@@ -106,6 +106,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [mcpStatus, setMcpStatus] = useState('')
   const [pathCheckStatus, setPathCheckStatus] = useState('')
   const [pathChecking, setPathChecking] = useState(false)
+  const [ctxMenuRegistered, setCtxMenuRegistered] = useState<boolean | null>(null)
+  const [ctxMenuBusy, setCtxMenuBusy] = useState(false)
+  const [ctxMenuStatus, setCtxMenuStatus] = useState('')
 
   const [notifSources, setNotifSources] = useState(BUILTIN_NOTIFICATION_SOURCES)
 
@@ -134,6 +137,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       getDockApi().linked.checkMcp().then((r) => setMcpInstalled(r.installed))
     }
   }, [tab, mcpInstalled])
+
+  // Check context menu registration status when behavior tab is shown
+  useEffect(() => {
+    if (tab === 'behavior' && ctxMenuRegistered === null) {
+      getDockApi().contextMenu.check().then((r) => setCtxMenuRegistered(r.registered))
+    }
+  }, [tab, ctxMenuRegistered])
 
   const updateTheme = (partial: Partial<Settings['theme']>) => {
     update({ theme: { ...settings.theme, ...partial } })
@@ -509,6 +519,50 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     </label>
                   )
                 })}
+                <div className="settings-divider" />
+                <div className="settings-section-header">Shell Integration</div>
+                <div className="settings-row">
+                  <span className="settings-label">
+                    Context Menu: {ctxMenuRegistered === null ? '...' : ctxMenuRegistered ? 'Registered' : 'Not Registered'}
+                  </span>
+                  <button
+                    className="settings-check-update-btn"
+                    disabled={ctxMenuBusy}
+                    onClick={async () => {
+                      setCtxMenuBusy(true)
+                      setCtxMenuStatus('')
+                      try {
+                        const api = getDockApi()
+                        if (ctxMenuRegistered) {
+                          const r = await api.contextMenu.unregister()
+                          if (r.success) {
+                            setCtxMenuRegistered(false)
+                            setCtxMenuStatus('Context menu removed.')
+                          } else {
+                            setCtxMenuStatus(r.error || 'Failed to remove.')
+                          }
+                        } else {
+                          const r = await api.contextMenu.register()
+                          if (r.success) {
+                            setCtxMenuRegistered(true)
+                            setCtxMenuStatus('Context menu registered.')
+                          } else {
+                            setCtxMenuStatus(r.error || 'Failed to register.')
+                          }
+                        }
+                      } catch {
+                        setCtxMenuStatus('Operation failed.')
+                      }
+                      setCtxMenuBusy(false)
+                    }}
+                  >
+                    {ctxMenuBusy ? '...' : ctxMenuRegistered ? 'Remove' : 'Register'}
+                  </button>
+                </div>
+                <div className="settings-description">
+                  Adds &quot;Open with Claude Dock&quot; to your file manager&apos;s right-click context menu.
+                </div>
+                {ctxMenuStatus && <div className="settings-update-status">{ctxMenuStatus}</div>}
                 <div className="settings-divider" />
                 <div className="settings-section-header">Dock MCP Server</div>
                 <div className="settings-row">
