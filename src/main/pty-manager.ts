@@ -30,7 +30,7 @@ export class PtyManager {
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   // Resume failure detection — watches early output for marker indicating session not found
-  private resumeWatchers = new Map<string, { tail: string; timer: ReturnType<typeof setTimeout> }>()
+  private resumeWatchers = new Map<string, { tail: string; bytes: number; timer: ReturnType<typeof setTimeout> }>()
   // Utility process hosting node-pty
   private host: UtilityProcess | null = null
 
@@ -135,11 +135,12 @@ export class PtyManager {
       this.onSessionCreated(sessionId)
     }
 
-    // Set up resume failure watcher (auto-expires after 60s)
+    // Set up resume failure watcher (auto-expires after 30s)
     if (resumeId) {
       this.resumeWatchers.set(terminalId, {
         tail: '',
-        timer: setTimeout(() => this.resumeWatchers.delete(terminalId), 60000)
+        bytes: 0,
+        timer: setTimeout(() => this.resumeWatchers.delete(terminalId), 30000)
       })
     }
 
@@ -221,6 +222,11 @@ export class PtyManager {
   // The decoded marker that appears in actual output but NOT in command echo
   private static readonly RESUME_FAIL_MARKER = '__DOCK_RF__'
 
+  // Once this many bytes have arrived without the failure marker, the resume
+  // clearly succeeded (Claude is rendering conversation output). A failed
+  // resume produces at most ~300 bytes before the marker appears.
+  private static readonly RESUME_SUCCESS_BYTE_THRESHOLD = 512
+
   /**
    * Check buffered PTY output for the resume failure marker.
    * Returns true if failure detected (caller should suppress the data chunk).
@@ -228,6 +234,16 @@ export class PtyManager {
   private detectResumeFailed(terminalId: string, data: string): boolean {
     const watcher = this.resumeWatchers.get(terminalId)
     if (!watcher) return false
+
+    // Track total output — if enough data has arrived, the resume succeeded
+    // and we stop watching. This prevents false positives from conversation
+    // content that happens to contain the marker string.
+    watcher.bytes += data.length
+    if (watcher.bytes > PtyManager.RESUME_SUCCESS_BYTE_THRESHOLD) {
+      clearTimeout(watcher.timer)
+      this.resumeWatchers.delete(terminalId)
+      return false
+    }
 
     // Combine tail of previous chunk with current chunk to handle boundary splits
     const combined = watcher.tail + data
@@ -320,8 +336,8 @@ export class PtyManager {
    * dimensions already match.
    */
   private scheduleResizePoke(terminalId: string): void {
-    // Multiple pokes at staggered intervals to cover different rendering stages
-    const poke = () => {
+    // Column-based poke: shrink cols by 1, restore after a short delay
+    const pokeCols = (restoreDelay = 50) => {
       const inst = this.ptys.get(terminalId)
       if (!inst) return
       const { cols, rows } = inst
@@ -331,15 +347,32 @@ export class PtyManager {
           if (this.ptys.has(terminalId)) {
             this.sendToHost({ type: 'resize', terminalId, cols, rows })
           }
-        }, 50)
+        }, restoreDelay)
       }
     }
-    // Poke after Claude has started rendering (1.5s), after it has likely
-    // finished restoring the conversation (4s), and a late poke for slow
-    // systems like Windows 10 where ConPTY layout may settle later (7s)
-    setTimeout(poke, 1500)
-    setTimeout(poke, 4000)
-    setTimeout(poke, 7000)
+    // Row-based poke: some ConPTY implementations (notably Windows 10) only
+    // trigger a full TUI relayout on row changes, not column changes
+    const pokeRows = (restoreDelay = 50) => {
+      const inst = this.ptys.get(terminalId)
+      if (!inst) return
+      const { cols, rows } = inst
+      if (rows > 1) {
+        this.sendToHost({ type: 'resize', terminalId, cols, rows: rows - 1 })
+        setTimeout(() => {
+          if (this.ptys.has(terminalId)) {
+            this.sendToHost({ type: 'resize', terminalId, cols, rows })
+          }
+        }, restoreDelay)
+      }
+    }
+    // Early pokes for fast systems (1.5s, 4s)
+    setTimeout(pokeCols, 1500)
+    setTimeout(pokeCols, 4000)
+    // Late pokes for slow systems (Windows 10) with row-based pokes for better
+    // coverage — some ConPTY versions need a row change to reposition the cursor
+    setTimeout(pokeRows, 7000)
+    setTimeout(() => pokeCols(100), 10000)
+    setTimeout(() => pokeRows(100), 13000)
   }
 
   kill(terminalId: string): void {
