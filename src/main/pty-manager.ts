@@ -30,7 +30,7 @@ export class PtyManager {
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   // Resume failure detection — watches early output for marker indicating session not found
-  private resumeWatchers = new Map<string, { tail: string; bytes: number; timer: ReturnType<typeof setTimeout> }>()
+  private resumeWatchers = new Map<string, { tail: string; timer: ReturnType<typeof setTimeout> }>()
   // Utility process hosting node-pty
   private host: UtilityProcess | null = null
 
@@ -139,7 +139,6 @@ export class PtyManager {
     if (resumeId) {
       this.resumeWatchers.set(terminalId, {
         tail: '',
-        bytes: 0,
         timer: setTimeout(() => this.resumeWatchers.delete(terminalId), 30000)
       })
     }
@@ -222,33 +221,23 @@ export class PtyManager {
   // The decoded marker that appears in actual output but NOT in command echo
   private static readonly RESUME_FAIL_MARKER = '__DOCK_RF__'
 
-  // Once this many visible (non-ANSI) bytes have arrived without the failure
-  // marker, the resume clearly succeeded (Claude is rendering conversation
-  // output). A failed resume produces at most ~300 visible bytes before the
-  // marker appears. We strip ANSI sequences before counting because ConPTY
-  // on Windows inflates output with escape sequences that can easily exceed
-  // a raw byte threshold before the marker arrives.
-  private static readonly RESUME_SUCCESS_BYTE_THRESHOLD = 512
-
-  /** Strip ANSI escape sequences to get visible text length */
-  private static stripAnsiLength(data: string): number {
-    // eslint-disable-next-line no-control-regex
-    return data.replace(/\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][0-2AB]/g, '').length
-  }
+  // Claude's TUI enters the alternate screen buffer on startup.
+  // Once we see this, the resume succeeded — stop watching.
+  private static readonly ALT_SCREEN_ENTER = '\x1b[?1049h'
 
   /**
    * Check buffered PTY output for the resume failure marker.
    * Returns true if failure detected (caller should suppress the data chunk).
+   *
+   * Stops watching when Claude's TUI enters the alternate screen buffer
+   * (clear success signal), or when the 30s timer expires.
    */
   private detectResumeFailed(terminalId: string, data: string): boolean {
     const watcher = this.resumeWatchers.get(terminalId)
     if (!watcher) return false
 
-    // Track visible text output (excluding ANSI escape sequences) — if enough
-    // has arrived, the resume succeeded and we stop watching. This prevents
-    // false positives from conversation content that contains the marker string.
-    watcher.bytes += PtyManager.stripAnsiLength(data)
-    if (watcher.bytes > PtyManager.RESUME_SUCCESS_BYTE_THRESHOLD) {
+    // If Claude's TUI has started (alternate screen buffer), resume succeeded
+    if (data.includes(PtyManager.ALT_SCREEN_ENTER)) {
       clearTimeout(watcher.timer)
       this.resumeWatchers.delete(terminalId)
       return false

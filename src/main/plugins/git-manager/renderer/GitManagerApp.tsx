@@ -5427,7 +5427,7 @@ const CollapsibleSection: React.FC<{
             title={addTitle || 'Add'}
           >+</button>
         )}
-        {loading && <span className="gm-toolbar-spinner" style={{ width: 10, height: 10, marginLeft: 6 }} />}
+        {loading && <span className="gm-toolbar-spinner" style={{ width: 10, height: 10, marginLeft: 6, marginRight: 8 }} />}
         {count !== undefined && !loading && <span className="gm-sidebar-header-count">{count}</span>}
       </div>
       {!collapsed && children}
