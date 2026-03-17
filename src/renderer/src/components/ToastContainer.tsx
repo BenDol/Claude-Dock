@@ -3,7 +3,7 @@ import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
 import type { GitProvider } from '../../../shared/remote-url'
-import { ProviderIcon } from '../plugins/git-manager/ProviderIcons'
+import { ProviderIcon } from '@plugins/git-manager/renderer/ProviderIcons'
 
 interface ToastEntry extends DockNotification {
   exiting: boolean

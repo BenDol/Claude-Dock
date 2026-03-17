@@ -13,8 +13,7 @@ import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagin
 import { ActivityTracker } from './activity-tracker'
 import { PluginManager, getPluginsDir } from './plugins'
 import { PluginUpdateService } from './plugins/plugin-updater'
-import { GitManagerWindowManager } from './plugins/git-manager/git-manager-window'
-import { PluginWindowManager } from './plugins/plugin-window-manager'
+import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
 
 declare const __DEV__: boolean
@@ -441,12 +440,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.PLUGIN_GET_OPEN_WINDOWS, (_event, projectDir: string) => {
-    const ids: string[] = []
-    if (GitManagerWindowManager.getInstance().isOpen(projectDir)) {
-      ids.push('git-manager')
-    }
-    ids.push(...PluginWindowManager.getInstance().getOpenPluginIds(projectDir))
-    return ids
+    return getOpenPluginIds(projectDir)
   })
 
   // Plugin Update System

@@ -6,7 +6,7 @@ import { getToolbarActions } from '../toolbar-actions'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
 import type { GitProvider } from '../../../shared/remote-url'
-import { ProviderIcon } from '../plugins/git-manager/ProviderIcons'
+import { ProviderIcon } from '@plugins/git-manager/renderer/ProviderIcons'
 import { sanitizeSvg } from '../lib/svg-sanitize'
 
 interface ToolbarProps {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { getDockApi } from '../../lib/ipc-bridge'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobGroup, CiSetupStatus } from '../../../../shared/ci-types'
 import { groupJobsByMatrix } from '../../../../shared/ci-types'
 import type { GitProvider } from '../../../../shared/remote-url'

@@ -7,7 +7,7 @@ import { IPC } from '../../shared/ipc-channels'
 import { fetchJSON, downloadFile, extractHostname } from '../http-utils'
 import { log, logError } from '../logger'
 import { PluginManager } from './plugin-manager'
-import { createBundledServices as createGitManagerBundledServices } from './git-manager/bundled-services'
+import { getServiceEntry } from './plugin-service-registry'
 import { trustPlugin } from './plugin-loader'
 import {
   getLastChecked,
@@ -583,9 +583,10 @@ export class PluginUpdateService {
         return
       }
 
-      // Inject services for plugins that need them (e.g. git-manager)
-      if (pluginId === 'git-manager' && typeof mod.setServices === 'function') {
-        mod.setServices(createGitManagerBundledServices())
+      // Inject services for plugins that need them
+      const serviceEntry = getServiceEntry(pluginId)
+      if (serviceEntry && typeof mod.setServices === 'function') {
+        mod.setServices(serviceEntry.factory())
       }
 
       // Swap the plugin in the manager (dispose old, register new)

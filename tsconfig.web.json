@@ -13,7 +13,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "paths": {
+      "@dock-renderer/*": ["./src/renderer/src/*"],
+      "@plugins/*": ["./src/main/plugins/*"]
+    }
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*", "src/main/plugins/*/renderer/**/*"]
 }

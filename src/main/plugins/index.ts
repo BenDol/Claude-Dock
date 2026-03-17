@@ -9,8 +9,12 @@ import { createSafeStore } from '../safe-store'
 import { log } from '../logger'
 
 declare const __BUILD_SHA__: string
+import { registerServiceFactory, getServiceEntry } from './plugin-service-registry'
 import { setServices as setGitManagerServices } from './git-manager/services'
 import { createBundledServices as createGitManagerServices } from './git-manager/bundled-services'
+
+// Register service factories for built-in plugins
+registerServiceFactory('git-manager', createGitManagerServices, setGitManagerServices)
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.
@@ -89,19 +93,19 @@ function tryLoadOverride(pluginId: string): OverrideResult | null {
 
 /**
  * Inject services for built-in plugins that require them (before register()).
+ * Uses the service factory registry — no per-plugin hardcoding needed.
  * If an override module is provided, calls its setServices export instead of
  * the bundled one — override bundles have their own copy of services.ts.
  */
 function injectPluginServices(pluginId: string, overrideModule?: Record<string, unknown>): void {
-  if (pluginId === 'git-manager') {
-    const services = createGitManagerServices()
-    if (overrideModule && typeof overrideModule.setServices === 'function') {
-      // Override module has its own services holder — inject into that
-      ;(overrideModule.setServices as typeof setGitManagerServices)(services)
-    } else {
-      // Bundled module — inject into the bundled services holder
-      setGitManagerServices(services)
-    }
+  const entry = getServiceEntry(pluginId)
+  if (!entry) return
+
+  const services = entry.factory()
+  if (overrideModule && typeof overrideModule.setServices === 'function') {
+    overrideModule.setServices(services)
+  } else {
+    entry.setServices(services)
   }
 }
 

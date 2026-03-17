@@ -1,8 +1,8 @@
 import './git-manager.css'
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { getDockApi } from '../../lib/ipc-bridge'
-import { useSettingsStore } from '../../stores/settings-store'
-import { applyThemeToDocument } from '../../lib/theme'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import { useSettingsStore } from '@dock-renderer/stores/settings-store'
+import { applyThemeToDocument } from '@dock-renderer/lib/theme'
 import type {
   GitCommitInfo,
   GitBranchInfo,
@@ -5201,18 +5201,22 @@ const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> 
 /** Shows ellipsed text with a hover tooltip that reveals the full text after a delay */
 const EllipsisPath: React.FC<{ text: string; className?: string }> = ({ text, className }) => {
   const spanRef = useRef<HTMLSpanElement>(null)
-  const [show, setShow] = useState(false)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onEnter = useCallback(() => {
     const el = spanRef.current
     if (!el || el.scrollWidth <= el.clientWidth) return
-    timerRef.current = setTimeout(() => setShow(true), 400)
+    timerRef.current = setTimeout(() => {
+      const rect = el.getBoundingClientRect()
+      const zoom = parseFloat(document.documentElement.style.zoom) || 1
+      setPos({ x: rect.left / zoom, y: rect.top / zoom })
+    }, 400)
   }, [])
 
   const onLeave = useCallback(() => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
-    setShow(false)
+    setPos(null)
   }, [])
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
@@ -5223,10 +5227,9 @@ const EllipsisPath: React.FC<{ text: string; className?: string }> = ({ text, cl
       className={className}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ position: 'relative' }}
     >
       {text}
-      {show && <span className="gm-ellipsis-tooltip">{text}</span>}
+      {pos && <span className="gm-ellipsis-tooltip" style={{ position: 'fixed', left: pos.x, top: pos.y }}>{text}</span>}
     </span>
   )
 }

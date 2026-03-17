@@ -30,7 +30,7 @@ const SRC_PLUGINS = path.join(ROOT, 'src', 'main', 'plugins')
 const BUILTIN_PLUGINS = [
   { id: 'git-sync', srcDir: 'git-sync', entry: 'git-sync-plugin.ts' },
   { id: 'git-manager', srcDir: 'git-manager', entry: 'git-manager-plugin.ts',
-    rendererEntry: 'src/renderer/src/plugins/git-manager/standalone-entry.tsx' }
+    rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' }
 ]
 
 /**
@@ -162,8 +162,9 @@ function main() {
         fs.mkdirSync(rendererStaging, { recursive: true })
 
         try {
+          const dockRendererAlias = path.join(ROOT, 'src', 'renderer', 'src')
           execSync(
-            `npx esbuild "${rendererEntryPath}" --bundle --platform=browser --format=iife --jsx=automatic --loader:.css=css --outfile="${path.join(rendererStaging, 'bundle.js')}"`,
+            `npx esbuild "${rendererEntryPath}" --bundle --platform=browser --format=iife --jsx=automatic --loader:.css=css --alias:@dock-renderer=${dockRendererAlias} --outfile="${path.join(rendererStaging, 'bundle.js')}"`,
             { cwd: ROOT, encoding: 'utf-8', stdio: 'pipe' }
           )
           console.log(`  Built standalone renderer bundle for ${plugin.id}`)

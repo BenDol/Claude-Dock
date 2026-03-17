@@ -8,7 +8,7 @@ import { getDockApi } from '../../lib/ipc-bridge'
 registerPluginView({
   pluginId: 'git-manager',
   queryParam: 'gitManager',
-  component: lazy(() => import('./GitManagerApp'))
+  component: lazy(() => import('@plugins/git-manager/renderer/GitManagerApp'))
 })
 
 // Register the toolbar button

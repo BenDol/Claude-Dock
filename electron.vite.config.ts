@@ -1,6 +1,7 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'child_process'
+import { resolve } from 'path'
 
 function getBuildInfo() {
   try {
@@ -65,6 +66,12 @@ export default defineConfig({
   },
   renderer: {
     plugins: [react()],
+    resolve: {
+      alias: {
+        '@dock-renderer': resolve(__dirname, 'src/renderer/src'),
+        '@plugins': resolve(__dirname, 'src/main/plugins')
+      }
+    },
     define: {
       __BUILD_SHA__: JSON.stringify(sha),
       __BUILD_DATE__: JSON.stringify(date),
