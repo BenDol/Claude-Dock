@@ -137,6 +137,10 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const detailRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef(false)
   const lastCiRefreshRef = useRef(0)
+  /** Cached log line counts from the last successful run, keyed by workflowId:jobName */
+  const baselineLogLinesRef = useRef<Map<string, number>>(new Map())
+  /** Which workflow IDs we've already fetched baselines for */
+  const baselineFetchedRef = useRef<Set<number>>(new Set())
 
   // Cross-log search state
   const [ciLogOpenLocal, setCiLogOpenLocal] = useState(false)
@@ -252,6 +256,8 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
 
   // Poll active runs and update historical runs when completions are detected
   const prevActiveIdsRef = useRef<Set<number>>(new Set())
+  const runsRef = useRef(runs)
+  runsRef.current = runs
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -295,12 +301,55 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
             const relevant = jobs.filter((j) => j.conclusion !== 'skipped')
             if (relevant.length === 0) return
             let done = 0
+            // Check if any in-progress job lacks useful step data (≤1 step)
+            const needsLogEstimate = relevant.some(
+              (j) => j.status === 'in_progress' && j.steps.filter((s) => s.status === 'completed').length <= 1
+            )
+
+            // Fetch baseline log line counts from last successful run if needed
+            if (needsLogEstimate && !baselineFetchedRef.current.has(run.workflowId)) {
+              baselineFetchedRef.current.add(run.workflowId)
+              const successRun = runsRef.current.find(
+                (r) => r.workflowId === run.workflowId && r.conclusion === 'success' && r.id !== run.id
+              )
+              if (successRun) {
+                try {
+                  const baseJobs = await api.ci.getRunJobs(projectDir, successRun.id)
+                  for (const bj of baseJobs) {
+                    if (bj.conclusion === 'skipped') continue
+                    try {
+                      const log = await api.ci.getJobLog(projectDir, bj.id)
+                      if (log) {
+                        baselineLogLinesRef.current.set(`${run.workflowId}:${bj.name}`, log.split('\n').length)
+                      }
+                    } catch { /* ignore */ }
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+
             for (const j of relevant) {
               if (j.status === 'completed') { done += 1; continue }
-              // For in-progress jobs, use step ratio as a fractional contribution
-              if (j.status === 'in_progress' && j.steps.length > 0) {
+              if (j.status === 'in_progress') {
                 const completedSteps = j.steps.filter((s) => s.status === 'completed').length
-                done += completedSteps / j.steps.length
+                if (completedSteps > 1 || j.steps.length > 2) {
+                  // Enough step data for step-based progress
+                  done += completedSteps / j.steps.length
+                } else {
+                  // ≤1 completed step — try log-line-count estimation
+                  const baselineKey = `${run.workflowId}:${j.name}`
+                  const baselineLines = baselineLogLinesRef.current.get(baselineKey)
+                  if (baselineLines && baselineLines > 0) {
+                    try {
+                      const currentLog = await api.ci.getJobLog(projectDir, j.id)
+                      if (currentLog) {
+                        const currentLines = currentLog.split('\n').length
+                        done += Math.min(currentLines / baselineLines, 0.99)
+                      }
+                    } catch { /* fall through to 0 */ }
+                  }
+                  // No baseline = 0 contribution (stays at 0% as requested)
+                }
               }
               // queued/waiting = 0 contribution
             }

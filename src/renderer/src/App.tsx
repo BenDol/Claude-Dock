@@ -171,16 +171,19 @@ let nextTermId = 1
 
 const ERROR_PATTERNS = /\b(error|fail|fatal|exception|panic|abort|segfault|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|could not|undefined is not|is not a function|exit code [1-9]|Process completed with exit code [1-9]|ERR!|npm ERR|FAILED|AssertionError|assert\.|expect\()\b/i
 
+// Generic CI runner termination messages — not the actual error location
+const NOISE_PATTERNS = /\b(Job failed:? command terminated with exit code|Process completed with exit code|Exiting with code|The process .+ exited with code|##\[error\]Process completed with exit code)\b/i
+
 /**
  * Extract only the error-relevant lines from a CI log, with context.
  * Falls back to the last 80 lines if no error patterns are found.
  */
 function extractErrorContext(fullLog: string, contextLines = 10): string {
   const lines = fullLog.split('\n')
-  // Find all line indices that match error patterns
+  // Find all line indices that match error patterns (skip generic runner termination noise)
   const errorIndices: number[] = []
   for (let i = 0; i < lines.length; i++) {
-    if (ERROR_PATTERNS.test(lines[i])) errorIndices.push(i)
+    if (ERROR_PATTERNS.test(lines[i]) && !NOISE_PATTERNS.test(lines[i])) errorIndices.push(i)
   }
 
   if (errorIndices.length === 0) {
