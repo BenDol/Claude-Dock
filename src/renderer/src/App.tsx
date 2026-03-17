@@ -172,7 +172,7 @@ let nextTermId = 1
 const ERROR_PATTERNS = /\b(error|fail|fatal|exception|panic|abort|segfault|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|could not|undefined is not|is not a function|exit code [1-9]|Process completed with exit code [1-9]|ERR!|npm ERR|FAILED|AssertionError|assert\.|expect\()\b/i
 
 // Generic CI runner termination messages — not the actual error location
-const NOISE_PATTERNS = /\b(Job failed:? command terminated with exit code|Process completed with exit code|Exiting with code|The process .+ exited with code|##\[error\]Process completed with exit code)\b/i
+const NOISE_PATTERNS = /\b(Job failed:? command terminated with exit code|Process completed with exit code|Exiting with code|The process .+ exited with code|##\[error\]Process completed with exit code|Last command failed with exit code|command terminated with exit code|failed with exit code|exited with exit code|exit status [0-9]|Cleaning up .* resources|Running after.script|ERROR: Build failed)\b/i
 
 /**
  * Extract only the error-relevant lines from a CI log, with context.
@@ -504,47 +504,46 @@ function DockApp() {
     const api = getDockApi()
     const MARKER = 'CI_FIX_COMPLETE'
     let buf = ''
-    // The prompt text we sent contains the MARKER as an instruction to Claude.
-    // The Claude CLI echoes the user prompt in the terminal output, so the first
-    // occurrence is just the echo. We skip it by waiting for the "Human:" / prompt
-    // echo to finish (indicated by the assistant starting to respond), then look
-    // for the marker in subsequent output.
-    let promptEchoFinished = false
+    // Count marker occurrences. The prompt text contains the marker as an
+    // instruction, and Claude CLI echoes it — so the first occurrence is
+    // the echo. We trigger on the 2nd occurrence (Claude's actual output).
+    // To handle ANSI fragments that might split the marker text across
+    // chunks, we also periodically check a collapsed (whitespace-stripped)
+    // version of recent buffer content.
+    let markerCount = 0
+    let triggered = false
 
     const cleanup = api.terminal.onData((id, chunk) => {
-      if (id !== termId) return
+      if (id !== termId || triggered) return
       const clean = stripAnsi(chunk)
       buf += clean
-      // Keep buffer from growing unbounded
-      if (buf.length > 10000) buf = buf.slice(-8000)
+      // Keep buffer from growing unbounded — but keep enough for marker detection
+      if (buf.length > 20000) buf = buf.slice(-15000)
 
-      // Detect when the prompt echo has finished and Claude's response begins.
-      // Claude Code shows a progress indicator (⠋⠙⠹ etc.) or "Thinking" or
-      // outputs the response directly. Once we see any of these after the marker
-      // appeared in the echo, the prompt phase is done.
-      if (!promptEchoFinished) {
-        // The prompt echo contains the marker (as an instruction). Once we see
-        // a newline after the first marker occurrence + some non-whitespace
-        // response content, the echo is finished.
-        const firstIdx = buf.indexOf(MARKER)
-        if (firstIdx >= 0) {
-          const afterFirst = buf.slice(firstIdx + MARKER.length)
-          // Look for signs that Claude has started responding:
-          // - Spinner chars (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏)
-          // - "Thinking" or "✻" (Claude Code response indicators)
-          // - A substantial amount of text after the marker (>200 chars)
-          if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻]/.test(afterFirst) || afterFirst.includes('Thinking') || afterFirst.replace(/\s/g, '').length > 200) {
-            promptEchoFinished = true
-            // Reset buffer to only contain content after the first marker
-            buf = afterFirst
-          }
-        }
-        return
+      // Count all marker occurrences in the buffer
+      let count = 0
+      let searchIdx = 0
+      while ((searchIdx = buf.indexOf(MARKER, searchIdx)) !== -1) {
+        count++
+        searchIdx += MARKER.length
       }
 
-      // After prompt echo is finished, look for the marker in Claude's response
-      if (buf.includes(MARKER)) {
-        // Claude signalled completion
+      // Also check with collapsed whitespace in case ANSI artifacts
+      // inserted spaces/newlines within the marker text
+      if (count < 2) {
+        const collapsed = buf.replace(/\s+/g, '')
+        let cIdx = 0
+        let cCount = 0
+        while ((cIdx = collapsed.indexOf(MARKER, cIdx)) !== -1) {
+          cCount++
+          cIdx += MARKER.length
+        }
+        if (cCount > count) count = cCount
+      }
+
+      if (count >= 2 && count > markerCount) {
+        // 2nd occurrence = Claude's actual output
+        triggered = true
         doCleanup()
         window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
         setTimeout(() => {
@@ -552,6 +551,7 @@ function DockApp() {
           removeTerminal(termId)
         }, 2000)
       }
+      markerCount = Math.max(markerCount, count)
     })
 
     const doCleanup = () => {
