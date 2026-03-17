@@ -427,7 +427,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_UPDATE_CHECK, async () => {
     try {
-      return await pluginUpdateService.checkForUpdates()
+      const profile = getSettings().updater?.profile || 'latest'
+      return await pluginUpdateService.checkForUpdates(profile)
     } catch (err) {
       logError('pluginUpdate:check failed:', err)
       return []
@@ -457,6 +458,34 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_UPDATE_DISMISS, (_event, pluginId: string, version: string) => {
     pluginUpdateService.dismissUpdate(pluginId, version)
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_GET_NEW_OVERRIDES, () => {
+    const { getOverrides, getSeenOverrideHashes } = require('./plugins/plugin-update-store')
+    const { PluginManager } = require('./plugins/plugin-manager')
+    const overrides = getOverrides() as Record<string, import('./plugins/plugin-update-store').PluginOverrideEntry>
+    const seen = getSeenOverrideHashes() as Record<string, string>
+    const pluginInfoList = (PluginManager.getInstance() as import('./plugins/plugin-manager').PluginManager).getPluginInfoList()
+    const results: { pluginId: string; pluginName: string; version: string; buildSha: string; hash: string; changelog: string }[] = []
+
+    for (const [pluginId, override] of Object.entries(overrides)) {
+      if (seen[pluginId] === override.hash) continue // already notified
+      const info = pluginInfoList.find((p: any) => p.id === pluginId)
+      results.push({
+        pluginId,
+        pluginName: info?.name || pluginId,
+        version: override.version,
+        buildSha: override.buildSha,
+        hash: override.hash,
+        changelog: '' // changelog not stored in override — could be added later
+      })
+    }
+    return results
+  })
+
+  ipcMain.handle(IPC.PLUGIN_UPDATE_MARK_OVERRIDE_SEEN, (_event, pluginId: string, hash: string) => {
+    const { markOverrideSeen } = require('./plugins/plugin-update-store')
+    markOverrideSeen(pluginId, hash)
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

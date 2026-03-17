@@ -240,6 +240,8 @@ export interface DockApi {
     install: (pluginId: string) => Promise<{ success: boolean; error?: string }>
     installAll: () => Promise<{ success: string[]; failed: { pluginId: string; error: string }[] }>
     dismiss: (pluginId: string, version: string) => Promise<void>
+    getNewOverrides: () => Promise<{ pluginId: string; pluginName: string; version: string; buildSha: string; hash: string; changelog: string }[]>
+    markOverrideSeen: (pluginId: string, hash: string) => Promise<void>
     onProgress: (callback: (pluginId: string, downloaded: number, total: number) => void) => () => void
     onStateChanged: (callback: (updates: PluginUpdateEntry[]) => void) => () => void
   }
@@ -482,6 +484,8 @@ const dockApi: DockApi = {
     install: (pluginId) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_INSTALL, pluginId),
     installAll: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_INSTALL_ALL),
     dismiss: (pluginId, version) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_DISMISS, pluginId, version),
+    getNewOverrides: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_GET_NEW_OVERRIDES),
+    markOverrideSeen: (pluginId, hash) => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_MARK_OVERRIDE_SEEN, pluginId, hash),
     onProgress: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, pluginId: string, downloaded: number, total: number) => {
         callback(pluginId, downloaded, total)

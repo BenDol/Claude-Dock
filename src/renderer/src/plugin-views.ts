@@ -1,6 +1,7 @@
 import { type LazyExoticComponent, type ComponentType } from 'react'
 
 export interface PluginView {
+  pluginId: string
   queryParam: string
   component: LazyExoticComponent<ComponentType>
 }

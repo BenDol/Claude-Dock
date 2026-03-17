@@ -6,6 +6,7 @@ import { getDockApi } from '../../lib/ipc-bridge'
 
 // Register the git manager view (opens in its own BrowserWindow)
 registerPluginView({
+  pluginId: 'git-manager',
   queryParam: 'gitManager',
   component: lazy(() => import('./GitManagerApp'))
 })

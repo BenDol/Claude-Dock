@@ -147,6 +147,8 @@ export const IPC = {
   PLUGIN_UPDATE_INSTALL: 'pluginUpdate:install',
   PLUGIN_UPDATE_INSTALL_ALL: 'pluginUpdate:installAll',
   PLUGIN_UPDATE_DISMISS: 'pluginUpdate:dismiss',
+  PLUGIN_UPDATE_GET_NEW_OVERRIDES: 'pluginUpdate:getNewOverrides',
+  PLUGIN_UPDATE_MARK_OVERRIDE_SEEN: 'pluginUpdate:markOverrideSeen',
 
   // Main -> Renderer (send)
   PLUGIN_UPDATE_PROGRESS: 'pluginUpdate:progress',

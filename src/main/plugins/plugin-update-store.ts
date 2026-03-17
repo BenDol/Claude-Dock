@@ -14,6 +14,7 @@ interface PluginUpdateStoreData {
   verifiedHosts: string[] // cached allowlist
   verifiedHostsFetchedAt: number
   overrides: Record<string, PluginOverrideEntry> // installed built-in overrides
+  seenOverrideHashes: Record<string, string> // pluginId → hash of override the user was notified about
 }
 
 let store: Store<PluginUpdateStoreData> | null = null
@@ -27,7 +28,8 @@ function getStore(): Store<PluginUpdateStoreData> {
         dismissedVersions: {},
         verifiedHosts: [],
         verifiedHostsFetchedAt: 0,
-        overrides: {}
+        overrides: {},
+        seenOverrideHashes: {}
       }
     })
   }
@@ -79,4 +81,14 @@ export function removeOverride(pluginId: string): void {
   const overrides = getOverrides()
   delete overrides[pluginId]
   safeWrite(() => getStore().set('overrides', overrides))
+}
+
+export function getSeenOverrideHashes(): Record<string, string> {
+  return safeRead(() => getStore().get('seenOverrideHashes', {})) ?? {}
+}
+
+export function markOverrideSeen(pluginId: string, hash: string): void {
+  const seen = getSeenOverrideHashes()
+  seen[pluginId] = hash
+  safeWrite(() => getStore().set('seenOverrideHashes', seen))
 }

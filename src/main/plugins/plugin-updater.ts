@@ -233,6 +233,7 @@ export class PluginUpdateService {
 
     const pluginInfoList = PluginManager.getInstance().getPluginInfoList()
     const dismissed = getDismissedVersions()
+    const installedOverrides = getOverrides()
     const currentAppVersion = app.getVersion()
 
     for (const info of pluginInfoList) {
@@ -243,6 +244,10 @@ export class PluginUpdateService {
 
       // Skip if user dismissed this version
       if (dismissed[info.id] === entry.version) continue
+
+      // Skip if this exact version is already installed as an override
+      const installedOverride = installedOverrides[info.id]
+      if (installedOverride && installedOverride.hash === entry.hash) continue
 
       // Skip if minAppVersion exceeds current app version
       if (entry.minAppVersion) {

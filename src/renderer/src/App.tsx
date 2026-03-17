@@ -66,15 +66,42 @@ function App() {
     return () => window.removeEventListener('app-restart', handler)
   }, [])
 
+  // When a plugin window opens, show "updated" notification if that plugin has a new override
+  useEffect(() => {
+    if (!pluginView) return
+    const timer = setTimeout(async () => {
+      const api = getDockApi()
+      try {
+        const newOverrides = await api.pluginUpdater.getNewOverrides()
+        const ov = newOverrides.find((o) => o.pluginId === pluginView.pluginId)
+        if (!ov) return
+        const sha = ov.buildSha.slice(0, 7)
+        const lines = [`v${ov.version} (${sha})`]
+        if (ov.changelog) lines.push(ov.changelog)
+        api.notifications.emit({
+          id: `plugin-updated-${ov.pluginId}-${ov.hash.slice(0, 8)}`,
+          title: `${ov.pluginName} Updated`,
+          message: lines.join('\n'),
+          type: 'success',
+          source: 'plugin-updater',
+          timeout: 0
+        })
+        await api.pluginUpdater.markOverrideSeen(ov.pluginId, ov.hash)
+      } catch { /* ignore */ }
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [])
+
   // When a dock window opens, check if there are pending plugin updates and re-notify
   useEffect(() => {
     if (isLauncher || pluginView) return
     const timer = setTimeout(async () => {
+      const api = getDockApi()
       try {
-        const updates = await getDockApi().pluginUpdater.getAvailable()
+        const updates = await api.pluginUpdater.getAvailable()
         if (updates.length > 0 && updates.some((u) => u.status === 'available')) {
           const names = updates.filter((u) => u.status === 'available').map((u) => u.pluginName)
-          getDockApi().notifications.emit({
+          api.notifications.emit({
             id: `plugin-updates-${Date.now()}`,
             title: 'Plugin Updates Available',
             message: names.length <= 3
@@ -89,7 +116,7 @@ function App() {
             ]
           })
         }
-      } catch { /* ignore — service may not be ready */ }
+      } catch { /* ignore */ }
     }, 2000)
     return () => clearTimeout(timer)
   }, [])
