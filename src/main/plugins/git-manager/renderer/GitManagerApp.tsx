@@ -320,6 +320,7 @@ const GitManagerApp: React.FC = () => {
   const [branches, setBranches] = useState<GitBranchInfo[]>([])
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [submodules, setSubmodules] = useState<GitSubmoduleInfo[]>([])
+  const [submodulesLoading, setSubmodulesLoading] = useState(false)
   const [stashes, setStashes] = useState<GitStashEntry[]>([])
   const [tags, setTags] = useState<{ name: string; hash: string; date: string }[]>([])
   const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
@@ -633,9 +634,15 @@ const GitManagerApp: React.FC = () => {
       setMergeState(mergeData)
       // Submodules are slow — load them without blocking the UI
       const subGen = ++submoduleGenRef.current
+      setSubmodulesLoading(true)
       api.gitManager.getSubmodules(activeDir).then((data) => {
-        if (subGen === submoduleGenRef.current) setSubmodules(data)
-      }).catch(() => {})
+        if (subGen === submoduleGenRef.current) {
+          setSubmodules(data)
+          setSubmodulesLoading(false)
+        }
+      }).catch(() => {
+        if (subGen === submoduleGenRef.current) setSubmodulesLoading(false)
+      })
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
         setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
@@ -1149,7 +1156,7 @@ const GitManagerApp: React.FC = () => {
               }}
             />
           </CollapsibleSection>
-          <CollapsibleSection title="Submodules" count={submodules.length} onAdd={() => { setAddSubmoduleBasePath(''); setSidebarModal('addSubmodule') }} addTitle="Add submodule">
+          <CollapsibleSection title="Submodules" count={submodules.length} loading={submodulesLoading} onAdd={() => { setAddSubmoduleBasePath(''); setSidebarModal('addSubmodule') }} addTitle="Add submodule">
             <SubmoduleTree
               submodules={submodules}
               selectedPath={selectedSubmodule}
@@ -5398,11 +5405,12 @@ const VerticalResizeHandle: React.FC<{
 const CollapsibleSection: React.FC<{
   title: string
   count?: number
+  loading?: boolean
   defaultCollapsed?: boolean
   onAdd?: () => void
   addTitle?: string
   children: React.ReactNode
-}> = ({ title, count, defaultCollapsed = false, onAdd, addTitle, children }) => {
+}> = ({ title, count, loading, defaultCollapsed = false, onAdd, addTitle, children }) => {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
 
   return (
@@ -5419,7 +5427,8 @@ const CollapsibleSection: React.FC<{
             title={addTitle || 'Add'}
           >+</button>
         )}
-        {count !== undefined && <span className="gm-sidebar-header-count">{count}</span>}
+        {loading && <span className="gm-toolbar-spinner" style={{ width: 10, height: 10, marginLeft: 6 }} />}
+        {count !== undefined && !loading && <span className="gm-sidebar-header-count">{count}</span>}
       </div>
       {!collapsed && children}
     </div>
