@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
@@ -114,6 +115,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       const unicode11Addon = new Unicode11Addon()
       term.loadAddon(unicode11Addon)
       term.unicode.activeVersion = '11'
+
+      // Clickable links (Ctrl+click or Alt+click opens in browser)
+      term.loadAddon(new WebLinksAddon((_event, url) => {
+        getDockApi().app.openExternal(url)
+      }))
 
       term.open(container)
 

@@ -214,7 +214,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_event, url: string) => {
-    if (url.startsWith('https://')) {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
       shell.openExternal(url)
     }
   })
