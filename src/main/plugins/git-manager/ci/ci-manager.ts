@@ -76,12 +76,27 @@ export class CiManager {
       const runs = await entry.provider.getActiveRuns(entry.projectDir)
       hasActive = runs.length > 0
 
-      // Detect transitions: previously active -> now completed
+      // Detect transitions: previously active -> now completed.
+      // A run may temporarily vanish from the active list between jobs
+      // (e.g. "detect" finishes, "build" hasn't started yet). Verify the
+      // run is actually completed before notifying.
       for (const [runId, prev] of entry.cachedRuns) {
         if (prev.status !== 'completed') {
           const stillActive = runs.find((r) => r.id === runId)
           if (!stillActive) {
-            this.emitCompletionNotification(entry, prev)
+            try {
+              const actual = await entry.provider.getRun(entry.projectDir, runId)
+              if (actual && actual.status === 'completed') {
+                this.emitCompletionNotification(entry, actual)
+              } else if (actual) {
+                // Not actually done — keep it in the cache for the next tick
+                runs.push(actual)
+                hasActive = true
+              }
+            } catch {
+              // Can't verify — assume completed to avoid stuck entries
+              this.emitCompletionNotification(entry, prev)
+            }
           }
         }
       }
