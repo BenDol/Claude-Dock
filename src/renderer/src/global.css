@@ -10,6 +10,17 @@
   --grid-gap: 1px;
   --term-header-height: 18px;
   --term-header-font: 10px;
+  --term-header-action-font: 12px;
+  --term-header-close-font: 15px;
+  --term-header-action-pad: 2px;
+  --toolbar-height: 28px;
+  --toolbar-font-size: 11px;
+  --toolbar-icon-size: 16px;
+  --toolbar-btn-pad-v: 2px;
+  --toolbar-btn-pad-h: 5px;
+  --toolbar-gap: 8px;
+  --toolbar-win-btn-w: 34px;
+  --toolbar-sep-h: 16px;
   /* Default UI variables (dark) so loading text is visible before applyThemeToDocument runs */
   --bg-primary: #0f0f14;
   --bg-secondary: #1a1b26;
@@ -75,7 +86,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 28px;
+  height: var(--toolbar-height);
   padding: 0;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -87,7 +98,7 @@ body {
 .toolbar-left, .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--toolbar-gap);
   -webkit-app-region: no-drag;
 }
 
@@ -98,7 +109,7 @@ body {
 
 .toolbar-separator {
   width: 1px;
-  height: 16px;
+  height: var(--toolbar-sep-h);
   background: var(--border-color);
   margin: 0 2px;
 }
@@ -107,13 +118,13 @@ body {
   background: none;
   border: none;
   color: var(--text-secondary);
-  width: 34px;
-  height: 28px;
+  width: var(--toolbar-win-btn-w);
+  height: var(--toolbar-height);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--toolbar-font-size);
   transition: background 0.1s, color 0.1s;
 }
 
@@ -129,8 +140,8 @@ body {
 
 .toolbar-project {
   font-weight: 600;
-  font-size: 11px;
-  line-height: 28px;
+  font-size: var(--toolbar-font-size);
+  line-height: var(--toolbar-height);
 }
 
 /* Workspace dropdown */
@@ -148,7 +159,7 @@ body {
   border: 1px solid transparent;
   color: var(--text-primary);
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--toolbar-font-size);
   line-height: 1;
   padding: 0 6px 0 14px;
   height: 100%;
@@ -425,16 +436,16 @@ body {
 .ws-prompt-cancel:hover { color: var(--text-primary); }
 
 .toolbar-count {
-  font-size: 10px;
+  font-size: calc(var(--toolbar-font-size) - 1px);
   color: var(--text-secondary);
-  line-height: 28px;
+  line-height: var(--toolbar-height);
 }
 
 .toolbar-btn {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
-  padding: 2px 8px;
+  padding: var(--toolbar-btn-pad-v) 8px;
   border-radius: 3px;
   cursor: pointer;
   font-size: 14px;
@@ -450,7 +461,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 5px;
+  padding: var(--toolbar-btn-pad-v) var(--toolbar-btn-pad-h);
+}
+
+.toolbar-btn-icon svg {
+  width: var(--toolbar-icon-size);
+  height: var(--toolbar-icon-size);
 }
 
 .toolbar-btn-active {
@@ -1173,9 +1189,9 @@ body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--term-header-action-font);
   line-height: 1;
-  padding: 2px 3px;
+  padding: var(--term-header-action-pad) 3px;
   border-radius: 3px;
   display: flex;
   align-items: center;
@@ -1192,7 +1208,7 @@ body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--term-header-close-font);
   line-height: 1;
   padding: 0px 3px;
   border-radius: 3px;

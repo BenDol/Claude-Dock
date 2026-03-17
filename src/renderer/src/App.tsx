@@ -614,7 +614,7 @@ function DockApp() {
 
   const DEFAULT_FONT_SIZE = 14
 
-  // Apply zoom: changes font size and scales header height + font
+  // Apply zoom: changes font size
   const applyZoom = useCallback((newSize: number) => {
     const size = Math.max(8, Math.min(32, newSize))
     const settings = useSettingsStore.getState().settings
@@ -623,12 +623,6 @@ function DockApp() {
     useSettingsStore.getState().update({
       terminal: { ...settings.terminal, fontSize: size }
     })
-
-    const scale = size / DEFAULT_FONT_SIZE
-    const headerHeight = Math.round(Math.max(14, 18 * scale))
-    const headerFont = Math.round(Math.max(8, 10 * scale))
-    document.documentElement.style.setProperty('--term-header-height', `${headerHeight}px`)
-    document.documentElement.style.setProperty('--term-header-font', `${headerFont}px`)
   }, [])
 
   // Directional terminal focus navigation

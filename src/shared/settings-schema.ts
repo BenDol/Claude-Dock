@@ -1,4 +1,5 @@
 export type TerminalStyle = 'default' | 'standard' | 'claude-code'
+export type BarSize = 'small' | 'medium' | 'large'
 
 export interface Settings {
   theme: {
@@ -6,6 +7,8 @@ export interface Settings {
     accentColor: string
     terminalStyle: TerminalStyle
     terminalColors: TerminalColors
+    headerBarSize: BarSize
+    terminalHeaderBarSize: BarSize
   }
   terminal: {
     fontFamily: string
@@ -184,7 +187,9 @@ export const DEFAULT_SETTINGS: Settings = {
     mode: 'dark',
     accentColor: '#da7756',
     terminalStyle: 'claude-code',
-    terminalColors: { ...CLAUDE_CODE_TERMINAL_COLORS }
+    terminalColors: { ...CLAUDE_CODE_TERMINAL_COLORS },
+    headerBarSize: 'small',
+    terminalHeaderBarSize: 'small'
   },
   terminal: {
     fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace",

@@ -267,6 +267,29 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => updateTheme({ accentColor: e.target.value })}
                   />
                 </label>
+                <div className="settings-divider" />
+                <label>
+                  Header Bar Size
+                  <select
+                    value={settings.theme.headerBarSize || 'small'}
+                    onChange={(e) => updateTheme({ headerBarSize: e.target.value as Settings['theme']['headerBarSize'] })}
+                  >
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                  </select>
+                </label>
+                <label>
+                  Terminal Header Size
+                  <select
+                    value={settings.theme.terminalHeaderBarSize || 'small'}
+                    onChange={(e) => updateTheme({ terminalHeaderBarSize: e.target.value as Settings['theme']['terminalHeaderBarSize'] })}
+                  >
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                  </select>
+                </label>
               </div>
             )}
             {tab === 'terminal' && (
