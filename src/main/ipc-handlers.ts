@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell, app } from 'electron'
 import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -216,6 +216,11 @@ export function registerIpcHandlers(): void {
     if (url.startsWith('https://')) {
       shell.openExternal(url)
     }
+  })
+
+  ipcMain.handle(IPC.APP_RELAUNCH, () => {
+    app.relaunch()
+    app.exit(0)
   })
 
   ipcMain.handle(IPC.APP_OPEN_IN_EXPLORER, (_event, dir: string) => {
