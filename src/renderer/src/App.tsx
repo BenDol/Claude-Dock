@@ -490,8 +490,11 @@ function DockApp() {
 
   const stripAnsi = useCallback((str: string) =>
     str
-      .replace(/\x1b\][^\x07]*\x07/g, '')
-      .replace(/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g, ''),
+      .replace(/\x1b\][^\x07]*\x07/g, '')                                              // OSC sequences
+      .replace(/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g, '')  // CSI sequences
+      .replace(/\x1b[()][A-Z0-9]/g, '')                                                // Character set selection
+      .replace(/\x1b[78DEHM]/g, '')                                                     // Other single-char escapes
+      .replace(/\r/g, ''),                                                               // Carriage returns
   [])
 
   const monitorForCompletion = useCallback((termId: string, fixData: Record<string, unknown>) => {
@@ -500,35 +503,51 @@ function DockApp() {
     let buf = ''
     // The prompt text we sent contains the MARKER as an instruction to Claude.
     // The Claude CLI echoes the user prompt in the terminal output, so the first
-    // occurrence of the marker is just the echo — skip it and only act on the second.
-    let seenCount = 0
+    // occurrence is just the echo. We skip it by waiting for the "Human:" / prompt
+    // echo to finish (indicated by the assistant starting to respond), then look
+    // for the marker in subsequent output.
+    let promptEchoFinished = false
 
     const cleanup = api.terminal.onData((id, chunk) => {
       if (id !== termId) return
-      buf += stripAnsi(chunk)
+      const clean = stripAnsi(chunk)
+      buf += clean
       // Keep buffer from growing unbounded
-      if (buf.length > 5000) buf = buf.slice(-3000)
+      if (buf.length > 10000) buf = buf.slice(-8000)
 
-      // Count all occurrences of the marker in the buffer
-      let count = 0
-      let idx = 0
-      while ((idx = buf.indexOf(MARKER, idx)) !== -1) {
-        count++
-        idx += MARKER.length
+      // Detect when the prompt echo has finished and Claude's response begins.
+      // Claude Code shows a progress indicator (⠋⠙⠹ etc.) or "Thinking" or
+      // outputs the response directly. Once we see any of these after the marker
+      // appeared in the echo, the prompt phase is done.
+      if (!promptEchoFinished) {
+        // The prompt echo contains the marker (as an instruction). Once we see
+        // a newline after the first marker occurrence + some non-whitespace
+        // response content, the echo is finished.
+        const firstIdx = buf.indexOf(MARKER)
+        if (firstIdx >= 0) {
+          const afterFirst = buf.slice(firstIdx + MARKER.length)
+          // Look for signs that Claude has started responding:
+          // - Spinner chars (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏)
+          // - "Thinking" or "✻" (Claude Code response indicators)
+          // - A substantial amount of text after the marker (>200 chars)
+          if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✻]/.test(afterFirst) || afterFirst.includes('Thinking') || afterFirst.replace(/\s/g, '').length > 200) {
+            promptEchoFinished = true
+            // Reset buffer to only contain content after the first marker
+            buf = afterFirst
+          }
+        }
+        return
       }
 
-      // Only trigger on the 2nd+ occurrence (first is the echoed prompt)
-      if (count > seenCount) {
-        if (count >= 2) {
-          // Claude signalled completion — push triggers new CI run automatically
-          doCleanup()
-          window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
-          setTimeout(() => {
-            api.terminal.kill(termId)
-            removeTerminal(termId)
-          }, 2000)
-        }
-        seenCount = count
+      // After prompt echo is finished, look for the marker in Claude's response
+      if (buf.includes(MARKER)) {
+        // Claude signalled completion
+        doCleanup()
+        window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
+        setTimeout(() => {
+          api.terminal.kill(termId)
+          removeTerminal(termId)
+        }, 2000)
       }
     })
 
