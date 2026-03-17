@@ -1,8 +1,8 @@
 /**
  * OS-level context menu integration for Claude Dock.
  *
- * - Windows: Registry entries under HKCU\Software\Classes\Directory\...
- *   (appears in Explorer right-click menu: "Open with Claude Dock")
+ * - Windows: IExplorerCommand COM handler for Win11 modern context menu,
+ *   with classic registry fallback for "Show more options".
  * - macOS: Finder Quick Action (Automator .workflow bundle) in ~/Library/Services/
  * - Linux: .desktop file with actions in ~/.local/share/nemo/actions/ and
  *   ~/.local/share/nautilus/scripts/, plus KDE service menu.
@@ -11,30 +11,327 @@
 import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
 import { log, logError } from './logger'
 
 // ---------------------------------------------------------------------------
-// Windows
+// Windows — Constants
 // ---------------------------------------------------------------------------
 
 const WIN_REG_DIR = 'HKCU\\Software\\Classes\\Directory\\shell\\ClaudeDock'
 const WIN_REG_BG = 'HKCU\\Software\\Classes\\Directory\\Background\\shell\\ClaudeDock'
+const COM_CLSID = '{E94B2C47-5F3A-4A8D-B6D1-7C2E8F9A0B3D}'
+const WIN_CLSID_KEY = `HKCU\\Software\\Classes\\CLSID\\${COM_CLSID}`
+const WIN_META_KEY = 'HKCU\\Software\\ClaudeDock'
+
+// ---------------------------------------------------------------------------
+// Windows — IExplorerCommand COM DLL (compiled at runtime via csc.exe)
+// ---------------------------------------------------------------------------
+
+/**
+ * C# source for a .NET COM DLL implementing IExplorerCommand.
+ * When registered as an ExplorerCommandHandler, Windows 11 shows it in the
+ * modern (first-level) context menu instead of relegating it to "Show more options".
+ *
+ * The DLL reads the exe path from HKCU\Software\ClaudeDock\ExePath at runtime
+ * so it remains valid across auto-updates without recompilation.
+ */
+const CS_SOURCE = `using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
+
+[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
+
+namespace ClaudeDock
+{
+    [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItem
+    {
+        [PreserveSig] int BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+        [PreserveSig] int GetParent(out IntPtr ppsi);
+        [PreserveSig] int GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+        [PreserveSig] int GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        [PreserveSig] int Compare(IntPtr psi, uint hint, out int piOrder);
+    }
+
+    [ComImport, Guid("b63ea76d-1f85-456f-a19c-48159efa858b")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IShellItemArray
+    {
+        [PreserveSig] int BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppvOut);
+        [PreserveSig] int GetPropertyStore(int flags, ref Guid riid, out IntPtr ppv);
+        [PreserveSig] int GetPropertyDescriptionList(IntPtr keyType, ref Guid riid, out IntPtr ppv);
+        [PreserveSig] int GetAttributes(int attribFlags, uint sfgaoMask, out uint psfgaoAttribs);
+        [PreserveSig] int GetCount(out uint pdwNumItems);
+        [PreserveSig] int GetItemAt(uint dwIndex, [MarshalAs(UnmanagedType.Interface)] out IShellItem ppsi);
+        [PreserveSig] int EnumItems(out IntPtr ppenumShellItems);
+    }
+
+    [ComImport, Guid("a08ce4d0-fa25-44ab-b57c-c7b1c323e0b9")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IExplorerCommand
+    {
+        [PreserveSig] int GetTitle(IShellItemArray psiItemArray, out IntPtr ppszName);
+        [PreserveSig] int GetIcon(IShellItemArray psiItemArray, out IntPtr ppszIcon);
+        [PreserveSig] int GetToolTip(IShellItemArray psiItemArray, out IntPtr ppszInfotip);
+        [PreserveSig] int GetCanonicalName(out Guid pguidCommandName);
+        [PreserveSig] int GetState(IShellItemArray psiItemArray, [MarshalAs(UnmanagedType.Bool)] bool fOkToBeSlow, out uint pCmdState);
+        [PreserveSig] int Invoke(IShellItemArray psiItemArray, IntPtr pbc);
+        [PreserveSig] int GetFlags(out uint pFlags);
+        [PreserveSig] int EnumSubCommands(out IntPtr ppEnum);
+    }
+
+    [ComVisible(true)]
+    [Guid("E94B2C47-5F3A-4A8D-B6D1-7C2E8F9A0B3D")]
+    [ClassInterface(ClassInterfaceType.None)]
+    public class OpenWithClaudeDock : IExplorerCommand
+    {
+        private const uint SIGDN_FILESYSPATH = 0x80058000;
+
+        private static string GetExePath()
+        {
+            try
+            {
+                RegistryKey key = Registry.CurrentUser.OpenSubKey("Software\\ClaudeDock");
+                if (key != null)
+                {
+                    object val = key.GetValue("ExePath");
+                    key.Close();
+                    if (val != null) return val.ToString();
+                }
+            }
+            catch {}
+            return "";
+        }
+
+        public int GetTitle(IShellItemArray psiItemArray, out IntPtr ppszName)
+        {
+            ppszName = Marshal.StringToCoTaskMemUni("Open with Claude Dock");
+            return 0;
+        }
+
+        public int GetIcon(IShellItemArray psiItemArray, out IntPtr ppszIcon)
+        {
+            ppszIcon = Marshal.StringToCoTaskMemUni(GetExePath());
+            return 0;
+        }
+
+        public int GetToolTip(IShellItemArray psiItemArray, out IntPtr ppszInfotip)
+        {
+            ppszInfotip = IntPtr.Zero;
+            return 1;
+        }
+
+        public int GetCanonicalName(out Guid pguidCommandName)
+        {
+            pguidCommandName = new Guid("D47C2B94-A3F5-4D8A-B61D-7C2E8F9A0B3D");
+            return 0;
+        }
+
+        public int GetState(IShellItemArray psiItemArray, bool fOkToBeSlow, out uint pCmdState)
+        {
+            pCmdState = 0;
+            return 0;
+        }
+
+        public int Invoke(IShellItemArray psiItemArray, IntPtr pbc)
+        {
+            try
+            {
+                string folderPath = "";
+                if (psiItemArray != null)
+                {
+                    uint count;
+                    if (psiItemArray.GetCount(out count) == 0 && count > 0)
+                    {
+                        IShellItem item;
+                        if (psiItemArray.GetItemAt(0, out item) == 0 && item != null)
+                        {
+                            string p;
+                            if (item.GetDisplayName(SIGDN_FILESYSPATH, out p) == 0 && p != null)
+                                folderPath = p;
+                            Marshal.ReleaseComObject(item);
+                        }
+                    }
+                }
+                string exePath = GetExePath();
+                if (!string.IsNullOrEmpty(exePath) && System.IO.File.Exists(exePath))
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = exePath;
+                    psi.Arguments = "\\\"" + folderPath + "\\\"";
+                    psi.UseShellExecute = false;
+                    Process.Start(psi);
+                }
+            }
+            catch {}
+            return 0;
+        }
+
+        public int GetFlags(out uint pFlags)
+        {
+            pFlags = 0;
+            return 0;
+        }
+
+        public int EnumSubCommands(out IntPtr ppEnum)
+        {
+            ppEnum = IntPtr.Zero;
+            return 1;
+        }
+    }
+}
+`
+
+function getShellExtDir(): string {
+  return path.join(app.getPath('userData'), 'shell-extension')
+}
+
+function getDllPath(): string {
+  return path.join(getShellExtDir(), 'ClaudeDockMenu.dll')
+}
+
+function findCscExe(): string | null {
+  const winDir = process.env.WINDIR || 'C:\\Windows'
+  const candidates = [
+    path.join(winDir, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'),
+    path.join(winDir, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')
+  ]
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p
+  }
+  return null
+}
+
+/**
+ * Compile the IExplorerCommand COM DLL if it doesn't exist yet.
+ * Uses csc.exe from .NET Framework 4.x (always present on Windows 10/11).
+ */
+function ensureShellExtDll(): boolean {
+  const dllPath = getDllPath()
+  if (fs.existsSync(dllPath)) return true
+
+  const csc = findCscExe()
+  if (!csc) {
+    log('[context-menu] csc.exe not found — skipping COM DLL compilation')
+    return false
+  }
+
+  const dir = getShellExtDir()
+  fs.mkdirSync(dir, { recursive: true })
+
+  const csPath = path.join(dir, 'ClaudeDockMenu.cs')
+  fs.writeFileSync(csPath, CS_SOURCE)
+
+  try {
+    execFileSync(
+      csc,
+      ['/target:library', `/out:${dllPath}`, '/platform:anycpu', '/nologo', csPath],
+      { encoding: 'utf8', timeout: 30000, windowsHide: true }
+    )
+    try { fs.unlinkSync(csPath) } catch { /* best effort */ }
+    if (fs.existsSync(dllPath)) {
+      log('[context-menu] compiled IExplorerCommand COM DLL')
+      return true
+    }
+  } catch (e) {
+    log(`[context-menu] csc.exe compilation failed: ${e}`)
+  }
+  try { fs.unlinkSync(csPath) } catch { /* best effort */ }
+  return false
+}
+
+/**
+ * Register the COM class in HKCU and set ExplorerCommandHandler on the verb keys.
+ * This promotes the entry from "Show more options" to the Win11 modern context menu.
+ */
+function registerComHandler(exePath: string): boolean {
+  const dllPath = getDllPath()
+  const codeBase = 'file:///' + dllPath.replace(/\\/g, '/')
+  const regOpts = { encoding: 'utf8' as const, windowsHide: true, timeout: 10000 }
+
+  try {
+    // Register CLSID — all entries must succeed for a valid COM registration
+    const clsidCmds = [
+      `reg add "${WIN_CLSID_KEY}" /ve /d "OpenWithClaudeDock" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /ve /d "mscoree.dll" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "ThreadingModel" /d "Both" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Assembly" /d "ClaudeDockMenu, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Class" /d "ClaudeDock.OpenWithClaudeDock" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "RuntimeVersion" /d "v4.0.30319" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "CodeBase" /d "${codeBase}" /f`
+    ]
+    for (const cmd of clsidCmds) execSync(cmd, regOpts)
+
+    // Store exe path for the COM DLL to read at runtime
+    execSync(`reg add "${WIN_META_KEY}" /v "ExePath" /d "${exePath}" /f`, regOpts)
+
+    // Set ExplorerCommandHandler on both verb entries
+    execSync(`reg add "${WIN_REG_DIR}" /v "ExplorerCommandHandler" /d "${COM_CLSID}" /f`, regOpts)
+    execSync(`reg add "${WIN_REG_BG}" /v "ExplorerCommandHandler" /d "${COM_CLSID}" /f`, regOpts)
+
+    log('[context-menu] Windows: registered COM handler for modern context menu')
+    return true
+  } catch (e) {
+    log(`[context-menu] COM handler registration failed: ${e}`)
+    // Clean up partial registration
+    unregisterComHandler()
+    return false
+  }
+}
+
+function unregisterComHandler(): void {
+  const regOpts = { encoding: 'utf8' as const, windowsHide: true, timeout: 10000 }
+  // Remove ExplorerCommandHandler from verb entries (restores classic command subkey usage)
+  try { execSync(`reg delete "${WIN_REG_DIR}" /v "ExplorerCommandHandler" /f`, regOpts) } catch { /* ok */ }
+  try { execSync(`reg delete "${WIN_REG_BG}" /v "ExplorerCommandHandler" /f`, regOpts) } catch { /* ok */ }
+  // Remove CLSID entries
+  try { execSync(`reg delete "${WIN_CLSID_KEY}" /f`, regOpts) } catch { /* ok */ }
+  // Remove metadata key
+  try { execSync(`reg delete "${WIN_META_KEY}" /f`, regOpts) } catch { /* ok */ }
+  // Try to delete the DLL (may fail if loaded by Explorer — harmless, it won't be used)
+  try { fs.unlinkSync(getDllPath()) } catch { /* ok */ }
+}
+
+// ---------------------------------------------------------------------------
+// Windows — Classic registry (fallback for "Show more options")
+// ---------------------------------------------------------------------------
+
+function windowsRegisterClassic(exePath: string): void {
+  const regOpts = { encoding: 'utf8' as const, windowsHide: true, timeout: 10000 }
+  const cmds = [
+    `reg add "${WIN_REG_DIR}" /ve /d "Open with Claude Dock" /f`,
+    `reg add "${WIN_REG_DIR}" /v "Icon" /d "${exePath}" /f`,
+    `reg add "${WIN_REG_DIR}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`,
+    `reg add "${WIN_REG_BG}" /ve /d "Open with Claude Dock" /f`,
+    `reg add "${WIN_REG_BG}" /v "Icon" /d "${exePath}" /f`,
+    `reg add "${WIN_REG_BG}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`
+  ]
+  for (const cmd of cmds) {
+    try { execSync(cmd, regOpts) } catch { /* best effort per entry */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Windows — Combined register / unregister / check / refresh
+// ---------------------------------------------------------------------------
 
 function windowsRegister(): { success: boolean; error?: string } {
   try {
     const exePath = app.getPath('exe')
-    const iconPath = exePath // Use the exe itself as the icon source
 
-    // Directory right-click: "Open with Claude Dock"
-    execSync(`reg add "${WIN_REG_DIR}" /ve /d "Open with Claude Dock" /f`, { encoding: 'utf8' })
-    execSync(`reg add "${WIN_REG_DIR}" /v "Icon" /d "${iconPath}" /f`, { encoding: 'utf8' })
-    execSync(`reg add "${WIN_REG_DIR}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`, { encoding: 'utf8' })
+    // 1. Always write classic registry entries (verb + command + icon).
+    //    These serve as fallback if the COM approach fails and also provide
+    //    the entry for older Windows versions.
+    windowsRegisterClassic(exePath)
 
-    // Background right-click (inside a folder): "Open with Claude Dock"
-    execSync(`reg add "${WIN_REG_BG}" /ve /d "Open with Claude Dock" /f`, { encoding: 'utf8' })
-    execSync(`reg add "${WIN_REG_BG}" /v "Icon" /d "${iconPath}" /f`, { encoding: 'utf8' })
-    execSync(`reg add "${WIN_REG_BG}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`, { encoding: 'utf8' })
+    // 2. Try to compile the COM DLL and register the IExplorerCommand handler.
+    //    This promotes the entry to the Win11 modern context menu.
+    if (ensureShellExtDll()) {
+      registerComHandler(exePath)
+    }
 
     log('[context-menu] Windows: registered context menu entries')
     return { success: true }
@@ -47,8 +344,11 @@ function windowsRegister(): { success: boolean; error?: string } {
 
 function windowsUnregister(): { success: boolean; error?: string } {
   try {
-    try { execSync(`reg delete "${WIN_REG_DIR}" /f`, { encoding: 'utf8' }) } catch { /* may not exist */ }
-    try { execSync(`reg delete "${WIN_REG_BG}" /f`, { encoding: 'utf8' }) } catch { /* may not exist */ }
+    // Remove COM handler first
+    unregisterComHandler()
+    // Remove classic verb entries
+    try { execSync(`reg delete "${WIN_REG_DIR}" /f`, { encoding: 'utf8', windowsHide: true }) } catch { /* may not exist */ }
+    try { execSync(`reg delete "${WIN_REG_BG}" /f`, { encoding: 'utf8', windowsHide: true }) } catch { /* may not exist */ }
     log('[context-menu] Windows: removed context menu entries')
     return { success: true }
   } catch (e: unknown) {
@@ -60,7 +360,7 @@ function windowsUnregister(): { success: boolean; error?: string } {
 
 function windowsIsRegistered(): boolean {
   try {
-    execSync(`reg query "${WIN_REG_DIR}" /ve`, { encoding: 'utf8' })
+    execSync(`reg query "${WIN_REG_DIR}" /ve`, { encoding: 'utf8', windowsHide: true, timeout: 5000 })
     return true
   } catch {
     return false
@@ -68,13 +368,21 @@ function windowsIsRegistered(): boolean {
 }
 
 /**
- * Read the exe path currently stored in the registry command entry.
- * Returns null if not registered or unreadable.
+ * Read the exe path from the ClaudeDock metadata key (used by the COM DLL),
+ * falling back to the classic command subkey.
  */
 function windowsGetRegisteredExe(): string | null {
+  const regOpts = { encoding: 'utf8' as const, windowsHide: true, timeout: 5000 }
+  // Try metadata key first (COM approach)
   try {
-    const output = execSync(`reg query "${WIN_REG_DIR}\\command" /ve`, { encoding: 'utf8' })
-    // Output looks like:  (Default)    REG_SZ    "C:\...\Claude Dock.exe" "%V"
+    const output = execSync(`reg query "${WIN_META_KEY}" /v "ExePath"`, regOpts)
+    const match = output.match(/ExePath\s+REG_SZ\s+(.+)/)
+    if (match) return match[1].trim()
+  } catch { /* ok */ }
+
+  // Fallback to classic command subkey
+  try {
+    const output = execSync(`reg query "${WIN_REG_DIR}\\command" /ve`, regOpts)
     const match = output.match(/"([^"]+)"/)
     return match ? match[1] : null
   } catch {
@@ -82,12 +390,6 @@ function windowsGetRegisteredExe(): string | null {
   }
 }
 
-/**
- * If the context menu is registered but points to a different exe path
- * (e.g. after an auto-update changed install location), re-register
- * to update the path. If the registered exe no longer exists on disk,
- * remove the stale entries entirely.
- */
 function windowsRefreshIfNeeded(): void {
   if (!windowsIsRegistered()) return
 
@@ -98,16 +400,13 @@ function windowsRefreshIfNeeded(): void {
 
   if (registeredExe.toLowerCase() === currentExe.toLowerCase()) return
 
-  // The registered exe differs from the current one
-  if (fs.existsSync(registeredExe)) {
-    // Old exe still exists (different install?) — don't touch it
-    return
-  }
+  if (fs.existsSync(registeredExe)) return // different install — don't touch
 
-  // Old exe is gone — the app was moved or the old install was removed.
-  // Re-register with the current exe path.
   log(`[context-menu] Windows: refreshing stale registry (old: ${registeredExe}, new: ${currentExe})`)
-  windowsRegister()
+  // Update classic entries
+  try { windowsRegisterClassic(currentExe) } catch { /* best effort */ }
+  // Update COM metadata
+  try { execSync(`reg add "${WIN_META_KEY}" /v "ExePath" /d "${currentExe}" /f`, { encoding: 'utf8', windowsHide: true, timeout: 10000 }) } catch { /* best effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -117,8 +416,6 @@ function windowsRefreshIfNeeded(): void {
 function macRegister(): { success: boolean; error?: string } {
   try {
     const exePath = app.getPath('exe')
-    // For a .app bundle the executable is inside Contents/MacOS/
-    // We want the .app bundle path for `open`
     const appPath = exePath.includes('.app/Contents/')
       ? exePath.substring(0, exePath.indexOf('.app/') + 4)
       : exePath
@@ -129,7 +426,6 @@ function macRegister(): { success: boolean; error?: string } {
 
     fs.mkdirSync(contentsDir, { recursive: true })
 
-    // Info.plist — declares a Quick Action that accepts folders in Finder
     const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -153,7 +449,6 @@ function macRegister(): { success: boolean; error?: string } {
 </dict>
 </plist>`
 
-    // document.wflow — Automator workflow that runs a shell script
     const wflow = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -350,7 +645,6 @@ done</string>
     fs.writeFileSync(path.join(contentsDir, 'Info.plist'), infoPlist)
     fs.writeFileSync(path.join(contentsDir, 'document.wflow'), wflow)
 
-    // Refresh Services menu
     try {
       execSync('/System/Library/CoreServices/pbs -flush', { encoding: 'utf8', timeout: 5000 })
     } catch { /* best effort */ }
@@ -392,11 +686,6 @@ function macIsRegistered(): boolean {
   return fs.existsSync(workflowDir)
 }
 
-/**
- * If the workflow exists but references an app path that no longer exists,
- * re-register to update it. If the current app path changed (e.g. moved),
- * this ensures the Quick Action still works.
- */
 function macRefreshIfNeeded(): void {
   if (!macIsRegistered()) return
 
@@ -412,13 +701,10 @@ function macRefreshIfNeeded(): void {
       ? exePath.substring(0, exePath.indexOf('.app/') + 4)
       : exePath
 
-    // Check if the workflow already references the current app path
     if (content.includes(currentAppPath)) return
 
-    // Extract the old app path from the workflow
     const match = content.match(/open -a "([^"]+)"/)
     if (match && !fs.existsSync(match[1])) {
-      // Old app path is gone — re-register with updated path
       log(`[context-menu] macOS: refreshing stale workflow (old: ${match[1]}, new: ${currentAppPath})`)
       macRegister()
     }
@@ -431,7 +717,6 @@ function macRefreshIfNeeded(): void {
 
 function linuxGetExePath(): string {
   const exePath = app.getPath('exe')
-  // For AppImage, the exe is inside the mounted image — use APPIMAGE env var
   return process.env.APPIMAGE || exePath
 }
 
@@ -439,7 +724,6 @@ function linuxRegister(): { success: boolean; error?: string } {
   try {
     const exePath = linuxGetExePath()
 
-    // 1. Nemo actions (Cinnamon file manager)
     const nemoDir = path.join(app.getPath('home'), '.local', 'share', 'nemo', 'actions')
     fs.mkdirSync(nemoDir, { recursive: true })
     fs.writeFileSync(path.join(nemoDir, 'claude-dock.nemo_action'), [
@@ -453,7 +737,6 @@ function linuxRegister(): { success: boolean; error?: string } {
       ''
     ].join('\n'))
 
-    // 2. Nautilus scripts (GNOME Files)
     const nautilusDir = path.join(app.getPath('home'), '.local', 'share', 'nautilus', 'scripts')
     fs.mkdirSync(nautilusDir, { recursive: true })
     const nautilusScript = path.join(nautilusDir, 'Open with Claude Dock')
@@ -464,7 +747,6 @@ function linuxRegister(): { success: boolean; error?: string } {
     ].join('\n'))
     fs.chmodSync(nautilusScript, 0o755)
 
-    // 3. KDE/Dolphin service menu
     const kdeDir = path.join(app.getPath('home'), '.local', 'share', 'kio', 'servicemenus')
     fs.mkdirSync(kdeDir, { recursive: true })
     fs.writeFileSync(path.join(kdeDir, 'claude-dock.desktop'), [
@@ -522,16 +804,11 @@ function linuxIsRegistered(): boolean {
   return fs.existsSync(nemoAction) || fs.existsSync(nautilusScript) || fs.existsSync(kdeMenu)
 }
 
-/**
- * If any of the registered Linux file manager entries reference an exe
- * that no longer exists, re-register to update the path.
- */
 function linuxRefreshIfNeeded(): void {
   if (!linuxIsRegistered()) return
 
   const currentExe = linuxGetExePath()
 
-  // Check the Nemo action for a stale exe path
   try {
     const nemoPath = path.join(
       app.getPath('home'), '.local', 'share', 'nemo', 'actions', 'claude-dock.nemo_action'
@@ -581,8 +858,7 @@ export function isContextMenuRegistered(): boolean {
 
 /**
  * Called on app startup. If context menu entries are registered but point to
- * a stale exe path (e.g. after auto-update changed install location or user
- * moved the app), re-register with the current exe path.
+ * a stale exe path, re-register with the current exe path.
  * Safe to call every launch — no-ops if entries are current or absent.
  */
 export function refreshContextMenuIfNeeded(): void {
@@ -594,5 +870,29 @@ export function refreshContextMenuIfNeeded(): void {
     }
   } catch (e) {
     logError('[context-menu] refresh failed:', e)
+  }
+}
+
+/**
+ * Auto-register the context menu on first boot after this feature is added.
+ * Uses a flag file in userData — once created, auto-registration never runs again.
+ * The user can still toggle it via Settings after this.
+ */
+export function autoRegisterContextMenuOnce(): void {
+  const flagFile = path.join(app.getPath('userData'), '.context-menu-registered')
+  if (fs.existsSync(flagFile)) return
+
+  try {
+    // Create the flag file first so we never retry even if registration fails
+    fs.writeFileSync(flagFile, new Date().toISOString())
+
+    const result = registerContextMenu()
+    if (result.success) {
+      log('[context-menu] auto-registered on first boot')
+    } else {
+      log(`[context-menu] auto-registration failed: ${result.error}`)
+    }
+  } catch (e) {
+    logError('[context-menu] auto-registration error:', e)
   }
 }

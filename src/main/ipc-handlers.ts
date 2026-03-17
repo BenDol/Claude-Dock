@@ -366,15 +366,30 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.CONTEXT_MENU_CHECK, () => {
-    return { registered: isContextMenuRegistered() }
+    try {
+      return { registered: isContextMenuRegistered() }
+    } catch (err) {
+      logError('contextMenu:check failed', err)
+      return { registered: false }
+    }
   })
 
   ipcMain.handle(IPC.CONTEXT_MENU_REGISTER, () => {
-    return registerContextMenu()
+    try {
+      return registerContextMenu()
+    } catch (err) {
+      logError('contextMenu:register failed', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
+    }
   })
 
   ipcMain.handle(IPC.CONTEXT_MENU_UNREGISTER, () => {
-    return unregisterContextMenu()
+    try {
+      return unregisterContextMenu()
+    } catch (err) {
+      logError('contextMenu:unregister failed', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
+    }
   })
 
   ipcMain.handle(IPC.LINKED_CHECK_MCP, (event) => {
