@@ -221,7 +221,8 @@ export class PluginUpdateService {
       }
     } else {
       const releaseTag = profile === 'bleeding-edge' ? 'bleeding-edge' : 'latest'
-      const manifestUrl = `https://github.com/${GITHUB_REPO}/releases/download/${releaseTag}/plugins.update`
+      // Cache-bust to avoid stale CDN responses after a fresh release upload
+      const manifestUrl = `https://github.com/${GITHUB_REPO}/releases/download/${releaseTag}/plugins.update?_=${Date.now()}`
 
       try {
         manifest = await fetchJSON<PluginUpdateManifest>(manifestUrl)
