@@ -92,6 +92,7 @@ export class PluginUpdateService {
   private static instance: PluginUpdateService
   private updates = new Map<string, PluginUpdateEntry>()
   private pluginsZipPath: string | null = null
+  private checkInProgress: Promise<PluginUpdateEntry[]> | null = null
 
   static getInstance(): PluginUpdateService {
     if (!PluginUpdateService.instance) {
@@ -103,6 +104,21 @@ export class PluginUpdateService {
   // --- Public API ---
 
   async checkForUpdates(profile?: string): Promise<PluginUpdateEntry[]> {
+    // If a check is already running, return that promise instead of starting another
+    if (this.checkInProgress) {
+      log('[plugin-updater] check already in progress, waiting...')
+      return this.checkInProgress
+    }
+
+    this.checkInProgress = this.doCheck(profile)
+    try {
+      return await this.checkInProgress
+    } finally {
+      this.checkInProgress = null
+    }
+  }
+
+  private async doCheck(profile?: string): Promise<PluginUpdateEntry[]> {
     log('[plugin-updater] checking for updates...')
     this.updates.clear()
 

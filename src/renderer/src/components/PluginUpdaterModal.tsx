@@ -12,34 +12,42 @@ export default function PluginUpdaterModal({ onClose }: Props) {
   const [expandedChangelogs, setExpandedChangelogs] = useState<Set<string>>(new Set())
   const backdropRef = useRef<HTMLDivElement>(null)
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false
     const api = getDockApi()
-    try {
-      const available = await api.pluginUpdater.getAvailable()
-      if (available.length > 0) {
-        setUpdates(available)
-      } else {
-        // No cached results — trigger a fresh check
-        setLoading(true)
+
+    async function load() {
+      try {
+        // Check cached results first
+        const available = await api.pluginUpdater.getAvailable()
+        if (!cancelled && available.length > 0) {
+          setUpdates(available)
+          setLoading(false)
+          return
+        }
+
+        // No cached results — trigger a fresh check (or wait for one in progress)
         const fresh = await api.pluginUpdater.check()
-        setUpdates(fresh)
+        if (!cancelled) {
+          setUpdates(fresh)
+          setLoading(false)
+        }
+      } catch {
+        if (!cancelled) setLoading(false)
       }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false)
     }
+
+    load()
+    return () => { cancelled = true }
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
-
-  // Listen for state changes from main process
+  // Listen for state changes from main process — handles updates arriving
+  // from a background check that was already running when the modal opened
   useEffect(() => {
     const api = getDockApi()
     const cleanupState = api.pluginUpdater.onStateChanged((newUpdates) => {
       setUpdates(newUpdates)
+      setLoading(false)
     })
     const cleanupProgress = api.pluginUpdater.onProgress((pluginId, downloaded, total) => {
       setUpdates((prev) =>
