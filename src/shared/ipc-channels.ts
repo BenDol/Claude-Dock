@@ -91,6 +91,7 @@ export const IPC = {
   GIT_MGR_DELETE_FILES: 'gitMgr:deleteFiles',
   GIT_MGR_SHOW_IN_FOLDER: 'gitMgr:showInFolder',
   GIT_MGR_APPLY_PATCH: 'gitMgr:applyPatch',
+  GIT_MGR_GET_FILE_BLOB: 'gitMgr:getFileBlob',
   GIT_MGR_OPEN_BASH: 'gitMgr:openBash',
   GIT_MGR_ADD_SUBMODULE: 'gitMgr:addSubmodule',
   GIT_MGR_REMOVE_SUBMODULE: 'gitMgr:removeSubmodule',
