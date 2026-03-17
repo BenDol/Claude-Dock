@@ -35,6 +35,15 @@ export class DockManager {
       dir = result.filePaths[0]
     }
 
+    // If a dock window is already open for this directory, focus it instead
+    const existing = this.findDockByDir(dir)
+    if (existing) {
+      log(`createDock: already open for ${dir}, focusing existing window`)
+      if (existing.window.isMinimized()) existing.window.restore()
+      existing.window.focus()
+      return existing
+    }
+
     addRecentPath(dir)
     try { migrateProjectIfNeeded(dir) } catch (e) { log(`MCP project migration error: ${e}`) }
 
@@ -72,6 +81,17 @@ export class DockManager {
     pluginManager.emitProjectPostOpen(dir, dock)
 
     return dock
+  }
+
+  /** Find an existing dock window for a given project directory (case-insensitive path match). */
+  findDockByDir(dir: string): DockWindow | null {
+    const normalised = path.resolve(dir).toLowerCase()
+    for (const dock of this.docks.values()) {
+      if (path.resolve(dock.projectDir).toLowerCase() === normalised && !dock.window.isDestroyed()) {
+        return dock
+      }
+    }
+    return null
   }
 
   async showLauncher(autoOpenDir?: string): Promise<void> {

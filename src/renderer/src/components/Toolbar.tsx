@@ -412,7 +412,9 @@ const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => 
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const openProject = useCallback((path: string) => {
+  const openProject = useCallback(async (path: string) => {
+    // If a window is already open for this workspace, just focus it
+    if (await api.app.focusDockPath(path)) return
     setPromptPath(path)
   }, [])
 

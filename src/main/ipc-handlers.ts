@@ -109,6 +109,15 @@ export function registerIpcHandlers(): void {
     const dock = getDockForEvent(event)
     if (dock) {
       log(`DOCK_SWITCH_PROJECT: ${dock.projectDir} -> ${newDir}`)
+      // If the target project is already open in another window, focus it
+      // without closing the current window
+      const existing = manager.findDockByDir(newDir)
+      if (existing && existing !== dock) {
+        log(`DOCK_SWITCH_PROJECT: target already open, focusing existing window`)
+        if (existing.window.isMinimized()) existing.window.restore()
+        existing.window.focus()
+        return
+      }
       dock.close()
       await manager.createDock(newDir)
     }
@@ -176,8 +185,26 @@ export function registerIpcHandlers(): void {
     removeRecentPath(dir)
   })
 
+  ipcMain.handle(IPC.APP_FOCUS_DOCK_PATH, (_event, dir: string): boolean => {
+    const existing = manager.findDockByDir(dir)
+    if (existing) {
+      if (existing.window.isMinimized()) existing.window.restore()
+      existing.window.focus()
+      return true
+    }
+    return false
+  })
+
   ipcMain.handle(IPC.APP_OPEN_DOCK_PATH, async (_event, dir: string) => {
     log(`APP_OPEN_DOCK_PATH: dir=${dir}`)
+    // If already open, focus the existing window without closing the launcher
+    const existing = manager.findDockByDir(dir)
+    if (existing) {
+      log('APP_OPEN_DOCK_PATH: already open, focusing existing window')
+      if (existing.window.isMinimized()) existing.window.restore()
+      existing.window.focus()
+      return
+    }
     // Wait for launcher to fully close and release GPU resources before creating dock
     await manager.closeLauncherAndWait()
     log('APP_OPEN_DOCK_PATH: launcher closed, creating dock')

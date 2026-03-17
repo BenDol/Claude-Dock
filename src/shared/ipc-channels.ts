@@ -14,6 +14,7 @@ export const IPC = {
   APP_GET_RECENT_PATHS: 'app:getRecentPaths',
   APP_REMOVE_RECENT_PATH: 'app:removeRecentPath',
   APP_OPEN_DOCK_PATH: 'app:openDockPath',
+  APP_FOCUS_DOCK_PATH: 'app:focusDockPath',
   WIN_MINIMIZE: 'win:minimize',
   WIN_MAXIMIZE: 'win:maximize',
   WIN_CLOSE: 'win:close',
