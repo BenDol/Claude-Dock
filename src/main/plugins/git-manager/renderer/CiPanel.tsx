@@ -417,7 +417,8 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       runNumber: run.runNumber,
       headBranch: run.headBranch,
       failedJobs: failedJobSummaries,
-      primaryFailedJobId: failedJobSummaries[0]?.id
+      primaryFailedJobId: failedJobSummaries[0]?.id,
+      sourceDir: projectDir
     })
   }, [projectDir])
 
@@ -1141,7 +1142,8 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
                     runNumber: run.runNumber,
                     headBranch: run.headBranch,
                     failedJobs: [{ id: job.id, name: job.name, failedSteps }],
-                    primaryFailedJobId: job.id
+                    primaryFailedJobId: job.id,
+                    sourceDir: projectDir
                   }
                   api.ci.fixWithClaude(projectDir, data)
                 }}

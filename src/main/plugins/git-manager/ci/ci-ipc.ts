@@ -155,7 +155,8 @@ export function registerCiIpc(): void {
       runNumber: data.runNumber as number,
       headBranch: data.headBranch as string,
       failedJobs: data.failedJobs as CiFixTask['failedJobs'],
-      primaryFailedJobId: data.primaryFailedJobId as number | undefined
+      primaryFailedJobId: data.primaryFailedJobId as number | undefined,
+      sourceDir: data.sourceDir as string | undefined
     }
     return sendTaskToDock(projectDir, task)
   })

@@ -1,5 +1,7 @@
 export interface ClaudeTaskBase {
   context?: string // optional user instructions
+  /** The directory the task was triggered from (may differ from dock projectDir for submodules). */
+  sourceDir?: string
 }
 
 export interface CiFixTask extends ClaudeTaskBase {

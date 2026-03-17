@@ -244,11 +244,22 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
 
     const contextSection = context ? `\nAdditional instructions from the user:\n${context}\n` : ''
 
+    // Detect submodule context — sourceDir differs from the dock's project dir
+    const normalize = (p: string) => p.replace(/\\/g, '/')
+    const isSubmodule = task.sourceDir && normalize(task.sourceDir) !== normalize(dir)
+    const submoduleRelPath = isSubmodule ? normalize(task.sourceDir!).replace(normalize(dir) + '/', '') : ''
+    const submoduleSection = isSubmodule
+      ? `\nIMPORTANT: This CI failure is from the submodule at "${submoduleRelPath}" (full path: ${task.sourceDir}). ` +
+        `The fix must be made INSIDE the submodule directory, not in the parent repository. ` +
+        `cd into the submodule before creating worktrees or making changes.\n`
+      : ''
+
     return `A CI build has failed and needs to be fixed.\n\n` +
       `Workflow: ${runName || 'CI Run'} #${runNumber || 0}\n` +
       `Branch: ${branch}\n` +
       (jobList ? `Failed jobs:\n${jobList}\n` : '') +
       logSection +
+      submoduleSection +
       contextSection +
       `\nPlease analyze this CI failure, find the relevant code, and fix the issue.\n\n` +
       `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
@@ -339,7 +350,14 @@ function buildReferenceThisPrompt(task: ReferenceThisTask, context: string): str
   return parts.join('\n')
 }
 
-function buildMergeResolvePrompt(task: MergeResolveTask): string {
+function buildMergeResolvePrompt(task: MergeResolveTask, dir: string): string {
+  const normalize = (p: string) => p.replace(/\\/g, '/')
+  const isSubmodule = task.sourceDir && normalize(task.sourceDir) !== normalize(dir)
+  const submoduleNote = isSubmodule
+    ? `\nNote: This file is inside the submodule at "${normalize(task.sourceDir!).replace(normalize(dir) + '/', '')}". ` +
+      `Work within that submodule directory (${task.sourceDir}).\n`
+    : ''
+
   const parts: string[] = [
     `Resolve the merge conflict in the file: ${task.filePath}`,
     '',
@@ -347,7 +365,7 @@ function buildMergeResolvePrompt(task: MergeResolveTask): string {
     `Resolve the conflicts according to these instructions:`,
     '',
     task.instructions,
-    '',
+    submoduleNote,
     `After resolving, write the file back with all conflict markers removed.`,
     `Make sure the result is valid, compiles, and preserves the intent described above.`
   ]
@@ -533,7 +551,7 @@ function DockApp() {
     } else if (task.type === 'reference-this') {
       prompt = buildReferenceThisPrompt(task, context)
     } else if (task.type === 'merge-resolve') {
-      prompt = buildMergeResolvePrompt(task)
+      prompt = buildMergeResolvePrompt(task, dir)
     }
 
     const sendToTerminal = (termId: string) => {

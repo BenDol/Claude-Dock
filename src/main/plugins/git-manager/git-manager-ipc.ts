@@ -565,7 +565,8 @@ export function registerGitManagerIpc(): void {
     const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
       type: 'merge-resolve',
       filePath,
-      instructions
+      instructions,
+      sourceDir: projectDir
     })
     return sent
       ? { success: true }

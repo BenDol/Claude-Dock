@@ -27,7 +27,14 @@ export function createBundledServices(): GitManagerServices {
 
     sendTaskToDock(projectDir: string, channel: string, data: unknown): boolean {
       const docks = DockManager.getInstance().getAllDocks()
-      const dock = docks.find((d: any) => d.projectDir === projectDir)
+      // Exact match first, then fall back to finding a dock whose project is
+      // a parent of the requested dir (handles submodule paths).
+      const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+      const normDir = normalize(projectDir)
+      let dock = docks.find((d: any) => normalize(d.projectDir) === normDir)
+      if (!dock) {
+        dock = docks.find((d: any) => normDir.startsWith(normalize(d.projectDir) + '/'))
+      }
       if (dock && !dock.window.isDestroyed()) {
         dock.window.webContents.send(channel, data)
         if (dock.window.isMinimized()) dock.window.restore()
