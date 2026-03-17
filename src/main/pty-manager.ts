@@ -222,10 +222,19 @@ export class PtyManager {
   // The decoded marker that appears in actual output but NOT in command echo
   private static readonly RESUME_FAIL_MARKER = '__DOCK_RF__'
 
-  // Once this many bytes have arrived without the failure marker, the resume
-  // clearly succeeded (Claude is rendering conversation output). A failed
-  // resume produces at most ~300 bytes before the marker appears.
+  // Once this many visible (non-ANSI) bytes have arrived without the failure
+  // marker, the resume clearly succeeded (Claude is rendering conversation
+  // output). A failed resume produces at most ~300 visible bytes before the
+  // marker appears. We strip ANSI sequences before counting because ConPTY
+  // on Windows inflates output with escape sequences that can easily exceed
+  // a raw byte threshold before the marker arrives.
   private static readonly RESUME_SUCCESS_BYTE_THRESHOLD = 512
+
+  /** Strip ANSI escape sequences to get visible text length */
+  private static stripAnsiLength(data: string): number {
+    // eslint-disable-next-line no-control-regex
+    return data.replace(/\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][0-2AB]/g, '').length
+  }
 
   /**
    * Check buffered PTY output for the resume failure marker.
@@ -235,10 +244,10 @@ export class PtyManager {
     const watcher = this.resumeWatchers.get(terminalId)
     if (!watcher) return false
 
-    // Track total output — if enough data has arrived, the resume succeeded
-    // and we stop watching. This prevents false positives from conversation
-    // content that happens to contain the marker string.
-    watcher.bytes += data.length
+    // Track visible text output (excluding ANSI escape sequences) — if enough
+    // has arrived, the resume succeeded and we stop watching. This prevents
+    // false positives from conversation content that contains the marker string.
+    watcher.bytes += PtyManager.stripAnsiLength(data)
     if (watcher.bytes > PtyManager.RESUME_SUCCESS_BYTE_THRESHOLD) {
       clearTimeout(watcher.timer)
       this.resumeWatchers.delete(terminalId)
