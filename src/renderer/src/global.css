@@ -978,6 +978,12 @@ body {
   margin-top: 1px;
 }
 
+.tb-notif-event-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 3px;
+}
+
 .tb-notif-event-action {
   background: none;
   border: none;
@@ -986,7 +992,6 @@ body {
   font-weight: 600;
   cursor: pointer;
   padding: 1px 0;
-  margin-top: 2px;
   display: inline-flex;
   align-items: center;
   gap: 3px;

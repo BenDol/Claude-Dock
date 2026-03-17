@@ -750,20 +750,24 @@ const NotificationDropdown: React.FC = () => {
                   <div className="tb-notif-body">
                     <div className="tb-notif-title">{n.title}</div>
                     <div className="tb-notif-msg">{n.message}</div>
-                    {resolveActions(n).filter((a) => a.event).map((a, i) => (
-                      <button
-                        key={i}
-                        className="tb-notif-event-action"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
-                          setOpen(false)
-                        }}
-                      >
-                        {a.event === 'ci-fix-with-claude' && <NotifRepairIcon />}
-                        {a.label}
-                      </button>
-                    ))}
+                    {resolveActions(n).some((a) => a.event) && (
+                      <div className="tb-notif-event-actions">
+                        {resolveActions(n).filter((a) => a.event).map((a, i) => (
+                          <button
+                            key={i}
+                            className="tb-notif-event-action"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              window.dispatchEvent(new CustomEvent(a.event!, { detail: n.data }))
+                              setOpen(false)
+                            }}
+                          >
+                            {a.event === 'ci-fix-with-claude' && <NotifRepairIcon />}
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {resolveActions(n).some((a) => a.url) && (
                     <button
