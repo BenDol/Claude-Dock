@@ -454,55 +454,41 @@ function DockApp() {
   const monitorForCompletion = useCallback((termId: string, fixData: Record<string, unknown>) => {
     const api = getDockApi()
     const MARKER = 'CI_FIX_COMPLETE'
-    let buf = ''
-    // Count marker occurrences. The prompt text contains the marker as an
-    // instruction, and Claude CLI echoes it — so the first occurrence is
-    // the echo. We trigger on the 2nd occurrence (Claude's actual output).
-    // To handle ANSI fragments that might split the marker text across
-    // chunks, we also periodically check a collapsed (whitespace-stripped)
-    // version of recent buffer content.
-    let markerCount = 0
     let triggered = false
+    // The prompt contains CI_FIX_COMPLETE as an instruction. Claude CLI echoes
+    // it when pasting the prompt. We record the time of the first sighting
+    // (the echo) and only trigger on sightings 30+ seconds later (Claude's
+    // actual output). This avoids the buffer-truncation problem where the
+    // first marker scrolls out of a large buffer during long sessions.
+    let firstSeenAt = 0
+    let recentBuf = ''
 
     const cleanup = api.terminal.onData((id, chunk) => {
       if (id !== termId || triggered) return
       const clean = stripAnsi(chunk)
-      buf += clean
-      // Keep buffer from growing unbounded — but keep enough for marker detection
-      if (buf.length > 20000) buf = buf.slice(-15000)
 
-      // Count all marker occurrences in the buffer
-      let count = 0
-      let searchIdx = 0
-      while ((searchIdx = buf.indexOf(MARKER, searchIdx)) !== -1) {
-        count++
-        searchIdx += MARKER.length
-      }
+      recentBuf += clean
+      if (recentBuf.length > 2000) recentBuf = recentBuf.slice(-1500)
 
-      // Also check with collapsed whitespace in case ANSI artifacts
-      // inserted spaces/newlines within the marker text
-      if (count < 2) {
-        const collapsed = buf.replace(/\s+/g, '')
-        let cIdx = 0
-        let cCount = 0
-        while ((cIdx = collapsed.indexOf(MARKER, cIdx)) !== -1) {
-          cCount++
-          cIdx += MARKER.length
+      const found = recentBuf.includes(MARKER) ||
+        recentBuf.replace(/\s+/g, '').includes(MARKER)
+
+      if (found) {
+        if (firstSeenAt === 0) {
+          // First sighting — prompt echo. Record time and clear buffer.
+          firstSeenAt = Date.now()
+          recentBuf = ''
+        } else if (Date.now() - firstSeenAt > 30000) {
+          // Seen again 30s+ later — Claude's actual completion signal
+          triggered = true
+          doCleanup()
+          window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
+          setTimeout(() => {
+            api.terminal.kill(termId)
+            removeTerminal(termId)
+          }, 2000)
         }
-        if (cCount > count) count = cCount
       }
-
-      if (count >= 2 && count > markerCount) {
-        // 2nd occurrence = Claude's actual output
-        triggered = true
-        doCleanup()
-        window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
-        setTimeout(() => {
-          api.terminal.kill(termId)
-          removeTerminal(termId)
-        }, 2000)
-      }
-      markerCount = Math.max(markerCount, count)
     })
 
     const doCleanup = () => {
