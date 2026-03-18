@@ -850,7 +850,7 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   // Compute grid layout including a "new" cell
   const allIds = [...terminals.map((t) => t.id), '__new__']
   const { cols, layout } = computeAutoLayout(allIds, maxCols)
-  const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y)) + 1 : 1
+  const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
 
   const handleSubmit = useCallback(() => {
     const perms: TaskPermissions = { allowedTools: Array.from(allowedTools), permissionMode: permMode }

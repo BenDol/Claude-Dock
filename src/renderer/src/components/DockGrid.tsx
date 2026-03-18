@@ -33,7 +33,7 @@ const DockGrid: React.FC = () => {
     return () => observer.disconnect()
   }, [])
 
-  const rows = Math.max(1, Math.ceil(terminals.length / cols))
+  const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
   const totalGap = gapSize * (rows - 1)
   const rowHeight = Math.floor((containerHeight - totalGap) / rows)
 
@@ -42,7 +42,10 @@ const DockGrid: React.FC = () => {
     (_layout: ReactGridLayout.Layout[], _oldItem: ReactGridLayout.Layout, newItem: ReactGridLayout.Layout) => {
       const draggedId = newItem.i
       const targetItem = layout.find(
-        (l) => l.i !== draggedId && l.x === newItem.x && l.y === newItem.y
+        (l) =>
+          l.i !== draggedId &&
+          newItem.x >= l.x && newItem.x < l.x + l.w &&
+          newItem.y >= l.y && newItem.y < l.y + l.h
       )
       if (targetItem) {
         swapTerminals(draggedId, targetItem.i)

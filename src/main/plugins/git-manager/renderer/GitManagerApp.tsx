@@ -1004,25 +1004,45 @@ const GitManagerApp: React.FC = () => {
     doCheckout(checkoutName)
   }, [activeDir, branches, doCheckout])
 
+  // Clear all repo-specific state so stale data from the previous repo is never shown
+  const resetRepoState = useCallback(() => {
+    setCommits([])
+    setBranches([])
+    setStatus(null)
+    setSubmodules([])
+    setSubmodulesLoading(false)
+    setStashes([])
+    setTags([])
+    setSelectedCommit(null)
+    setMergeState(null)
+    setError(null)
+    setActionError(null)
+    setNotGitRepo(false)
+    setSearchQuery('')
+    setSearchResults([])
+    setSearchOpen(false)
+    setLoading(true)
+    // Allow auto-switch to changes tab for the new repo
+    initialLoadRef.current = true
+  }, [])
+
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    resetRepoState()
     setActiveDir(activeDir + '/' + sub.path)
-    setSelectedCommit(null)
-    setSubmodules([])
-  }, [activeDir])
+  }, [activeDir, resetRepoState])
 
   const navigateBack = useCallback(() => {
     setNavStack((prev) => {
       const next = [...prev]
       const entry = next.pop()
       if (entry) {
+        resetRepoState()
         setActiveDir(entry.dir)
-        setSelectedCommit(null)
-        setSubmodules([])
       }
       return next
     })
-  }, [])
+  }, [resetRepoState])
 
   const api = getDockApi()
   const currentBranch = branches.find((b) => b.current)
@@ -1042,7 +1062,7 @@ const GitManagerApp: React.FC = () => {
           )}
           {navStack.length > 0 ? (
             <span className="gm-titlebar-breadcrumb">
-              <button className="gm-breadcrumb-root" onClick={() => { setActiveDir(projectDir); setNavStack([]); setSelectedCommit(null) }}>
+              <button className="gm-breadcrumb-root" onClick={() => { resetRepoState(); setActiveDir(projectDir); setNavStack([]) }}>
                 {projectDir.split(/[/\\]/).pop()}
               </button>
               {navStack.slice(1).map((entry, i) => (

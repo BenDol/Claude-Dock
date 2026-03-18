@@ -13,6 +13,7 @@ import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, install
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } from './context-menu-integration'
 import { ActivityTracker } from './activity-tracker'
+import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
 import { PluginUpdateService } from './plugins/plugin-updater'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
@@ -542,6 +543,52 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.PLUGIN_UPDATE_MARK_OVERRIDE_SEEN, (_event, pluginId: string, hash: string) => {
     const { markOverrideSeen } = require('./plugins/plugin-update-store')
     markOverrideSeen(pluginId, hash)
+  })
+
+  // Usage / Anthropic API
+  ipcMain.handle(IPC.USAGE_FETCH, async () => {
+    try {
+      const settings = getSettings()
+      const limit = settings.anthropic?.spendLimitUsd ?? 100
+      return await usageService.fetchUsage(limit)
+    } catch (err) {
+      logError('usage:fetch failed:', err)
+      return { success: false, error: 'internal' }
+    }
+  })
+
+  ipcMain.handle(IPC.USAGE_CACHED, () => {
+    try {
+      return usageService.getCached()
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle(IPC.USAGE_SET_KEY, (_event, key: string) => {
+    try {
+      return usageService.setKey(key)
+    } catch (err) {
+      logError('usage:setKey failed:', err)
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle(IPC.USAGE_HAS_KEY, () => {
+    try {
+      return { hasKey: usageService.hasKey() }
+    } catch {
+      return { hasKey: false }
+    }
+  })
+
+  ipcMain.handle(IPC.USAGE_CLEAR_KEY, () => {
+    try {
+      return usageService.clearKey()
+    } catch (err) {
+      logError('usage:clearKey failed:', err)
+      return { success: false }
+    }
   })
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {

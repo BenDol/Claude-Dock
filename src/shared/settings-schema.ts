@@ -30,6 +30,9 @@ export interface Settings {
     autoSpawnFirstTerminal: boolean
     markNotificationsRead: boolean
     blockedNotificationSources: string[]
+    idleNotification: boolean
+    idleNotificationMinLines: number
+    idleNotificationDelayMs: number
   }
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
@@ -54,6 +57,10 @@ export interface Settings {
     width: number
     height: number
     skipPathPrompt: boolean
+  }
+  anthropic: {
+    showUsageMeter: boolean
+    spendLimitUsd: number
   }
   advanced: {
     debugLogging: boolean
@@ -210,7 +217,10 @@ export const DEFAULT_SETTINGS: Settings = {
     closeAction: 'ask',
     autoSpawnFirstTerminal: true,
     markNotificationsRead: false,
-    blockedNotificationSources: []
+    blockedNotificationSources: [],
+    idleNotification: false,
+    idleNotificationMinLines: 10,
+    idleNotificationDelayMs: 5000
   },
   updater: {
     profile: 'latest',
@@ -235,6 +245,10 @@ export const DEFAULT_SETTINGS: Settings = {
     width: 500,
     height: 550,
     skipPathPrompt: false
+  },
+  anthropic: {
+    showUsageMeter: true,
+    spendLimitUsd: 100
   },
   advanced: {
     debugLogging: false,

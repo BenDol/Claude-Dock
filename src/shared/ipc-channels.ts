@@ -159,6 +159,13 @@ export const IPC = {
   PLUGIN_UPDATE_GET_NEW_OVERRIDES: 'pluginUpdate:getNewOverrides',
   PLUGIN_UPDATE_MARK_OVERRIDE_SEEN: 'pluginUpdate:markOverrideSeen',
 
+  // Usage / Anthropic API
+  USAGE_FETCH: 'usage:fetch',
+  USAGE_CACHED: 'usage:cached',
+  USAGE_SET_KEY: 'usage:setKey',
+  USAGE_HAS_KEY: 'usage:hasKey',
+  USAGE_CLEAR_KEY: 'usage:clearKey',
+
   // Main -> Renderer (send)
   PLUGIN_UPDATE_PROGRESS: 'pluginUpdate:progress',
   PLUGIN_UPDATE_STATE_CHANGED: 'pluginUpdate:stateChanged',

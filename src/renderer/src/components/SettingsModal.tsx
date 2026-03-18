@@ -109,6 +109,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   const [ctxMenuRegistered, setCtxMenuRegistered] = useState<boolean | null>(null)
   const [ctxMenuBusy, setCtxMenuBusy] = useState(false)
   const [ctxMenuStatus, setCtxMenuStatus] = useState('')
+  const [anthropicHasKey, setAnthropicHasKey] = useState<boolean | null>(null)
+  const [anthropicKeyBusy, setAnthropicKeyBusy] = useState(false)
+  const [anthropicKeyInput, setAnthropicKeyInput] = useState('')
+  const [anthropicStatus, setAnthropicStatus] = useState('')
 
   const [notifSources, setNotifSources] = useState(BUILTIN_NOTIFICATION_SOURCES)
 
@@ -145,6 +149,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     }
   }, [tab, ctxMenuRegistered])
 
+  // Check Anthropic API key status when behavior tab is shown
+  useEffect(() => {
+    if (tab === 'behavior' && anthropicHasKey === null) {
+      getDockApi().usage.hasKey().then((r) => setAnthropicHasKey(r.hasKey)).catch(() => {})
+    }
+  }, [tab, anthropicHasKey])
+
   const updateTheme = (partial: Partial<Settings['theme']>) => {
     update({ theme: { ...settings.theme, ...partial } })
   }
@@ -162,6 +173,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
   }
   const updateLinked = (partial: Partial<Settings['linked']>) => {
     update({ linked: { ...settings.linked, ...partial } })
+  }
+  const updateAnthropic = (partial: Partial<Settings['anthropic']>) => {
+    update({ anthropic: { ...settings.anthropic, ...partial } })
   }
   const updateUpdater = (partial: Partial<Settings['updater']>) => {
     update({ updater: { ...settings.updater, ...partial } })
@@ -519,6 +533,42 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   Incoming notifications will not trigger the unread badge.
                 </div>
                 <div className="settings-divider" />
+                <div className="settings-section-header">Idle Notification</div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.behavior.idleNotification ?? false}
+                    onChange={(e) => updateBehavior({ idleNotification: e.target.checked })}
+                  />
+                  Notify when terminal goes idle
+                </label>
+                <div className="settings-description">
+                  Send an OS notification and flash the taskbar when a terminal stops producing output after significant activity, while the dock is not focused.
+                </div>
+                <label className={settings.behavior.idleNotification ? '' : 'disabled'}>
+                  Minimum lines of activity
+                  <input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={settings.behavior.idleNotificationMinLines ?? 10}
+                    disabled={!settings.behavior.idleNotification}
+                    onChange={(e) => updateBehavior({ idleNotificationMinLines: parseInt(e.target.value) || 10 })}
+                  />
+                </label>
+                <label className={settings.behavior.idleNotification ? '' : 'disabled'}>
+                  Idle delay (ms)
+                  <input
+                    type="number"
+                    min={1000}
+                    max={60000}
+                    step={1000}
+                    value={settings.behavior.idleNotificationDelayMs ?? 5000}
+                    disabled={!settings.behavior.idleNotification}
+                    onChange={(e) => updateBehavior({ idleNotificationDelayMs: parseInt(e.target.value) || 5000 })}
+                  />
+                </label>
+                <div className="settings-divider" />
                 <div className="settings-section-header">Block Notifications From</div>
                 <div className="settings-description">
                   Mute toast notifications from selected sources.
@@ -673,6 +723,132 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </label>
                 <div className="settings-description" style={{ paddingLeft: 24 }}>
                   Allow Claude sessions to send messages to each other for coordination.
+                </div>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Anthropic API</div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.anthropic?.showUsageMeter ?? true}
+                    onChange={(e) => updateAnthropic({ showUsageMeter: e.target.checked })}
+                  />
+                  Show usage meter
+                </label>
+                <div className="settings-description">
+                  Display API spend as a percentage bar in the toolbar.
+                </div>
+                <label>
+                  Spend limit (USD)
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={settings.anthropic?.spendLimitUsd ?? 100}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value)
+                      if (!isNaN(val) && val > 0) updateAnthropic({ spendLimitUsd: val })
+                    }}
+                    style={{ width: 80, marginLeft: 8 }}
+                  />
+                </label>
+                <div className="settings-description">
+                  Your monthly budget — the meter shows spend as a percentage of this limit.
+                </div>
+                <div className="settings-row">
+                  <span className="settings-label">
+                    API Key: {anthropicHasKey === null ? '...' : anthropicHasKey ? 'Configured' : 'Not configured'}
+                  </span>
+                  <div className="settings-btn-group">
+                    {anthropicHasKey ? (
+                      <button
+                        className="settings-check-update-btn"
+                        disabled={anthropicKeyBusy}
+                        onClick={async () => {
+                          setAnthropicKeyBusy(true)
+                          setAnthropicStatus('')
+                          try {
+                            const r = await getDockApi().usage.clearKey()
+                            if (r.success) {
+                              setAnthropicHasKey(false)
+                              setAnthropicStatus('API key cleared.')
+                            } else {
+                              setAnthropicStatus('Failed to clear key.')
+                            }
+                          } catch {
+                            setAnthropicStatus('Operation failed.')
+                          }
+                          setAnthropicKeyBusy(false)
+                        }}
+                      >
+                        {anthropicKeyBusy ? '...' : 'Clear API Key'}
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          type="password"
+                          placeholder="Paste API key"
+                          value={anthropicKeyInput}
+                          onChange={(e) => setAnthropicKeyInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && anthropicKeyInput.trim()) {
+                              e.preventDefault()
+                              ;(async () => {
+                                setAnthropicKeyBusy(true)
+                                setAnthropicStatus('')
+                                try {
+                                  const r = await getDockApi().usage.setKey(anthropicKeyInput.trim())
+                                  if (r.success) {
+                                    setAnthropicHasKey(true)
+                                    setAnthropicKeyInput('')
+                                    setAnthropicStatus('API key saved.')
+                                  } else {
+                                    setAnthropicStatus('Failed to save key.')
+                                  }
+                                } catch {
+                                  setAnthropicStatus('Operation failed.')
+                                }
+                                setAnthropicKeyBusy(false)
+                              })()
+                            }
+                          }}
+                          style={{ width: 140, fontSize: 11, padding: '2px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)', borderRadius: 3, color: 'var(--text-primary)' }}
+                        />
+                        <button
+                          className="settings-check-update-btn"
+                          disabled={anthropicKeyBusy || !anthropicKeyInput.trim()}
+                          onClick={async () => {
+                            setAnthropicKeyBusy(true)
+                            setAnthropicStatus('')
+                            try {
+                              const r = await getDockApi().usage.setKey(anthropicKeyInput.trim())
+                              if (r.success) {
+                                setAnthropicHasKey(true)
+                                setAnthropicKeyInput('')
+                                setAnthropicStatus('API key saved.')
+                              } else {
+                                setAnthropicStatus('Failed to save key.')
+                              }
+                            } catch {
+                              setAnthropicStatus('Operation failed.')
+                            }
+                            setAnthropicKeyBusy(false)
+                          }}
+                        >
+                          {anthropicKeyBusy ? '...' : 'Save'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {anthropicStatus && <div className="settings-update-status">{anthropicStatus}</div>}
+                <div className="settings-description">
+                  <button
+                    className="usage-setup-link"
+                    onClick={() => getDockApi().app.openExternal('https://console.anthropic.com/settings/admin-keys')}
+                    style={{ fontSize: 11 }}
+                  >
+                    Manage API keys on Anthropic Console
+                  </button>
                 </div>
                 <div className="settings-divider" />
                 <label>

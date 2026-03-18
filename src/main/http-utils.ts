@@ -25,11 +25,11 @@ function followRedirects(
     .on('error', onError)
 }
 
-export function fetchJSON<T>(url: string): Promise<T> {
+export function fetchJSON<T>(url: string, extraHeaders?: Record<string, string>): Promise<T> {
   return new Promise((resolve, reject) => {
     followRedirects(
       url,
-      { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      { 'User-Agent': USER_AGENT, Accept: 'application/json', ...extraHeaders },
       (res) => {
         if (res.statusCode !== 200) {
           return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`))

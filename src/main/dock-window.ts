@@ -7,6 +7,7 @@ import { saveBuffer, loadBuffer, clearBuffer } from './buffer-store'
 import { getWindowState, saveWindowState, WindowState } from './window-state-store'
 import { getSettings, setSetting } from './settings-store'
 import { ActivityTracker } from './activity-tracker'
+import { IdleNotifier } from './idle-notifier'
 import { log } from './logger'
 
 declare const __DEV__: boolean
@@ -20,6 +21,7 @@ export class DockWindow {
   readonly projectDir: string
   readonly window: BrowserWindow
   readonly ptyManager: PtyManager
+  private readonly idleNotifier: IdleNotifier
   private savedResumeIds: string[]
   private outputBuffers = new Map<string, string>()
 
@@ -61,6 +63,7 @@ export class DockWindow {
 
     log(`DockWindow: BrowserWindow created`)
     this.trackWindowState()
+    this.idleNotifier = new IdleNotifier(this.window)
 
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
@@ -81,12 +84,14 @@ export class DockWindow {
           } catch (e) { log(`buffer accumulate error: ${e}`) }
         }
         try { ActivityTracker.getInstance().trackData(this.id, terminalId, data) } catch (e) { log(`ActivityTracker.trackData error: ${e}`) }
+        try { this.idleNotifier.trackData(terminalId, data) } catch (e) { log(`IdleNotifier.trackData error: ${e}`) }
       },
       (terminalId, exitCode) => {
         if (!this.window.isDestroyed()) {
           this.window.webContents.send(IPC.TERMINAL_EXIT, terminalId, exitCode)
         }
         try { ActivityTracker.getInstance().setTerminalAlive(this.id, terminalId, false) } catch (e) { log(`ActivityTracker.setTerminalAlive error: ${e}`) }
+        try { this.idleNotifier.removeTerminal(terminalId) } catch (e) { log(`IdleNotifier.removeTerminal error: ${e}`) }
       },
       (sessionId) => {
         // Persist session immediately when a fresh terminal is created
@@ -173,6 +178,7 @@ export class DockWindow {
     this.window.on('closed', () => {
       this.ptyManager.killAll()
       try { ActivityTracker.getInstance().removeDock(this.id) } catch (e) { log(`ActivityTracker.removeDock error: ${e}`) }
+      try { this.idleNotifier.dispose() } catch (e) { log(`IdleNotifier.dispose error: ${e}`) }
     })
   }
 

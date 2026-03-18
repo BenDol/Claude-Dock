@@ -256,6 +256,13 @@ export interface DockApi {
     register: () => Promise<{ success: boolean; error?: string }>
     unregister: () => Promise<{ success: boolean; error?: string }>
   }
+  usage: {
+    fetch: () => Promise<{ success: boolean; data?: { spent: number; limit: number; percentage: number; lastUpdated: number }; error?: string }>
+    getCached: () => Promise<{ success: boolean; data?: { spent: number; limit: number; percentage: number; lastUpdated: number }; error?: string } | null>
+    setKey: (key: string) => Promise<{ success: boolean }>
+    hasKey: () => Promise<{ hasKey: boolean }>
+    clearKey: () => Promise<{ success: boolean }>
+  }
   debug: {
     write: (text: string) => Promise<void>
     openDevTools: () => Promise<void>
@@ -522,6 +529,13 @@ const dockApi: DockApi = {
     check: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_CHECK),
     register: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_REGISTER),
     unregister: () => ipcRenderer.invoke(IPC.CONTEXT_MENU_UNREGISTER)
+  },
+  usage: {
+    fetch: () => ipcRenderer.invoke(IPC.USAGE_FETCH),
+    getCached: () => ipcRenderer.invoke(IPC.USAGE_CACHED),
+    setKey: (key) => ipcRenderer.invoke(IPC.USAGE_SET_KEY, key),
+    hasKey: () => ipcRenderer.invoke(IPC.USAGE_HAS_KEY),
+    clearKey: () => ipcRenderer.invoke(IPC.USAGE_CLEAR_KEY)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
