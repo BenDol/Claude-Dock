@@ -775,7 +775,6 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   onClose: () => void
 }) {
   const terminals = useDockStore((s) => s.terminals)
-  const maxCols = useSettingsStore((s) => s.settings.grid.maxColumns)
   const [selected, setSelected] = useState<string | null>(null) // null = new terminal
   const [contextText, setContextText] = useState('')
   const [permMode, setPermMode] = useState(defaultPermissions.permissionMode)
@@ -793,11 +792,6 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
       return next
     })
   }, [])
-
-  // Compute grid layout including a "new" cell
-  const allIds = [...terminals.map((t) => t.id), '__new__']
-  const { cols, layout } = computeAutoLayout(allIds, maxCols)
-  const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
 
   const handleSubmit = useCallback(() => {
     const perms: TaskPermissions = { allowedTools: Array.from(allowedTools), permissionMode: permMode }
@@ -828,41 +822,32 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
           <span className="tp-title">{taskLabel} — Send to terminal</span>
           <button className="tp-close" onClick={onClose}>{'\u2715'}</button>
         </div>
-        <div
-          className="tp-grid"
-          style={{
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${rows}, 1fr)`
-          }}
-        >
-          {layout.map((cell) => {
-            const isNew = cell.i === '__new__'
-            const term = isNew ? null : terminals.find((t) => t.id === cell.i)
-            const isSelected = isNew ? selected === null : selected === cell.i
-            const isAlive = term ? term.isAlive : true
+        <div className="tp-grid">
+          {terminals.map((term) => {
+            const isSelected = selected === term.id
+            const isAlive = term.isAlive
             return (
               <button
-                key={cell.i}
-                className={`tp-cell${isSelected ? ' tp-cell-selected' : ''}${isNew ? ' tp-cell-new' : ''}${!isAlive ? ' tp-cell-dead' : ''}`}
-                style={{ gridColumn: cell.x + 1, gridRow: cell.y + 1 }}
-                onClick={() => setSelected(isNew ? null : cell.i)}
-                disabled={!isNew && !isAlive}
-                title={isNew ? 'Create new terminal' : term?.title || ''}
+                key={term.id}
+                className={`tp-cell${isSelected ? ' tp-cell-selected' : ''}${!isAlive ? ' tp-cell-dead' : ''}`}
+                onClick={() => setSelected(term.id)}
+                disabled={!isAlive}
+                title={term.title || ''}
               >
-                {isNew ? (
-                  <>
-                    <span className="tp-cell-icon">+</span>
-                    <span className="tp-cell-label">New</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="tp-cell-num">{term?.title?.replace(/\D/g, '') || '?'}</span>
-                    <span className="tp-cell-label">{term?.title || 'Terminal'}</span>
-                  </>
-                )}
+                <span className="tp-cell-num">{term.title?.replace(/\D/g, '') || '?'}</span>
+                <span className="tp-cell-label">{term.title || 'Terminal'}</span>
               </button>
             )
           })}
+          <button
+            key="__new__"
+            className={`tp-cell tp-cell-new${selected === null ? ' tp-cell-selected' : ''}`}
+            onClick={() => setSelected(null)}
+            title="Create new terminal"
+          >
+            <span className="tp-cell-icon">+</span>
+            <span className="tp-cell-label">New</span>
+          </button>
         </div>
         <div className="tp-context">
           <textarea
@@ -877,8 +862,10 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
           <div className="tp-perms">
             <label className="tp-session-toggle">
               <input type="checkbox" checked={useSession} onChange={() => setUseSession(!useSession)} />
-              Persistent session
-              <span className="tp-session-hint">Uses --session-id so the terminal retains context across restarts</span>
+              <span className="tp-session-text">
+                Persistent session
+                <span className="tp-session-hint">Uses --session-id so the terminal retains context across restarts</span>
+              </span>
             </label>
             <button className="tp-perms-toggle" onClick={() => setShowPerms(!showPerms)}>
               <span className="tp-perms-chevron">{showPerms ? '\u25BC' : '\u25B6'}</span>
