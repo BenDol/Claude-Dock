@@ -63,13 +63,17 @@ export function setKey(key: string): { success: boolean } {
 }
 
 export function getKey(): string | null {
+  // 1. Check encrypted credential store first
   try {
     const blob = credStore().get('apiKeyEncrypted')
-    if (!blob) return null
-    return decryptValue(blob)
-  } catch {
-    return null
-  }
+    if (blob) return decryptValue(blob)
+  } catch { /* fall through */ }
+
+  // 2. Fall back to environment variable
+  const envKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_ADMIN_KEY
+  if (envKey) return envKey
+
+  return null
 }
 
 export function hasKey(): boolean {
