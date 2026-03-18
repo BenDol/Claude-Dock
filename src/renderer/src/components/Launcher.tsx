@@ -136,10 +136,35 @@ const Launcher: React.FC = () => {
     }
   }, [updatePhase])
 
-  // Auto-update: when download completes, install automatically
+  // Auto-update: when download completes, install automatically — but only if
+  // no dock windows have running terminals (avoids killing active Claude sessions)
   useEffect(() => {
-    if (updatePhase === 'ready' && autoUpdating) {
-      doInstall()
+    if (updatePhase !== 'ready' || !autoUpdating) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const tryInstall = async () => {
+      if (cancelled) return
+      try {
+        const active = await getDockApi().updater.hasActiveTerminals()
+        if (cancelled) return
+        if (!active) {
+          doInstall()
+        } else {
+          // Retry in 30 seconds — terminals are still running
+          timer = setTimeout(tryInstall, 30_000)
+        }
+      } catch {
+        // On error, install anyway (don't block updates indefinitely)
+        if (!cancelled) doInstall()
+      }
+    }
+    tryInstall()
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
     }
   }, [updatePhase, autoUpdating])
 

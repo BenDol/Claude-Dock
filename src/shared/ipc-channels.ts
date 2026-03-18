@@ -26,6 +26,7 @@ export const IPC = {
   UPDATER_INSTALL: 'updater:install',
   UPDATER_SAVE_PENDING_PROJECT: 'updater:savePendingProject',
   UPDATER_IS_LOCKED: 'updater:isLocked',
+  UPDATER_HAS_ACTIVE_TERMINALS: 'updater:hasActiveTerminals',
   GIT_CHECK: 'git:check',
   GIT_INSTALL: 'git:install',
   GIT_CLONE: 'git:clone',

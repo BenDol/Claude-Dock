@@ -614,6 +614,14 @@ export function registerIpcHandlers(): void {
     return isUpdateLocked()
   })
 
+  ipcMain.handle(IPC.UPDATER_HAS_ACTIVE_TERMINALS, () => {
+    const manager = DockManager.getInstance()
+    for (const dock of manager.getAllDocks()) {
+      if (dock.ptyManager.size > 0) return true
+    }
+    return false
+  })
+
   ipcMain.handle(IPC.UPDATER_INSTALL, () => {
     if (__DEV__) throw new Error('Updates are disabled in dev mode')
     if (!acquireUpdateLock()) {
