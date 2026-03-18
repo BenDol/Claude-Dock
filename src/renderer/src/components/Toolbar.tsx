@@ -842,7 +842,7 @@ const ClaudeUsageButton: React.FC = () => {
     return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current) }
   }, [showMeter])
 
-  const pct = 50 // DEBUG: hardcoded for testing — revert to: usage ? Math.min(usage.percentage, 100) : 0
+  const pct = usage ? Math.min(usage.percentage, 100) : 0
   const fillColor = pct < 70 ? '#9ece6a' : pct < 90 ? '#e0af68' : '#f7768e'
   // The rotating disc (200% tall) masks the non-liquid portion.
   // Its bottom edge should sit at the water line: top = waterLine% - 200%.
