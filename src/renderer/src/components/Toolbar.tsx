@@ -806,15 +806,15 @@ const NotificationDropdown: React.FC = () => {
 // --- Usage Meter ---
 
 /**
- * Combined Claude logo button with fluid fill usage indicator.
- * The logo fills from bottom to top based on usage percentage, with
- * color shifting from green → yellow → red as usage increases.
- * Clicking opens the Anthropic Console.
+ * CSS fluid fill button using the rotating-disc technique.
+ * A large rounded rectangle rotates inside the button, creating a
+ * realistic wavy liquid surface at the fill line. Pure CSS animation,
+ * no canvas or JS physics needed.
  */
 const ClaudeUsageButton: React.FC = () => {
   const showMeter = useSettingsStore((s) => s.settings.anthropic?.showUsageMeter ?? true)
   const [usage, setUsage] = useState<{ spent: number; limit: number; percentage: number } | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const api = getDockApi()
 
@@ -826,9 +826,9 @@ const ClaudeUsageButton: React.FC = () => {
         if (r.success && r.data) {
           setUsage({ spent: r.data.spent, limit: r.data.limit, percentage: r.data.percentage })
         }
-        timerRef.current = setTimeout(poll, 5 * 60 * 1000)
+        pollTimerRef.current = setTimeout(poll, 5 * 60 * 1000)
       }).catch(() => {
-        timerRef.current = setTimeout(poll, 5 * 60 * 1000)
+        pollTimerRef.current = setTimeout(poll, 5 * 60 * 1000)
       })
     }
 
@@ -839,13 +839,14 @@ const ClaudeUsageButton: React.FC = () => {
       poll()
     }).catch(() => poll())
 
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+    return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current) }
   }, [showMeter])
 
   const pct = 50 // DEBUG: hardcoded for testing — revert to: usage ? Math.min(usage.percentage, 100) : 0
   const fillColor = pct < 70 ? '#9ece6a' : pct < 90 ? '#e0af68' : '#f7768e'
-  // Fill rises from bottom: clipPath reveals from 100% (hidden) to 0% (full)
-  const fillTop = 100 - pct
+  // The rotating disc (200% tall) masks the non-liquid portion.
+  // Its bottom edge should sit at the water line: top = waterLine% - 200%.
+  const discTop = (100 - pct) - 200
 
   const tooltipText = usage
     ? `Estimated Usage: ~$${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(pct)}%)`
@@ -856,65 +857,27 @@ const ClaudeUsageButton: React.FC = () => {
       className="toolbar-btn toolbar-btn-icon claude-usage-btn"
       onClick={() => api.app.openExternal('https://console.anthropic.com')}
       title={tooltipText}
-      style={{ position: 'relative', overflow: 'hidden' }}
+      style={{ '--fluid-color': fillColor, '--fluid-top': `${discTop}%` } as React.CSSProperties}
     >
-      {/* Fluid fill background — fills entire button from bottom up */}
       {showMeter && pct > 0 && (
-        <div
-          className="claude-usage-fill-bg"
-          style={{
-            position: 'absolute',
-            left: 0, right: 0, bottom: 0,
-            height: `${pct}%`,
-            background: fillColor,
-            opacity: 0.2,
-            transition: 'height 1s ease, background 0.5s ease'
-          }}
-        />
+        <>
+          {/* Liquid color layer behind everything */}
+          <div className="claude-fluid-color" style={{ background: `color-mix(in srgb, ${fillColor} 50%, transparent)` }} />
+          <div className="claude-fluid-bubbles">
+            <span className="claude-bubble claude-bubble-1" />
+            <span className="claude-bubble claude-bubble-2" />
+            <span className="claude-bubble claude-bubble-3" />
+            <span className="claude-bubble claude-bubble-4" />
+            <span className="claude-bubble claude-bubble-5" />
+            <span className="claude-bubble claude-bubble-6" />
+          </div>
+          <div className="claude-fluid-disc claude-fluid-disc-1" />
+          <div className="claude-fluid-disc claude-fluid-disc-2" />
+        </>
       )}
-      {/* Wavy edge on the fill surface */}
-      {showMeter && pct > 0 && pct < 100 && (
-        <div
-          className="claude-usage-wave"
-          style={{
-            position: 'absolute',
-            left: '-50%', right: '-50%',
-            bottom: `${pct}%`,
-            height: 6,
-            background: fillColor,
-            opacity: 0.15,
-            borderRadius: '50%',
-            transform: 'translateY(50%)'
-          }}
-        />
-      )}
-      {/* Starburst icon — sits on top of the fluid */}
-      <svg width="16" height="16" viewBox="0 0 100 100" className="claude-usage-icon" style={{ position: 'relative', zIndex: 1 }}>
-        <defs>
-          <clipPath id="usage-fill-clip">
-            <rect x="0" y={fillTop} width="100" height={pct} />
-          </clipPath>
-        </defs>
-        {[
-          'M50 50 L46.5 30 L44 2 L48 1 L51 2 L50 30Z',
-          'M50 50 L55 32 L68 6 L72 8 L72 12 L57 34Z',
-          'M50 50 L60 38 L84 18 L87 22 L85 26 L62 40Z',
-          'M50 50 L64 44 L94 34 L95 38 L93 42 L65 47Z',
-          'M50 50 L64 54 L96 56 L96 60 L93 63 L64 57Z',
-          'M50 50 L60 60 L82 80 L79 83 L75 83 L58 62Z',
-          'M50 50 L54 63 L62 92 L58 94 L54 93 L52 64Z',
-          'M50 50 L46 62 L36 90 L32 89 L31 85 L44 61Z',
-          'M50 50 L40 58 L16 74 L14 70 L15 66 L38 56Z',
-          'M50 50 L37 48 L6 46 L5 42 L8 38 L37 44Z',
-          'M50 50 L40 38 L22 14 L26 11 L30 12 L42 36Z'
-        ].map((d, i) => (
-          <React.Fragment key={i}>
-            <path d={d} fill="currentColor" opacity="0.3" />
-            {showMeter && pct > 0 && (
-              <path d={d} fill={fillColor} clipPath="url(#usage-fill-clip)" className="claude-usage-fluid" />
-            )}
-          </React.Fragment>
-        ))}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="claude-usage-icon">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
       </svg>
     </button>
   )

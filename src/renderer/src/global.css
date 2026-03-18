@@ -4332,26 +4332,84 @@ body {
   filter: brightness(1.15);
 }
 
-/* Claude Usage Button — fluid fill */
-.claude-usage-btn { position: relative; overflow: hidden; border-radius: 4px; }
-.claude-usage-icon { display: block; }
+/* Claude Usage Button — CSS rotating-disc fluid fill */
+.claude-usage-btn {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background-color: transparent;
+  transition: background-color 0.5s ease;
+  width: var(--toolbar-icon-size);
+  height: var(--toolbar-icon-size);
+  min-width: var(--toolbar-icon-size);
+  min-height: var(--toolbar-icon-size);
+  box-sizing: content-box;
+}
+.claude-usage-icon { display: block; position: relative; z-index: 3; }
+.claude-fluid-color {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: background 0.5s ease;
+}
+.claude-usage-dollar {
+  font-weight: 300;
+  font-size: 14px;
+  line-height: 1;
+  color: currentColor;
+  opacity: 0.85;
+}
 
-/* Wave animation on the fluid surface edge */
-@keyframes claude-wave {
-  0%   { transform: translateY(50%) translateX(0); }
-  50%  { transform: translateY(50%) translateX(-5%); }
-  100% { transform: translateY(50%) translateX(0); }
+/* Rotating discs — toolbar background color, masking the liquid beneath. */
+.claude-fluid-disc {
+  position: absolute;
+  width: 200%;
+  height: 200%;
+  left: -50%;
+  top: var(--fluid-top, -100%);
+  background-color: var(--bg-tertiary);
+  border-radius: 40%;
+  z-index: 2;
+  pointer-events: none;
+  transition: top 1s ease;
 }
-.claude-usage-wave {
-  animation: claude-wave 2.5s ease-in-out infinite;
+.claude-fluid-disc-1 {
+  animation: claude-fluid-spin 8s linear infinite;
+}
+.claude-fluid-disc-2 {
+  opacity: 0.5;
+  top: calc(var(--fluid-top, -100%) - 1%);
+  animation: claude-fluid-spin 10s linear infinite reverse;
+}
+@keyframes claude-fluid-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-/* Subtle bob on the starburst fill paths */
-@keyframes claude-fluid-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-0.5px); }
+/* Bubbles */
+.claude-fluid-bubbles {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
 }
-.claude-usage-fluid {
-  animation: claude-fluid-bob 3s ease-in-out infinite;
+.claude-bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+  animation: claude-bubble-rise linear infinite;
+}
+.claude-bubble-1 { width: 3px; height: 3px; left: 15%; animation-duration: 3.2s; animation-delay: 0s; }
+.claude-bubble-2 { width: 2px; height: 2px; left: 40%; animation-duration: 4.1s; animation-delay: 0.8s; }
+.claude-bubble-3 { width: 2px; height: 2px; left: 65%; animation-duration: 3.6s; animation-delay: 1.5s; }
+.claude-bubble-4 { width: 3px; height: 3px; left: 80%; animation-duration: 4.4s; animation-delay: 0.3s; }
+.claude-bubble-5 { width: 2px; height: 2px; left: 30%; animation-duration: 3.8s; animation-delay: 2.1s; }
+.claude-bubble-6 { width: 2px; height: 2px; left: 55%; animation-duration: 4.7s; animation-delay: 1.2s; }
+@keyframes claude-bubble-rise {
+  0%   { bottom: -4px; opacity: 0; }
+  10%  { opacity: 0.6; }
+  80%  { opacity: 0.4; }
+  100% { bottom: 100%; opacity: 0; }
 }
 
