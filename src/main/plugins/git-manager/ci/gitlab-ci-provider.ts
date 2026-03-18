@@ -320,12 +320,13 @@ export class GitLabCiProvider implements CiProvider {
   }
 
   async cancelRun(projectDir: string, runId: number): Promise<void> {
-    await glab(['ci', 'cancel', String(runId)], projectDir)
+    const projectId = await getProjectId(projectDir)
+    await glab(['api', '--method', 'POST', `/projects/${projectId}/pipelines/${runId}/cancel`], projectDir)
   }
 
   async rerunFailedJobs(projectDir: string, runId: number): Promise<void> {
-    // GitLab retries the whole pipeline (no failed-only retry via CLI)
-    await glab(['ci', 'retry', String(runId)], projectDir)
+    const projectId = await getProjectId(projectDir)
+    await glab(['api', '--method', 'POST', `/projects/${projectId}/pipelines/${runId}/retry`], projectDir)
   }
 
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
