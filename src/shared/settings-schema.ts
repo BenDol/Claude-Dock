@@ -247,7 +247,7 @@ export const DEFAULT_SETTINGS: Settings = {
     skipPathPrompt: false
   },
   anthropic: {
-    showUsageMeter: true,
+    showUsageMeter: false,
     spendLimitUsd: 100
   },
   advanced: {
