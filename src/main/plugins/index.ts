@@ -174,9 +174,9 @@ export function registerPlugins(): void {
           if (finalPlugin.lazyLoad) {
             deferred.push(finalPlugin)
             // Store override module for deferred injection
-            if (effectiveOverride) (finalPlugin as any)._overrideModule = effectiveOverride.module
+            if (override) (finalPlugin as any)._overrideModule = override.module
           } else {
-            injectPluginServices(finalPlugin.id, effectiveOverride?.module)
+            injectPluginServices(finalPlugin.id, override?.module)
             manager.register(finalPlugin)
           }
         } catch (e) {

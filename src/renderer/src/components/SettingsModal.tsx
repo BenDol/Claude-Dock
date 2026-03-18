@@ -916,7 +916,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   >
                     {pathChecking ? 'Checking...' : 'Check & Fix PATH'}
                   </button>
-                  <div className="settings-description">
+                  <div className="settings-description" style={{ marginTop: 6 }}>
                     Check if the Claude CLI is in your shell PATH and fix it if not.
                   </div>
                   {pathCheckStatus && (
