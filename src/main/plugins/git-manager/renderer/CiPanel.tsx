@@ -928,7 +928,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                     {run.name}
                     {runProgress.has(run.id) && <span className="ci-run-pct">{runProgress.get(run.id)}%</span>}
                   </span>
-                  <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span></span>
+                  <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span> · <ElapsedTime since={run.createdAt} className="ci-run-elapsed" /></span>
                 </div>
                 <button
                   className={`ci-cancel-btn${cancellingRuns.has(run.id) ? ' ci-cancel-btn-active' : ''}`}
@@ -965,6 +965,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                 </span>
                 <span className="ci-run-meta">
                   #{run.runNumber} · <span className="ci-run-branch">{run.headBranch}</span> · {run.event} · {formatTime(run.createdAt)}
+                  {run.status === 'completed' && run.updatedAt && <> · {formatDuration(run.createdAt, run.updatedAt)}</>}
                 </span>
               </div>
               {(run.conclusion === 'failure' || run.conclusion === 'cancelled') && (
@@ -1186,6 +1187,7 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
           <StatusDot color={getStatusColor(run)} animated={effectiveStatus === 'in_progress' || effectiveStatus === 'queued'} />
           <span className="ci-detail-status-label">{statusLabel}</span>
           {progress !== undefined && effectiveStatus === 'in_progress' && <span className="ci-detail-pct">{progress}%</span>}
+          {effectiveStatus === 'in_progress' && <ElapsedTime since={run.createdAt} className="ci-detail-duration" />}
           {totalDuration && <span className="ci-detail-duration">{totalDuration}</span>}
         </div>
 
@@ -1759,6 +1761,10 @@ function formatTime(iso: string): string {
 
 function formatDuration(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime()
+  return formatMs(ms)
+}
+
+function formatMs(ms: number): string {
   if (ms < 0) return ''
   const sec = Math.floor(ms / 1000)
   if (sec < 60) return `${sec}s`
@@ -1768,6 +1774,18 @@ function formatDuration(start: string, end: string): string {
   const hr = Math.floor(min / 60)
   const remMin = min % 60
   return `${hr}h ${remMin}m`
+}
+
+/** Live elapsed time display — updates every second while active. */
+const ElapsedTime: React.FC<{ since: string; className?: string }> = ({ since, className }) => {
+  const [text, setText] = useState(() => formatMs(Date.now() - new Date(since).getTime()))
+  useEffect(() => {
+    const update = () => setText(formatMs(Date.now() - new Date(since).getTime()))
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [since])
+  return <span className={className}>{text}</span>
 }
 
 // --- Structured log viewer ---
