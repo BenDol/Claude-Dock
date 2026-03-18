@@ -157,6 +157,8 @@ function findPricing(modelId: string): { input: number; output: number; cacheRea
 
 /**
  * Read ~/.claude/stats-cache.json and estimate cost from token counts.
+ * Tries to compute monthly usage from dailyModelTokens first, falls back
+ * to all-time modelUsage if monthly data isn't available.
  */
 function fetchFromLocalStats(spendLimit: number, now: number): UsageResult {
   try {
@@ -169,35 +171,32 @@ function fetchFromLocalStats(spendLimit: number, now: number): UsageResult {
     }
 
     const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'))
-    const modelUsage = stats.modelUsage as Record<string, {
-      inputTokens?: number
-      outputTokens?: number
-      cacheReadInputTokens?: number
-      cacheCreationInputTokens?: number
-    }> | undefined
 
-    if (!modelUsage || Object.keys(modelUsage).length === 0) {
-      log('[usage-service] no model usage data in stats-cache.json')
+    // Try monthly estimate from dailyModelTokens first
+    const monthlyCost = estimateMonthlyCost(stats)
+    if (monthlyCost !== null) {
+      const percentage = spendLimit > 0 ? Math.min((monthlyCost / spendLimit) * 100, 100) : 0
+      log(`[usage-service] monthly estimate: ~$${monthlyCost.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
+      cachedResult = {
+        success: true,
+        data: { spent: monthlyCost, limit: spendLimit, percentage, lastUpdated: now }
+      }
+      lastFetchTime = now
+      return cachedResult
+    }
+
+    // Fallback: all-time estimate from modelUsage
+    const allTimeCost = estimateAllTimeCost(stats)
+    if (allTimeCost === null) {
+      log('[usage-service] no usage data in stats-cache.json')
       return { success: false, error: 'no_stats' }
     }
 
-    let totalCostEstimate = 0
-    for (const [model, usage] of Object.entries(modelUsage)) {
-      const pricing = findPricing(model)
-      const inputCost = ((usage.inputTokens ?? 0) / 1_000_000) * pricing.input
-      const outputCost = ((usage.outputTokens ?? 0) / 1_000_000) * pricing.output
-      const cacheReadCost = ((usage.cacheReadInputTokens ?? 0) / 1_000_000) * pricing.cacheRead
-      const cacheWriteCost = ((usage.cacheCreationInputTokens ?? 0) / 1_000_000) * pricing.cacheWrite
-      totalCostEstimate += inputCost + outputCost + cacheReadCost + cacheWriteCost
-    }
-
-    const percentage = spendLimit > 0 ? Math.min((totalCostEstimate / spendLimit) * 100, 100) : 0
-
-    log(`[usage-service] local stats estimate: $${totalCostEstimate.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%) [last computed: ${stats.lastComputedDate || 'unknown'}]`)
-
+    const percentage = spendLimit > 0 ? Math.min((allTimeCost / spendLimit) * 100, 100) : 0
+    log(`[usage-service] all-time estimate (no monthly data): ~$${allTimeCost.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
     cachedResult = {
       success: true,
-      data: { spent: totalCostEstimate, limit: spendLimit, percentage, lastUpdated: now }
+      data: { spent: allTimeCost, limit: spendLimit, percentage, lastUpdated: now }
     }
     lastFetchTime = now
     return cachedResult
@@ -206,6 +205,66 @@ function fetchFromLocalStats(spendLimit: number, now: number): UsageResult {
     if (cachedResult?.success) return cachedResult
     return { success: false, error: 'stats_read_error' }
   }
+}
+
+/**
+ * Estimate cost for the current month from dailyModelTokens.
+ * Each entry has { date, tokensByModel: { "model-id": totalTokens } }.
+ * Since we only have aggregate tokens (not input/output split), we use
+ * a blended rate: average of input and output pricing per model.
+ */
+function estimateMonthlyCost(stats: Record<string, unknown>): number | null {
+  const dailyTokens = stats.dailyModelTokens as Array<{
+    date: string
+    tokensByModel?: Record<string, number>
+  }> | undefined
+
+  if (!dailyTokens || dailyTokens.length === 0) return null
+
+  const nowDate = new Date()
+  const monthPrefix = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`
+
+  const thisMonth = dailyTokens.filter((d) => d.date.startsWith(monthPrefix))
+  if (thisMonth.length === 0) return null
+
+  let totalCost = 0
+  for (const day of thisMonth) {
+    if (!day.tokensByModel) continue
+    for (const [model, tokens] of Object.entries(day.tokensByModel)) {
+      const pricing = findPricing(model)
+      // Blended rate: average of input + output price (rough estimate since
+      // we don't know the input/output split)
+      const blendedRate = (pricing.input + pricing.output) / 2
+      totalCost += (tokens / 1_000_000) * blendedRate
+    }
+  }
+
+  return totalCost > 0 ? totalCost : null
+}
+
+/**
+ * Estimate all-time cost from modelUsage (cumulative totals with input/output split).
+ */
+function estimateAllTimeCost(stats: Record<string, unknown>): number | null {
+  const modelUsage = stats.modelUsage as Record<string, {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheCreationInputTokens?: number
+  }> | undefined
+
+  if (!modelUsage || Object.keys(modelUsage).length === 0) return null
+
+  let totalCost = 0
+  for (const [model, usage] of Object.entries(modelUsage)) {
+    const pricing = findPricing(model)
+    totalCost += ((usage.inputTokens ?? 0) / 1_000_000) * pricing.input
+    totalCost += ((usage.outputTokens ?? 0) / 1_000_000) * pricing.output
+    totalCost += ((usage.cacheReadInputTokens ?? 0) / 1_000_000) * pricing.cacheRead
+    totalCost += ((usage.cacheCreationInputTokens ?? 0) / 1_000_000) * pricing.cacheWrite
+  }
+
+  return totalCost > 0 ? totalCost : null
 }
 
 /**
