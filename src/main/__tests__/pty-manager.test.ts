@@ -106,7 +106,7 @@ describe('PtyManager', () => {
     it('queues claude launch command with session-id for new terminals', () => {
       manager.spawn('term-1', '/project')
 
-      // Process the queue (200ms initial delay)
+      // Process the queue (100ms initial delay)
       vi.advanceTimersByTime(200)
 
       const writeCalls = mockHostPostMessage.mock.calls.filter(
@@ -137,18 +137,17 @@ describe('PtyManager', () => {
       const countWrites = () =>
         mockHostPostMessage.mock.calls.filter((c) => c[0].type === 'write').length
 
-      // First launch after 200ms initial delay
-      vi.advanceTimersByTime(200)
+      // First launch after 100ms initial delay
+      vi.advanceTimersByTime(100)
       expect(countWrites()).toBe(1)
 
-      // processQueue uses nested setTimeout: 200ms (first) -> next() -> setTimeout(processQueue, 3000)
-      // Then next processQueue: setTimeout(next, 200) -> next() -> setTimeout(processQueue, 3000)
-      // Second launch: 3000ms (gap) + 200ms (delay) = 3200ms after first
-      vi.advanceTimersByTime(3200)
+      // processQueue uses nested setTimeout: 100ms (delay) -> next() -> setTimeout(processQueue, 1500)
+      // Second launch: 1500ms (gap) + 100ms (delay) = 1600ms after first
+      vi.advanceTimersByTime(1600)
       expect(countWrites()).toBe(2)
 
-      // Third launch: another 3000ms + 200ms
-      vi.advanceTimersByTime(3200)
+      // Third launch: another 1500ms + 100ms
+      vi.advanceTimersByTime(1600)
       expect(countWrites()).toBe(3)
     })
 
