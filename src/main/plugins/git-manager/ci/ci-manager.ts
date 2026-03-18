@@ -238,7 +238,8 @@ export class CiManager {
         headBranch: run.headBranch,
         providerKey: entry.provider.providerKey,
         ...(failureContext || {})
-      }
+      },
+      ...(conclusion === 'success' ? { autoReadMs: 5 * 60 * 1000 } : {})
     })
   }
 }
