@@ -169,71 +169,26 @@ function LauncherApp() {
 
 let nextTermId = 1
 
-const ERROR_PATTERNS = /\b(error|fail|fatal|exception|panic|abort|segfault|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|could not|undefined is not|is not a function|exit code [1-9]|Process completed with exit code [1-9]|ERR!|npm ERR|FAILED|AssertionError|assert\.|expect\()\b/i
-
-// Generic CI runner termination messages — not the actual error location
-const NOISE_PATTERNS = /\b(Job failed:? command terminated with exit code|Process completed with exit code|Exiting with code|The process .+ exited with code|##\[error\]Process completed with exit code|Last command failed with exit code|command terminated with exit code|failed with exit code|exited with exit code|exit status [0-9]|Cleaning up .* resources|Running after.script|ERROR: Build failed)\b/i
-
-/**
- * Extract only the error-relevant lines from a CI log, with context.
- * Falls back to the last 80 lines if no error patterns are found.
- */
-function extractErrorContext(fullLog: string, contextLines = 10): string {
-  const lines = fullLog.split('\n')
-  // Find all line indices that match error patterns (skip generic runner termination noise)
-  const errorIndices: number[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (ERROR_PATTERNS.test(lines[i]) && !NOISE_PATTERNS.test(lines[i])) errorIndices.push(i)
-  }
-
-  if (errorIndices.length === 0) {
-    // No error patterns found — fall back to tail
-    return lines.slice(-80).join('\n')
-  }
-
-  // Merge overlapping ranges into contiguous blocks
-  const ranges: [number, number][] = []
-  for (const idx of errorIndices) {
-    const start = Math.max(0, idx - contextLines)
-    const end = Math.min(lines.length - 1, idx + contextLines)
-    if (ranges.length > 0 && start <= ranges[ranges.length - 1][1] + 1) {
-      // Extend the previous range
-      ranges[ranges.length - 1][1] = end
-    } else {
-      ranges.push([start, end])
-    }
-  }
-
-  // Build output, joining blocks with separator
-  const blocks = ranges.map(([start, end]) => lines.slice(start, end + 1).join('\n'))
-  const result = blocks.join('\n...\n')
-
-  // Cap at ~200 lines to avoid overly large prompts
-  const resultLines = result.split('\n')
-  if (resultLines.length > 200) return resultLines.slice(0, 200).join('\n')
-  return result
-}
 
 async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnType<typeof getDockApi>, dir: string): Promise<string> {
   try {
     const { runName, runNumber, headBranch: branch, failedJobs } = task
 
-    // Fetch logs for all failed jobs
-    const jobLogSnippets: { name: string; log: string }[] = []
+    // Save full job logs to temp files for Claude to read
+    const jobLogFiles: { name: string; path: string }[] = []
     for (const fj of failedJobs) {
       if (!fj.id) continue
       try {
         // Try sourceDir first (submodule may have its own CI), fall back to dock projectDir
-        let fullLog = ''
+        let result = { path: '', error: undefined as string | undefined }
         if (task.sourceDir && task.sourceDir !== dir) {
-          try { fullLog = await api.ci.getJobLog(task.sourceDir, fj.id) } catch { /* fall through */ }
+          try { result = await api.ci.saveJobLog(task.sourceDir, task.runId, fj.id, fj.name) } catch { /* fall through */ }
         }
-        if (!fullLog) {
-          try { fullLog = await api.ci.getJobLog(dir, fj.id) } catch { /* continue */ }
+        if (!result.path) {
+          try { result = await api.ci.saveJobLog(dir, task.runId, fj.id, fj.name) } catch { /* continue */ }
         }
-        if (fullLog) {
-          const snippet = extractErrorContext(fullLog, 15)
-          if (snippet) jobLogSnippets.push({ name: fj.name, log: snippet })
+        if (result.path) {
+          jobLogFiles.push({ name: fj.name, path: result.path })
         }
       } catch { /* continue without log */ }
     }
@@ -244,14 +199,13 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
     }).join('\n')
 
     let logSection = ''
-    if (jobLogSnippets.length === 1) {
-      logSection = `\nThe error log from "${jobLogSnippets[0].name}" is provided below — start your analysis from this output. ` +
-        `If you need more context, you can check the full CI log yourself.\n\`\`\`\n${jobLogSnippets[0].log}\n\`\`\`\n`
-    } else if (jobLogSnippets.length > 1) {
-      logSection = '\nThe error logs from the failed jobs are provided below — start your analysis from this output. ' +
-        'If you need more context, you can check the full CI logs yourself.\n' + jobLogSnippets.map(
-        (s) => `\n--- ${s.name} ---\n\`\`\`\n${s.log}\n\`\`\``
-      ).join('\n') + '\n'
+    if (jobLogFiles.length === 1) {
+      logSection = `\nThe full CI log for "${jobLogFiles[0].name}" has been saved to:\n  ${jobLogFiles[0].path}\n` +
+        `Read this file to find the failure cause. The complete log is there — no need to re-fetch from CI.\n`
+    } else if (jobLogFiles.length > 1) {
+      logSection = '\nThe full CI logs for the failed jobs have been saved to the following files:\n' +
+        jobLogFiles.map((f) => `  - ${f.name}: ${f.path}`).join('\n') + '\n' +
+        `Read these files to find the failure causes. The complete logs are there — no need to re-fetch from CI.\n`
     } else {
       logSection = '\nCI logs could not be fetched automatically. Please check the CI pipeline logs yourself ' +
         `(e.g. \`gh run view ${task.runId} --log-failed\`) to find the error.\n`
@@ -276,9 +230,6 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
       logSection +
       submoduleSection +
       contextSection +
-      (jobLogSnippets.length > 0
-        ? `\nThe error logs above contain the relevant failure output. Use them to identify the issue directly — do NOT re-fetch the CI pipeline logs unless the provided output is insufficient.\n`
-        : '') +
       `Find the relevant code and fix the issue.\n\n` +
       `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
       `The fix MUST be committed and pushed to the branch "${branch}". ` +

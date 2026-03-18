@@ -4332,49 +4332,18 @@ body {
   filter: brightness(1.15);
 }
 
-/* Usage Meter */
-.usage-meter-wrap { position: relative; display: flex; align-items: center; }
-.usage-meter { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
-.usage-meter-dimmed { opacity: 0.5; }
-.usage-meter-bar { width: 40px; height: 6px; background: var(--border-color); border-radius: 3px; overflow: hidden; }
-.usage-meter-fill { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; }
-.usage-meter-label { font-size: 9px; color: var(--text-secondary); min-width: 22px; text-align: right; }
-
-/* Usage Setup Panel */
-.usage-setup-panel {
-  position: absolute;
-  top: calc(var(--toolbar-height) - 2px);
-  right: 0;
-  width: 260px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  padding: 10px 12px;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* Claude Usage Button — fluid fill icon */
+.claude-usage-btn { position: relative; }
+.claude-usage-icon { display: block; }
+.claude-usage-fluid {
+  transition: opacity 0.5s ease;
 }
-.usage-setup-title { font-size: 11px; font-weight: 600; color: var(--text-primary); }
-.usage-setup-step { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
-.usage-setup-num { font-weight: 600; color: var(--text-primary); min-width: 14px; }
-.usage-setup-link {
-  background: none; border: none; color: var(--accent-color); cursor: pointer;
-  font-size: 11px; padding: 0; text-decoration: underline;
+/* Gentle wave animation on the fill edge */
+@keyframes claude-fluid-wave {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
 }
-.usage-setup-link:hover { filter: brightness(1.2); }
-.usage-setup-input {
-  flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border-color);
-  border-radius: 3px; padding: 4px 6px; font-size: 11px; color: var(--text-primary);
-  outline: none; width: 100%;
+.claude-usage-fluid {
+  animation: claude-fluid-wave 3s ease-in-out infinite;
 }
-.usage-setup-input:focus { border-color: var(--accent-color); }
-.usage-setup-error { font-size: 10px; color: #f7768e; }
-.usage-setup-save {
-  background: var(--accent-color); color: #fff; border: none; border-radius: 3px;
-  padding: 4px 12px; font-size: 11px; cursor: pointer; font-weight: 500; align-self: flex-end;
-}
-.usage-setup-save:hover { filter: brightness(1.15); }
-.usage-setup-save:disabled { opacity: 0.5; cursor: default; }
 

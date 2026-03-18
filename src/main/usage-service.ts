@@ -1,5 +1,7 @@
-import { safeStorage } from 'electron'
+import { app, safeStorage } from 'electron'
 import * as https from 'https'
+import * as fs from 'fs'
+import * as path from 'path'
 import { createSafeStore } from './safe-store'
 import { log } from './logger'
 
@@ -98,30 +100,111 @@ export function getCached(): UsageResult | null {
 }
 
 export async function fetchUsage(spendLimit: number): Promise<UsageResult> {
-  // Rate-limit: return cached if recent enough
   const now = Date.now()
   if (cachedResult && now - lastFetchTime < MIN_FETCH_INTERVAL_MS) {
     return cachedResult
   }
 
+  // Try admin key first (accurate live data), fall back to local stats
   const apiKey = getKey()
-  if (!apiKey) {
-    return { success: false, error: 'no_key' }
+  if (apiKey?.startsWith('sk-ant-admin')) {
+    try {
+      const result = await fetchWithAdminKey(apiKey, spendLimit, now)
+      if (result.success) return result
+    } catch (err) {
+      log(`[usage-service] admin API failed, falling back to local stats: ${err}`)
+    }
   }
 
-  const isAdminKey = apiKey.startsWith('sk-ant-admin')
-  log(`[usage-service] fetching usage (keyType=${isAdminKey ? 'admin' : 'regular'})`)
+  // Primary path: estimate from local Claude Code stats
+  return fetchFromLocalStats(spendLimit, now)
+}
 
+// --- Anthropic pricing per 1M tokens (USD) ---
+const MODEL_PRICING: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
+  // Opus 4.6
+  'claude-opus-4-6':            { input: 15, output: 75, cacheRead: 1.5,  cacheWrite: 18.75 },
+  // Opus 4.5
+  'claude-opus-4-5':            { input: 15, output: 75, cacheRead: 1.5,  cacheWrite: 18.75 },
+  // Sonnet 4.6
+  'claude-sonnet-4-6':          { input: 3,  output: 15, cacheRead: 0.3,  cacheWrite: 3.75 },
+  // Sonnet 4.5
+  'claude-sonnet-4-5':          { input: 3,  output: 15, cacheRead: 0.3,  cacheWrite: 3.75 },
+  // Haiku 4.5
+  'claude-haiku-4-5':           { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
+  // Sonnet 3.5 / 3.6
+  'claude-3-5-sonnet':          { input: 3,  output: 15, cacheRead: 0.3,  cacheWrite: 3.75 },
+  'claude-3-6-sonnet':          { input: 3,  output: 15, cacheRead: 0.3,  cacheWrite: 3.75 },
+  // Opus 3
+  'claude-3-opus':              { input: 15, output: 75, cacheRead: 1.5,  cacheWrite: 18.75 },
+  // Haiku 3.5
+  'claude-3-5-haiku':           { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
+}
+
+function findPricing(modelId: string): { input: number; output: number; cacheRead: number; cacheWrite: number } {
+  // Exact match first
+  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
+  // Prefix match (e.g. "claude-opus-4-6" matches "claude-opus-4-6-20260101")
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (modelId.startsWith(prefix)) return pricing
+  }
+  // Guess from model name
+  if (modelId.includes('opus')) return MODEL_PRICING['claude-opus-4-6']
+  if (modelId.includes('haiku')) return MODEL_PRICING['claude-haiku-4-5']
+  // Default to sonnet pricing
+  return MODEL_PRICING['claude-sonnet-4-6']
+}
+
+/**
+ * Read ~/.claude/stats-cache.json and estimate cost from token counts.
+ */
+function fetchFromLocalStats(spendLimit: number, now: number): UsageResult {
   try {
-    if (isAdminKey) {
-      return await fetchWithAdminKey(apiKey, spendLimit, now)
-    } else {
-      return await fetchWithRegularKey(apiKey, spendLimit, now)
+    const home = process.env.USERPROFILE || process.env.HOME || app.getPath('home')
+    const statsPath = path.join(home, '.claude', 'stats-cache.json')
+
+    if (!fs.existsSync(statsPath)) {
+      log('[usage-service] stats-cache.json not found')
+      return { success: false, error: 'no_stats' }
     }
+
+    const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'))
+    const modelUsage = stats.modelUsage as Record<string, {
+      inputTokens?: number
+      outputTokens?: number
+      cacheReadInputTokens?: number
+      cacheCreationInputTokens?: number
+    }> | undefined
+
+    if (!modelUsage || Object.keys(modelUsage).length === 0) {
+      log('[usage-service] no model usage data in stats-cache.json')
+      return { success: false, error: 'no_stats' }
+    }
+
+    let totalCostEstimate = 0
+    for (const [model, usage] of Object.entries(modelUsage)) {
+      const pricing = findPricing(model)
+      const inputCost = ((usage.inputTokens ?? 0) / 1_000_000) * pricing.input
+      const outputCost = ((usage.outputTokens ?? 0) / 1_000_000) * pricing.output
+      const cacheReadCost = ((usage.cacheReadInputTokens ?? 0) / 1_000_000) * pricing.cacheRead
+      const cacheWriteCost = ((usage.cacheCreationInputTokens ?? 0) / 1_000_000) * pricing.cacheWrite
+      totalCostEstimate += inputCost + outputCost + cacheReadCost + cacheWriteCost
+    }
+
+    const percentage = spendLimit > 0 ? Math.min((totalCostEstimate / spendLimit) * 100, 100) : 0
+
+    log(`[usage-service] local stats estimate: $${totalCostEstimate.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%) [last computed: ${stats.lastComputedDate || 'unknown'}]`)
+
+    cachedResult = {
+      success: true,
+      data: { spent: totalCostEstimate, limit: spendLimit, percentage, lastUpdated: now }
+    }
+    lastFetchTime = now
+    return cachedResult
   } catch (err) {
-    log(`[usage-service] fetch error: ${err}`)
+    log(`[usage-service] local stats read failed: ${err}`)
     if (cachedResult?.success) return cachedResult
-    return { success: false, error: 'network' }
+    return { success: false, error: 'stats_read_error' }
   }
 }
 
@@ -136,88 +219,24 @@ async function fetchWithAdminKey(apiKey: string, spendLimit: number, now: number
   const url = `https://api.anthropic.com/v1/organizations/cost_report?starting_at=${encodeURIComponent(startOfMonth.toISOString())}&ending_at=${encodeURIComponent(new Date().toISOString())}`
 
   const result = await fetchAnthropicAPI<{ data?: Array<{ total_cost_usd?: number }> }>(url, apiKey)
-  log(`[usage-service] admin API response: status=${result.status}`)
 
   if (result.status === 401 || result.status === 403) {
-    if (!unauthorizedLogged) { log(`[usage-service] unauthorized (${result.status})`); unauthorizedLogged = true }
-    cachedResult = { success: false, error: 'unauthorized' }
-    lastFetchTime = now
-    return cachedResult
+    if (!unauthorizedLogged) { log(`[usage-service] admin key unauthorized (${result.status})`); unauthorizedLogged = true }
+    throw new Error('unauthorized')
   }
 
-  if (result.status === 429) {
-    if (cachedResult?.success) return cachedResult
-    return { success: false, error: 'rate_limited' }
-  }
-
-  if (!result.ok || !result.data) {
-    log(`[usage-service] unexpected response: ${JSON.stringify(result.data).slice(0, 200)}`)
-    return { success: false, error: `http_${result.status}` }
-  }
+  if (result.status === 429) throw new Error('rate_limited')
+  if (!result.ok || !result.data) throw new Error(`http_${result.status}`)
 
   unauthorizedLogged = false
-
-  // Sum up total_cost_usd from all data entries
   const entries = result.data.data || []
   const spent = entries.reduce((sum, e) => sum + (e.total_cost_usd ?? 0), 0)
   const percentage = spendLimit > 0 ? Math.min((spent / spendLimit) * 100, 100) : 0
 
-  log(`[usage-service] spend: $${spent.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
+  log(`[usage-service] admin API: $${spent.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
   cachedResult = { success: true, data: { spent, limit: spendLimit, percentage, lastUpdated: now } }
   lastFetchTime = now
   return cachedResult
-}
-
-/**
- * Regular key: use a minimal /v1/messages call to read rate-limit headers.
- * The headers show token limits per minute — we report the percentage of
- * the input token rate limit currently consumed.
- */
-async function fetchWithRegularKey(apiKey: string, spendLimit: number, now: number): Promise<UsageResult> {
-  const result = await fetchAnthropicAPIWithHeaders(
-    'https://api.anthropic.com/v1/messages',
-    apiKey,
-    JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1,
-      messages: [{ role: 'user', content: 'hi' }]
-    })
-  )
-
-  log(`[usage-service] regular API response: status=${result.status}`)
-
-  if (result.status === 401 || result.status === 403) {
-    if (!unauthorizedLogged) { log(`[usage-service] unauthorized (${result.status})`); unauthorizedLogged = true }
-    cachedResult = { success: false, error: 'unauthorized' }
-    lastFetchTime = now
-    return cachedResult
-  }
-
-  // Read rate limit headers
-  const headers = result.headers || {}
-  const tokensRemaining = parseFloat(headers['anthropic-ratelimit-input-tokens-remaining'] || '0')
-  const tokensLimit = parseFloat(headers['anthropic-ratelimit-input-tokens-limit'] || '0')
-
-  if (tokensLimit > 0) {
-    const tokensUsed = tokensLimit - tokensRemaining
-    const percentage = Math.min((tokensUsed / tokensLimit) * 100, 100)
-    log(`[usage-service] rate limit: ${tokensUsed}/${tokensLimit} tokens (${percentage.toFixed(1)}%)`)
-    cachedResult = {
-      success: true,
-      data: {
-        spent: tokensUsed,
-        limit: tokensLimit,
-        percentage,
-        lastUpdated: now
-      }
-    }
-    lastFetchTime = now
-    return cachedResult
-  }
-
-  // No rate limit headers — can't determine usage
-  log(`[usage-service] no rate limit headers found`)
-  return { success: false, error: 'no_usage_data' }
 }
 
 interface APIResult<T> {
@@ -267,47 +286,3 @@ function fetchAnthropicAPI<T>(url: string, apiKey: string): Promise<APIResult<T>
   })
 }
 
-function fetchAnthropicAPIWithHeaders(url: string, apiKey: string, body: string): Promise<APIResult<unknown>> {
-  return new Promise((resolve) => {
-    const parsed = new URL(url)
-    const req = https.request(
-      {
-        method: 'POST',
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'User-Agent': 'Claude-Dock'
-        }
-      },
-      (res) => {
-        const flatHeaders: Record<string, string> = {}
-        for (const [k, v] of Object.entries(res.headers)) {
-          if (typeof v === 'string') flatHeaders[k] = v
-          else if (Array.isArray(v)) flatHeaders[k] = v[0]
-        }
-        let data = ''
-        res.on('data', (chunk) => { data += chunk })
-        res.on('end', () => {
-          const status = res.statusCode ?? 0
-          try {
-            resolve({ ok: status >= 200 && status < 300, status, data: JSON.parse(data), headers: flatHeaders })
-          } catch {
-            resolve({ ok: false, status, headers: flatHeaders })
-          }
-        })
-        res.on('error', () => resolve({ ok: false, status: 0 }))
-      }
-    )
-    req.on('error', () => resolve({ ok: false, status: 0 }))
-    req.setTimeout(10000, () => {
-      req.destroy()
-      resolve({ ok: false, status: 0 })
-    })
-    req.write(body)
-    req.end()
-  })
-}

@@ -220,6 +220,7 @@ export interface DockApi {
     getRunJobs: (projectDir: string, runId: number) => Promise<CiJob[]>
     cancelRun: (projectDir: string, runId: number) => Promise<{ success: boolean; error?: string }>
     getJobLog: (projectDir: string, jobId: number) => Promise<string>
+    saveJobLog: (projectDir: string, runId: number, jobId: number, jobName: string) => Promise<{ path: string; error?: string }>
     startPolling: (projectDir: string) => Promise<void>
     stopPolling: (projectDir: string) => Promise<void>
     fixWithClaude: (projectDir: string, data: Record<string, unknown>) => Promise<boolean>
@@ -462,6 +463,7 @@ const dockApi: DockApi = {
     getRunJobs: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_GET_RUN_JOBS, projectDir, runId),
     cancelRun: (projectDir, runId) => ipcRenderer.invoke(IPC.CI_CANCEL_RUN, projectDir, runId),
     getJobLog: (projectDir, jobId) => ipcRenderer.invoke(IPC.CI_GET_JOB_LOG, projectDir, jobId),
+    saveJobLog: (projectDir, runId, jobId, jobName) => ipcRenderer.invoke(IPC.CI_SAVE_JOB_LOG, projectDir, runId, jobId, jobName),
     startPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_START_POLLING, projectDir),
     stopPolling: (projectDir) => ipcRenderer.invoke(IPC.CI_STOP_POLLING, projectDir),
     fixWithClaude: (projectDir, data) => ipcRenderer.invoke(IPC.CI_FIX_WITH_CLAUDE, projectDir, data),

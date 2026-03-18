@@ -359,8 +359,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
           {hasPluginUpdates && <span className="toolbar-update-dot" />}
         </button>
         <NotificationDropdown />
-        <UsageMeter />
-        <AccountButton />
+        <ClaudeUsageButton />
         <div className="toolbar-separator" />
         <button className="win-btn win-minimize" onClick={() => api.win.minimize()} title="Minimize">
           &#x2015;
@@ -806,61 +805,33 @@ const NotificationDropdown: React.FC = () => {
 
 // --- Usage Meter ---
 
-const KeyIcon: React.FC = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.78 7.78 5.5 5.5 0 017.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-  </svg>
-)
-
-const UserIcon: React.FC = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-    <circle cx="12" cy="7" r="4" />
-  </svg>
-)
-
-const UsageMeter: React.FC = () => {
+/**
+ * Combined Claude logo button with fluid fill usage indicator.
+ * The logo fills from bottom to top based on usage percentage, with
+ * color shifting from green → yellow → red as usage increases.
+ * Clicking opens the Anthropic Console.
+ */
+const ClaudeUsageButton: React.FC = () => {
   const showMeter = useSettingsStore((s) => s.settings.anthropic?.showUsageMeter ?? true)
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
   const [usage, setUsage] = useState<{ spent: number; limit: number; percentage: number } | null>(null)
-  const [setupOpen, setSetupOpen] = useState(false)
-  const [keyInput, setKeyInput] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [dimmed, setDimmed] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const api = getDockApi()
 
-  // Check if key exists on mount
   useEffect(() => {
-    api.usage.hasKey().then((r) => setHasApiKey(r.hasKey)).catch(() => setHasApiKey(false))
-  }, [])
-
-  // Poll usage when key is configured
-  useEffect(() => {
-    if (!hasApiKey || !showMeter) return
+    if (!showMeter) return
 
     const poll = () => {
       api.usage.fetch().then((r) => {
         if (r.success && r.data) {
           setUsage({ spent: r.data.spent, limit: r.data.limit, percentage: r.data.percentage })
-          setDimmed(false)
-        } else if (r.error === 'unauthorized') {
-          setHasApiKey(false)
-        } else if (r.error === 'network' || r.error === 'rate_limited') {
-          setDimmed(true)
         }
-        // Schedule next poll
         timerRef.current = setTimeout(poll, 5 * 60 * 1000)
       }).catch(() => {
-        setDimmed(true)
         timerRef.current = setTimeout(poll, 5 * 60 * 1000)
       })
     }
 
-    // Initial fetch — try cached first
     api.usage.getCached().then((cached) => {
       if (cached?.success && cached.data) {
         setUsage({ spent: cached.data.spent, limit: cached.data.limit, percentage: cached.data.percentage })
@@ -868,131 +839,58 @@ const UsageMeter: React.FC = () => {
       poll()
     }).catch(() => poll())
 
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [hasApiKey, showMeter])
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [showMeter])
 
-  // Close setup panel on outside click
-  useEffect(() => {
-    if (!setupOpen) return
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setSetupOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [setupOpen])
+  const pct = usage ? Math.min(usage.percentage, 100) : 0
+  const fillColor = pct < 70 ? '#9ece6a' : pct < 90 ? '#e0af68' : '#f7768e'
+  // Fill rises from bottom: clipPath reveals from 100% (hidden) to 0% (full)
+  const fillTop = 100 - pct
 
-  const handleSaveKey = useCallback(async () => {
-    if (!keyInput.trim()) return
-    setSaving(true)
-    setSaveError('')
-    try {
-      const result = await api.usage.setKey(keyInput.trim())
-      if (result.success) {
-        setHasApiKey(true)
-        setSetupOpen(false)
-        setKeyInput('')
-      } else {
-        setSaveError('Failed to save key.')
-      }
-    } catch {
-      setSaveError('Failed to save key.')
-    }
-    setSaving(false)
-  }, [keyInput])
+  const tooltipText = usage
+    ? `Estimated Usage: ~$${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(pct)}%)`
+    : 'Anthropic Console'
 
-  if (!showMeter) return null
-
-  // Mode A: No API key — show setup icon
-  if (hasApiKey === false) {
-    return (
-      <div className="usage-meter-wrap" ref={ref}>
-        <button
-          className="toolbar-btn toolbar-btn-icon"
-          onClick={() => setSetupOpen(!setupOpen)}
-          title="Set up API usage tracking"
-        >
-          <KeyIcon />
-        </button>
-        {setupOpen && (
-          <>
-            <div className="ws-dropdown-backdrop" onMouseDown={() => setSetupOpen(false)} />
-            <div className="usage-setup-panel" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="usage-setup-title">API Usage Meter Setup</div>
-              <div className="usage-setup-step">
-                <span className="usage-setup-num">1.</span>
-                <span>
-                  <button
-                    className="usage-setup-link"
-                    onClick={() => api.app.openExternal('https://console.anthropic.com/settings/admin-keys')}
-                  >
-                    Create an Admin API key
-                  </button>
-                </span>
-              </div>
-              <div className="usage-setup-step">
-                <span className="usage-setup-num">2.</span>
-                <input
-                  className="usage-setup-input"
-                  type="password"
-                  placeholder="Paste your API key"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveKey() }}
-                  autoFocus
-                />
-              </div>
-              {saveError && <div className="usage-setup-error">{saveError}</div>}
-              <button
-                className="usage-setup-save"
-                onClick={handleSaveKey}
-                disabled={saving || !keyInput.trim()}
-              >
-                {saving ? '...' : 'Save'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    )
-  }
-
-  // Loading state
-  if (hasApiKey === null || !usage) return null
-
-  // Mode B: Key configured — show usage bar
-  const color = usage.percentage < 70 ? '#9ece6a' : usage.percentage < 90 ? '#e0af68' : '#f7768e'
-  const isDollar = usage.limit < 10000 // admin key reports small USD values; regular key reports large token counts
-  const tooltipText = isDollar
-    ? `API Usage: $${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(usage.percentage)}%)`
-    : `Rate Limit: ${Math.round(usage.spent).toLocaleString()} / ${Math.round(usage.limit).toLocaleString()} tokens (${Math.round(usage.percentage)}%)`
-
-  return (
-    <div
-      className={`usage-meter${dimmed ? ' usage-meter-dimmed' : ''}`}
-      title={tooltipText}
-    >
-      <div className="usage-meter-bar">
-        <div
-          className="usage-meter-fill"
-          style={{ width: `${Math.min(usage.percentage, 100)}%`, background: color }}
-        />
-      </div>
-      <span className="usage-meter-label">{Math.round(usage.percentage)}%</span>
-    </div>
-  )
-}
-
-const AccountButton: React.FC = () => {
-  const api = getDockApi()
   return (
     <button
-      className="toolbar-btn toolbar-btn-icon"
+      className="toolbar-btn toolbar-btn-icon claude-usage-btn"
       onClick={() => api.app.openExternal('https://console.anthropic.com')}
-      title="Anthropic Console"
+      title={tooltipText}
     >
-      <UserIcon />
+      <svg width="16" height="16" viewBox="0 0 24 24" className="claude-usage-icon">
+        {/* Background outline — always visible */}
+        <path
+          d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          opacity="0.35"
+        />
+        {/* Fluid fill — clipped to rise from bottom based on usage */}
+        {showMeter && pct > 0 && (
+          <g>
+            <defs>
+              <clipPath id="usage-fill-clip">
+                <rect x="0" y={`${fillTop}%`} width="100%" height={`${pct}%`} />
+              </clipPath>
+            </defs>
+            <path
+              d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
+              fill={fillColor}
+              opacity="0.6"
+              clipPath="url(#usage-fill-clip)"
+              className="claude-usage-fluid"
+            />
+          </g>
+        )}
+        {/* Foreground outline — crisp on top of fill */}
+        <path
+          d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      </svg>
     </button>
   )
 }

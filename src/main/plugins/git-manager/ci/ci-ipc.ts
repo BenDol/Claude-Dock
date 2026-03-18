@@ -1,4 +1,7 @@
 import { ipcMain } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 import { IPC } from '../../../../shared/ipc-channels'
 import { CiProviderRegistry } from './ci-provider-registry'
 import { CiManager } from './ci-manager'
@@ -85,6 +88,24 @@ export function registerCiIpc(): void {
     } catch (err) {
       getServices().logError('[ci] getJobLog failed:', err)
       return ''
+    }
+  })
+
+  ipcMain.handle(IPC.CI_SAVE_JOB_LOG, async (_event, projectDir: string, runId: number, jobId: number, jobName: string) => {
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return { path: '', error: 'No CI provider' }
+    try {
+      const log = await provider.getJobLog(projectDir, jobId)
+      if (!log) return { path: '', error: 'Empty log' }
+      const cacheDir = path.join(os.tmpdir(), 'claude-dock-ci-logs')
+      fs.mkdirSync(cacheDir, { recursive: true })
+      const safeName = jobName.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 60)
+      const filePath = path.join(cacheDir, `run-${runId}-job-${jobId}-${safeName}.log`)
+      fs.writeFileSync(filePath, log, 'utf-8')
+      return { path: filePath }
+    } catch (err) {
+      getServices().logError('[ci] saveJobLog failed:', err)
+      return { path: '', error: err instanceof Error ? err.message : 'Failed to save log' }
     }
   })
 

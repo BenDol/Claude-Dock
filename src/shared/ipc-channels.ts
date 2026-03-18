@@ -138,6 +138,7 @@ export const IPC = {
   CI_GET_RUN_JOBS: 'ci:getRunJobs',
   CI_CANCEL_RUN: 'ci:cancelRun',
   CI_GET_JOB_LOG: 'ci:getJobLog',
+  CI_SAVE_JOB_LOG: 'ci:saveJobLog',
   CI_START_POLLING: 'ci:startPolling',
   CI_STOP_POLLING: 'ci:stopPolling',
   CI_FIX_WITH_CLAUDE: 'ci:fixWithClaude',
