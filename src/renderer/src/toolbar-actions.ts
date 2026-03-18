@@ -8,6 +8,8 @@ export interface ToolbarAction {
   order?: number // lower = further left, default 100
   /** Optional async badge provider — return a number/string to show, or null to hide */
   getBadge?: (projectDir: string) => Promise<string | number | null>
+  /** Optional async badge variant — return a CSS modifier suffix (e.g. 'staged') or null for default */
+  getBadgeVariant?: (projectDir: string) => Promise<string | null>
   /** Optional async warning indicator — return true to show a small warning icon overlay */
   getWarning?: (projectDir: string) => Promise<boolean>
   /** Optional async status dot — return a color status or null to hide */

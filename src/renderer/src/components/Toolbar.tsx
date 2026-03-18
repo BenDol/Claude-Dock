@@ -84,6 +84,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const rcBufsRef = useRef<Map<string, string>>(new Map())
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
+  const [badgeVariants, setBadgeVariants] = useState<Record<string, string>>({})
   const [warnings, setWarnings] = useState<Set<string>>(new Set())
   const [statusDots, setStatusDots] = useState<Record<string, 'success' | 'failure' | 'in_progress'>>({})
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
@@ -154,6 +155,20 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             return { ...prev, [action.id]: val }
           })
         }).catch(() => {})
+        if (action.getBadgeVariant) {
+          action.getBadgeVariant(projectDir).then((variant) => {
+            setBadgeVariants((prev) => {
+              if (variant == null) {
+                if (!(action.id in prev)) return prev
+                const next = { ...prev }
+                delete next[action.id]
+                return next
+              }
+              if (prev[action.id] === variant) return prev
+              return { ...prev, [action.id]: variant }
+            })
+          }).catch(() => {})
+        }
       }
       for (const action of warningActions) {
         action.getWarning!(projectDir).then((warn) => {
@@ -330,7 +345,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
             {warnings.has(action.id) ? (
               <span className="toolbar-warning" title="Unresolved conflicts">&#9888;</span>
             ) : badges[action.id] != null ? (
-              <span className="toolbar-badge">{badges[action.id]}</span>
+              <span className={`toolbar-badge${badgeVariants[action.id] ? ` toolbar-badge-${badgeVariants[action.id]}` : ''}`}>{badges[action.id]}</span>
             ) : null}
             {statusDots[action.id] && (
               <span className={`toolbar-status-dot toolbar-status-dot-${statusDots[action.id]}`} />

@@ -513,6 +513,11 @@ body {
   box-sizing: border-box;
 }
 
+.toolbar-badge-staged {
+  background: #9ece6a;
+  color: #1a1b26;
+}
+
 .toolbar-badge-notif {
   top: -1px;
   right: -3px;
