@@ -2901,6 +2901,35 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.ci-retry-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.ci-run-row:hover .ci-retry-btn {
+  opacity: 0.6;
+}
+
+.ci-retry-btn:hover {
+  opacity: 1;
+  color: var(--accent-color);
+}
+
+.ci-retry-btn-active {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .ci-run-fix-btn {
   background: none;
   border: none;
@@ -3171,6 +3200,14 @@ body {
   color: #ff99aa;
 }
 
+.ci-detail-icon-retry {
+  color: var(--accent-color);
+}
+
+.ci-detail-icon-retry:hover {
+  color: var(--accent-color);
+}
+
 .ci-detail-close {
   background: none;
   border: none;
@@ -3312,13 +3349,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
+  opacity: 0.6;
   transition: opacity 0.12s, color 0.12s;
   flex-shrink: 0;
-}
-
-.ci-detail-job-header:hover .ci-detail-fix-btn {
-  opacity: 0.6;
 }
 
 .ci-detail-fix-btn:hover {

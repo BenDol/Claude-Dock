@@ -434,6 +434,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   }, [expandedRun, projectDir])
 
   const [cancellingRuns, setCancellingRuns] = useState<Set<number>>(new Set())
+  const [retryingRuns, setRetryingRuns] = useState<Set<number>>(new Set())
 
   const handleCancel = useCallback(async (runId: number) => {
     setCancellingRuns((prev) => new Set(prev).add(runId))
@@ -449,6 +450,20 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       }, 3000)
     } catch {
       setCancellingRuns((prev) => { const next = new Set(prev); next.delete(runId); return next })
+    }
+  }, [projectDir, loadRuns])
+
+  const handleRetry = useCallback(async (runId: number) => {
+    setRetryingRuns((prev) => new Set(prev).add(runId))
+    try {
+      await api.ci.rerunFailed(projectDir, runId)
+      // Refresh runs after a short delay to pick up the new run
+      setTimeout(() => {
+        loadRuns(1, true)
+        setRetryingRuns((prev) => { const next = new Set(prev); next.delete(runId); return next })
+      }, 3000)
+    } catch {
+      setRetryingRuns((prev) => { const next = new Set(prev); next.delete(runId); return next })
     }
   }, [projectDir, loadRuns])
 
@@ -952,6 +967,22 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                   #{run.runNumber} · <span className="ci-run-branch">{run.headBranch}</span> · {run.event} · {formatTime(run.createdAt)}
                 </span>
               </div>
+              {(run.conclusion === 'failure' || run.conclusion === 'cancelled') && (
+                <button
+                  className={`ci-retry-btn${retryingRuns.has(run.id) ? ' ci-retry-btn-active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); handleRetry(run.id) }}
+                  disabled={retryingRuns.has(run.id)}
+                  title={retryingRuns.has(run.id) ? 'Retrying...' : 'Retry run'}
+                >
+                  {retryingRuns.has(run.id) ? (
+                    <span className="ci-cancel-spinner" />
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                  )}
+                </button>
+              )}
               {run.conclusion === 'failure' && (
                 <button className="ci-run-fix-btn" onClick={(e) => { e.stopPropagation(); handleFixRunWithClaude(run) }} title="Fix with Claude">
                   <ClaudeFixIcon />
@@ -987,6 +1018,8 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
               onClose={() => { setExpandedRun(null); setAutoOpenJob(null) }}
               onCancel={handleCancel}
               cancelling={cancellingRuns.has(selectedRun.id)}
+              onRetry={handleRetry}
+              retrying={retryingRuns.has(selectedRun.id)}
               onOpenUrl={(url) => api.app.openExternal(url)}
               autoOpenJobId={autoOpenJob?.runId === selectedRun.id ? autoOpenJob.jobId : undefined}
               onAutoOpenHandled={() => setAutoOpenJob(null)}
@@ -998,7 +1031,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   )
 }
 
-function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, cancelling, onOpenUrl, autoOpenJobId, onAutoOpenHandled }: {
+function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, provider, projectDir, searchQuery, progress, onToggleGroup, onClose, onCancel, cancelling, onRetry, retrying, onOpenUrl, autoOpenJobId, onAutoOpenHandled }: {
   run: CiWorkflowRun
   jobs: CiJob[]
   jobGroups: CiJobGroup[]
@@ -1012,6 +1045,8 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
   onClose: () => void
   onCancel: (runId: number) => void
   cancelling?: boolean
+  onRetry: (runId: number) => void
+  retrying?: boolean
   onOpenUrl: (url: string) => void
   autoOpenJobId?: number
   onAutoOpenHandled?: () => void
@@ -1116,6 +1151,22 @@ function RunDetailPanel({ run, jobs, jobGroups, loadingJobs, expandedGroups, pro
               ) : (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" />
+                </svg>
+              )}
+            </button>
+          )}
+          {(effectiveStatus === 'failure' || effectiveStatus === 'cancelled') && (
+            <button
+              className={`ci-detail-icon-btn ci-detail-icon-retry${retrying ? ' ci-retry-btn-active' : ''}`}
+              onClick={() => onRetry(run.id)}
+              disabled={retrying}
+              title={retrying ? 'Retrying...' : 'Retry run'}
+            >
+              {retrying ? (
+                <span className="ci-cancel-spinner" />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                 </svg>
               )}
             </button>
