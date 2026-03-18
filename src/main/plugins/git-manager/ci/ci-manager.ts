@@ -142,7 +142,8 @@ export class CiManager {
       source: 'git-manager',
       projectDir: entry.projectDir,
       action: run.url ? { label: `View on ${shortProviderName(entry.provider.providerKey)}`, url: run.url } : undefined,
-      data: { runId: run.id, providerKey: entry.provider.providerKey }
+      data: { runId: run.id, providerKey: entry.provider.providerKey },
+      autoReadMs: 5 * 60 * 1000 // Auto-mark as read after 5 minutes
     })
   }
 

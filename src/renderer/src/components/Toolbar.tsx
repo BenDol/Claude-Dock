@@ -667,6 +667,8 @@ const NotificationDropdown: React.FC = () => {
     try { localStorage.setItem(notifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
   }, [readIds, projectDir])
 
+  const autoReadTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
   useEffect(() => {
     const api = getDockApi()
     const norm = (p: string) => p.replace(/[\\/]/g, '/').toLowerCase()
@@ -679,9 +681,20 @@ const NotificationDropdown: React.FC = () => {
       // Auto-mark as read if the setting is enabled or window is focused
       if (markAllRead || document.hasFocus()) {
         setReadIds((prev) => new Set(prev).add(notification.id))
+      } else if (notification.autoReadMs && notification.autoReadMs > 0) {
+        // Schedule auto-read after the specified delay
+        const timer = setTimeout(() => {
+          autoReadTimers.current.delete(notification.id)
+          setReadIds((prev) => new Set(prev).add(notification.id))
+        }, notification.autoReadMs)
+        autoReadTimers.current.set(notification.id, timer)
       }
     })
-    return cleanup
+    return () => {
+      cleanup()
+      for (const timer of autoReadTimers.current.values()) clearTimeout(timer)
+      autoReadTimers.current.clear()
+    }
   }, [markAllRead, projectDir])
 
   // Mark all as read when panel opens

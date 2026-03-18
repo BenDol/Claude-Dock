@@ -23,6 +23,7 @@ export interface GitManagerServices {
     action?: { label: string; url?: string; event?: string }
     actions?: { label: string; url?: string; event?: string }[]
     data?: Record<string, unknown>
+    autoReadMs?: number
   }) => void
 
   getSettings: () => { theme: { mode: string } }

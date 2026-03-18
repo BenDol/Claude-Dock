@@ -68,6 +68,8 @@ export interface DockNotification {
   source?: string
   projectDir?: string
   data?: Record<string, unknown>
+  /** Auto-mark this notification as read after N milliseconds if still unread */
+  autoReadMs?: number
 }
 
 export interface CiSetupStep {
