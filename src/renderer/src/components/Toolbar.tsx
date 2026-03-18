@@ -842,7 +842,7 @@ const ClaudeUsageButton: React.FC = () => {
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
   }, [showMeter])
 
-  const pct = usage ? Math.min(usage.percentage, 100) : 0
+  const pct = 50 // DEBUG: hardcoded for testing — revert to: usage ? Math.min(usage.percentage, 100) : 0
   const fillColor = pct < 70 ? '#9ece6a' : pct < 90 ? '#e0af68' : '#f7768e'
   // Fill rises from bottom: clipPath reveals from 100% (hidden) to 0% (full)
   const fillTop = 100 - pct
@@ -856,40 +856,65 @@ const ClaudeUsageButton: React.FC = () => {
       className="toolbar-btn toolbar-btn-icon claude-usage-btn"
       onClick={() => api.app.openExternal('https://console.anthropic.com')}
       title={tooltipText}
+      style={{ position: 'relative', overflow: 'hidden' }}
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" className="claude-usage-icon">
-        {/* Background outline — always visible */}
-        <path
-          d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          opacity="0.35"
+      {/* Fluid fill background — fills entire button from bottom up */}
+      {showMeter && pct > 0 && (
+        <div
+          className="claude-usage-fill-bg"
+          style={{
+            position: 'absolute',
+            left: 0, right: 0, bottom: 0,
+            height: `${pct}%`,
+            background: fillColor,
+            opacity: 0.2,
+            transition: 'height 1s ease, background 0.5s ease'
+          }}
         />
-        {/* Fluid fill — clipped to rise from bottom based on usage */}
-        {showMeter && pct > 0 && (
-          <g>
-            <defs>
-              <clipPath id="usage-fill-clip">
-                <rect x="0" y={`${fillTop}%`} width="100%" height={`${pct}%`} />
-              </clipPath>
-            </defs>
-            <path
-              d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
-              fill={fillColor}
-              opacity="0.6"
-              clipPath="url(#usage-fill-clip)"
-              className="claude-usage-fluid"
-            />
-          </g>
-        )}
-        {/* Foreground outline — crisp on top of fill */}
-        <path
-          d="M16.31 2H7.69L2 12l5.69 10h8.62L22 12z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
+      )}
+      {/* Wavy edge on the fill surface */}
+      {showMeter && pct > 0 && pct < 100 && (
+        <div
+          className="claude-usage-wave"
+          style={{
+            position: 'absolute',
+            left: '-50%', right: '-50%',
+            bottom: `${pct}%`,
+            height: 6,
+            background: fillColor,
+            opacity: 0.15,
+            borderRadius: '50%',
+            transform: 'translateY(50%)'
+          }}
         />
+      )}
+      {/* Starburst icon — sits on top of the fluid */}
+      <svg width="16" height="16" viewBox="0 0 100 100" className="claude-usage-icon" style={{ position: 'relative', zIndex: 1 }}>
+        <defs>
+          <clipPath id="usage-fill-clip">
+            <rect x="0" y={fillTop} width="100" height={pct} />
+          </clipPath>
+        </defs>
+        {[
+          'M50 50 L46.5 30 L44 2 L48 1 L51 2 L50 30Z',
+          'M50 50 L55 32 L68 6 L72 8 L72 12 L57 34Z',
+          'M50 50 L60 38 L84 18 L87 22 L85 26 L62 40Z',
+          'M50 50 L64 44 L94 34 L95 38 L93 42 L65 47Z',
+          'M50 50 L64 54 L96 56 L96 60 L93 63 L64 57Z',
+          'M50 50 L60 60 L82 80 L79 83 L75 83 L58 62Z',
+          'M50 50 L54 63 L62 92 L58 94 L54 93 L52 64Z',
+          'M50 50 L46 62 L36 90 L32 89 L31 85 L44 61Z',
+          'M50 50 L40 58 L16 74 L14 70 L15 66 L38 56Z',
+          'M50 50 L37 48 L6 46 L5 42 L8 38 L37 44Z',
+          'M50 50 L40 38 L22 14 L26 11 L30 12 L42 36Z'
+        ].map((d, i) => (
+          <React.Fragment key={i}>
+            <path d={d} fill="currentColor" opacity="0.3" />
+            {showMeter && pct > 0 && (
+              <path d={d} fill={fillColor} clipPath="url(#usage-fill-clip)" className="claude-usage-fluid" />
+            )}
+          </React.Fragment>
+        ))}
       </svg>
     </button>
   )

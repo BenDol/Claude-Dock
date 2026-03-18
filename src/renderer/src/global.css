@@ -4332,18 +4332,26 @@ body {
   filter: brightness(1.15);
 }
 
-/* Claude Usage Button — fluid fill icon */
-.claude-usage-btn { position: relative; }
+/* Claude Usage Button — fluid fill */
+.claude-usage-btn { position: relative; overflow: hidden; border-radius: 4px; }
 .claude-usage-icon { display: block; }
-.claude-usage-fluid {
-  transition: opacity 0.5s ease;
+
+/* Wave animation on the fluid surface edge */
+@keyframes claude-wave {
+  0%   { transform: translateY(50%) translateX(0); }
+  50%  { transform: translateY(50%) translateX(-5%); }
+  100% { transform: translateY(50%) translateX(0); }
 }
-/* Gentle wave animation on the fill edge */
-@keyframes claude-fluid-wave {
+.claude-usage-wave {
+  animation: claude-wave 2.5s ease-in-out infinite;
+}
+
+/* Subtle bob on the starburst fill paths */
+@keyframes claude-fluid-bob {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1px); }
+  50% { transform: translateY(-0.5px); }
 }
 .claude-usage-fluid {
-  animation: claude-fluid-wave 3s ease-in-out infinite;
+  animation: claude-fluid-bob 3s ease-in-out infinite;
 }
 
