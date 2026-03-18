@@ -25,6 +25,51 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   return e.key.toLowerCase() === key
 }
 
+// Patterns for Claude tool invocations that contain file paths
+// Matches: Read(path), Write(path), Edit(path), Glob(path), Grep(path)
+const TOOL_PATH_RE = /\b(Read|Write|Edit|Glob|Grep|MultiEdit)\(([^)]+)\)/g
+
+function registerFilePathLinks(term: Terminal): void {
+  term.registerLinkProvider({
+    provideLinks(lineNumber, callback) {
+      const line = term.buffer.active.getLine(lineNumber - 1)
+      if (!line) { callback(undefined); return }
+      const text = line.translateToString(true)
+
+      const links: { startIndex: number; length: number; filePath: string }[] = []
+      TOOL_PATH_RE.lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = TOOL_PATH_RE.exec(text)) !== null) {
+        const fullMatch = m[0]
+        const filePath = m[2].trim()
+        // Skip obviously non-path values (e.g. glob patterns with **)
+        if (!filePath || filePath.includes('**')) continue
+        // The clickable region is the path portion inside the parens
+        const pathStart = m.index + m[1].length + 1 // after "Tool("
+        links.push({ startIndex: pathStart, length: filePath.length, filePath })
+      }
+
+      if (links.length === 0) { callback(undefined); return }
+
+      const projectDir = useDockStore.getState().projectDir
+      callback(links.map((l) => ({
+        range: {
+          start: { x: l.startIndex + 1, y: lineNumber },
+          end: { x: l.startIndex + l.length + 1, y: lineNumber }
+        },
+        text: l.filePath,
+        activate() {
+          // Resolve relative paths against project dir
+          const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
+            ? l.filePath
+            : projectDir + '/' + l.filePath
+          getDockApi().app.openInExplorer(resolved)
+        }
+      })))
+    }
+  })
+}
+
 interface UseTerminalOptions {
   terminalId: string
   onTitleChange?: (title: string) => void
@@ -123,6 +168,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.loadAddon(new WebLinksAddon((_event, url) => {
         getDockApi().app.openExternal(url)
       }))
+
+      // Clickable file paths from Claude tool output — e.g. Read(src/foo.ts), Write(src/bar.ts)
+      registerFilePathLinks(term)
 
       // Search in scrollback buffer (Ctrl+F)
       const searchAddon = new SearchAddon()
