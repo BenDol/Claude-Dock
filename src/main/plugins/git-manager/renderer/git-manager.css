@@ -1840,6 +1840,16 @@
   background: var(--bg-tertiary);
 }
 
+.gm-detail-file-list-item-focused {
+  background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent-color) 40%, transparent);
+  outline-offset: -1px;
+}
+
+.gm-detail-file-list-item-focused:hover {
+  background: color-mix(in srgb, var(--accent-color) 30%, transparent);
+}
+
 .gm-detail-file-list-name {
   flex: 1;
   overflow: hidden;

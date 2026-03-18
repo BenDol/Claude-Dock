@@ -2531,7 +2531,8 @@ const LazyDiffFile: React.FC<{
   commitHash?: string
   commitSubject?: string
   onResetFile?: (filePath: string) => void
-}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu, commitHash, commitSubject, onResetFile }) => {
+  hidden?: boolean
+}> = ({ file: f, fileIdx: fi, syntaxHL, selectedLines, projectDir, scrollTo, onScrolled, onLineMouseDown, onContextMenu, commitHash, commitSubject, onResetFile, hidden }) => {
   const api = getDockApi()
   const [visible, setVisible] = useState(fi < 5) // render first 5 eagerly
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -2587,6 +2588,10 @@ const LazyDiffFile: React.FC<{
   for (const h of f.hunks) for (const l of h.lines) {
     if (l.type === 'add') adds++
     else if (l.type === 'delete') dels++
+  }
+
+  if (hidden) {
+    return <div className="gm-diff-file" ref={sentinelRef} style={{ display: 'none' }} />
   }
 
   return (
@@ -2901,6 +2906,9 @@ const CommitDetailPanel: React.FC<{
   const [fileListExpanded, setFileListExpanded] = useState(false)
   const [scrollToFileIdx, setScrollToFileIdx] = useState<number | null>(null)
   const clearScrollTo = useCallback(() => setScrollToFileIdx(null), [])
+  const [focusedFileIdx, setFocusedFileIdx] = useState<number | null>(null)
+  const [hoveredFileIdx, setHoveredFileIdx] = useState<number | null>(null)
+  const activeFilterIdx = focusedFileIdx ?? hoveredFileIdx
 
   const handleResetFile = useCallback(async (filePath: string) => {
     if (!window.confirm(`Reset "${filePath}" to its state before this commit?`)) return
@@ -2947,7 +2955,7 @@ const CommitDetailPanel: React.FC<{
   }, [api, projectDir, detail.files, selectedLines, onError, onRefresh])
 
   // Clear selection on new commit
-  useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null) }, [detail.hash])
+  useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null); setFocusedFileIdx(null) }, [detail.hash])
 
   // Scroll to file and line from search navigation
   useEffect(() => {
@@ -3211,18 +3219,30 @@ const CommitDetailPanel: React.FC<{
           {detail.files.length} file{detail.files.length !== 1 ? 's' : ''} changed
         </div>
         {fileListExpanded && (
-          <div className="gm-detail-file-list">
+          <div className="gm-detail-file-list" onMouseLeave={() => setHoveredFileIdx(null)}>
             {detail.files.map((f, fi) => {
               let adds = 0, dels = 0
               for (const h of f.hunks) for (const l of h.lines) {
                 if (l.type === 'add') adds++
                 else if (l.type === 'delete') dels++
               }
+              const isFocused = focusedFileIdx === fi
               return (
                 <div
                   key={f.path}
-                  className="gm-detail-file-list-item"
-                  onClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
+                  className={`gm-detail-file-list-item${isFocused ? ' gm-detail-file-list-item-focused' : ''}`}
+                  onMouseEnter={() => setHoveredFileIdx(fi)}
+                  onClick={(e) => {
+                    if (e.ctrlKey || e.metaKey) {
+                      // Ctrl+click: scroll to file without selecting
+                      setScrollToFileIdx(fi)
+                      setFileListExpanded(false)
+                    } else {
+                      // Normal click: toggle focus filter
+                      setFocusedFileIdx(isFocused ? null : fi)
+                    }
+                  }}
+                  onDoubleClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
                 >
                   <FileStatusBadge status={f.status} />
                   <EllipsisPath className="gm-detail-file-list-name" text={f.path} />
@@ -3250,6 +3270,7 @@ const CommitDetailPanel: React.FC<{
             commitHash={detail.hash}
             commitSubject={detail.subject}
             onResetFile={handleResetFile}
+            hidden={activeFilterIdx != null && activeFilterIdx !== fi}
           />
         ))}
       </div>
@@ -4359,7 +4380,7 @@ const WorkingChanges: React.FC<{
       {/* Diff viewer panel */}
       {selectedFile && (
         <>
-          <ResizeHandle side="left" targetRef={fileListRef} min={200} max={600} storageKey="gm-wc-filelist-width" />
+          <ResizeHandle side="left" targetRef={fileListRef} min={200} max={1400} storageKey="gm-wc-filelist-width" />
           <WorkingDiffViewer
             diffs={fileDiffs}
             loading={diffLoading}
