@@ -963,11 +963,15 @@ const UsageMeter: React.FC = () => {
 
   // Mode B: Key configured — show usage bar
   const color = usage.percentage < 70 ? '#9ece6a' : usage.percentage < 90 ? '#e0af68' : '#f7768e'
+  const isDollar = usage.limit < 10000 // admin key reports small USD values; regular key reports large token counts
+  const tooltipText = isDollar
+    ? `API Usage: $${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(usage.percentage)}%)`
+    : `Rate Limit: ${Math.round(usage.spent).toLocaleString()} / ${Math.round(usage.limit).toLocaleString()} tokens (${Math.round(usage.percentage)}%)`
 
   return (
     <div
       className={`usage-meter${dimmed ? ' usage-meter-dimmed' : ''}`}
-      title={`API Usage: $${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(usage.percentage)}%)`}
+      title={tooltipText}
     >
       <div className="usage-meter-bar">
         <div

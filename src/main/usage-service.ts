@@ -109,60 +109,122 @@ export async function fetchUsage(spendLimit: number): Promise<UsageResult> {
     return { success: false, error: 'no_key' }
   }
 
+  const isAdminKey = apiKey.startsWith('sk-ant-admin')
+  log(`[usage-service] fetching usage (keyType=${isAdminKey ? 'admin' : 'regular'})`)
+
   try {
-    const startOfMonth = new Date()
-    startOfMonth.setUTCDate(1)
-    startOfMonth.setUTCHours(0, 0, 0, 0)
-    const startingAt = startOfMonth.toISOString()
-    const endingAt = new Date().toISOString()
-
-    const url = `https://api.anthropic.com/v1/organizations/usage?starting_at=${encodeURIComponent(startingAt)}&ending_at=${encodeURIComponent(endingAt)}`
-
-    const result = await fetchAnthropicAPI<{ total_spend_cents?: number }>(url, apiKey)
-
-    if (result.status === 401 || result.status === 403) {
-      if (!unauthorizedLogged) {
-        log(`usage-service: unauthorized (${result.status})`)
-        unauthorizedLogged = true
-      }
-      cachedResult = { success: false, error: 'unauthorized' }
-      lastFetchTime = now
-      return cachedResult
+    if (isAdminKey) {
+      return await fetchWithAdminKey(apiKey, spendLimit, now)
+    } else {
+      return await fetchWithRegularKey(apiKey, spendLimit, now)
     }
-
-    if (result.status === 429) {
-      // Rate limited — use cached or report error
-      if (cachedResult?.success) return cachedResult
-      return { success: false, error: 'rate_limited' }
-    }
-
-    if (!result.ok || !result.data) {
-      return { success: false, error: `http_${result.status}` }
-    }
-
-    unauthorizedLogged = false
-    const spentCents = result.data.total_spend_cents ?? 0
-    const spent = spentCents / 100
-    const percentage = spendLimit > 0 ? Math.min((spent / spendLimit) * 100, 100) : 0
-
-    cachedResult = {
-      success: true,
-      data: { spent, limit: spendLimit, percentage, lastUpdated: now }
-    }
-    lastFetchTime = now
-    return cachedResult
   } catch (err) {
-    log(`usage-service: fetch error: ${err}`)
-    // Return cached if available
+    log(`[usage-service] fetch error: ${err}`)
     if (cachedResult?.success) return cachedResult
     return { success: false, error: 'network' }
   }
+}
+
+/**
+ * Admin key: use /v1/organizations/cost_report for actual spend data.
+ */
+async function fetchWithAdminKey(apiKey: string, spendLimit: number, now: number): Promise<UsageResult> {
+  const startOfMonth = new Date()
+  startOfMonth.setUTCDate(1)
+  startOfMonth.setUTCHours(0, 0, 0, 0)
+
+  const url = `https://api.anthropic.com/v1/organizations/cost_report?starting_at=${encodeURIComponent(startOfMonth.toISOString())}&ending_at=${encodeURIComponent(new Date().toISOString())}`
+
+  const result = await fetchAnthropicAPI<{ data?: Array<{ total_cost_usd?: number }> }>(url, apiKey)
+  log(`[usage-service] admin API response: status=${result.status}`)
+
+  if (result.status === 401 || result.status === 403) {
+    if (!unauthorizedLogged) { log(`[usage-service] unauthorized (${result.status})`); unauthorizedLogged = true }
+    cachedResult = { success: false, error: 'unauthorized' }
+    lastFetchTime = now
+    return cachedResult
+  }
+
+  if (result.status === 429) {
+    if (cachedResult?.success) return cachedResult
+    return { success: false, error: 'rate_limited' }
+  }
+
+  if (!result.ok || !result.data) {
+    log(`[usage-service] unexpected response: ${JSON.stringify(result.data).slice(0, 200)}`)
+    return { success: false, error: `http_${result.status}` }
+  }
+
+  unauthorizedLogged = false
+
+  // Sum up total_cost_usd from all data entries
+  const entries = result.data.data || []
+  const spent = entries.reduce((sum, e) => sum + (e.total_cost_usd ?? 0), 0)
+  const percentage = spendLimit > 0 ? Math.min((spent / spendLimit) * 100, 100) : 0
+
+  log(`[usage-service] spend: $${spent.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
+  cachedResult = { success: true, data: { spent, limit: spendLimit, percentage, lastUpdated: now } }
+  lastFetchTime = now
+  return cachedResult
+}
+
+/**
+ * Regular key: use a minimal /v1/messages call to read rate-limit headers.
+ * The headers show token limits per minute — we report the percentage of
+ * the input token rate limit currently consumed.
+ */
+async function fetchWithRegularKey(apiKey: string, spendLimit: number, now: number): Promise<UsageResult> {
+  const result = await fetchAnthropicAPIWithHeaders(
+    'https://api.anthropic.com/v1/messages',
+    apiKey,
+    JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'hi' }]
+    })
+  )
+
+  log(`[usage-service] regular API response: status=${result.status}`)
+
+  if (result.status === 401 || result.status === 403) {
+    if (!unauthorizedLogged) { log(`[usage-service] unauthorized (${result.status})`); unauthorizedLogged = true }
+    cachedResult = { success: false, error: 'unauthorized' }
+    lastFetchTime = now
+    return cachedResult
+  }
+
+  // Read rate limit headers
+  const headers = result.headers || {}
+  const tokensRemaining = parseFloat(headers['anthropic-ratelimit-input-tokens-remaining'] || '0')
+  const tokensLimit = parseFloat(headers['anthropic-ratelimit-input-tokens-limit'] || '0')
+
+  if (tokensLimit > 0) {
+    const tokensUsed = tokensLimit - tokensRemaining
+    const percentage = Math.min((tokensUsed / tokensLimit) * 100, 100)
+    log(`[usage-service] rate limit: ${tokensUsed}/${tokensLimit} tokens (${percentage.toFixed(1)}%)`)
+    cachedResult = {
+      success: true,
+      data: {
+        spent: tokensUsed,
+        limit: tokensLimit,
+        percentage,
+        lastUpdated: now
+      }
+    }
+    lastFetchTime = now
+    return cachedResult
+  }
+
+  // No rate limit headers — can't determine usage
+  log(`[usage-service] no rate limit headers found`)
+  return { success: false, error: 'no_usage_data' }
 }
 
 interface APIResult<T> {
   ok: boolean
   status: number
   data?: T
+  headers?: Record<string, string>
 }
 
 function fetchAnthropicAPI<T>(url: string, apiKey: string): Promise<APIResult<T>> {
@@ -202,5 +264,50 @@ function fetchAnthropicAPI<T>(url: string, apiKey: string): Promise<APIResult<T>
       req.destroy()
       resolve({ ok: false, status: 0 })
     })
+  })
+}
+
+function fetchAnthropicAPIWithHeaders(url: string, apiKey: string, body: string): Promise<APIResult<unknown>> {
+  return new Promise((resolve) => {
+    const parsed = new URL(url)
+    const req = https.request(
+      {
+        method: 'POST',
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'User-Agent': 'Claude-Dock'
+        }
+      },
+      (res) => {
+        const flatHeaders: Record<string, string> = {}
+        for (const [k, v] of Object.entries(res.headers)) {
+          if (typeof v === 'string') flatHeaders[k] = v
+          else if (Array.isArray(v)) flatHeaders[k] = v[0]
+        }
+        let data = ''
+        res.on('data', (chunk) => { data += chunk })
+        res.on('end', () => {
+          const status = res.statusCode ?? 0
+          try {
+            resolve({ ok: status >= 200 && status < 300, status, data: JSON.parse(data), headers: flatHeaders })
+          } catch {
+            resolve({ ok: false, status, headers: flatHeaders })
+          }
+        })
+        res.on('error', () => resolve({ ok: false, status: 0 }))
+      }
+    )
+    req.on('error', () => resolve({ ok: false, status: 0 }))
+    req.setTimeout(10000, () => {
+      req.destroy()
+      resolve({ ok: false, status: 0 })
+    })
+    req.write(body)
+    req.end()
   })
 }
