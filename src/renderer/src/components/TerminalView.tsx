@@ -162,7 +162,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
   // the cursor position (especially needed on Windows 10).
   useEffect(() => {
     if (!loading) return
-    const MIN_DISPLAY_MS = isResumed ? 3500 : 800
+    const MIN_DISPLAY_MS = isResumed ? 1500 : 800
     const interval = setInterval(() => {
       const elapsed = Date.now() - mountTimeRef.current
       if (gotDataRef.current && elapsed >= MIN_DISPLAY_MS) {

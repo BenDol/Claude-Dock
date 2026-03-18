@@ -174,8 +174,8 @@ export class PtyManager {
     const next = this.launchQueue.shift()!
     setTimeout(() => {
       next()
-      setTimeout(() => this.processQueue(), 3000)
-    }, 200)
+      setTimeout(() => this.processQueue(), 1500)
+    }, 100)
   }
 
   private bufferData(terminalId: string, data: string): void {
