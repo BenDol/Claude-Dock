@@ -849,7 +849,7 @@ const ClaudeUsageButton: React.FC = () => {
   const discTop = (100 - pct) - 200
 
   const tooltipText = usage
-    ? `Estimated Usage: ~$${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(pct)}%)`
+    ? `Monthly Usage: ~$${usage.spent.toFixed(2)} / $${usage.limit.toFixed(2)} (${Math.round(pct)}%)`
     : 'Anthropic Console'
 
   return (

@@ -172,31 +172,13 @@ function fetchFromLocalStats(spendLimit: number, now: number): UsageResult {
 
     const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'))
 
-    // Try monthly estimate from dailyModelTokens first
-    const monthlyCost = estimateMonthlyCost(stats)
-    if (monthlyCost !== null) {
-      const percentage = spendLimit > 0 ? Math.min((monthlyCost / spendLimit) * 100, 100) : 0
-      log(`[usage-service] monthly estimate: ~$${monthlyCost.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
-      cachedResult = {
-        success: true,
-        data: { spent: monthlyCost, limit: spendLimit, percentage, lastUpdated: now }
-      }
-      lastFetchTime = now
-      return cachedResult
-    }
-
-    // Fallback: all-time estimate from modelUsage
-    const allTimeCost = estimateAllTimeCost(stats)
-    if (allTimeCost === null) {
-      log('[usage-service] no usage data in stats-cache.json')
-      return { success: false, error: 'no_stats' }
-    }
-
-    const percentage = spendLimit > 0 ? Math.min((allTimeCost / spendLimit) * 100, 100) : 0
-    log(`[usage-service] all-time estimate (no monthly data): ~$${allTimeCost.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
+    // Monthly estimate from dailyModelTokens — if no current month data, show $0
+    const monthlyCost = estimateMonthlyCost(stats) ?? 0
+    const percentage = spendLimit > 0 ? Math.min((monthlyCost / spendLimit) * 100, 100) : 0
+    log(`[usage-service] monthly estimate: ~$${monthlyCost.toFixed(2)} / $${spendLimit} (${percentage.toFixed(1)}%)`)
     cachedResult = {
       success: true,
-      data: { spent: allTimeCost, limit: spendLimit, percentage, lastUpdated: now }
+      data: { spent: monthlyCost, limit: spendLimit, percentage, lastUpdated: now }
     }
     lastFetchTime = now
     return cachedResult
