@@ -467,11 +467,11 @@ function DockApp() {
     const MARKER = 'CI_FIX_COMPLETE'
     let triggered = false
     // The prompt contains CI_FIX_COMPLETE as an instruction. Claude CLI echoes
-    // it when pasting the prompt. We record the time of the first sighting
-    // (the echo) and only trigger on sightings 30+ seconds later (Claude's
-    // actual output). This avoids the buffer-truncation problem where the
-    // first marker scrolls out of a large buffer during long sessions.
-    let firstSeenAt = 0
+    // it when pasting the prompt. We skip any marker sightings within the first
+    // 15 seconds (the echo window), then trigger on the first sighting after that
+    // (Claude's actual completion output).
+    const monitorStartedAt = Date.now()
+    const ECHO_WINDOW_MS = 15000
     let recentBuf = ''
 
     const cleanup = api.terminal.onData((id, chunk) => {
@@ -485,12 +485,11 @@ function DockApp() {
         recentBuf.replace(/\s+/g, '').includes(MARKER)
 
       if (found) {
-        if (firstSeenAt === 0) {
-          // First sighting — prompt echo. Record time and clear buffer.
-          firstSeenAt = Date.now()
+        if (Date.now() - monitorStartedAt < ECHO_WINDOW_MS) {
+          // Within echo window — this is the prompt echo, ignore and clear buffer
           recentBuf = ''
-        } else if (Date.now() - firstSeenAt > 30000) {
-          // Seen again 30s+ later — Claude's actual completion signal
+        } else {
+          // Past echo window — Claude's actual completion signal
           triggered = true
           doCleanup()
           window.dispatchEvent(new CustomEvent('ci-fix-complete', { detail: fixData }))
