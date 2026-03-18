@@ -23,6 +23,7 @@ export interface Settings {
     maxColumns: number
     gapSize: number
     defaultMode: 'auto' | 'freeform'
+    viewportMode: 'auto' | 'landscape' | 'portrait'
   }
   behavior: {
     confirmCloseWithRunning: boolean
@@ -210,7 +211,8 @@ export const DEFAULT_SETTINGS: Settings = {
   grid: {
     maxColumns: 4,
     gapSize: 0,
-    defaultMode: 'auto'
+    defaultMode: 'auto',
+    viewportMode: 'auto'
   },
   behavior: {
     confirmCloseWithRunning: true,

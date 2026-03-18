@@ -12,26 +12,28 @@ const DockGrid: React.FC = () => {
   const focusedTerminalId = useDockStore((s) => s.focusedTerminalId)
   const swapTerminals = useDockStore((s) => s.swapTerminals)
   const gapSize = useSettingsStore((s) => s.settings.grid.gapSize)
-  const { cols, layout } = useGridLayout()
+  const { cols, layout, setContainerSize } = useGridLayout()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
   const [containerHeight, setContainerHeight] = useState(600)
 
-  // Track container size
+  // Track container size and feed it to the grid layout hook for orientation detection
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width)
-        setContainerHeight(entry.contentRect.height)
+        const { width, height } = entry.contentRect
+        setContainerWidth(width)
+        setContainerHeight(height)
+        setContainerSize(width, height)
       }
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [setContainerSize])
 
   const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
   const totalGap = gapSize * (rows - 1)

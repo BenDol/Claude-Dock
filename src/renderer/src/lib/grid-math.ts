@@ -87,3 +87,18 @@ export function computeAutoLayout(
 
   return { cols, layout }
 }
+
+/** Portrait layout: single column, all terminals stacked vertically */
+export function computePortraitLayout(
+  terminalIds: string[]
+): { cols: number; layout: Layout[] } {
+  const layout: Layout[] = terminalIds.map((id, i) => ({
+    i: id,
+    x: 0,
+    y: i,
+    w: 1,
+    h: 1,
+    static: true
+  }))
+  return { cols: 1, layout }
+}

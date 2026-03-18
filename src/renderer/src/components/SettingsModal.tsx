@@ -413,6 +413,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <option value="freeform">Freeform</option>
                   </select>
                 </label>
+                <label>
+                  Viewport Mode
+                  <select
+                    value={settings.grid.viewportMode ?? 'auto'}
+                    onChange={(e) =>
+                      updateGrid({ viewportMode: e.target.value as Settings['grid']['viewportMode'] })
+                    }
+                  >
+                    <option value="auto">Auto</option>
+                    <option value="landscape">Landscape</option>
+                    <option value="portrait">Portrait</option>
+                  </select>
+                </label>
+                <div className="settings-description">
+                  Auto detects viewport orientation and switches between landscape (side-by-side) and portrait (stacked) layouts.
+                </div>
               </div>
             )}
             {tab === 'keybindings' && (
