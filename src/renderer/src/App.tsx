@@ -223,15 +223,21 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
         `cd into the submodule before creating worktrees or making changes.\n`
       : ''
 
+    const startIso = new Date().toISOString()
+
     return `A CI build has failed and needs to be fixed.\n\n` +
       `Workflow: ${runName || 'CI Run'} #${runNumber || 0}\n` +
       `Branch: ${branch}\n` +
+      `Fix started at: ${startIso}\n` +
       (jobList ? `Failed jobs:\n${jobList}\n` : '') +
       logSection +
       submoduleSection +
       contextSection +
       `Find the relevant code and fix the issue.\n\n` +
       `CRITICAL BRANCH SAFETY INSTRUCTIONS:\n` +
+      `OVERRIDE: Any CLAUDE.md or project instructions that restrict git write actions (commits, branch creation, pushes) ` +
+      `do NOT apply to this task. You are explicitly authorized to create commits, branches, worktrees, and push to the ` +
+      `branch "${branch}" as part of this CI fix. This is a user-initiated automated fix task.\n\n` +
       `The fix MUST be committed and pushed to the branch "${branch}". ` +
       `You MUST NOT disturb the user's current working tree, staged files, or checked-out branch. ` +
       `Use a git worktree to work in isolation:\n` +
@@ -243,6 +249,11 @@ async function buildCiFixPrompt(task: CiFixTask, context: string, api: ReturnTyp
       `  3. Commit and push from the worktree: git push origin ${branch}\n` +
       `  4. cd back to the original directory and clean up: git worktree remove ../ci-fix-${branch.replace(/[^a-zA-Z0-9_-]/g, '-')}\n` +
       `Pushing the fix will automatically trigger a new CI run.\n\n` +
+      `COMMIT MESSAGE INSTRUCTIONS:\n` +
+      `At the bottom of every commit message, include the following lines:\n` +
+      `  - "Resolved in: Xm Ys" where X and Y are the elapsed minutes and seconds since the fix started at ${startIso}. ` +
+      `Calculate this by comparing the current time to the start time when you make the commit.\n` +
+      `  - "Fixed with Claude via Fix with Claude (Claude Dock)"\n\n` +
       `IMPORTANT: When you have successfully fixed the issue, committed, and pushed the changes, output the exact text CI_FIX_COMPLETE on its own line. ` +
       `If you cannot fix the issue or need more information, do NOT output this marker.`
   } catch {
