@@ -25,21 +25,70 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   return e.key.toLowerCase() === key
 }
 
-// Matches Claude tool invocations containing file paths: ToolName(path/to/file.ext)
-// Captures any PascalCase word followed by a parenthesized value that looks like a file path
-const TOOL_PATH_RE = /\b([A-Z][a-zA-Z]*)\(([^)]+)\)/g
+// Tools whose argument is a file path (the entire content inside parens is the path)
+const FILE_PATH_TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'MultiEdit', 'Update', 'Create',
+  'NotebookEdit', 'Glob'
+])
+
+// Tools whose argument may contain quoted file paths (e.g. Bash, Grep)
+const COMMAND_TOOLS = new Set(['Bash', 'Grep'])
+
+// Match PascalCase tool invocations: ToolName(...)
+const TOOL_RE = /\b([A-Z][a-zA-Z]*)\(([^)]+)\)/g
+
+// Match standalone file:line references: path/to/file.ext:123
+const FILE_LINE_RE = /(?:^|[\s│┃┆┇┊┋╎╏])([a-zA-Z0-9_.][a-zA-Z0-9_./\\-]*\.[a-zA-Z]{1,10}):(\d+)(?::(\d+))?/g
+
+// Extract a clean file path from a tool argument
+function extractFilePath(toolName: string, rawArg: string): string | null {
+  const arg = rawArg.trim()
+
+  if (FILE_PATH_TOOLS.has(toolName)) {
+    // Strip surrounding quotes if present
+    const unquoted = arg.replace(/^["']|["']$/g, '')
+    if (looksLikeFilePath(unquoted)) return unquoted
+    return null
+  }
+
+  if (COMMAND_TOOLS.has(toolName)) {
+    // Extract quoted paths from commands like: ls "C:\path" or cat 'file.txt'
+    const quoted = arg.match(/["']([^"']+)["']/g)
+    if (quoted) {
+      for (const q of quoted) {
+        const inner = q.slice(1, -1)
+        if (looksLikeFilePath(inner)) return inner
+      }
+    }
+    return null
+  }
+
+  // Unknown tool — try the raw arg
+  const unquoted = arg.replace(/^["']|["']$/g, '')
+  if (looksLikeFilePath(unquoted)) return unquoted
+  return null
+}
 
 // Quick check: does the string look like a file path?
 function looksLikeFilePath(s: string): boolean {
+  if (!s || s.length > 300) return false
   // Must contain a dot (extension) or path separator
   if (!/[./\\]/.test(s)) return false
-  // Must not be a glob pattern
+  // Must not be a glob pattern with **
   if (s.includes('**')) return false
-  // Must not look like a function call or code expression
-  if (/[=<>{}|&;!?#@$%^*+~`]/.test(s)) return false
-  // Must not be too long (paths are typically < 200 chars)
-  if (s.length > 200) return false
+  // Must not contain shell operators or code syntax
+  if (/[<>{}|&;!?#@$%^*+~`]/.test(s)) return false
+  // Must not start with a flag
+  if (/^-/.test(s)) return false
+  // Must not contain spaces unless it's a Windows path (C:\Program Files\...)
+  if (s.includes(' ') && !/^[a-zA-Z]:\\/.test(s)) return false
   return true
+}
+
+interface FileLink {
+  startIndex: number
+  length: number
+  filePath: string
 }
 
 function registerFilePathLinks(term: Terminal): void {
@@ -49,14 +98,53 @@ function registerFilePathLinks(term: Terminal): void {
       if (!line) { callback(undefined); return }
       const text = line.translateToString(true)
 
-      const links: { startIndex: number; length: number; filePath: string }[] = []
-      TOOL_PATH_RE.lastIndex = 0
+      const links: FileLink[] = []
+
+      // 1. Tool invocations: Read(path), Write(path), Bash(cmd "path"), etc.
+      TOOL_RE.lastIndex = 0
       let m: RegExpExecArray | null
-      while ((m = TOOL_PATH_RE.exec(text)) !== null) {
-        const filePath = m[2].trim()
+      while ((m = TOOL_RE.exec(text)) !== null) {
+        const toolName = m[1]
+        const rawArg = m[2]
+        const filePath = extractFilePath(toolName, rawArg)
+        if (!filePath) continue
+
+        // Find where the path actually starts within the full match
+        const argStart = m.index + toolName.length + 1 // after "Tool("
+        const innerText = m[2]
+        const pathOffset = innerText.indexOf(filePath.charAt(0) === '"' || filePath.charAt(0) === "'"
+          ? filePath : filePath)
+
+        // For command tools, find the quoted path position
+        if (COMMAND_TOOLS.has(toolName)) {
+          const quoteMatch = innerText.match(new RegExp(`["']${filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`))
+          if (quoteMatch && quoteMatch.index != null) {
+            const start = argStart + quoteMatch.index + 1 // skip opening quote
+            links.push({ startIndex: start, length: filePath.length, filePath })
+            continue
+          }
+        }
+
+        // For file path tools, the path is the content (possibly unquoted)
+        const stripped = rawArg.trim()
+        const quoteOffset = stripped.startsWith('"') || stripped.startsWith("'") ? 1 : 0
+        const leadingSpaces = rawArg.length - rawArg.trimStart().length
+        const start = argStart + leadingSpaces + quoteOffset
+        links.push({ startIndex: start, length: filePath.length, filePath })
+      }
+
+      // 2. Standalone file:line references (e.g. src/foo.ts:42:10)
+      FILE_LINE_RE.lastIndex = 0
+      while ((m = FILE_LINE_RE.exec(text)) !== null) {
+        const filePath = m[1]
         if (!looksLikeFilePath(filePath)) continue
-        // The clickable region is the path portion inside the parens
-        const pathStart = m.index + m[1].length + 1 // after "Tool("
+        // Don't duplicate if already matched by a tool invocation
+        const pathStart = text.indexOf(filePath, m.index)
+        if (pathStart < 0) continue
+        const alreadyLinked = links.some((l) =>
+          pathStart >= l.startIndex && pathStart < l.startIndex + l.length
+        )
+        if (alreadyLinked) continue
         links.push({ startIndex: pathStart, length: filePath.length, filePath })
       }
 
@@ -70,7 +158,6 @@ function registerFilePathLinks(term: Terminal): void {
         },
         text: l.filePath,
         activate() {
-          // Resolve relative paths against project dir
           const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
             ? l.filePath
             : projectDir + '/' + l.filePath
