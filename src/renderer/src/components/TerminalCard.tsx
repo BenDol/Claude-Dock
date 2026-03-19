@@ -74,11 +74,39 @@ const CopyIdIcon: React.FC<{ copied?: boolean }> = ({ copied }) => (
   </svg>
 )
 
+/** Parse a flags string like "--allowedTools Bash,Read --permission-mode acceptEdits" into a tooltip + label */
+function parsePermissionIndicator(flags: string | undefined): { label: string; tooltip: string } | null {
+  if (!flags) return null
+
+  const toolsMatch = flags.match(/--allowedTools\s+(\S+)/)
+  const modeMatch = flags.match(/--permission-mode\s+(\S+)/)
+  if (!toolsMatch && !modeMatch) return null
+
+  const parts: string[] = []
+  let label = ''
+
+  if (modeMatch) {
+    const mode = modeMatch[1]
+    if (mode === 'acceptEdits') { parts.push('Mode: accept edits'); label = 'AE' }
+    else if (mode === 'bypassPermissions') { parts.push('Mode: bypass all'); label = 'BP' }
+  }
+
+  if (toolsMatch) {
+    const tools = toolsMatch[1].split(',')
+    parts.push(`Tools: ${tools.join(', ')}`)
+    if (!label) label = `${tools.length}T`
+  }
+
+  return { label, tooltip: parts.join(' · ') }
+}
+
 const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive, isFocused }) => {
   const removeTerminal = useDockStore((s) => s.removeTerminal)
   const isUnlocked = useDockStore((s) => s.unlockedTerminals.has(terminalId))
   const toggleTerminalLock = useDockStore((s) => s.toggleTerminalLock)
   const isActive = useDockStore((s) => s.activeTerminals.has(terminalId))
+  const claudeFlags = useDockStore((s) => s.claudeTaskFlags.get(terminalId))
+  const permIndicator = parsePermissionIndicator(claudeFlags)
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
@@ -118,6 +146,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         <div className="terminal-card-status">
           <span className={`status-dot ${!isAlive ? 'dead' : isActive ? 'active' : 'inactive'}`} />
           <TerminalTitle terminalId={terminalId} title={title} />
+          {permIndicator && (
+            <span className="terminal-perms-badge" title={permIndicator.tooltip}>
+              {permIndicator.label}
+            </span>
+          )}
         </div>
         <div className="terminal-card-actions">
           <div className={`terminal-actions-panel ${actionsOpen ? 'open' : ''}`}>

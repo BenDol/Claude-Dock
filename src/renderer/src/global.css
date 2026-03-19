@@ -1113,6 +1113,20 @@ body {
   flex: 1;
 }
 
+.terminal-perms-badge {
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent-color) 20%, transparent);
+  color: var(--accent-color);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+  letter-spacing: 0.3px;
+}
+
 .status-dot {
   width: 6px;
   height: 6px;

@@ -120,6 +120,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             parts.push(`--permission-mode ${defaultPermissionMode}`)
           }
           flags = parts.length > 0 ? parts.join(' ') : undefined
+          // Store default flags so the terminal header can display them
+          if (flags) {
+            useDockStore.getState().setTerminalClaudeFlags(terminalId, flags)
+          }
         }
         getDockApi().terminal.spawn(terminalId, flags ? { claudeFlags: flags } : undefined)
       }
