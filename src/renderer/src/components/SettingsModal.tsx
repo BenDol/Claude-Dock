@@ -377,6 +377,47 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => updateTerminal({ scrollback: parseInt(e.target.value) || 5000 })}
                   />
                 </label>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Default Permissions</div>
+                <div className="settings-description">
+                  Pre-approve tools and permission mode for new terminals so Claude doesn&apos;t ask each time. Only applies to newly spawned terminals.
+                </div>
+                <label>
+                  Permission Mode
+                  <select
+                    value={settings.terminal.defaultPermissionMode ?? 'default'}
+                    onChange={(e) => updateTerminal({ defaultPermissionMode: e.target.value as Settings['terminal']['defaultPermissionMode'] })}
+                  >
+                    <option value="default">Default (ask each time)</option>
+                    <option value="acceptEdits">Accept edits</option>
+                    <option value="bypassPermissions">Bypass all permissions</option>
+                  </select>
+                </label>
+                <div className="settings-section-header" style={{ fontSize: 11, marginTop: 8 }}>Allowed Tools</div>
+                <div className="settings-description">
+                  Pre-approve specific tools. Leave all unchecked to use Claude&apos;s defaults.
+                </div>
+                <div className="tp-perms-tools">
+                  {['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep'].map((tool) => {
+                    const allowed = settings.terminal.defaultAllowedTools ?? []
+                    const isChecked = allowed.includes(tool)
+                    return (
+                      <label key={tool} className="tp-perms-tool">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...allowed, tool]
+                              : allowed.filter((t: string) => t !== tool)
+                            updateTerminal({ defaultAllowedTools: next })
+                          }}
+                        />
+                        {tool}
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
             )}
             {tab === 'grid' && (

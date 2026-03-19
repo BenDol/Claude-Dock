@@ -124,10 +124,10 @@ export class PtyManager {
     })
 
     const cmd = resumeId
-      ? this.buildResumeCmd(shell, sessionId)
+      ? this.buildResumeCmd(shell, sessionId, claudeFlags)
       : ephemeral
         ? `claude${claudeFlags ? ' ' + claudeFlags : ''}\r`
-        : `claude --session-id ${sessionId}\r`
+        : `claude --session-id ${sessionId}${claudeFlags ? ' ' + claudeFlags : ''}\r`
 
     // Resumed sessions are already interacted (user had a prior conversation)
     if (resumeId && !ephemeral) {
@@ -204,18 +204,19 @@ export class PtyManager {
    * command so the shell echo (which shows the raw typed text) does NOT
    * contain the decoded marker string — only the actual output does.
    */
-  private buildResumeCmd(shell: string, sessionId: string): string {
+  private buildResumeCmd(shell: string, sessionId: string, claudeFlags?: string): string {
+    const flags = claudeFlags ? ' ' + claudeFlags : ''
     const lower = shell.toLowerCase()
     if (lower.includes('powershell') || lower.includes('pwsh')) {
       // PowerShell: string concatenation hides marker from command echo
-      return `claude --resume ${sessionId}; if ($LASTEXITCODE -ne 0) { Write-Host ('__DOCK' + '_RF__') }\r`
+      return `claude --resume ${sessionId}${flags}; if ($LASTEXITCODE -ne 0) { Write-Host ('__DOCK' + '_RF__') }\r`
     }
     if (lower.includes('cmd')) {
       // cmd.exe: ^ escape is consumed during parsing, not in PTY echo
-      return `claude --resume ${sessionId} || echo __DOCK^_RF__\r`
+      return `claude --resume ${sessionId}${flags} || echo __DOCK^_RF__\r`
     }
     // bash/zsh: printf with hex escape — echo shows \x5f, output shows _
-    return `claude --resume ${sessionId} || printf '__DOCK\\x5fRF__\\n'\r`
+    return `claude --resume ${sessionId}${flags} || printf '__DOCK\\x5fRF__\\n'\r`
   }
 
   // The decoded marker that appears in actual output but NOT in command echo

@@ -565,7 +565,8 @@ function DockApp() {
       if (useSession) {
         // Persistent session — use session-id mode, not ephemeral
         useDockStore.getState().setTerminalPersistentTask(termId, true)
-      } else if (flags) {
+      }
+      if (flags) {
         useDockStore.getState().setTerminalClaudeFlags(termId, flags)
       }
       addTerminal(termId)

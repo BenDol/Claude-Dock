@@ -99,9 +99,30 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     if (!spawnedRef.current) {
       spawnedRef.current = true
       const state = useDockStore.getState()
-      const ephemeral = state.claudeTaskTerminals.has(terminalId) && !state.claudePersistentTaskTerminals.has(terminalId)
-      const claudeFlags = state.claudeTaskFlags.get(terminalId)
-      getDockApi().terminal.spawn(terminalId, ephemeral ? { ephemeral: true, claudeFlags } : undefined)
+      const isTask = state.claudeTaskTerminals.has(terminalId)
+      const ephemeral = isTask && !state.claudePersistentTaskTerminals.has(terminalId)
+      const taskFlags = state.claudeTaskFlags.get(terminalId)
+
+      if (ephemeral) {
+        // Ephemeral task terminal — task flags only, no session persistence
+        getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags })
+      } else {
+        // Persistent terminal (regular or task) — merge task flags with defaults
+        let flags = taskFlags
+        if (!flags) {
+          // No task flags — apply default permission flags from settings
+          const { defaultAllowedTools, defaultPermissionMode } = useSettingsStore.getState().settings.terminal
+          const parts: string[] = []
+          if (defaultAllowedTools && defaultAllowedTools.length > 0) {
+            parts.push(`--allowedTools ${defaultAllowedTools.join(',')}`)
+          }
+          if (defaultPermissionMode && defaultPermissionMode !== 'default') {
+            parts.push(`--permission-mode ${defaultPermissionMode}`)
+          }
+          flags = parts.length > 0 ? parts.join(' ') : undefined
+        }
+        getDockApi().terminal.spawn(terminalId, flags ? { claudeFlags: flags } : undefined)
+      }
     }
   }, [terminalId])
 

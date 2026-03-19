@@ -18,6 +18,8 @@ export interface Settings {
     cursorBlink: boolean
     scrollback: number
     scrollToBottom: boolean
+    defaultAllowedTools: string[]
+    defaultPermissionMode: 'default' | 'acceptEdits' | 'bypassPermissions'
   }
   grid: {
     maxColumns: number
@@ -206,7 +208,9 @@ export const DEFAULT_SETTINGS: Settings = {
     cursorStyle: 'block',
     cursorBlink: true,
     scrollback: 5000,
-    scrollToBottom: true
+    scrollToBottom: true,
+    defaultAllowedTools: [],
+    defaultPermissionMode: 'default'
   },
   grid: {
     maxColumns: 4,
