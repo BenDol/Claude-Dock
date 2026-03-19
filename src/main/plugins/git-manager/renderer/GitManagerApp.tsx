@@ -313,6 +313,119 @@ function parseGitError(action: string, errorMsg: string, context: {
 }
 
 
+// ── Extracted hooks for search state ────────────────────────────────────────
+
+type TabType = 'log' | 'changes' | 'conflicts' | 'ci'
+
+function useSearchState(activeDir: string, activeTab: TabType) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<GitSearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchTruncated, setSearchTruncated] = useState(false)
+  const [searchFocusIdx, setSearchFocusIdx] = useState(-1)
+  const [scrollToFileAndLine, setScrollToFileAndLine] = useState<{ filePath: string; lineNumber?: number } | null>(null)
+  const [wcNavigateTo, setWcNavigateTo] = useState<{ path: string; staged: boolean; lineNumber?: number } | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const triggerSearch = useCallback((q: string) => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    if (!q.trim()) {
+      setSearchResults([])
+      setSearchLoading(false)
+      setSearchTruncated(false)
+      return
+    }
+    setSearchLoading(true)
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const mode = activeTab === 'changes' ? 'working' as const : 'log' as const
+        const response = await getDockApi().gitManager.search(activeDir, { query: q.trim(), mode })
+        setSearchResults(response.results)
+        setSearchTruncated(response.truncated)
+        setSearchFocusIdx(-1)
+      } catch {
+        setSearchResults([])
+        setSearchTruncated(false)
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 300)
+  }, [activeDir, activeTab])
+
+  const handleSearchClose = useCallback(() => setSearchOpen(false), [])
+  const handleScrollToFileLineHandled = useCallback(() => setScrollToFileAndLine(null), [])
+  const handleWcNavigateHandled = useCallback(() => setWcNavigateTo(null), [])
+
+  // Ctrl+F keyboard shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  return {
+    searchQuery, setSearchQuery, searchResults, setSearchResults,
+    searchLoading, setSearchLoading, searchOpen, setSearchOpen, searchTruncated,
+    searchFocusIdx, setSearchFocusIdx,
+    scrollToFileAndLine, setScrollToFileAndLine,
+    wcNavigateTo, setWcNavigateTo,
+    searchInputRef, searchDebounceRef,
+    triggerSearch, handleSearchClose, handleScrollToFileLineHandled, handleWcNavigateHandled
+  }
+}
+
+function useCiSearchState(activeTab: string) {
+  const [ciLogOpen, setCiLogOpen] = useState(false)
+  const [ciLogMatchInfo, setCiLogMatchInfo] = useState<{ count: number; current: number }>({ count: 0, current: 0 })
+  const ciLogSearchMode = activeTab === 'ci' && ciLogOpen
+  const ciSearchMode = activeTab === 'ci' && !ciLogOpen
+  const [ciSearchResults, setCiSearchResults] = useState<CiLogSearchMatch[]>([])
+  const [ciSearchProgress, setCiSearchProgress] = useState<CiSearchProgress | null>(null)
+
+  // CI log view tracking
+  useEffect(() => {
+    const logViewHandler = (e: Event) => {
+      const isOpen = (e as CustomEvent).detail as boolean
+      setCiLogOpen(isOpen)
+      if (!isOpen) { setCiLogMatchInfo({ count: 0, current: 0 }) }
+    }
+    const matchHandler = (e: Event) => {
+      const info = (e as CustomEvent).detail as { count: number; current: number }
+      setCiLogMatchInfo(info)
+    }
+    window.addEventListener('ci-log-view', logViewHandler)
+    window.addEventListener('ci-log-search-matches', matchHandler)
+    return () => {
+      window.removeEventListener('ci-log-view', logViewHandler)
+      window.removeEventListener('ci-log-search-matches', matchHandler)
+    }
+  }, [])
+
+  // CI cross-log search results tracking
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { results, progress } = (e as CustomEvent).detail as { results: CiLogSearchMatch[]; progress: CiSearchProgress | null }
+      setCiSearchResults(results)
+      setCiSearchProgress(progress)
+    }
+    window.addEventListener('ci-search-results', handler)
+    return () => window.removeEventListener('ci-search-results', handler)
+  }, [])
+
+  return {
+    ciLogOpen, ciLogMatchInfo, ciLogSearchMode, ciSearchMode,
+    ciSearchResults, setCiSearchResults, ciSearchProgress, setCiSearchProgress
+  }
+}
+
 const GitManagerApp: React.FC = () => {
   const loadSettings = useSettingsStore((s) => s.load)
   const [commits, setCommits] = useState<GitCommitInfo[]>([])
@@ -354,27 +467,22 @@ const GitManagerApp: React.FC = () => {
   const detailRef = useRef<HTMLDivElement>(null)
   const [sidebarFocusIdx, setSidebarFocusIdx] = useState(-1)
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<GitSearchResult[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchTruncated, setSearchTruncated] = useState(false)
-  const [searchFocusIdx, setSearchFocusIdx] = useState(-1)
-  const [scrollToFileAndLine, setScrollToFileAndLine] = useState<{ filePath: string; lineNumber?: number } | null>(null)
-  const [wcNavigateTo, setWcNavigateTo] = useState<{ path: string; staged: boolean; lineNumber?: number } | null>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Search state (extracted hook)
+  const {
+    searchQuery, setSearchQuery, searchResults, setSearchResults,
+    searchLoading, setSearchLoading, searchOpen, setSearchOpen, searchTruncated,
+    searchFocusIdx, setSearchFocusIdx,
+    scrollToFileAndLine, setScrollToFileAndLine,
+    wcNavigateTo, setWcNavigateTo,
+    searchInputRef, searchDebounceRef,
+    triggerSearch, handleSearchClose, handleScrollToFileLineHandled, handleWcNavigateHandled
+  } = useSearchState(activeDir, activeTab)
 
-  // CI log search state
-  const [ciLogOpen, setCiLogOpen] = useState(false)
-  const [ciLogMatchInfo, setCiLogMatchInfo] = useState<{ count: number; current: number }>({ count: 0, current: 0 })
-  const ciLogSearchMode = activeTab === 'ci' && ciLogOpen
-  const ciSearchMode = activeTab === 'ci' && !ciLogOpen
-
-  // CI cross-log search state
-  const [ciSearchResults, setCiSearchResults] = useState<CiLogSearchMatch[]>([])
-  const [ciSearchProgress, setCiSearchProgress] = useState<CiSearchProgress | null>(null)
+  // CI search state (extracted hook)
+  const {
+    ciLogOpen, ciLogMatchInfo, ciLogSearchMode, ciSearchMode,
+    ciSearchResults, setCiSearchResults, ciSearchProgress, setCiSearchProgress
+  } = useCiSearchState(activeTab)
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -682,6 +790,66 @@ const GitManagerApp: React.FC = () => {
     setLoading(false)
   }, [activeDir])
 
+  // Targeted refresh functions — only fetch data that could have changed
+  const refreshAfterCommit = useCallback(async () => {
+    if (!activeDir) return
+    const gen = ++refreshGenRef.current
+    const api = getDockApi()
+    try {
+      const [logData, statusData, commitCount] = await Promise.all([
+        api.gitManager.getLog(activeDir, { maxCount: 200 }),
+        api.gitManager.getStatus(activeDir),
+        api.gitManager.getCommitCount(activeDir)
+      ])
+      if (gen !== refreshGenRef.current) return
+      setCommits(logData)
+      setStatus(statusData)
+      setTotalCommitCount(commitCount)
+      lastRefreshRef.current = Date.now()
+    } catch { /* next full refresh will catch up */ }
+  }, [activeDir])
+
+  const refreshAfterCheckout = useCallback(async () => {
+    if (!activeDir) return
+    const gen = ++refreshGenRef.current
+    const api = getDockApi()
+    try {
+      const [logData, branchData, statusData, mergeData, commitCount] = await Promise.all([
+        api.gitManager.getLog(activeDir, { maxCount: 200 }),
+        api.gitManager.getBranches(activeDir),
+        api.gitManager.getStatus(activeDir),
+        api.gitManager.getMergeState(activeDir),
+        api.gitManager.getCommitCount(activeDir)
+      ])
+      if (gen !== refreshGenRef.current) return
+      setCommits(logData)
+      setBranches(branchData)
+      setStatus(statusData)
+      setMergeState(mergeData)
+      setTotalCommitCount(commitCount)
+      if (mergeData.inProgress && mergeData.conflicts.length > 0) {
+        setActiveTab((prev) => prev === 'conflicts' ? 'conflicts' : prev)
+      }
+      lastRefreshRef.current = Date.now()
+    } catch { /* next full refresh will catch up */ }
+  }, [activeDir])
+
+  const refreshAfterPush = useCallback(async () => {
+    if (!activeDir) return
+    const gen = ++refreshGenRef.current
+    const api = getDockApi()
+    try {
+      const [branchData, statusData] = await Promise.all([
+        api.gitManager.getBranches(activeDir),
+        api.gitManager.getStatus(activeDir)
+      ])
+      if (gen !== refreshGenRef.current) return
+      setBranches(branchData)
+      setStatus(statusData)
+      lastRefreshRef.current = Date.now()
+    } catch { /* next full refresh will catch up */ }
+  }, [activeDir])
+
   useEffect(() => {
     refresh()
   }, [refresh])
@@ -794,33 +962,7 @@ const GitManagerApp: React.FC = () => {
     showActionError(action, errorMsg, { retry })
   }, [showActionError])
 
-  // Search handler (debounced)
-  const triggerSearch = useCallback((q: string) => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
-    if (!q.trim()) {
-      setSearchResults([])
-      setSearchLoading(false)
-      setSearchTruncated(false)
-      return
-    }
-    setSearchLoading(true)
-    searchDebounceRef.current = setTimeout(async () => {
-      try {
-        const mode = activeTab === 'changes' ? 'working' as const : 'log' as const
-        const response = await getDockApi().gitManager.search(activeDir, { query: q.trim(), mode })
-        setSearchResults(response.results)
-        setSearchTruncated(response.truncated)
-        setSearchFocusIdx(-1)
-      } catch {
-        setSearchResults([])
-        setSearchTruncated(false)
-      } finally {
-        setSearchLoading(false)
-      }
-    }, 300)
-  }, [activeDir, activeTab])
-
-  // Search result click handler
+  // Search result click handler (cross-cutting: needs navigateToCommit + setActiveTab)
   const handleSearchResult = useCallback((result: GitSearchResult) => {
     setSearchOpen(false)
     setSearchQuery('')
@@ -839,49 +981,6 @@ const GitManagerApp: React.FC = () => {
       })
     }
   }, [navigateToCommit])
-
-  // Ctrl+F keyboard shortcut
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault()
-        searchInputRef.current?.focus()
-        setSearchOpen(true)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
-
-  // CI log view tracking
-  useEffect(() => {
-    const logViewHandler = (e: Event) => {
-      const isOpen = (e as CustomEvent).detail as boolean
-      setCiLogOpen(isOpen)
-      if (!isOpen) { setCiLogMatchInfo({ count: 0, current: 0 }) }
-    }
-    const matchHandler = (e: Event) => {
-      const info = (e as CustomEvent).detail as { count: number; current: number }
-      setCiLogMatchInfo(info)
-    }
-    window.addEventListener('ci-log-view', logViewHandler)
-    window.addEventListener('ci-log-search-matches', matchHandler)
-    return () => {
-      window.removeEventListener('ci-log-view', logViewHandler)
-      window.removeEventListener('ci-log-search-matches', matchHandler)
-    }
-  }, [])
-
-  // CI cross-log search results tracking
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { results, progress } = (e as CustomEvent).detail as { results: CiLogSearchMatch[]; progress: CiSearchProgress | null }
-      setCiSearchResults(results)
-      setCiSearchProgress(progress)
-    }
-    window.addEventListener('ci-search-results', handler)
-    return () => window.removeEventListener('ci-search-results', handler)
-  }, [])
 
   const handleCiSearchResult = useCallback((result: CiLogSearchMatch) => {
     window.dispatchEvent(new CustomEvent('ci-open-job-log', {
@@ -914,11 +1013,11 @@ const GitManagerApp: React.FC = () => {
         })
         return
       }
-      refresh()
+      refreshAfterPush()
     } finally {
       setPushing(false)
     }
-  }, [activeDir, refresh, pushing, showActionError])
+  }, [activeDir, refreshAfterPush, pushing, showActionError])
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
@@ -936,7 +1035,7 @@ const GitManagerApp: React.FC = () => {
     actionBusyRef.current = true
     try {
       const result = await api.gitManager.checkoutBranch(activeDir, checkoutName)
-      if (result.success) { setError(null); refresh(); return }
+      if (result.success) { setError(null); refreshAfterCheckout(); return }
 
       const errMsg = result.error || 'Checkout failed'
       // Dirty working tree — auto-stash and retry inline
@@ -955,7 +1054,7 @@ const GitManagerApp: React.FC = () => {
           return
         }
         setError(null)
-        refresh()
+        refreshAfterCheckout()
       } else {
         showActionError('Checkout branch', errMsg, {
           branchName: checkoutName,
@@ -970,7 +1069,7 @@ const GitManagerApp: React.FC = () => {
     } finally {
       actionBusyRef.current = false
     }
-  }, [activeDir, refresh, showActionError])
+  }, [activeDir, refreshAfterCheckout, showActionError])
 
   const handleCheckoutBranch = useCallback(async (name: string) => {
     const api = getDockApi()
@@ -1044,6 +1143,24 @@ const GitManagerApp: React.FC = () => {
     })
   }, [resetRepoState])
 
+  // Stable callback refs for memoized child components
+  const handleScrollToHashHandled = useCallback(() => setScrollToHash(null), [])
+  const handleCommitted = useCallback((hash: string) => {
+    wcBusyRef.current = false
+    setWcBusy(false)
+    refreshAfterCommit().then(() => navigateToCommit(hash))
+  }, [refreshAfterCommit, navigateToCommit])
+  const handleBusyChange = useCallback((busy: boolean) => { wcBusyRef.current = busy; setWcBusy(busy) }, [])
+  const handleCloseDetail = useCallback(() => setSelectedCommit(null), [])
+  const handleOpenPullDialog = useCallback(() => {
+    getDockApi().gitManager.getRemotes(activeDir).then(setRemotes)
+    setPullDialogOpen(true)
+  }, [activeDir])
+  const mergeConflictState = useMemo(() => {
+    if (mergeState?.inProgress) return mergeState
+    return { inProgress: false as const, type: 'none' as const, conflicts: status?.conflicts ?? [] }
+  }, [mergeState, status])
+
   const api = getDockApi()
   const currentBranch = branches.find((b) => b.current)
   const localBranches = branches.filter((b) => !b.remote)
@@ -1094,10 +1211,7 @@ const GitManagerApp: React.FC = () => {
             behindCount={currentBranch?.behind ?? 0}
             onError={handleSmartError}
             onRefresh={refresh}
-            onOpenDialog={() => {
-              getDockApi().gitManager.getRemotes(activeDir).then(setRemotes)
-              setPullDialogOpen(true)
-            }}
+            onOpenDialog={handleOpenPullDialog}
           />
           {currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
             <button className="gm-toolbar-btn" onClick={handlePush} title={!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`} disabled={pushing}>
@@ -1221,41 +1335,45 @@ const GitManagerApp: React.FC = () => {
             />
           </CollapsibleSection>
           <CollapsibleSection title="Tags" count={tags.length} defaultCollapsed>
-            {tags.map((t) => (
-              <div
-                key={t.name}
-                className="gm-sidebar-item gm-sidebar-item-tag"
-                onClick={() => navigateToCommit(t.hash)}
-                onDoubleClick={() => {
-                  setActiveTab('log')
-                  handleSelectCommit(t.hash)
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  const zoom = parseFloat(document.documentElement.style.zoom) || 1
-                  setTagSidebarCtx({ x: e.clientX / zoom, y: e.clientY / zoom, tag: t })
-                }}
-                title={`${t.name} — ${t.hash}`}
-              >
-                <TagSidebarIcon />
-                <span className="gm-sidebar-item-label">{t.name}</span>
-              </div>
-            ))}
+            <VirtualSidebarList itemCount={tags.length}>
+              {(startIdx, endIdx) => tags.slice(startIdx, endIdx).map((t) => (
+                <div
+                  key={t.name}
+                  className="gm-sidebar-item gm-sidebar-item-tag"
+                  onClick={() => navigateToCommit(t.hash)}
+                  onDoubleClick={() => {
+                    setActiveTab('log')
+                    handleSelectCommit(t.hash)
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+                    setTagSidebarCtx({ x: e.clientX / zoom, y: e.clientY / zoom, tag: t })
+                  }}
+                  title={`${t.name} — ${t.hash}`}
+                >
+                  <TagSidebarIcon />
+                  <span className="gm-sidebar-item-label">{t.name}</span>
+                </div>
+              ))}
+            </VirtualSidebarList>
             {tags.length === 0 && (
               <div className="gm-sidebar-empty">No tags</div>
             )}
           </CollapsibleSection>
           <CollapsibleSection title="Stashes" count={stashes.length} defaultCollapsed>
-            {stashes.map((s) => (
-              <StashSidebarEntry
-                key={s.index}
-                stash={s}
-                projectDir={activeDir}
-                onError={handleSmartError}
-                onRefresh={refresh}
-                onConfirm={setConfirmModal}
-              />
-            ))}
+            <VirtualSidebarList itemCount={stashes.length}>
+              {(startIdx, endIdx) => stashes.slice(startIdx, endIdx).map((s) => (
+                <StashSidebarEntry
+                  key={s.index}
+                  stash={s}
+                  projectDir={activeDir}
+                  onError={handleSmartError}
+                  onRefresh={refresh}
+                  onConfirm={setConfirmModal}
+                />
+              ))}
+            </VirtualSidebarList>
             {stashes.length === 0 && (
               <div className="gm-sidebar-empty">No stashes</div>
             )}
@@ -1419,7 +1537,7 @@ const GitManagerApp: React.FC = () => {
                   query={searchQuery}
                   focusIdx={searchFocusIdx}
                   onSelect={handleCiSearchResult}
-                  onClose={() => setSearchOpen(false)}
+                  onClose={handleSearchClose}
                 />
               )}
               {searchOpen && searchQuery.trim() && !ciLogSearchMode && !ciSearchMode && (
@@ -1429,7 +1547,7 @@ const GitManagerApp: React.FC = () => {
                   truncated={searchTruncated}
                   focusIdx={searchFocusIdx}
                   onSelect={handleSearchResult}
-                  onClose={() => setSearchOpen(false)}
+                  onClose={handleSearchClose}
                 />
               )}
             </div>
@@ -1454,7 +1572,7 @@ const GitManagerApp: React.FC = () => {
               projectDir={activeDir}
               totalCommitCount={totalCommitCount}
               scrollToHash={scrollToHash}
-              onScrollToHandled={() => setScrollToHash(null)}
+              onScrollToHandled={handleScrollToHashHandled}
               onSelect={handleSelectCommit}
               onAction={refresh}
               onError={handleSmartError}
@@ -1462,7 +1580,7 @@ const GitManagerApp: React.FC = () => {
             />
           ) : activeTab === 'conflicts' && (mergeState?.inProgress || (status && status.conflicts.length > 0)) ? (
             <MergeConflictsPanel
-              mergeState={mergeState?.inProgress ? mergeState : { inProgress: false, type: 'none', conflicts: status!.conflicts }}
+              mergeState={mergeConflictState}
               projectDir={activeDir}
               onRefresh={refresh}
               onError={handleSmartError}
@@ -1478,13 +1596,13 @@ const GitManagerApp: React.FC = () => {
                 syntaxHL={syntaxHL}
                 active={activeTab === 'changes'}
                 navigateTo={wcNavigateTo}
-                onNavigateHandled={() => setWcNavigateTo(null)}
+                onNavigateHandled={handleWcNavigateHandled}
                 onRefresh={refresh}
                 onError={handleSmartError}
                 onConfirm={setConfirmModal}
-                onCommitted={(hash) => { wcBusyRef.current = false; setWcBusy(false); refresh().then(() => navigateToCommit(hash)) }}
+                onCommitted={handleCommitted}
                 onStatusRefreshed={setStatus}
-                onBusyChange={(busy) => { wcBusyRef.current = busy; setWcBusy(busy) }}
+                onBusyChange={handleBusyChange}
               />
             </div>
           )}
@@ -1506,8 +1624,8 @@ const GitManagerApp: React.FC = () => {
                 projectDir={activeDir}
                 syntaxHL={syntaxHL}
                 scrollToFileAndLine={scrollToFileAndLine}
-                onScrollToHandled={() => setScrollToFileAndLine(null)}
-                onClose={() => setSelectedCommit(null)}
+                onScrollToHandled={handleScrollToFileLineHandled}
+                onClose={handleCloseDetail}
                 onError={handleSmartError}
                 onRefresh={refresh}
               />
@@ -1767,7 +1885,7 @@ const CommitLog: React.FC<{
   onAction: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
   onCheckout: (name: string) => void
-}> = ({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError, onCheckout }) => {
+}> = React.memo(({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError, onCheckout }) => {
   const [showGraph, setShowGraph] = useState(() => localStorage.getItem('gm-show-graph') !== 'false')
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; commit: GitCommitInfo } | null>(null)
   const [stashCtxMenu, setStashCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
@@ -2338,9 +2456,9 @@ const CommitLog: React.FC<{
       )}
     </div>
   )
-}
+})
 
-const GraphToggleIcon: React.FC = () => (
+const GraphToggleIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="6" cy="6" r="2.5" />
     <circle cx="18" cy="12" r="2.5" />
@@ -2348,7 +2466,7 @@ const GraphToggleIcon: React.FC = () => (
     <line x1="6" y1="8.5" x2="6" y2="15.5" />
     <path d="M8.5 6h4a4 4 0 014 4v2" />
   </svg>
-)
+))
 
 // ── Binary file viewer system ──────────────────────────────────────────────────
 // Extensible registry: add new viewer types by appending to FILE_VIEWERS.
@@ -2690,7 +2808,7 @@ const SearchDropdown: React.FC<{
   focusIdx: number
   onSelect: (result: GitSearchResult) => void
   onClose: () => void
-}> = ({ results, loading, truncated, focusIdx, onSelect, onClose }) => {
+}> = React.memo(({ results, loading, truncated, focusIdx, onSelect, onClose }) => {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -2780,7 +2898,7 @@ const SearchDropdown: React.FC<{
       {loading && results.length > 0 && <div className="gm-search-dropdown-loading">Searching...</div>}
     </div>
   )
-}
+})
 
 const CiSearchDropdown: React.FC<{
   results: CiLogSearchMatch[]
@@ -2877,12 +2995,12 @@ const CiSearchDropdown: React.FC<{
   )
 }
 
-const SearchIcon: React.FC = () => (
+const SearchIcon: React.FC = React.memo(() => (
   <svg className="gm-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8" />
     <line x1="21" y1="21" x2="16.65" y2="16.65" />
   </svg>
-)
+))
 
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
@@ -2894,7 +3012,7 @@ const CommitDetailPanel: React.FC<{
   onError?: (msg: string) => void
   onRefresh?: () => void
   hideClose?: boolean
-}> = ({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh, hideClose }) => {
+}> = React.memo(({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh, hideClose }) => {
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
@@ -3294,7 +3412,7 @@ const CommitDetailPanel: React.FC<{
       )}
     </div>
   )
-}
+})
 
 const CommitDiffContextMenu: React.FC<{
   x: number; y: number
@@ -3387,7 +3505,7 @@ const VirtualFileList: React.FC<{
   onContextMenu: (e: React.MouseEvent, file: GitFileStatusEntry, section: 'staged' | 'unstaged') => void
   actionLabel: string
   actionTitle: string
-}> = ({ files, section, selectedFile, selectedPaths, stagingPaths, projectDir, onSelect, onShiftSelect, onCtrlSelect, onAction, onBatchAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
+}> = React.memo(({ files, section, selectedFile, selectedPaths, stagingPaths, projectDir, onSelect, onShiftSelect, onCtrlSelect, onAction, onBatchAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
   const api = getDockApi()
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -3577,7 +3695,7 @@ const VirtualFileList: React.FC<{
       </div>
     </div>
   )
-}
+})
 
 const StashSection: React.FC<{
   stashes: GitStashEntry[]
@@ -3585,7 +3703,7 @@ const StashSection: React.FC<{
   onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onConfirm: (modal: { title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void }) => void
-}> = ({ stashes, projectDir, onError, onRefresh, onConfirm }) => {
+}> = React.memo(({ stashes, projectDir, onError, onRefresh, onConfirm }) => {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('gm-stash-section-collapsed') === 'true' } catch { return false }
   })
@@ -3690,27 +3808,27 @@ const StashSection: React.FC<{
       )}
     </div>
   )
-}
+})
 
-const StashApplyIcon: React.FC = () => (
+const StashApplyIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="8 4 16 12 8 20" />
   </svg>
-)
+))
 
-const StashPopIcon: React.FC = () => (
+const StashPopIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="17 11 12 6 7 11" />
     <line x1="12" y1="6" x2="12" y2="18" />
   </svg>
-)
+))
 
-const StashDropIcon: React.FC = () => (
+const StashDropIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18" />
     <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
-)
+))
 
 const WorkingChanges: React.FC<{
   status: GitStatusResult | null
@@ -3726,7 +3844,7 @@ const WorkingChanges: React.FC<{
   onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
   onBusyChange?: (busy: boolean) => void
-}> = ({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
+}> = React.memo(({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -3765,6 +3883,8 @@ const WorkingChanges: React.FC<{
       if (onStatusRefreshed) onStatusRefreshed(s)
     } catch { /* ignore */ }
   }, [projectDir, onStatusRefreshed])
+
+  const handleCloseDiffViewer = useCallback(() => { setSelectedFile(null); setSelectedPaths(new Set()) }, [])
 
   // Poll working changes status periodically — pause when unfocused, resume on focus
   useEffect(() => {
@@ -4389,7 +4509,7 @@ const WorkingChanges: React.FC<{
             projectDir={projectDir}
             syntaxHL={syntaxHL}
             multiFile={selectedPaths.size > 1}
-            onClose={() => { setSelectedFile(null); setSelectedPaths(new Set()) }}
+            onClose={handleCloseDiffViewer}
             onRefresh={onRefresh}
           />
         </>
@@ -4423,7 +4543,7 @@ const WorkingChanges: React.FC<{
       )}
     </div>
   )
-}
+})
 
 // --- File context menu ---
 
@@ -4744,7 +4864,7 @@ function buildPartialPatch(
   return parts.join('\n') + '\n'
 }
 
-function DiffStats({ diffs }: { diffs: GitFileDiff[] }) {
+const DiffStats = React.memo(function DiffStats({ diffs }: { diffs: GitFileDiff[] }) {
   const { add, del } = useMemo(() => {
     let add = 0, del = 0
     for (const f of diffs) {
@@ -4766,7 +4886,7 @@ function DiffStats({ diffs }: { diffs: GitFileDiff[] }) {
       {del > 0 && <span className="gm-diff-stat-del">-{del}</span>}
     </span>
   )
-}
+})
 
 const WorkingDiffViewer: React.FC<{
   diffs: GitFileDiff[]
@@ -4778,7 +4898,7 @@ const WorkingDiffViewer: React.FC<{
   multiFile?: boolean
   onClose: () => void
   onRefresh: () => void
-}> = ({ diffs, loading, filePath, staged, projectDir, syntaxHL, multiFile, onClose, onRefresh }) => {
+}> = React.memo(({ diffs, loading, filePath, staged, projectDir, syntaxHL, multiFile, onClose, onRefresh }) => {
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [dragStart, setDragStart] = useState<string | null>(null)
@@ -5169,7 +5289,7 @@ const WorkingDiffViewer: React.FC<{
       )}
     </div>
   )
-}
+})
 
 const DiffLineContextMenu: React.FC<{
   x: number; y: number
@@ -5263,7 +5383,7 @@ const DiffLineContextMenu: React.FC<{
 
 const DIFF_LINE_LIMIT = 5000
 
-const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> = ({ lineCount, children }) => {
+const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> = React.memo(({ lineCount, children }) => {
   const [expanded, setExpanded] = useState(false)
   if (lineCount <= DIFF_LINE_LIMIT || expanded) return <>{children}</>
   return (
@@ -5272,10 +5392,10 @@ const LargeDiffGate: React.FC<{ lineCount: number; children: React.ReactNode }> 
       <button className="gm-modal-btn gm-modal-btn-primary" onClick={() => setExpanded(true)}>Load diff</button>
     </div>
   )
-}
+})
 
 /** Shows ellipsed text with a hover tooltip that reveals the full text after a delay */
-const EllipsisPath: React.FC<{ text: string; className?: string }> = ({ text, className }) => {
+const EllipsisPath: React.FC<{ text: string; className?: string }> = React.memo(({ text, className }) => {
   const spanRef = useRef<HTMLSpanElement>(null)
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -5308,9 +5428,9 @@ const EllipsisPath: React.FC<{ text: string; className?: string }> = ({ text, cl
       {pos && <span className="gm-ellipsis-tooltip" style={{ position: 'fixed', left: pos.x, top: pos.y }}>{text}</span>}
     </span>
   )
-}
+})
 
-const FileStatusBadge: React.FC<{ status: string }> = ({ status }) => {
+const FileStatusBadge: React.FC<{ status: string }> = React.memo(({ status }) => {
   const colors: Record<string, string> = {
     modified: '#e0af68',
     added: '#9ece6a',
@@ -5329,7 +5449,7 @@ const FileStatusBadge: React.FC<{ status: string }> = ({ status }) => {
       {label}
     </span>
   )
-}
+})
 
 // --- Author avatar ---
 
@@ -5353,7 +5473,7 @@ function getAuthorColor(name: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
 }
 
-const AuthorAvatar: React.FC<{ name: string; large?: boolean }> = ({ name, large }) => (
+const AuthorAvatar: React.FC<{ name: string; large?: boolean }> = React.memo(({ name, large }) => (
   <span
     className={`gm-avatar${large ? ' gm-avatar-lg' : ''}`}
     style={{ backgroundColor: getAuthorColor(name) }}
@@ -5361,7 +5481,7 @@ const AuthorAvatar: React.FC<{ name: string; large?: boolean }> = ({ name, large
   >
     {getAuthorInitials(name)}
   </span>
-)
+))
 
 // --- Resize handle ---
 
@@ -5461,6 +5581,60 @@ const VerticalResizeHandle: React.FC<{
   return <div className="gm-resize-handle-vertical" onMouseDown={handleMouseDown} />
 }
 
+// --- Virtual sidebar list (for large tag/stash lists) ---
+
+const SIDEBAR_ROW_HEIGHT = 28
+
+const VirtualSidebarList: React.FC<{
+  itemCount: number
+  rowHeight?: number
+  maxHeight?: number
+  children: (startIdx: number, endIdx: number) => React.ReactNode
+}> = React.memo(({ itemCount, rowHeight = SIDEBAR_ROW_HEIGHT, maxHeight = 350, children }) => {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [containerHeight, setContainerHeight] = useState(0)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      setContainerHeight(entries[0]?.contentRect.height ?? 0)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const totalHeight = itemCount * rowHeight
+  if (totalHeight <= maxHeight) {
+    return <>{children(0, itemCount)}</>
+  }
+
+  const overscan = 3
+  const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
+  const startIdx = containerHeight > 0
+    ? Math.max(0, Math.floor(clampedScrollTop / rowHeight) - overscan)
+    : 0
+  const endIdx = containerHeight > 0
+    ? Math.min(itemCount, Math.ceil((clampedScrollTop + containerHeight) / rowHeight) + overscan)
+    : itemCount
+  const offsetY = startIdx * rowHeight
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ maxHeight, overflow: 'auto' }}
+      onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+    >
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
+          {children(startIdx, endIdx)}
+        </div>
+      </div>
+    </div>
+  )
+})
+
 // --- Collapsible sidebar section ---
 
 const CollapsibleSection: React.FC<{
@@ -5471,7 +5645,7 @@ const CollapsibleSection: React.FC<{
   onAdd?: () => void
   addTitle?: string
   children: React.ReactNode
-}> = ({ title, count, loading, defaultCollapsed = false, onAdd, addTitle, children }) => {
+}> = React.memo(({ title, count, loading, defaultCollapsed = false, onAdd, addTitle, children }) => {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
 
   return (
@@ -5494,9 +5668,9 @@ const CollapsibleSection: React.FC<{
       {!collapsed && children}
     </div>
   )
-}
+})
 
-const SectionChevron: React.FC<{ collapsed: boolean }> = ({ collapsed }) => (
+const SectionChevron: React.FC<{ collapsed: boolean }> = React.memo(({ collapsed }) => (
   <svg
     className="gm-section-chevron"
     width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -5505,7 +5679,7 @@ const SectionChevron: React.FC<{ collapsed: boolean }> = ({ collapsed }) => (
   >
     <polyline points="6 9 12 15 18 9" />
   </svg>
-)
+))
 
 // --- Remote branch tree (grouped by remote name) ---
 
@@ -5740,7 +5914,7 @@ const PullSplitButton: React.FC<{
   onError: (msg: string, retry?: () => Promise<void>) => void
   onRefresh: () => void
   onOpenDialog: () => void
-}> = ({ activeDir, behindCount, onError, onRefresh, onOpenDialog }) => {
+}> = React.memo(({ activeDir, behindCount, onError, onRefresh, onOpenDialog }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [defaultSub, setDefaultSub] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -5855,7 +6029,7 @@ const PullSplitButton: React.FC<{
       )}
     </div>
   )
-}
+})
 
 // --- Pull dialog ---
 
@@ -5980,7 +6154,7 @@ const BranchDropdown: React.FC<{
   remoteBranches: GitBranchInfo[]
   currentBranch?: string
   onCheckout: (name: string) => void
-}> = ({ localBranches, remoteBranches, currentBranch, onCheckout }) => {
+}> = React.memo(({ localBranches, remoteBranches, currentBranch, onCheckout }) => {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -6148,18 +6322,18 @@ const BranchDropdown: React.FC<{
       )}
     </div>
   )
-}
+})
 
-const BranchIcon: React.FC = () => (
+const BranchIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="6" y1="3" x2="6" y2="15" />
     <circle cx="18" cy="6" r="3" />
     <circle cx="6" cy="18" r="3" />
     <path d="M18 9a9 9 0 01-9 9" />
   </svg>
-)
+))
 
-const ChevronIcon: React.FC<{ open: boolean }> = ({ open }) => (
+const ChevronIcon: React.FC<{ open: boolean }> = React.memo(({ open }) => (
   <svg
     width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
@@ -6167,7 +6341,7 @@ const ChevronIcon: React.FC<{ open: boolean }> = ({ open }) => (
   >
     <polyline points="6 9 12 15 18 9" />
   </svg>
-)
+))
 
 // --- Context menu ---
 
@@ -6772,7 +6946,7 @@ const MergeConflictsPanel: React.FC<{
   projectDir: string
   onRefresh: () => void
   onError: (msg: string) => void
-}> = ({ mergeState, projectDir, onRefresh, onError }) => {
+}> = React.memo(({ mergeState, projectDir, onRefresh, onError }) => {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [conflictContent, setConflictContent] = useState<GitConflictFileContent | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
@@ -7074,7 +7248,7 @@ const MergeConflictsPanel: React.FC<{
       </div>
     </div>
   )
-}
+})
 
 // --- Conflict Editor (manual edit with syntax highlighting) ---
 
@@ -7184,12 +7358,12 @@ const ConflictEditor: React.FC<{
   )
 }
 
-const ClaudeResolveIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
+const ClaudeResolveIcon: React.FC<{ size?: number }> = React.memo(({ size = 14 }) => (
   <svg className="gm-claude-resolve-icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
     <path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" />
   </svg>
-)
+))
 
 const ConflictChunkView: React.FC<{
   chunk: GitConflictChunk
@@ -7711,7 +7885,7 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   ]}
 ]
 
-const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
+const SettingsDropdown: React.FC<{ projectDir: string }> = React.memo(({ projectDir }) => {
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const ref = useRef<HTMLDivElement>(null)
@@ -7806,14 +7980,14 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => {
       )}
     </div>
   )
-}
+})
 
-const SettingsIcon: React.FC = () => (
+const SettingsIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
     <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
   </svg>
-)
+))
 
 // --- Notification panel ---
 
@@ -7827,7 +8001,7 @@ function gmNotifReadKey(projectDir: string): string {
   return `gm-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
 }
 
-const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }> = ({ projectDir, provider }) => {
+const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }> = React.memo(({ projectDir, provider }) => {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<DockNotification[]>(() => {
     try { const raw = localStorage.getItem(gmNotifStorageKey(projectDir)); return raw ? JSON.parse(raw) : [] } catch { return [] }
@@ -7851,20 +8025,23 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
     try { localStorage.setItem(gmNotifStorageKey(projectDir), JSON.stringify(notifications)) } catch { /* ignore */ }
   }, [notifications, projectDir])
 
+  // Persist read state — prune stale IDs to prevent unbounded growth
   useEffect(() => {
-    try { localStorage.setItem(gmNotifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
+    const notifIds = new Set(notifications.map((n) => n.id))
+    const pruned = [...readIds].filter((id) => notifIds.has(id))
+    try { localStorage.setItem(gmNotifReadKey(projectDir), JSON.stringify(pruned)) } catch { /* ignore */ }
     // Sync read state to the dock app's notification panel so both stay in sync
     try {
       const dockReadKey = `dock-notifications-read:${projectDir.replace(/[\\/]/g, '/').toLowerCase()}`
       const existing = localStorage.getItem(dockReadKey)
       const dockReadIds: Set<string> = existing ? new Set(JSON.parse(existing)) : new Set()
       let changed = false
-      for (const id of readIds) {
+      for (const id of pruned) {
         if (!dockReadIds.has(id)) { dockReadIds.add(id); changed = true }
       }
       if (changed) localStorage.setItem(dockReadKey, JSON.stringify([...dockReadIds]))
     } catch { /* ignore */ }
-  }, [readIds, projectDir])
+  }, [readIds, projectDir, notifications])
 
   const autoReadTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
@@ -8006,7 +8183,7 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
       )}
     </div>
   )
-}
+})
 
 function resolveNotifActions(n: DockNotification): NotificationAction[] {
   if (n.actions && n.actions.length > 0) return n.actions
@@ -8023,26 +8200,26 @@ function notifIcon(type: DockNotification['type']): string {
   }
 }
 
-const NotificationBellIcon: React.FC = () => (
+const NotificationBellIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
   </svg>
-)
+))
 
-const ExternalLinkMiniIcon: React.FC = () => (
+const ExternalLinkMiniIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
     <polyline points="15 3 21 3 21 9" />
     <line x1="10" y1="14" x2="21" y2="3" />
   </svg>
-)
+))
 
-const NotifRepairIcon: React.FC = () => (
+const NotifRepairIcon: React.FC = React.memo(() => (
   <svg className="gm-notif-repair-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
   </svg>
-)
+))
 
 // --- Submodule tree ---
 
@@ -8444,137 +8621,137 @@ const SwitchSubmoduleBranchModal: React.FC<{
   )
 }
 
-const TagSidebarIcon: React.FC = () => (
+const TagSidebarIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
     <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
     <line x1="7" y1="7" x2="7.01" y2="7" />
   </svg>
-)
+))
 
 // --- SVG Icons ---
 
-const BackIcon: React.FC = () => (
+const BackIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 18 9 12 15 6" />
   </svg>
-)
+))
 
-const SubmoduleIcon: React.FC = () => (
+const SubmoduleIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <circle cx="12" cy="14" r="2" strokeWidth="1.5" />
   </svg>
-)
+))
 
-const SubmoduleArrowUp: React.FC = () => (
+const SubmoduleArrowUp: React.FC = React.memo(() => (
   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="19" x2="12" y2="5" />
     <polyline points="5 12 12 5 19 12" />
   </svg>
-)
+))
 
-const SubmoduleArrowDown: React.FC = () => (
+const SubmoduleArrowDown: React.FC = React.memo(() => (
   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="5" x2="12" y2="19" />
     <polyline points="19 12 12 19 5 12" />
   </svg>
-)
+))
 
-const SubmoduleDirtyIcon: React.FC = () => (
+const SubmoduleDirtyIcon: React.FC = React.memo(() => (
   <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
     <circle cx="8" cy="8" r="5" fill="#e0af68" />
   </svg>
-)
+))
 
-const SubmoduleCommitIcon: React.FC = () => (
+const SubmoduleCommitIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="17 1 21 5 17 9" />
     <path d="M3 11V9a4 4 0 014-4h14" />
   </svg>
-)
+))
 
-const StashIcon: React.FC = () => (
+const StashIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
     <polyline points="7.5 4.21 12 6.81 16.5 4.21" />
     <line x1="12" y1="22" x2="12" y2="6.81" />
   </svg>
-)
+))
 
-const StashSidebarIcon: React.FC = () => (
+const StashSidebarIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#bb9af7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
     <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
   </svg>
-)
+))
 
-const BashIcon: React.FC = () => (
+const BashIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="4 17 10 11 4 5" />
     <line x1="12" y1="19" x2="20" y2="19" />
   </svg>
-)
+))
 
-const OpenFolderIcon: React.FC = () => (
+const OpenFolderIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <line x1="12" y1="11" x2="12" y2="17" />
     <polyline points="9 14 12 11 15 14" />
   </svg>
-)
+))
 
-const CopyIcon: React.FC = () => (
+const CopyIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
     <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
   </svg>
-)
+))
 
 // Provider icons and providerLabel are imported from ./ProviderIcons
 
-const OpenFileIcon: React.FC = () => (
+const OpenFileIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
     <polyline points="15 3 21 3 21 9" />
     <line x1="10" y1="14" x2="21" y2="3" />
   </svg>
-)
+))
 
-const ShowInFolderIcon: React.FC = () => (
+const ShowInFolderIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     <polyline points="9 14 12 17 15 14" />
     <line x1="12" y1="10" x2="12" y2="17" />
   </svg>
-)
+))
 
-const ResetChangeIcon: React.FC = () => (
+const ResetChangeIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="1 4 1 10 7 10" />
     <path d="M3.51 15a9 9 0 105.64-11.36L1 10" />
   </svg>
-)
+))
 
-const WriteTestsIcon: React.FC = () => (
+const WriteTestsIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" />
     <line x1="8" y1="2" x2="16" y2="2" />
     <line x1="6" y1="18" x2="18" y2="18" />
   </svg>
-)
+))
 
-const ClaudeActionIcon: React.FC = () => (
+const ClaudeActionIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
     <path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" />
   </svg>
-)
+))
 
-const ReferenceThisIcon: React.FC = () => (
+const ReferenceThisIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
     <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
   </svg>
-)
+))
 
 /** Claude action button — hover to expand action icons inline */
 const ClaudeActionWheel: React.FC<{ files: string[]; commitHash?: string; commitSubject?: string; direction?: 'left' | 'right' }> = ({ files, commitHash, commitSubject, direction = 'right' }) => {
@@ -8611,99 +8788,99 @@ const ClaudeActionWheel: React.FC<{ files: string[]; commitHash?: string; commit
   )
 }
 
-const FolderIcon: React.FC = () => (
+const FolderIcon: React.FC = React.memo(() => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
     <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
   </svg>
-)
+))
 
-const SparkleIcon: React.FC = () => (
+const SparkleIcon: React.FC = React.memo(() => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
     <path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" />
   </svg>
-)
+))
 
-const GitIcon: React.FC = () => (
+const GitIcon: React.FC = React.memo(() => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="18" r="3" />
     <circle cx="12" cy="6" r="3" />
     <path d="M12 9v6" />
   </svg>
-)
+))
 
-const FetchIcon: React.FC = () => (
+const FetchIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
     <polyline points="7 10 12 15 17 10" />
     <line x1="12" y1="15" x2="12" y2="3" />
   </svg>
-)
+))
 
-const PullIcon: React.FC = () => (
+const PullIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="8 17 12 21 16 17" />
     <line x1="12" y1="12" x2="12" y2="21" />
     <path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29" />
   </svg>
-)
+))
 
-const PushIcon: React.FC = () => (
+const PushIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="16 16 12 12 8 16" />
     <line x1="12" y1="12" x2="12" y2="21" />
     <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3" />
     <polyline points="16 16 12 12 8 16" />
   </svg>
-)
+))
 
-const ChangesIcon: React.FC = () => (
+const ChangesIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
     <polyline points="14 2 14 8 20 8" />
     <line x1="12" y1="18" x2="12" y2="12" />
     <line x1="9" y1="15" x2="15" y2="15" />
   </svg>
-)
+))
 
-const TagIcon: React.FC = () => (
+const TagIcon: React.FC = React.memo(() => (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 3, flexShrink: 0 }}>
     <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
     <line x1="7" y1="7" x2="7.01" y2="7" />
   </svg>
-)
+))
 
-const RefreshIcon: React.FC = () => (
+const RefreshIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="23 4 23 10 17 10" />
     <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
   </svg>
-)
+))
 
-const WarningIcon: React.FC = () => (
+const WarningIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0af68" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
     <line x1="12" y1="9" x2="12" y2="13" />
     <line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
-)
+))
 
-const ConflictFileIcon: React.FC = () => (
+const ConflictFileIcon: React.FC = React.memo(() => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0af68" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
     <polyline points="14 2 14 8 20 8" />
     <line x1="12" y1="12" x2="12" y2="16" />
     <line x1="12" y1="18" x2="12.01" y2="18" />
   </svg>
-)
+))
 
-const ConflictPlaceholderIcon: React.FC = () => (
+const ConflictPlaceholderIcon: React.FC = React.memo(() => (
   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
     <polyline points="14 2 14 8 20 8" />
     <line x1="9" y1="13" x2="15" y2="13" />
   </svg>
-)
+))
 
 function formatDate(iso: string): string {
   const d = new Date(iso)

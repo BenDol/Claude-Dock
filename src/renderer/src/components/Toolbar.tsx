@@ -676,11 +676,13 @@ const NotificationDropdown: React.FC = () => {
     try { localStorage.setItem(notifStorageKey(projectDir), JSON.stringify(notifications)) } catch { /* ignore */ }
   }, [notifications, projectDir])
 
-  // Persist read state (project-scoped)
+  // Persist read state (project-scoped) — prune stale IDs to prevent unbounded growth
   useEffect(() => {
     if (!projectDir) return
-    try { localStorage.setItem(notifReadKey(projectDir), JSON.stringify([...readIds])) } catch { /* ignore */ }
-  }, [readIds, projectDir])
+    const notifIds = new Set(notifications.map((n) => n.id))
+    const pruned = [...readIds].filter((id) => notifIds.has(id))
+    try { localStorage.setItem(notifReadKey(projectDir), JSON.stringify(pruned)) } catch { /* ignore */ }
+  }, [readIds, projectDir, notifications])
 
   const autoReadTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
