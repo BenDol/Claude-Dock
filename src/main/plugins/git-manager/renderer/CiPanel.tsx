@@ -315,15 +315,15 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
               if (successRun) {
                 try {
                   const baseJobs = await api.ci.getRunJobs(projectDir, successRun.id)
-                  for (const bj of baseJobs) {
-                    if (bj.conclusion === 'skipped') continue
+                  await Promise.all(baseJobs.map(async (bj) => {
+                    if (bj.conclusion === 'skipped') return
                     try {
                       const log = await api.ci.getJobLog(projectDir, bj.id)
                       if (log) {
                         baselineLogLinesRef.current.set(`${run.workflowId}:${bj.name}`, log.split('\n').length)
                       }
                     } catch { /* ignore */ }
-                  }
+                  }))
                 } catch { /* ignore */ }
               }
             }
@@ -714,13 +714,18 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
       for (const { job, run } of jobsToSearch) {
         if (abort.signal.aborted) return
 
-        // Fetch log (cached)
+        // Fetch log (cached, capped at 50 entries to prevent unbounded memory growth)
         let log = logCacheRef.current.get(job.id)
         if (log === undefined) {
           try {
             log = await api.ci.getJobLog(projectDir, job.id) || ''
           } catch {
             log = ''
+          }
+          if (logCacheRef.current.size >= 50) {
+            // Evict oldest entry
+            const firstKey = logCacheRef.current.keys().next().value
+            if (firstKey !== undefined) logCacheRef.current.delete(firstKey)
           }
           logCacheRef.current.set(job.id, log)
         }

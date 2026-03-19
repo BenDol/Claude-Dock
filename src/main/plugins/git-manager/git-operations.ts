@@ -1324,28 +1324,29 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
         // Set tracking branch from .gitmodules
         sub.trackingBranch = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
 
-        try {
-          const subCwd = pathMod.join(cwd, sub.path)
-          const { stdout: porcelain } = await gitExec(subCwd, ['status', '--porcelain'], 5000)
-          const lines = porcelain.trim().split('\n').filter(Boolean)
+        const subCwd = pathMod.join(cwd, sub.path)
+        // Run status and branch checks in parallel per submodule
+        const [statusResult, branchResult] = await Promise.allSettled([
+          gitExec(subCwd, ['status', '--porcelain'], 5000),
+          gitExec(subCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+        ])
+        if (statusResult.status === 'fulfilled') {
+          const lines = statusResult.value.stdout.trim().split('\n').filter(Boolean)
           sub.hasDirtyWorkTree = lines.length > 0
           sub.changeCount = lines.length
-        } catch (err) {
-          getServices().log(`[git-manager] getSubmodules: status failed for ${sub.path}:`, err instanceof Error ? err.message.split('\n')[0] : err)
+        } else {
+          getServices().log(`[git-manager] getSubmodules: status failed for ${sub.path}:`, statusResult.reason?.message?.split('\n')[0])
         }
-        try {
-          const subCwd = pathMod.join(cwd, sub.path)
-          const { stdout: branchOut } = await gitExec(subCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
-          const branch = branchOut.trim()
+        if (branchResult.status === 'fulfilled') {
+          const branch = branchResult.value.stdout.trim()
           if (branch && branch !== 'HEAD') {
             sub.branch = branch
             sub.isDetached = false
           } else {
-            // Detached HEAD — common after git submodule update
             sub.isDetached = true
           }
-        } catch (err) {
-          getServices().log(`[git-manager] getSubmodules: branch check failed for ${sub.path}:`, err instanceof Error ? err.message.split('\n')[0] : err)
+        } else {
+          getServices().log(`[git-manager] getSubmodules: branch check failed for ${sub.path}:`, branchResult.reason?.message?.split('\n')[0])
         }
       })
     )
@@ -1715,8 +1716,9 @@ async function searchLog(cwd: string, query: string, maxResults: number, gen: nu
         commits.push({ hash: lines[i], shortHash: lines[i + 1], subject: lines[i + 2] })
       }
 
-      // For each commit, get lightweight diff to find file + line
-      for (const c of commits.slice(0, 15)) {
+      // For each commit, get lightweight diff to find file + line (parallel)
+      const lowerQuery = query.toLowerCase()
+      await Promise.all(commits.slice(0, 15).map(async (c) => {
         if (isSearchStale(cwd, gen)) return
         try {
           const { stdout: diffOut } = await gitExec(cwd, [
@@ -1724,8 +1726,6 @@ async function searchLog(cwd: string, query: string, maxResults: number, gen: nu
           ], 10000)
           let currentFile = ''
           let lineNum: number | undefined
-          let lineContent: string | undefined
-          const lowerQuery = query.toLowerCase()
           for (const line of diffOut.split('\n')) {
             if (line.startsWith('+++ b/')) {
               currentFile = line.slice(6)
@@ -1752,7 +1752,7 @@ async function searchLog(cwd: string, query: string, maxResults: number, gen: nu
             }
           }
         } catch { /* ignore per-commit errors */ }
-      }
+      }))
     } catch { /* ignore */ }
   }
 
