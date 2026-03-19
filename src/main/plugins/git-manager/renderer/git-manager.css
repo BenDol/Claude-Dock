@@ -4726,3 +4726,103 @@
 .gm-gitignore-checkbox input[type="checkbox"] {
   margin: 0;
 }
+
+/* Stage loop warning */
+.gm-stage-loop-warning {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid #e0af68;
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.gm-stage-loop-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.gm-stage-loop-icon {
+  color: #e0af68;
+  font-size: 14px;
+}
+
+.gm-stage-loop-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.gm-stage-loop-close:hover {
+  color: var(--text-primary);
+}
+
+.gm-stage-loop-body {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.gm-stage-loop-files {
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.gm-stage-loop-file {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #e0af68;
+  padding: 1px 0;
+  word-break: break-all;
+}
+
+.gm-stage-loop-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.gm-stage-loop-btn {
+  background: #e0af68;
+  color: #1a1b26;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.gm-stage-loop-btn:hover {
+  filter: brightness(1.1);
+}
+
+.gm-stage-loop-btn-secondary {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.gm-stage-loop-btn-secondary:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  filter: none;
+}

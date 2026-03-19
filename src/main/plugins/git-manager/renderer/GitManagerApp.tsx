@@ -3859,6 +3859,8 @@ const WorkingChanges: React.FC<{
   const userEditedMsgRef = useRef(false)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [gitignoreModal, setGitignoreModal] = useState<{ pattern: string; hasTracked: boolean } | null>(null)
+  const [stageLoopWarning, setStageLoopWarning] = useState<string[] | null>(null)
+  const stageLoopCountRef = useRef<Map<string, number>>(new Map())
   const [selectedFile, setSelectedFile] = useState<{ path: string; staged: boolean } | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [fileDiffs, setFileDiffs] = useState<GitFileDiff[]>([])
@@ -3883,6 +3885,26 @@ const WorkingChanges: React.FC<{
       if (onStatusRefreshed) onStatusRefreshed(s)
     } catch { /* ignore */ }
   }, [projectDir, onStatusRefreshed])
+
+  // Detect files that reappear as unstaged immediately after staging (external process regeneration loop)
+  const checkStageLoop = useCallback((stagedPaths: string[], newStatus: GitStatusResult) => {
+    const unstagedSet = new Set(newStatus.unstaged.map((f) => f.path).concat(newStatus.untracked.map((f) => f.path)))
+    const reappeared: string[] = []
+    for (const p of stagedPaths) {
+      if (unstagedSet.has(p)) {
+        const count = (stageLoopCountRef.current.get(p) || 0) + 1
+        stageLoopCountRef.current.set(p, count)
+        if (count >= 2) reappeared.push(p)
+      } else {
+        stageLoopCountRef.current.delete(p)
+      }
+    }
+    if (reappeared.length > 0) {
+      setStageLoopWarning(reappeared)
+      // Reset counts so warning doesn't re-trigger on next normal poll
+      for (const p of reappeared) stageLoopCountRef.current.delete(p)
+    }
+  }, [])
 
   const handleCloseDiffViewer = useCallback(() => { setSelectedFile(null); setSelectedPaths(new Set()) }, [])
 
@@ -4105,7 +4127,10 @@ const WorkingChanges: React.FC<{
       if (paths.length > BATCH) await refreshStatus()
     }
     setBatchProgress(null)
-    await refreshStatus()
+    const newStatus = await getDockApi().gitManager.getStatus(projectDir)
+    setLocalStatus(newStatus)
+    if (onStatusRefreshed) onStatusRefreshed(newStatus)
+    if (!failed) checkStageLoop(paths, newStatus)
     setStagingPaths(new Set())
     setBusy(false)
     scrollToTop()
@@ -4192,7 +4217,10 @@ const WorkingChanges: React.FC<{
     setStagingPaths((prev) => new Set(prev).add(filePath))
     const r = await api.gitManager.stage(projectDir, [filePath])
     if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
-    await refreshStatus()
+    const newStatus = await getDockApi().gitManager.getStatus(projectDir)
+    setLocalStatus(newStatus)
+    if (onStatusRefreshed) onStatusRefreshed(newStatus)
+    if (r.success) checkStageLoop([filePath], newStatus)
     setStagingPaths((prev) => { const n = new Set(prev); n.delete(filePath); return n })
     if (r.success && autoGen && !userEditedMsgRef.current) triggerAutoGenerate()
   }
@@ -4540,6 +4568,45 @@ const WorkingChanges: React.FC<{
           onDone={onRefresh}
           onError={onError}
         />
+      )}
+      {stageLoopWarning && (
+        <div className="gm-stage-loop-warning">
+          <div className="gm-stage-loop-header">
+            <span className="gm-stage-loop-icon">&#9888;</span>
+            <strong>External process modifying tracked files</strong>
+            <button className="gm-stage-loop-close" onClick={() => setStageLoopWarning(null)}>&times;</button>
+          </div>
+          <div className="gm-stage-loop-body">
+            The following file{stageLoopWarning.length > 1 ? 's keep' : ' keeps'} reappearing as unstaged immediately after staging.
+            An external process (build tool, file watcher, compiler) is likely regenerating {stageLoopWarning.length > 1 ? 'them' : 'it'}.
+          </div>
+          <div className="gm-stage-loop-files">
+            {stageLoopWarning.map((f) => <div key={f} className="gm-stage-loop-file">{f}</div>)}
+          </div>
+          <div className="gm-stage-loop-actions">
+            <button
+              className="gm-stage-loop-btn"
+              onClick={() => {
+                const patterns = stageLoopWarning.map((f) => {
+                  // Suggest glob pattern for known generated files, otherwise the exact path
+                  const ext = f.match(/\.[^./\\]+$/)?.[0]
+                  if (ext && /^\.(tsbuildinfo|pyc|pyo|class|o|obj|dll|exe|so|dylib)$/i.test(ext)) {
+                    return `*${ext}`
+                  }
+                  return f
+                })
+                const unique = [...new Set(patterns)]
+                setGitignoreModal({ pattern: unique.join('\n'), hasTracked: true })
+                setStageLoopWarning(null)
+              }}
+            >
+              Add to .gitignore
+            </button>
+            <button className="gm-stage-loop-btn gm-stage-loop-btn-secondary" onClick={() => setStageLoopWarning(null)}>
+              Dismiss
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

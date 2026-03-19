@@ -279,7 +279,8 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
         const y = xy[1] // worktree/unstaged
         const isRename = entry.startsWith('2 ')
         const isSubmodule = sub.startsWith('S')
-        const path = parts.slice(8).join(' ')
+        // Rename entries (type 2) have an extra score field at index 8 (e.g. R098)
+        const path = parts.slice(isRename ? 9 : 8).join(' ')
         let oldPath: string | undefined
 
         if (isRename) {
