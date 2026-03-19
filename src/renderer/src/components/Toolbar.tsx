@@ -369,11 +369,11 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         >
           <FolderIcon />
         </button>
+        <NotificationDropdown />
         <button className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           <SettingsIcon />
           {hasPluginUpdates && <span className="toolbar-update-dot" />}
         </button>
-        <NotificationDropdown />
         <ClaudeUsageButton />
         <div className="toolbar-separator" />
         <button className="win-btn win-minimize" onClick={() => api.win.minimize()} title="Minimize">
