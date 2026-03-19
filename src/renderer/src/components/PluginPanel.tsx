@@ -97,7 +97,22 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
                 </button>
               )}
             </div>
-            <div className="plugin-description">{plugin.description}</div>
+            <div className="plugin-description">
+              {plugin.description}
+              {plugin.source === 'external' && (
+                <button
+                  className="plugin-reset-trust-btn"
+                  onClick={async () => {
+                    await getDockApi().plugins.resetTrust(plugin.id)
+                    // The trust will be re-prompted on next app launch
+                    window.dispatchEvent(new CustomEvent('plugin-state-changed'))
+                  }}
+                  title="Reset trust decision — you will be prompted again on next launch"
+                >
+                  Reset Trust
+                </button>
+              )}
+            </div>
             {state.enabled && hasSettings && isExpanded && (
               <div className="plugin-settings">
                 {plugin.settingsSchema!.map((def) => {

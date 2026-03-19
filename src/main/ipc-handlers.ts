@@ -15,6 +15,7 @@ import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } f
 import { ActivityTracker } from './activity-tracker'
 import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
+import { resetPluginTrust } from './plugins/plugin-loader'
 import { PluginUpdateService } from './plugins/plugin-updater'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
@@ -473,6 +474,16 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_OPEN_DIR, () => {
     shell.openPath(getPluginsDir())
+  })
+
+  ipcMain.handle(IPC.PLUGIN_RESET_TRUST, (_event, pluginId: string) => {
+    try {
+      resetPluginTrust(pluginId)
+      return { success: true }
+    } catch (err) {
+      logError('plugin:resetTrust failed:', err)
+      return { success: false }
+    }
   })
 
   ipcMain.handle(IPC.PLUGIN_GET_OPEN_WINDOWS, (_event, projectDir: string) => {

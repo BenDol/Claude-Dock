@@ -136,6 +136,7 @@ export interface DockApi {
     getToolbarActions: () => Promise<PluginToolbarAction[]>
     getDir: () => Promise<string>
     openDir: () => Promise<void>
+    resetTrust: (pluginId: string) => Promise<{ success: boolean }>
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
     getOpenWindows: (projectDir: string) => Promise<string[]>
     onWindowStateChanged: (callback: (data: { pluginId: string; projectDir: string; open: boolean }) => void) => () => void
@@ -372,6 +373,7 @@ const dockApi: DockApi = {
     getToolbarActions: () => ipcRenderer.invoke(IPC.PLUGIN_GET_TOOLBAR_ACTIONS),
     getDir: () => ipcRenderer.invoke(IPC.PLUGIN_GET_DIR),
     openDir: () => ipcRenderer.invoke(IPC.PLUGIN_OPEN_DIR),
+    resetTrust: (pluginId: string) => ipcRenderer.invoke(IPC.PLUGIN_RESET_TRUST, pluginId),
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     getOpenWindows: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_GET_OPEN_WINDOWS, projectDir),
     onWindowStateChanged: (callback) => {

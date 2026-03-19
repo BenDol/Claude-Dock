@@ -55,6 +55,7 @@ export const IPC = {
   PLUGIN_GET_TOOLBAR_ACTIONS: 'plugin:getToolbarActions',
   PLUGIN_GET_DIR: 'plugin:getDir',
   PLUGIN_OPEN_DIR: 'plugin:openDir',
+  PLUGIN_RESET_TRUST: 'plugin:resetTrust',
   DEBUG_WRITE: 'debug:write',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
   DEBUG_OPEN_LOGS: 'debug:openLogs',

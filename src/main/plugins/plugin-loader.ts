@@ -12,6 +12,7 @@ import type Store from 'electron-store'
 
 interface TrustedEntry {
   hash: string // SHA-256 of the plugin.json content at time of approval
+  denied?: boolean // true if the user explicitly denied this plugin
 }
 
 interface TrustedPluginsData {
@@ -36,18 +37,38 @@ function hashManifest(raw: string): string {
 }
 
 /**
- * Checks if a plugin is trusted AND its manifest hasn't changed since approval.
- * If the manifest changes (update, tamper), re-prompt is required.
+ * Checks if a plugin has been reviewed (trusted or denied) AND its manifest
+ * hasn't changed since the decision. If the manifest changes (update, tamper),
+ * re-prompt is required.
  */
-function isTrusted(pluginId: string, manifestHash: string): boolean {
+function isReviewed(pluginId: string, manifestHash: string): boolean {
   const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
   const entry = entries[pluginId]
   return entry?.hash === manifestHash
 }
 
+function wasDenied(pluginId: string, manifestHash: string): boolean {
+  const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
+  const entry = entries[pluginId]
+  return entry?.hash === manifestHash && entry.denied === true
+}
+
 export function trustPlugin(pluginId: string, manifestHash: string): void {
   const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
   entries[pluginId] = { hash: manifestHash }
+  safeWriteSync(() => getTrustedStore().set('entries', entries))
+}
+
+export function resetPluginTrust(pluginId: string): void {
+  const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
+  delete entries[pluginId]
+  safeWriteSync(() => getTrustedStore().set('entries', entries))
+  log(`[plugin-loader] trust reset for plugin: ${pluginId}`)
+}
+
+function denyPlugin(pluginId: string, manifestHash: string): void {
+  const entries = safeRead(() => getTrustedStore().get('entries', {})) ?? {}
+  entries[pluginId] = { hash: manifestHash, denied: true }
   safeWriteSync(() => getTrustedStore().set('entries', entries))
 }
 
@@ -234,14 +255,15 @@ export async function loadRuntimePlugins(): Promise<RuntimePlugin[]> {
       manifest.defaultEnabled = manifest.defaultEnabled ?? true
       manifest.description = manifest.description ?? ''
 
-      // Consent gate: prompt for approval if this plugin hasn't been trusted
-      // or if its manifest has changed since last approval (update / tamper)
+      // Consent gate: prompt for approval if this plugin hasn't been reviewed
+      // (trusted or denied) or if its manifest changed since the last decision.
       const manifestHash = hashManifest(raw)
-      if (!isTrusted(manifest.id, manifestHash)) {
-        log(`[plugin-loader] untrusted or modified plugin: ${manifest.id} — prompting for consent`)
+      if (!isReviewed(manifest.id, manifestHash)) {
+        log(`[plugin-loader] unreviewed or modified plugin: ${manifest.id} — prompting for consent`)
         const allowed = await promptPluginConsent(manifest, pluginDir)
         if (!allowed) {
           log(`[plugin-loader] user denied plugin: ${manifest.id}`)
+          denyPlugin(manifest.id, manifestHash)
           manifest.defaultEnabled = false
           // Still register it (so it appears in settings as disabled) but skip loading its module
           plugins.push(new RuntimePlugin(manifest, pluginDir, null))
@@ -249,6 +271,12 @@ export async function loadRuntimePlugins(): Promise<RuntimePlugin[]> {
         }
         trustPlugin(manifest.id, manifestHash)
         log(`[plugin-loader] user approved plugin: ${manifest.id}`)
+      } else if (wasDenied(manifest.id, manifestHash)) {
+        // Previously denied and manifest unchanged — skip without prompting
+        log(`[plugin-loader] previously denied plugin: ${manifest.id} — skipping`)
+        manifest.defaultEnabled = false
+        plugins.push(new RuntimePlugin(manifest, pluginDir, null))
+        continue
       }
 
       // Load main module if specified
