@@ -898,9 +898,16 @@ const GitManagerApp: React.FC = () => {
   }, [activeDir, refresh])
 
   // Refresh when the toolbar button re-opens an already-open window
+  // Also reset to the main repo if we were navigated into a submodule
   useEffect(() => {
-    return getDockApi().gitManager.onReopen(() => refresh())
-  }, [refresh])
+    return getDockApi().gitManager.onReopen(() => {
+      if (activeDir !== projectDir) {
+        setActiveDir(projectDir)
+        setNavStack([])
+      }
+      refresh()
+    })
+  }, [refresh, activeDir, projectDir])
 
   const selectCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectCommitGen = useRef(0)
@@ -4108,6 +4115,18 @@ const WorkingChanges: React.FC<{
   }
 
   const [batchProgress, setBatchProgress] = useState<string | null>(null)
+
+  // Listen for discard progress events (LFS files can take a long time)
+  useEffect(() => {
+    return getDockApi().gitManager.onDiscardProgress(({ completed, total, path }) => {
+      if (completed < total) {
+        const name = path.split('/').pop() || path
+        setBatchProgress(`Discarding ${completed + 1}/${total}: ${name}`)
+      } else {
+        setBatchProgress(null)
+      }
+    })
+  }, [])
 
   const scrollToTop = () => {
     if (scrollListRef.current) scrollListRef.current.scrollTop = 0

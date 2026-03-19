@@ -1,4 +1,4 @@
-import { ipcMain, shell } from 'electron'
+import { ipcMain, shell, BrowserWindow } from 'electron'
 import { execFile } from 'child_process'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
@@ -317,9 +317,14 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_DISCARD, async (_event, projectDir: string, paths: string[]) => {
+  ipcMain.handle(IPC.GIT_MGR_DISCARD, async (event, projectDir: string, paths: string[]) => {
     try {
-      await gitOps.discardFiles(projectDir, paths)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      await gitOps.discardFiles(projectDir, paths, (completed, total, path) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('git-manager:discard-progress', { completed, total, path })
+        }
+      })
       return { success: true }
     } catch (err) {
       getServices().logError('[git-manager] discard failed:', err)

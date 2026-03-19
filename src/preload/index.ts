@@ -182,6 +182,7 @@ export interface DockApi {
     getTags: (projectDir: string) => Promise<{ name: string; hash: string; date: string }[]>
     renameBranch: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
     discard: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+    onDiscardProgress: (callback: (progress: { completed: number; total: number; path: string }) => void) => () => void
     restoreFileFromCommit: (projectDir: string, commitHash: string, filePath: string) => Promise<{ success: boolean; error?: string }>
     deleteFiles: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     showInFolder: (projectDir: string, filePath: string) => Promise<void>
@@ -423,6 +424,11 @@ const dockApi: DockApi = {
     getTags: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_TAGS, projectDir),
     renameBranch: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName),
     discard: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DISCARD, projectDir, paths),
+    onDiscardProgress: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: { completed: number; total: number; path: string }) => callback(progress)
+      ipcRenderer.on('git-manager:discard-progress', handler)
+      return () => ipcRenderer.removeListener('git-manager:discard-progress', handler)
+    },
     restoreFileFromCommit: (projectDir, commitHash, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_RESTORE_FILE_FROM_COMMIT, projectDir, commitHash, filePath),
     deleteFiles: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_FILES, projectDir, paths),
     showInFolder: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_SHOW_IN_FOLDER, projectDir, filePath),

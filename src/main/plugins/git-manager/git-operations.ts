@@ -631,9 +631,19 @@ export async function deleteBranch(cwd: string, name: string, force?: boolean): 
 
 // --- Discard / Delete ---
 
-export async function discardFiles(cwd: string, paths: string[]): Promise<void> {
+export async function discardFiles(
+  cwd: string,
+  paths: string[],
+  onProgress?: (completed: number, total: number, path: string) => void
+): Promise<void> {
   if (paths.length === 0) return
-  await gitExec(cwd, ['checkout', '--', ...paths], 10000)
+  // Process files individually to avoid LFS lock contention and provide progress.
+  // LFS files can take a long time to restore so we use a generous timeout.
+  for (let i = 0; i < paths.length; i++) {
+    onProgress?.(i, paths.length, paths[i])
+    await gitExec(cwd, ['checkout', '--', paths[i]], 120000)
+  }
+  onProgress?.(paths.length, paths.length, '')
 }
 
 /** Restore a file to its state before a given commit (i.e. from the commit's parent) */
