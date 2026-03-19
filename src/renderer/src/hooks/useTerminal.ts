@@ -25,9 +25,22 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   return e.key.toLowerCase() === key
 }
 
-// Patterns for Claude tool invocations that contain file paths
-// Matches: Read(path), Write(path), Edit(path), Glob(path), Grep(path)
-const TOOL_PATH_RE = /\b(Read|Write|Edit|Glob|Grep|MultiEdit)\(([^)]+)\)/g
+// Matches Claude tool invocations containing file paths: ToolName(path/to/file.ext)
+// Captures any PascalCase word followed by a parenthesized value that looks like a file path
+const TOOL_PATH_RE = /\b([A-Z][a-zA-Z]*)\(([^)]+)\)/g
+
+// Quick check: does the string look like a file path?
+function looksLikeFilePath(s: string): boolean {
+  // Must contain a dot (extension) or path separator
+  if (!/[./\\]/.test(s)) return false
+  // Must not be a glob pattern
+  if (s.includes('**')) return false
+  // Must not look like a function call or code expression
+  if (/[=<>{}|&;!?#@$%^*+~`]/.test(s)) return false
+  // Must not be too long (paths are typically < 200 chars)
+  if (s.length > 200) return false
+  return true
+}
 
 function registerFilePathLinks(term: Terminal): void {
   term.registerLinkProvider({
@@ -40,10 +53,8 @@ function registerFilePathLinks(term: Terminal): void {
       TOOL_PATH_RE.lastIndex = 0
       let m: RegExpExecArray | null
       while ((m = TOOL_PATH_RE.exec(text)) !== null) {
-        const fullMatch = m[0]
         const filePath = m[2].trim()
-        // Skip obviously non-path values (e.g. glob patterns with **)
-        if (!filePath || filePath.includes('**')) continue
+        if (!looksLikeFilePath(filePath)) continue
         // The clickable region is the path portion inside the parens
         const pathStart = m.index + m[1].length + 1 // after "Tool("
         links.push({ startIndex: pathStart, length: filePath.length, filePath })
