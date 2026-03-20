@@ -234,16 +234,16 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     }))
   }, [currentBranch])
 
-  // Start polling when ready
+  // Start backend polling only when tab is active and ready
   useEffect(() => {
-    if (status !== 'ready') return
+    if (status !== 'ready' || !active) return
     pollingRef.current = true
     api.ci.startPolling(projectDir)
     return () => {
       pollingRef.current = false
       api.ci.stopPolling(projectDir)
     }
-  }, [status, projectDir])
+  }, [status, projectDir, active])
 
   // Load runs when workflow selection changes
   useEffect(() => {
@@ -260,7 +260,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   runsRef.current = runs
 
   useEffect(() => {
-    if (status !== 'ready') return
+    if (status !== 'ready' || !active) return
     let timer: ReturnType<typeof setInterval>
     let consecutiveFailures = 0
     const pollActive = async () => {
@@ -380,7 +380,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
     }
     schedule()
     return () => clearTimeout(timer)
-  }, [status, projectDir])
+  }, [status, projectDir, active])
 
   const loadRuns = useCallback(async (p: number, reset?: boolean) => {
     if (loadingRunsRef.current) return
