@@ -1034,6 +1034,12 @@ function cleanCommitMessage(raw: string): string {
     .replace(/^["']|["']$/g, '')
     .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
+
+  // Reject if the response looks like raw diff output leaked through
+  if (msg.includes('diff --git') || msg.includes('@@') || msg.includes('index ') && msg.includes('100644')) {
+    return ''
+  }
+
   // Ensure first line is under 72 chars
   const lines = msg.split('\n')
   if (lines[0].length > 72) {
