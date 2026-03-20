@@ -293,17 +293,20 @@ export class PluginUpdateService {
       // - For bleeding-edge: compare per-plugin build SHAs (only changes when
       //   that plugin's source directory is modified, not on every repo commit)
       // - For latest: check if version is newer, OR if version matches but
-      //   the content hash differs (hotfix to same version)
+      //   the build SHA differs (hotfix to same version)
+      // In both cases, skip if a content-hash match proves the code is identical
+      // (avoids false positives when app and archive were built from different commits)
       const localPluginSha = __PLUGIN_BUILD_SHAS__?.[info.id]
       let hasUpdate: boolean
       if (profile === 'bleeding-edge') {
         hasUpdate = !!localPluginSha && entry.buildSha !== localPluginSha
       } else {
         const newerVersion = isNewerVersion(info.version, entry.version)
-        const sameVersionDifferentHash = info.version === entry.version
+        const sameVersionDifferentBuild = info.version === entry.version
           && !!localPluginSha && entry.buildSha !== localPluginSha
-        hasUpdate = newerVersion || sameVersionDifferentHash
+        hasUpdate = newerVersion || sameVersionDifferentBuild
       }
+
 
       if (!hasUpdate) continue
 

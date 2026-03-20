@@ -201,7 +201,9 @@ function main() {
       JSON.stringify(pluginJson, null, 2)
     )
 
-    // Compute content hash of staging dir (index.js + plugin.json)
+    // Compute content hash of staging dir (index.js + plugin.json).
+    // This hash is STABLE — it only changes when the actual plugin code changes,
+    // not when the git commit SHA or build metadata changes.
     const contentHash = hashDirectory(pluginStaging)
 
     // Write meta.json (for override loading) — NOT included in contentHash above
@@ -210,13 +212,12 @@ function main() {
       JSON.stringify({ version: appVersion, buildSha: pluginBuildSha, hash: contentHash, installedAt: 0 }, null, 2)
     )
 
-    // Final hash includes meta.json (for zip verification on client side)
-    const finalHash = hashDirectory(pluginStaging)
-
+    // Use the stable content hash (excludes meta.json) in the manifest so that
+    // update detection is based on actual code changes, not build metadata.
     manifest.plugins[plugin.id] = {
       version: appVersion,
       buildSha: pluginBuildSha,
-      hash: finalHash,
+      hash: contentHash,
       archivePath: `${plugin.id}/`,
       changelog: '',
       minAppVersion: undefined,
