@@ -527,18 +527,49 @@ export async function getDiff(cwd: string, filePath?: string, staged?: boolean):
 
 export async function getCommitDetail(cwd: string, hash: string): Promise<GitCommitDetail | null> {
   try {
-    // Run metadata and diff in parallel for speed
+    // Run metadata and numstat in parallel (numstat is fast even for large files)
     const metaPromise = gitExec(cwd, [
       'log', '-1', `--format=${LOG_FORMAT}%n%b`, hash
     ], 10000)
 
-    // For the diff, we need to know if it's a root commit (no parents).
-    // Use --root flag speculatively — git ignores it for non-root commits.
-    const diffPromise = gitExec(cwd, [
-      'diff-tree', '--root', '-p', '--no-color', '--unified=5', '-r', hash
-    ], 15000)
+    const numstatPromise = gitExec(cwd, [
+      'diff-tree', '--root', '--numstat', '-r', hash
+    ], 10000).catch(() => ({ stdout: '', stderr: '' }))
 
-    const [{ stdout: metaOut }, { stdout: diffOut }] = await Promise.all([metaPromise, diffPromise])
+    const [{ stdout: metaOut }, { stdout: numstatOut }] = await Promise.all([metaPromise, numstatPromise])
+
+    // Find files that are too large for a full diff (>1MB of changes)
+    const MAX_DIFF_LINES = 50000
+    const largeFiles = new Set<string>()
+    for (const line of numstatOut.split('\n')) {
+      const parts = line.trim().split('\t')
+      if (parts.length >= 3) {
+        const added = parseInt(parts[0], 10) || 0
+        const removed = parseInt(parts[1], 10) || 0
+        if (added + removed > MAX_DIFF_LINES) {
+          largeFiles.add(parts[2])
+        }
+      }
+    }
+
+    // Build diff command, excluding large files
+    const diffArgs = ['diff-tree', '--root', '-p', '--no-color', '--unified=5', '-r', hash]
+    if (largeFiles.size > 0) {
+      diffArgs.push('--')
+      diffArgs.push('.')
+      for (const f of largeFiles) diffArgs.push(`:(exclude)${f}`)
+    }
+
+    let diffOut = ''
+    try {
+      const result = await gitExec(cwd, diffArgs, 15000)
+      diffOut = result.stdout
+    } catch { /* timeout or error — proceed with metadata only */ }
+
+    // Add synthetic entries for large files that were excluded
+    for (const f of largeFiles) {
+      diffOut += `\ndiff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -0,0 +0,0 @@\n File too large to display diff\n`
+    }
 
     const lines = metaOut.split('\n')
     if (lines.length < 7) return null
@@ -980,6 +1011,37 @@ export async function stashApply(cwd: string, index: number): Promise<void> {
 
 export async function stashDrop(cwd: string, index: number): Promise<void> {
   await gitExec(cwd, ['stash', 'drop', `stash@{${index}}`], 10000)
+}
+
+// --- Git LFS ---
+
+/**
+ * Migrate files to Git LFS: installs LFS, tracks the file extensions,
+ * removes the files from the index, re-adds them with LFS, and amends the commit.
+ */
+export async function migrateToLfs(cwd: string, filePaths: string[]): Promise<string> {
+  // 1. Install LFS (idempotent)
+  await gitExec(cwd, ['lfs', 'install'], 15000)
+
+  // 2. Track each unique extension
+  const extensions = new Set(filePaths.map((f) => {
+    const ext = f.split('.').pop()
+    return ext ? `*.${ext}` : ''
+  }).filter(Boolean))
+  for (const pattern of extensions) {
+    await gitExec(cwd, ['lfs', 'track', pattern], 10000)
+  }
+
+  // 3. Remove files from index (keep on disk) and re-add with LFS
+  for (const f of filePaths) {
+    await gitExec(cwd, ['rm', '--cached', f], 10000)
+  }
+  await gitExec(cwd, ['add', '.gitattributes', ...filePaths], 10000)
+
+  // 4. Amend the current commit to include the LFS changes
+  await gitExec(cwd, ['commit', '--amend', '--no-edit'], 15000)
+
+  return `Migrated ${filePaths.length} file(s) to Git LFS (${[...extensions].join(', ')})`
 }
 
 // --- Remotes ---

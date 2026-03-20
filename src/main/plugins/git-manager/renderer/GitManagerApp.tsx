@@ -302,9 +302,62 @@ function parseGitError(action: string, errorMsg: string, context: {
 
   // Better title/message for push rejection
   if (action.toLowerCase() === 'push' && /non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
+    resolutions.push({
+      label: 'Pull & Rebase',
+      description: 'Pull the latest changes with rebase, then try pushing again',
+      action: async () => {
+        await api.gitManager.pull(context.projectDir)
+        context.refresh()
+      }
+    })
     return {
-      title: 'Pull latest changes from remote repository',
-      message: 'The push was rejected because the tip of your current branch is behind its remote counterpart. Merge the remote changes before pushing again.',
+      title: 'Branch is behind remote',
+      message: 'The push was rejected because your branch is behind its remote counterpart. Pull the latest changes before pushing again.',
+      resolutions
+    }
+  }
+
+  // Large file / Git LFS errors
+  if (/exceeds.*file size limit|large files detected|git.lfs|GH001/i.test(msg)) {
+    // Extract file names and sizes from the error
+    const fileMatches = [...msg.matchAll(/File\s+(\S+)\s+is\s+([\d.]+\s*[KMGT]?B)/gi)]
+    const fileList = fileMatches.map((m) => `${m[1]} (${m[2]})`).join(', ')
+
+    if (fileMatches.length > 0) {
+      resolutions.push({
+        label: 'Migrate to Git LFS',
+        description: 'Install Git LFS, track these file types, and amend the commit',
+        action: async () => {
+          const files = fileMatches.map((m) => m[1])
+          const result = await api.gitManager.migrateToLfs(context.projectDir, files)
+          if (!result.success) throw new Error(result.error || 'LFS migration failed')
+          context.refresh()
+        }
+      })
+    }
+    resolutions.push({
+      label: 'Add to .gitignore',
+      description: 'Stop tracking these large files and remove them from the commit',
+      action: async () => {
+        for (const m of fileMatches) {
+          await api.gitManager.addToGitignore(context.projectDir, m[1], true)
+        }
+        context.refresh()
+      }
+    })
+    resolutions.push({
+      label: 'Open Git Bash',
+      description: 'Set up Git LFS manually',
+      keepOpen: true,
+      action: async () => {
+        await api.gitManager.openBash(context.projectDir)
+      }
+    })
+    return {
+      title: 'Files exceed size limit',
+      message: fileList
+        ? `The following files exceed the remote\'s file size limit: ${fileList}.\n\nYou can either add them to .gitignore, or set up Git LFS to track large files.`
+        : 'One or more files exceed the remote\'s file size limit. Add them to .gitignore or set up Git LFS.',
       resolutions
     }
   }

@@ -566,6 +566,16 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_MIGRATE_TO_LFS, async (_event, projectDir: string, filePaths: string[]) => {
+    try {
+      const message = await gitOps.migrateToLfs(projectDir, filePaths)
+      return { success: true, message }
+    } catch (err) {
+      getServices().logError('[git-manager] migrate to LFS failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'LFS migration failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
     const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
       type: 'merge-resolve',

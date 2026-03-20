@@ -211,6 +211,7 @@ export interface DockApi {
     resolveWithClaude: (projectDir: string, filePath: string, instructions: string) => Promise<{ success: boolean; error?: string }>
     previewGitignore: (projectDir: string, pattern: string) => Promise<string[]>
     addToGitignore: (projectDir: string, pattern: string, removeFromIndex: boolean) => Promise<{ success: boolean; error?: string }>
+    migrateToLfs: (projectDir: string, filePaths: string[]) => Promise<{ success: boolean; message?: string; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -457,6 +458,7 @@ const dockApi: DockApi = {
     resolveWithClaude: (projectDir, filePath, instructions) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, projectDir, filePath, instructions),
     previewGitignore: (projectDir, pattern) => ipcRenderer.invoke(IPC.GIT_MGR_PREVIEW_GITIGNORE, projectDir, pattern),
     addToGitignore: (projectDir, pattern, removeFromIndex) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_TO_GITIGNORE, projectDir, pattern, removeFromIndex),
+    migrateToLfs: (projectDir, filePaths) => ipcRenderer.invoke(IPC.GIT_MGR_MIGRATE_TO_LFS, projectDir, filePaths),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

@@ -129,6 +129,7 @@ export const IPC = {
   GIT_MGR_RESOLVE_WITH_CLAUDE: 'gitMgr:resolveWithClaude',
   GIT_MGR_PREVIEW_GITIGNORE: 'gitMgr:previewGitignore',
   GIT_MGR_ADD_TO_GITIGNORE: 'gitMgr:addToGitignore',
+  GIT_MGR_MIGRATE_TO_LFS: 'gitMgr:migrateToLfs',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',
