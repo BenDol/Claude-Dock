@@ -39,8 +39,8 @@ export function registerGitManagerIpc(): void {
     return gitOps.getBranches(projectDir)
   })
 
-  ipcMain.handle(IPC.GIT_MGR_GET_STATUS, async (_event, projectDir: string) => {
-    return gitOps.getStatus(projectDir)
+  ipcMain.handle(IPC.GIT_MGR_GET_STATUS, async (_event, projectDir: string, fast?: boolean) => {
+    return gitOps.getStatus(projectDir, fast)
   })
 
   ipcMain.handle(IPC.GIT_MGR_GET_DIFF, async (_event, projectDir: string, filePath?: string, staged?: boolean) => {

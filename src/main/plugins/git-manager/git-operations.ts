@@ -242,7 +242,12 @@ function parseStatusChar(c: string): string {
   return map[c] || c
 }
 
-export async function getStatus(cwd: string): Promise<GitStatusResult> {
+/**
+ * @param fast If true, uses -unormal instead of -uall for faster polling.
+ *   This collapses untracked directories but is significantly faster for repos
+ *   with large working trees or LFS files.
+ */
+export async function getStatus(cwd: string, fast?: boolean): Promise<GitStatusResult> {
   const result: GitStatusResult = {
     branch: '',
     ahead: 0,
@@ -254,7 +259,7 @@ export async function getStatus(cwd: string): Promise<GitStatusResult> {
   }
 
   try {
-    const { stdout } = await gitExec(cwd, ['status', '--porcelain=v2', '--branch', '-z', '-uall'], 10000)
+    const { stdout } = await gitExec(cwd, ['status', '--porcelain=v2', '--branch', '-z', fast ? '-unormal' : '-uall'], 10000)
     const entries = stdout.split('\0')
 
     for (let i = 0; i < entries.length; i++) {

@@ -149,7 +149,7 @@ export interface DockApi {
     getCommitCount: (projectDir: string) => Promise<number>
     getCommitIndex: (projectDir: string, hash: string) => Promise<number>
     getBranches: (projectDir: string) => Promise<GitBranchInfo[]>
-    getStatus: (projectDir: string) => Promise<GitStatusResult>
+    getStatus: (projectDir: string, fast?: boolean) => Promise<GitStatusResult>
     getDiff: (projectDir: string, filePath?: string, staged?: boolean) => Promise<GitFileDiff[]>
     getCommitDetail: (projectDir: string, hash: string) => Promise<GitCommitDetail | null>
     getFileBlob: (projectDir: string, filePath: string, ref?: string) => Promise<string | null>
@@ -392,7 +392,7 @@ const dockApi: DockApi = {
     getCommitCount: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_COUNT, projectDir),
     getCommitIndex: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_INDEX, projectDir, hash),
     getBranches: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_BRANCHES, projectDir),
-    getStatus: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_STATUS, projectDir),
+    getStatus: (projectDir, fast?) => ipcRenderer.invoke(IPC.GIT_MGR_GET_STATUS, projectDir, fast),
     getDiff: (projectDir, filePath, staged) => ipcRenderer.invoke(IPC.GIT_MGR_GET_DIFF, projectDir, filePath, staged),
     getCommitDetail: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_DETAIL, projectDir, hash),
     getFileBlob: (projectDir: string, filePath: string, ref?: string) => ipcRenderer.invoke(IPC.GIT_MGR_GET_FILE_BLOB, projectDir, filePath, ref) as Promise<string | null>,

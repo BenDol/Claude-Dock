@@ -262,9 +262,11 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   useEffect(() => {
     if (status !== 'ready') return
     let timer: ReturnType<typeof setInterval>
+    let consecutiveFailures = 0
     const pollActive = async () => {
       try {
         const active = await api.ci.getActiveRuns(projectDir)
+        consecutiveFailures = 0 // reset on success
         const activeIds = new Set(active.map((r) => r.id))
 
         // Detect runs that were active but are now gone (completed)
@@ -366,11 +368,18 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
 
         prevActiveIdsRef.current = activeIds
         setActiveRuns(active)
-      } catch { /* ignore */ }
+      } catch {
+        consecutiveFailures++
+      }
     }
     pollActive()
-    timer = setInterval(pollActive, 10_000)
-    return () => clearInterval(timer)
+    // Adaptive polling: 10s normally, backs off to 60s after 3 consecutive failures
+    const schedule = () => {
+      const delay = consecutiveFailures >= 3 ? 60_000 : 10_000
+      timer = setTimeout(() => { pollActive().then(schedule) }, delay)
+    }
+    schedule()
+    return () => clearTimeout(timer)
   }, [status, projectDir])
 
   const loadRuns = useCallback(async (p: number, reset?: boolean) => {

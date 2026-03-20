@@ -3941,10 +3941,12 @@ const WorkingChanges: React.FC<{
   // Sync localStatus when parentStatus changes (from full refresh)
   useEffect(() => { setLocalStatus(null) }, [parentStatus])
 
-  // Quick re-fetch just the status (not the full app data)
+  // Quick re-fetch just the status (not the full app data).
+  // Uses fast mode (-unormal) for polling — collapses untracked dirs but avoids
+  // scanning every file in large repos. Full -uall runs on explicit refresh.
   const refreshStatus = useCallback(async () => {
     try {
-      const s = await getDockApi().gitManager.getStatus(projectDir)
+      const s = await getDockApi().gitManager.getStatus(projectDir, true)
       setLocalStatus(s)
       if (onStatusRefreshed) onStatusRefreshed(s)
     } catch { /* ignore */ }
