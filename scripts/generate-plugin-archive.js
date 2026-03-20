@@ -224,7 +224,7 @@ function main() {
       requiresAppUpdate
     }
 
-    console.log(`  ${plugin.id}: v${appVersion}, pluginSha=${pluginBuildSha.slice(0, 7)}, hash=${finalHash.slice(0, 12)}...`)
+    console.log(`  ${plugin.id}: v${appVersion}, pluginSha=${pluginBuildSha.slice(0, 7)}, hash=${contentHash.slice(0, 12)}...`)
   }
 
   // Create plugins.zip
