@@ -36,6 +36,30 @@
   -webkit-app-region: drag;
   flex-shrink: 0;
   gap: 8px;
+  position: relative;
+}
+
+/* Push progress bar — thin animated bar at the bottom edge of the titlebar */
+.gm-push-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+  z-index: 10;
+  overflow: hidden;
+}
+.gm-push-progress-bar {
+  width: 30%;
+  height: 100%;
+  background: var(--accent-color);
+  border-radius: 1px;
+  animation: gm-push-slide 1.2s ease-in-out infinite;
+}
+@keyframes gm-push-slide {
+  0%   { margin-left: -30%; }
+  100% { margin-left: 100%; }
 }
 
 .gm-titlebar-left,

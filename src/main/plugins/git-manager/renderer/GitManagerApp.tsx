@@ -325,12 +325,14 @@ function parseGitError(action: string, errorMsg: string, context: {
 
     if (fileMatches.length > 0) {
       resolutions.push({
-        label: 'Migrate to Git LFS',
-        description: 'Install Git LFS, track these file types, and amend the commit',
+        label: 'Migrate to Git LFS & Push',
+        description: 'Install Git LFS, track these file types, amend the commit, then push',
         action: async () => {
           const files = fileMatches.map((m) => m[1])
-          const result = await api.gitManager.migrateToLfs(context.projectDir, files)
-          if (!result.success) throw new Error(result.error || 'LFS migration failed')
+          const lfsResult = await api.gitManager.migrateToLfs(context.projectDir, files)
+          if (!lfsResult.success) throw new Error(lfsResult.error || 'LFS migration failed')
+          const pushResult = await api.gitManager.push(context.projectDir)
+          if (!pushResult.success) throw new Error(pushResult.error || 'Push failed after LFS migration')
           context.refresh()
         }
       })
@@ -1069,15 +1071,16 @@ const GitManagerApp: React.FC = () => {
           retry: async () => {
             const r2 = await api.gitManager.push(activeDir)
             if (!r2.success) throw new Error(r2.error || 'Push still failed')
+            refresh()
           }
         })
         return
       }
-      refreshAfterPush()
+      refresh()
     } finally {
       setPushing(false)
     }
-  }, [activeDir, refreshAfterPush, pushing, showActionError])
+  }, [activeDir, refresh, pushing, showActionError])
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
@@ -1297,6 +1300,7 @@ const GitManagerApp: React.FC = () => {
             <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
           </div>
         </div>
+        {pushing && <div className="gm-push-progress"><div className="gm-push-progress-bar" /></div>}
       </div>
 
       {error && (
