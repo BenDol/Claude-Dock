@@ -310,5 +310,49 @@ function schedulePluginUpdateCheck(): void {
       .catch((err) => {
         log(`[plugin-updater] startup check failed: ${err}`)
       })
+
+    // Re-check every 30 minutes
+    const RECHECK_INTERVAL = 30 * 60 * 1000
+    setInterval(() => {
+      service.checkForUpdates(getSetting('updater')?.profile || 'latest')
+        .then(async (updates) => {
+          if (updates.length === 0) return
+          const autoUpdatePlugins = getSetting('updater')?.autoUpdatePlugins ?? false
+          const installable = updates.filter((u) => u.status === 'available' && !u.requiresAppUpdate)
+
+          if (autoUpdatePlugins && installable.length > 0) {
+            log(`[plugin-updater] periodic: auto-updating ${installable.length} plugin(s)...`)
+            const result = await service.installAll()
+            const successNames = result.success.map(
+              (id) => updates.find((u) => u.pluginId === id)?.pluginName || id
+            )
+            if (successNames.length > 0) {
+              NotificationManager.getInstance().notify({
+                title: 'Plugins Updated',
+                message: `${successNames.join(', ')} updated successfully.`,
+                type: 'success',
+                source: 'plugin-updater',
+                timeout: 8000
+              })
+            }
+          } else if (installable.length > 0) {
+            const names = installable.map((u) => u.pluginName)
+            NotificationManager.getInstance().notify({
+              title: 'Plugin Updates Available',
+              message: names.length <= 3
+                ? names.join(', ')
+                : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more...`,
+              type: 'info',
+              source: 'plugin-updater',
+              timeout: 0,
+              actions: [
+                { label: 'View', event: 'plugin-update-open' },
+                { label: 'Update All', event: 'plugin-update-all' }
+              ]
+            })
+          }
+        })
+        .catch((err) => log(`[plugin-updater] periodic check failed: ${err}`))
+    }, RECHECK_INTERVAL)
   }, delay)
 }

@@ -171,6 +171,12 @@ export class PluginUpdateService {
       }
 
       this.setStatus(pluginId, 'installed')
+      // Remove from cache after a short delay so the UI can show "Updated!"
+      // briefly, then clear it so subsequent checks can find new updates
+      setTimeout(() => {
+        this.updates.delete(pluginId)
+        this.broadcastState()
+      }, 3000)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       entry.error = msg

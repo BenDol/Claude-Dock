@@ -18,15 +18,15 @@ export default function PluginUpdaterModal({ onClose }: Props) {
 
     async function load() {
       try {
-        // Check cached results first
+        // Show cached results immediately if any (non-installed ones only)
         const available = await api.pluginUpdater.getAvailable()
-        if (!cancelled && available.length > 0) {
-          setUpdates(available)
+        const pending = available.filter((u) => u.status !== 'installed')
+        if (!cancelled && pending.length > 0) {
+          setUpdates(pending)
           setLoading(false)
-          return
         }
 
-        // No cached results — trigger a fresh check (or wait for one in progress)
+        // Always trigger a fresh check so we pick up new updates
         const fresh = await api.pluginUpdater.check()
         if (!cancelled) {
           setUpdates(fresh)
