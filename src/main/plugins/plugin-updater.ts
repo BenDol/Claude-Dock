@@ -157,20 +157,26 @@ export class PluginUpdateService {
 
     const entry = this.updates.get(pluginId)
     if (!entry) throw new Error(`No update found for plugin: ${pluginId}`)
-    if (entry.status === 'installed') return
+    if (entry.status === 'installed') {
+      log(`[plugin-updater] ${pluginId}: already installed, skipping`)
+      return
+    }
 
     try {
+      log(`[plugin-updater] ${pluginId}: installing (${entry.currentVersion} -> ${entry.newVersion}, source=${entry.source})`)
       this.setStatus(pluginId, 'downloading')
 
       if (entry.source === 'builtin') {
         await this.installBuiltinUpdate(entry)
-        // Hot-reload the plugin without requiring app restart
+        log(`[plugin-updater] ${pluginId}: builtin update installed, hot-reloading...`)
         this.hotReloadPlugin(pluginId)
       } else {
         await this.installExternalUpdate(entry)
+        log(`[plugin-updater] ${pluginId}: external update installed`)
       }
 
       this.setStatus(pluginId, 'installed')
+      log(`[plugin-updater] ${pluginId}: install complete`)
       // Remove from cache after a short delay so the UI can show "Updated!"
       // briefly, then clear it so subsequent checks can find new updates
       setTimeout(() => {
@@ -179,6 +185,7 @@ export class PluginUpdateService {
       }, 3000)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      logError(`[plugin-updater] ${pluginId}: install failed:`, msg)
       entry.error = msg
       this.setStatus(pluginId, 'failed')
       throw err
@@ -197,6 +204,7 @@ export class PluginUpdateService {
     const installable = Array.from(this.updates.values()).filter(
       (e) => e.status === 'available' && !e.requiresAppUpdate
     )
+    log(`[plugin-updater] installAll: ${installable.length} installable out of ${this.updates.size} total`)
 
     for (const entry of installable) {
       try {
@@ -298,6 +306,8 @@ export class PluginUpdateService {
       }
 
       if (!hasUpdate) continue
+
+      log(`[plugin-updater] ${info.id}: update available (${info.version} -> ${entry.version}, localSha=${localPluginSha?.slice(0, 7) || 'none'}, remoteSha=${entry.buildSha?.slice(0, 7) || 'none'}, hash=${entry.hash?.slice(0, 7)}, overrideHash=${installedOverride?.hash?.slice(0, 7) || 'none'})`)
 
       // In dev mode, use local plugins.zip; in production, use GitHub release
       let downloadUrl: string

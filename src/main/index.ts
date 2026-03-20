@@ -322,18 +322,26 @@ function schedulePluginUpdateCheck(): void {
 
           if (autoUpdatePlugins && installable.length > 0) {
             log(`[plugin-updater] periodic: auto-updating ${installable.length} plugin(s)...`)
-            const result = await service.installAll()
-            const successNames = result.success.map(
-              (id) => updates.find((u) => u.pluginId === id)?.pluginName || id
-            )
-            if (successNames.length > 0) {
-              NotificationManager.getInstance().notify({
-                title: 'Plugins Updated',
-                message: `${successNames.join(', ')} updated successfully.`,
-                type: 'success',
-                source: 'plugin-updater',
-                timeout: 8000
-              })
+            try {
+              const result = await service.installAll()
+              const successNames = result.success.map(
+                (id) => updates.find((u) => u.pluginId === id)?.pluginName || id
+              )
+              if (result.failed.length > 0) {
+                log(`[plugin-updater] periodic: ${result.failed.length} failed: ${result.failed.map((f) => `${f.pluginId}: ${f.error}`).join(', ')}`)
+              }
+              if (successNames.length > 0) {
+                log(`[plugin-updater] periodic: updated ${successNames.join(', ')}`)
+                NotificationManager.getInstance().notify({
+                  title: 'Plugins Updated',
+                  message: `${successNames.join(', ')} updated successfully.`,
+                  type: 'success',
+                  source: 'plugin-updater',
+                  timeout: 8000
+                })
+              }
+            } catch (installErr) {
+              log(`[plugin-updater] periodic: installAll threw: ${installErr}`)
             }
           } else if (installable.length > 0) {
             const names = installable.map((u) => u.pluginName)
