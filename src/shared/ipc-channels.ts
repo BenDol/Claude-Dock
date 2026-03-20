@@ -173,6 +173,19 @@ export const IPC = {
   PLUGIN_UPDATE_GET_NEW_OVERRIDES: 'pluginUpdate:getNewOverrides',
   PLUGIN_UPDATE_MARK_OVERRIDE_SEEN: 'pluginUpdate:markOverrideSeen',
 
+  // Cloud Integration
+  CLOUD_OPEN: 'cloud:open',
+  CLOUD_GET_PROVIDERS: 'cloud:getProviders',
+  CLOUD_GET_ACTIVE_PROVIDER: 'cloud:getActiveProvider',
+  CLOUD_SET_PROVIDER: 'cloud:setProvider',
+  CLOUD_GET_DASHBOARD: 'cloud:getDashboard',
+  CLOUD_GET_CLUSTERS: 'cloud:getClusters',
+  CLOUD_GET_CLUSTER_DETAIL: 'cloud:getClusterDetail',
+  CLOUD_GET_WORKLOADS: 'cloud:getWorkloads',
+  CLOUD_GET_WORKLOAD_DETAIL: 'cloud:getWorkloadDetail',
+  CLOUD_GET_CONSOLE_URL: 'cloud:getConsoleUrl',
+  CLOUD_CHECK_AUTH: 'cloud:checkAuth',
+
   // Usage / Anthropic API
   USAGE_FETCH: 'usage:fetch',
   USAGE_CACHED: 'usage:cached',
