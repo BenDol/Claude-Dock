@@ -538,15 +538,17 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
 
     const [{ stdout: metaOut }, { stdout: numstatOut }] = await Promise.all([metaPromise, numstatPromise])
 
-    // Find files that are too large for a full diff (>1MB of changes)
-    const MAX_DIFF_LINES = 50000
+    // Find files that are too large for a full diff (>10K lines of changes)
+    const MAX_DIFF_LINES = 10000
     const largeFiles = new Set<string>()
+    const allFiles: { name: string; added: number; removed: number }[] = []
     for (const line of numstatOut.split('\n')) {
       const parts = line.trim().split('\t')
-      if (parts.length >= 3) {
+      if (parts.length >= 3 && parts[2]) {
         const added = parseInt(parts[0], 10) || 0
         const removed = parseInt(parts[1], 10) || 0
-        if (added + removed > MAX_DIFF_LINES) {
+        allFiles.push({ name: parts[2], added, removed })
+        if (added + removed >= MAX_DIFF_LINES) {
           largeFiles.add(parts[2])
         }
       }
@@ -564,11 +566,20 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
     try {
       const result = await gitExec(cwd, diffArgs, 15000)
       diffOut = result.stdout
-    } catch { /* timeout or error — proceed with metadata only */ }
+    } catch {
+      // Timeout or error — build minimal diff entries from numstat so files still show
+      for (const f of allFiles) {
+        if (!largeFiles.has(f.name)) {
+          diffOut += `\ndiff --git a/${f.name} b/${f.name}\n--- a/${f.name}\n+++ b/${f.name}\n@@ -1,${f.removed} +1,${f.added} @@\n Diff timed out — click file to view\n`
+        }
+      }
+    }
 
     // Add synthetic entries for large files that were excluded
     for (const f of largeFiles) {
-      diffOut += `\ndiff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -0,0 +0,0 @@\n File too large to display diff\n`
+      const info = allFiles.find((a) => a.name === f)
+      const label = info ? ` (${(info.added + info.removed).toLocaleString()} lines)` : ''
+      diffOut += `\ndiff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -0,0 +0,0 @@\n File too large to display diff${label}\n`
     }
 
     const lines = metaOut.split('\n')
