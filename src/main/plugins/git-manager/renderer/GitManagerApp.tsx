@@ -3595,7 +3595,7 @@ const VirtualFileList: React.FC<{
   const api = getDockApi()
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
-  const [containerHeight, setContainerHeight] = useState(400)
+  const [containerHeight, setContainerHeight] = useState(0)
   const isStaged = section === 'staged'
   const anchorIdxRef = useRef(0)
 
@@ -3707,8 +3707,10 @@ const VirtualFileList: React.FC<{
 
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
-  // Skip virtualization when container hasn't been measured yet or all files fit
-  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight
+  // Skip virtualization when container hasn't been measured yet, all files fit,
+  // or the container isn't the actual scroll element (parent is scrolling instead)
+  const isOwnScrollContainer = containerRef.current ? containerRef.current.scrollHeight > containerRef.current.clientHeight : false
+  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight && isOwnScrollContainer
   const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
   const startIdx = shouldVirtualize ? Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan) : 0
   const endIdx = shouldVirtualize ? Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan) : files.length
