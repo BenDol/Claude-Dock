@@ -1200,19 +1200,32 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
   return msg
 }
 
+// File extensions that are data/binary — include in stat but exclude from diff
+const DATA_FILE_PATTERNS = /\.(jsonl|json|csv|tsv|parquet|arrow|sqlite|db|pkl|pickle|npy|npz|h5|hdf5|bin|dat|model|onnx|pt|pth|safetensors|gguf|weights|tar|gz|zip|7z|rar|bz2|xz|log|lock)$/i
+
 export async function generateCommitMessage(cwd: string): Promise<string> {
-  // Get staged diff with minimal context for speed
-  const [statResult, diffResult] = await Promise.all([
+  // Get staged file list, stat, and diff
+  const [namesResult, statResult, diffResult] = await Promise.all([
+    gitExec(cwd, ['diff', '--cached', '--name-only'], 5000),
     gitExec(cwd, ['diff', '--cached', '--stat', '--no-color'], 10000),
-    gitExec(cwd, ['diff', '--cached', '--no-color', '--unified=1'], 10000)
+    // Exclude large data files from the diff to avoid overwhelming the LLM
+    gitExec(cwd, ['diff', '--cached', '--no-color', '--unified=1',
+      '--', '.', ...getDataFileExcludes(cwd)
+    ], 10000).catch(() => ({ stdout: '', stderr: '' }))
   ])
 
   const stat = statResult.stdout.trim()
   if (!stat) throw new Error('No staged changes to describe')
 
-  const diff = diffResult.stdout
+  // Note which files are data-only (excluded from diff) so the LLM knows they exist
+  const allFiles = namesResult.stdout.trim().split('\n').filter(Boolean)
+  const dataFiles = allFiles.filter((f) => DATA_FILE_PATTERNS.test(f))
+  let diff = diffResult.stdout
+  if (dataFiles.length > 0) {
+    diff += `\n\n(Data files changed but diff excluded: ${dataFiles.join(', ')})`
+  }
 
-  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars`)
+  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars, dataFiles=${dataFiles.length}`)
   const t0 = Date.now()
 
   // Race all available providers — use whichever responds first
