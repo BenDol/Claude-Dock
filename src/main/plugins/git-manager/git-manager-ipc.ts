@@ -7,6 +7,7 @@ import * as gitOps from './git-operations'
 import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 import { registerCiIpc } from './ci/ci-ipc'
+import { registerPrIpc } from './pr/pr-ipc'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -589,6 +590,7 @@ export function registerGitManagerIpc(): void {
   })
 
   registerCiIpc()
+  registerPrIpc()
 
   getServices().log('[git-manager] IPC handlers registered (v2)')
 }

@@ -233,6 +233,16 @@ export interface DockApi {
     navigateToRun: (projectDir: string, runId: number) => Promise<boolean>
     onNavigateToRun: (callback: (runId: number) => void) => () => void
   }
+  pr: {
+    checkAvailable: (projectDir: string) => Promise<string | false>
+    getSetupStatus: (projectDir: string) => Promise<CiSetupStatus>
+    runSetupAction: (projectDir: string, actionId: string, data?: Record<string, string>) => Promise<{ success: boolean; error?: string }>
+    list: (projectDir: string, state?: string) => Promise<import('../shared/pr-types').PullRequest[]>
+    get: (projectDir: string, id: number) => Promise<import('../shared/pr-types').PullRequest | null>
+    create: (projectDir: string, request: import('../shared/pr-types').PrCreateRequest) => Promise<import('../shared/pr-types').PrCreateResult>
+    getDefaultBranch: (projectDir: string) => Promise<string>
+    getNewUrl: (projectDir: string, sourceBranch: string, targetBranch: string) => Promise<string | null>
+  }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
     emit: (notification: DockNotification) => void
@@ -491,6 +501,16 @@ const dockApi: DockApi = {
       ipcRenderer.on('ci-navigate-run', handler)
       return () => ipcRenderer.removeListener('ci-navigate-run', handler)
     }
+  },
+  pr: {
+    checkAvailable: (projectDir) => ipcRenderer.invoke(IPC.PR_CHECK_AVAILABLE, projectDir),
+    getSetupStatus: (projectDir) => ipcRenderer.invoke(IPC.PR_GET_SETUP_STATUS, projectDir),
+    runSetupAction: (projectDir, actionId, data) => ipcRenderer.invoke(IPC.PR_RUN_SETUP_ACTION, projectDir, actionId, data),
+    list: (projectDir, state) => ipcRenderer.invoke(IPC.PR_LIST, projectDir, state),
+    get: (projectDir, id) => ipcRenderer.invoke(IPC.PR_GET, projectDir, id),
+    create: (projectDir, request) => ipcRenderer.invoke(IPC.PR_CREATE, projectDir, request),
+    getDefaultBranch: (projectDir) => ipcRenderer.invoke(IPC.PR_GET_DEFAULT_BRANCH, projectDir),
+    getNewUrl: (projectDir, sourceBranch, targetBranch) => ipcRenderer.invoke(IPC.PR_GET_NEW_URL, projectDir, sourceBranch, targetBranch)
   },
   notifications: {
     onShow: (callback) => {

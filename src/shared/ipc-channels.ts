@@ -148,6 +148,16 @@ export const IPC = {
   CI_RERUN_FAILED: 'ci:rerunFailed',
   CI_NAVIGATE_TO_RUN: 'ci:navigateToRun',
 
+  // Pull Requests / Merge Requests
+  PR_CHECK_AVAILABLE: 'pr:checkAvailable',
+  PR_GET_SETUP_STATUS: 'pr:getSetupStatus',
+  PR_RUN_SETUP_ACTION: 'pr:runSetupAction',
+  PR_LIST: 'pr:list',
+  PR_GET: 'pr:get',
+  PR_CREATE: 'pr:create',
+  PR_GET_DEFAULT_BRANCH: 'pr:getDefaultBranch',
+  PR_GET_NEW_URL: 'pr:getNewUrl',
+
   // Claude Tasks
   CLAUDE_SEND_TASK: 'claude:sendTask',
 
