@@ -1034,12 +1034,6 @@ function cleanCommitMessage(raw: string): string {
     .replace(/^["']|["']$/g, '')
     .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
-
-  // Reject if the response looks like raw diff output leaked through
-  if (msg.includes('diff --git') || msg.includes('@@') || msg.includes('index ') && msg.includes('100644')) {
-    return ''
-  }
-
   // Ensure first line is under 72 chars
   const lines = msg.split('\n')
   if (lines[0].length > 72) {
@@ -1202,6 +1196,15 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
 
 // File extensions that are data/binary — include in stat but exclude from diff
 const DATA_FILE_PATTERNS = /\.(jsonl|json|csv|tsv|parquet|arrow|sqlite|db|pkl|pickle|npy|npz|h5|hdf5|bin|dat|model|onnx|pt|pth|safetensors|gguf|weights|tar|gz|zip|7z|rar|bz2|xz|log|lock)$/i
+
+/** Build git pathspec excludes for data files: [':(exclude)*.jsonl', ':(exclude)*.csv', ...] */
+function getDataFileExcludes(_cwd: string): string[] {
+  const exts = ['jsonl', 'json', 'csv', 'tsv', 'parquet', 'arrow', 'sqlite', 'db',
+    'pkl', 'pickle', 'npy', 'npz', 'h5', 'hdf5', 'bin', 'dat', 'model', 'onnx',
+    'pt', 'pth', 'safetensors', 'gguf', 'weights', 'tar', 'gz', 'zip', '7z',
+    'rar', 'bz2', 'xz', 'log', 'lock']
+  return exts.map((ext) => `:(exclude)*.${ext}`)
+}
 
 export async function generateCommitMessage(cwd: string): Promise<string> {
   // Get staged file list, stat, and diff
