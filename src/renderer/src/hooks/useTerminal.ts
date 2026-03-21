@@ -114,9 +114,11 @@ function registerWebLinks(term: Terminal): void {
           end: { x: l.startIndex + l.url.length + 1, y: lineNumber }
         },
         text: l.url,
-        decorations: { pointerCursor: true, underline: true },
-        activate(_event: MouseEvent) {
-          getDockApi().app.openExternal(l.url)
+        decorations: { pointerCursor: true, underline: false },
+        activate(event: MouseEvent) {
+          if (event.ctrlKey || event.metaKey) {
+            getDockApi().app.openExternal(l.url)
+          }
         }
       })))
     }
@@ -195,8 +197,9 @@ function registerFilePathLinks(term: Terminal): void {
           end: { x: l.startIndex + l.length + 1, y: lineNumber }
         },
         text: l.filePath,
-        decorations: { pointerCursor: true, underline: true },
-        activate(_event: MouseEvent) {
+        decorations: { pointerCursor: true, underline: false },
+        activate(event: MouseEvent) {
+          if (!event.ctrlKey && !event.metaKey) return
           const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
             ? l.filePath
             : projectDir + '/' + l.filePath
@@ -331,6 +334,19 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
 
       // Clickable file paths from Claude tool output — e.g. Read(src/foo.ts), Write(src/bar.ts)
       registerFilePathLinks(term)
+
+      // Track Ctrl key state so CSS can show pointer cursor on links only while Ctrl is held
+      const termElement = term.element
+      if (termElement) {
+        const updateCtrlHeld = (e: KeyboardEvent) => {
+          if (e.key === 'Control' || e.key === 'Meta') {
+            termElement.classList.toggle('ctrl-held', e.type === 'keydown')
+          }
+        }
+        window.addEventListener('keydown', updateCtrlHeld)
+        window.addEventListener('keyup', updateCtrlHeld)
+        window.addEventListener('blur', () => termElement.classList.remove('ctrl-held'))
+      }
 
       // Search in scrollback buffer (Ctrl+F)
       const searchAddon = new SearchAddon()
