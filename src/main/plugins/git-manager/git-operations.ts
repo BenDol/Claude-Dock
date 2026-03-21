@@ -959,6 +959,9 @@ export async function pullAdvanced(
   return (stdout + stderr).trim()
 }
 
+// Push/pull timeout: 5 minutes — LFS uploads of large files can take a while
+const REMOTE_OP_TIMEOUT = 300000
+
 export async function push(cwd: string): Promise<string> {
   // If the current branch has no upstream, push with --set-upstream to origin
   try {
@@ -971,16 +974,16 @@ export async function push(cwd: string): Promise<string> {
     const { stdout: branchOut } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
     const branch = branchOut.trim()
     if (branch && branch !== 'HEAD') {
-      const { stdout, stderr } = await gitExec(cwd, ['push', '--set-upstream', 'origin', branch], 60000)
+      const { stdout, stderr } = await gitExec(cwd, ['push', '--set-upstream', 'origin', branch], REMOTE_OP_TIMEOUT)
       return (stdout + stderr).trim()
     }
   }
-  const { stdout, stderr } = await gitExec(cwd, ['push'], 60000)
+  const { stdout, stderr } = await gitExec(cwd, ['push'], REMOTE_OP_TIMEOUT)
   return (stdout + stderr).trim()
 }
 
 export async function pushForceWithLease(cwd: string): Promise<string> {
-  const { stdout, stderr } = await gitExec(cwd, ['push', '--force-with-lease'], 60000)
+  const { stdout, stderr } = await gitExec(cwd, ['push', '--force-with-lease'], REMOTE_OP_TIMEOUT)
   return (stdout + stderr).trim()
 }
 
