@@ -365,6 +365,55 @@ function parseGitError(action: string, errorMsg: string, context: {
     }
   }
 
+  // Untracked files would be overwritten by checkout/merge
+  if (/untracked working tree files would be overwritten/i.test(msg)) {
+    // Extract file list from the error
+    const fileLines = msg.split('\n').filter((l) => l.startsWith('\t')).map((l) => l.trim())
+
+    resolutions.push({
+      label: 'Force checkout (clean untracked)',
+      description: 'Remove conflicting untracked files and retry checkout',
+      danger: true,
+      action: async () => {
+        // Remove the listed untracked files
+        if (fileLines.length > 0) {
+          await api.gitManager.deleteFiles(context.projectDir, fileLines)
+        }
+        // Retry
+        if (context.retry) {
+          await context.retry()
+        } else if (context.branchName) {
+          const r = await api.gitManager.checkoutBranch(context.projectDir, context.branchName)
+          if (!r.success) throw new Error(r.error || 'Checkout still failed')
+        }
+        context.refresh()
+      }
+    })
+    resolutions.push({
+      label: 'Stash untracked & checkout',
+      description: 'Stash all changes including untracked files, then checkout',
+      action: async () => {
+        const sr = await api.gitManager.stashSave(context.projectDir, 'Auto-stash before checkout', '--include-untracked')
+        if (!sr.success) throw new Error('Stash failed: ' + (sr.error || 'Unknown error'))
+        if (context.retry) {
+          await context.retry()
+        } else if (context.branchName) {
+          const r = await api.gitManager.checkoutBranch(context.projectDir, context.branchName)
+          if (!r.success) throw new Error(r.error || 'Checkout still failed')
+        }
+        context.refresh()
+      }
+    })
+
+    return {
+      title: 'Untracked files conflict',
+      message: fileLines.length > 0
+        ? `The following untracked files would be overwritten by checkout:\n${fileLines.slice(0, 10).map((f) => `  • ${f}`).join('\n')}${fileLines.length > 10 ? `\n  ... and ${fileLines.length - 10} more` : ''}`
+        : 'Untracked working tree files would be overwritten by checkout.',
+      resolutions
+    }
+  }
+
   return { title: `${action} failed`, message: msg, resolutions }
 }
 
