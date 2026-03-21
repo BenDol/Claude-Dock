@@ -509,6 +509,7 @@ const GitManagerApp: React.FC = () => {
   const [identitySetup, setIdentitySetup] = useState<{ retry?: () => Promise<void> } | null>(null)
   const [notGitRepo, setNotGitRepo] = useState(false)
   const [sidebarModal, setSidebarModal] = useState<'addSubmodule' | 'addSubmodulePath' | 'addRemote' | null>(null)
+  const [sidebarBranchCtx, setSidebarBranchCtx] = useState<{ x: number; y: number; branchName: string; isRemote: boolean } | null>(null)
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
   const [switchBranchSubPath, setSwitchBranchSubPath] = useState<string | null>(null)
   const [selectedSubmodule, setSelectedSubmodule] = useState<string | null>(null)
@@ -1356,7 +1357,15 @@ const GitManagerApp: React.FC = () => {
         {/* Branch sidebar */}
         <div className="gm-sidebar" ref={sidebarRef} tabIndex={0} onKeyDown={handleSidebarKeyDown} onMouseDown={() => setSidebarFocusIdx(-1)}>
           <CollapsibleSection title="Branches" count={localBranches.length}>
-            <LocalBranchTree branches={localBranches} onCheckout={handleCheckoutBranch} onNavigate={navigateToBranch} />
+            <LocalBranchTree
+              branches={localBranches}
+              onCheckout={handleCheckoutBranch}
+              onNavigate={navigateToBranch}
+              onBranchContextMenu={(e, branch) => {
+                const zoom = parseFloat(document.documentElement.style.zoom) || 1
+                setSidebarBranchCtx({ x: e.clientX / zoom, y: e.clientY / zoom, branchName: branch.name, isRemote: false })
+              }}
+            />
           </CollapsibleSection>
           <CollapsibleSection title="Remotes" count={remoteBranches.length} defaultCollapsed onAdd={() => setSidebarModal('addRemote')} addTitle="Add remote">
             <RemoteBranchTree
@@ -1749,6 +1758,19 @@ const GitManagerApp: React.FC = () => {
           onError={handleSmartError}
         />
       )}
+      {sidebarBranchCtx && (
+        <BranchRefContextMenu
+          x={sidebarBranchCtx.x}
+          y={sidebarBranchCtx.y}
+          branchName={sidebarBranchCtx.branchName}
+          isRemote={sidebarBranchCtx.isRemote}
+          projectDir={activeDir}
+          onClose={() => setSidebarBranchCtx(null)}
+          onAction={refresh}
+          onError={(msg) => setError(msg)}
+          onCheckout={handleCheckoutBranch}
+        />
+      )}
       {confirmModal && (
         <ConfirmModal
           title={confirmModal.title}
@@ -1978,6 +2000,7 @@ const CommitLog: React.FC<{
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; commit: GitCommitInfo } | null>(null)
   const [stashCtxMenu, setStashCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
   const [tagCtxMenu, setTagCtxMenu] = useState<{ x: number; y: number; tagName: string; commitHash: string } | null>(null)
+  const [branchCtxMenu, setBranchCtxMenu] = useState<{ x: number; y: number; branchName: string; isRemote: boolean; commitHash: string } | null>(null)
   const [modal, setModal] = useState<{ type: 'reset' | 'createBranch' | 'createTag'; commit: GitCommitInfo } | null>(null)
 
   // Virtual scroll state
@@ -2419,12 +2442,16 @@ const CommitLog: React.FC<{
               <span
                 key={r}
                 className={`gm-ref-badge${isTag ? ' gm-ref-tag' : isRemote ? ' gm-ref-remote' : ''}`}
-                onContextMenu={isTag ? (e) => {
+                onContextMenu={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
                   const zoom = parseFloat(document.documentElement.style.zoom) || 1
-                  setTagCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, tagName: label, commitHash: c.hash })
-                } : undefined}
+                  if (isTag) {
+                    setTagCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, tagName: label, commitHash: c.hash })
+                  } else {
+                    setBranchCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, branchName: label, isRemote, commitHash: c.hash })
+                  }
+                }}
               >
                 {isTag && <TagIcon />}{label}
               </span>
@@ -2509,6 +2536,19 @@ const CommitLog: React.FC<{
           commitHash={tagCtxMenu.commitHash}
           projectDir={projectDir}
           onClose={() => setTagCtxMenu(null)}
+          onAction={onAction}
+          onError={onError}
+          onCheckout={onCheckout}
+        />
+      )}
+      {branchCtxMenu && (
+        <BranchRefContextMenu
+          x={branchCtxMenu.x}
+          y={branchCtxMenu.y}
+          branchName={branchCtxMenu.branchName}
+          isRemote={branchCtxMenu.isRemote}
+          projectDir={projectDir}
+          onClose={() => setBranchCtxMenu(null)}
           onAction={onAction}
           onError={onError}
           onCheckout={onCheckout}
@@ -5987,13 +6027,14 @@ const LocalBranchTree: React.FC<{
   branches: GitBranchInfo[]
   onCheckout: (name: string) => void
   onNavigate?: (branchName: string) => void
-}> = ({ branches, onCheckout, onNavigate }) => {
+  onBranchContextMenu?: (e: React.MouseEvent, branch: GitBranchInfo) => void
+}> = ({ branches, onCheckout, onNavigate, onBranchContextMenu }) => {
   const tree = useMemo(() => buildBranchTree(branches), [branches])
 
   return (
     <>
       {[...tree.children.values()].map((node) => (
-        <LocalBranchNode key={node.fullPath} node={node} depth={0} onCheckout={onCheckout} onNavigate={onNavigate} />
+        <LocalBranchNode key={node.fullPath} node={node} depth={0} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onBranchContextMenu} />
       ))}
     </>
   )
@@ -6004,7 +6045,8 @@ const LocalBranchNode: React.FC<{
   depth: number
   onCheckout: (name: string) => void
   onNavigate?: (branchName: string) => void
-}> = ({ node, depth, onCheckout, onNavigate }) => {
+  onContextMenu?: (e: React.MouseEvent, branch: GitBranchInfo) => void
+}> = ({ node, depth, onCheckout, onNavigate, onContextMenu }) => {
   const [collapsed, setCollapsed] = useState(false)
   const isLeaf = node.branch !== undefined && node.children.size === 0
   const isGroup = node.children.size > 0
@@ -6018,6 +6060,7 @@ const LocalBranchNode: React.FC<{
         title={b.tracking ? `Tracking: ${b.tracking}` : undefined}
         onClick={() => onNavigate?.(b.name)}
         onDoubleClick={() => { if (!b.current) onCheckout(b.name) }}
+        onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, b) } }}
       >
         <span className="gm-branch-name">{node.name}</span>
         {(b.ahead > 0 || b.behind > 0) && (
@@ -6061,7 +6104,7 @@ const LocalBranchNode: React.FC<{
         </div>
       )}
       {!collapsed && [...node.children.values()].map((child) => (
-        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} onCheckout={onCheckout} onNavigate={onNavigate} />
+        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onContextMenu} />
       ))}
     </>
   )
@@ -6912,6 +6955,121 @@ const TagContextMenu: React.FC<{
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item gm-ctx-danger" onClick={doDelete}>
         Delete tag
+      </div>
+    </div>
+  )
+}
+
+// --- Branch ref context menu (commit log + sidebar) ---
+
+const BranchRefContextMenu: React.FC<{
+  x: number; y: number
+  branchName: string
+  isRemote: boolean
+  projectDir: string
+  onClose: () => void
+  onAction: () => void
+  onError: (msg: string, retry?: () => Promise<void>) => void
+  onCheckout?: (name: string) => void
+}> = ({ x, y, branchName, isRemote, projectDir, onClose, onAction, onError, onCheckout }) => {
+  const ref = useRef<HTMLDivElement>(null)
+  const [showDelete, setShowDelete] = useState(false)
+  const [deleteRemote, setDeleteRemote] = useState(isRemote)
+  const [deleteLocal, setDeleteLocal] = useState(!isRemote)
+  const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const vw = window.innerWidth / zoom
+    const vh = window.innerHeight / zoom
+    if (parseFloat(el.style.left) + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
+    if (parseFloat(el.style.top) + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
+  }, [showDelete])
+
+  const api = getDockApi()
+
+  const doCheckout = () => {
+    onClose()
+    const name = isRemote ? branchName.replace(/^[^/]+\//, '') : branchName
+    if (onCheckout) onCheckout(name)
+    else api.gitManager.checkoutBranch(projectDir, name).then((r) => {
+      if (!r.success) onError(`Checkout failed: ${r.error || 'Unknown error'}`)
+      onAction()
+    })
+  }
+
+  const doDelete = async () => {
+    if (!deleteRemote && !deleteLocal) return
+    setDeleting(true)
+    try {
+      const remoteName = isRemote ? branchName : `origin/${branchName}`
+      const localName = isRemote ? branchName.replace(/^[^/]+\//, '') : branchName
+      const name = deleteRemote ? remoteName : localName
+      const r = await api.gitManager.deleteBranch(projectDir, name, true, { deleteRemote, deleteLocal })
+      if (!r.success) onError(`Delete branch failed: ${r.error || 'Unknown error'}`)
+      onClose()
+      onAction()
+    } catch (err) {
+      onError(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      onClose()
+    }
+    setDeleting(false)
+  }
+
+  if (showDelete) {
+    return (
+      <div className="gm-ctx-menu gm-ctx-menu-wide" ref={ref} style={{ left: x, top: y }}>
+        <div className="gm-ctx-header">Delete branch</div>
+        <div className="gm-ctx-body">
+          <div className="gm-ctx-branch-name">{branchName}</div>
+          <label className="gm-ctx-checkbox">
+            <input type="checkbox" checked={deleteRemote} onChange={(e) => setDeleteRemote(e.target.checked)} />
+            Delete branch from remote repository
+          </label>
+          <label className="gm-ctx-checkbox">
+            <input type="checkbox" checked={deleteLocal} onChange={(e) => setDeleteLocal(e.target.checked)} />
+            Delete local tracking branch (if available)
+          </label>
+        </div>
+        <div className="gm-ctx-footer">
+          <button className="gm-small-btn" onClick={() => setShowDelete(false)}>Cancel</button>
+          <button className="gm-small-btn gm-ctx-danger-btn" onClick={doDelete} disabled={deleting || (!deleteRemote && !deleteLocal)}>
+            {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      {!isRemote && (
+        <div className="gm-ctx-item" onClick={doCheckout}>
+          Checkout branch
+        </div>
+      )}
+      {isRemote && (
+        <div className="gm-ctx-item" onClick={doCheckout}>
+          Checkout (create local)
+        </div>
+      )}
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(branchName); onClose() }}>
+        Copy branch name
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item gm-ctx-danger" onClick={() => setShowDelete(true)}>
+        Delete branch...
       </div>
     </div>
   )

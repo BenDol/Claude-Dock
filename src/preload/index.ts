@@ -167,7 +167,7 @@ export interface DockApi {
     commit: (projectDir: string, message: string) => Promise<{ success: boolean; hash?: string; error?: string }>
     checkoutBranch: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
     createBranch: (projectDir: string, name: string, startPoint?: string) => Promise<{ success: boolean; error?: string }>
-    deleteBranch: (projectDir: string, name: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
+    deleteBranch: (projectDir: string, name: string, force?: boolean, options?: { deleteRemote?: boolean; deleteLocal?: boolean }) => Promise<{ success: boolean; error?: string }>
     pull: (projectDir: string, mode?: 'merge' | 'rebase') => Promise<{ success: boolean; output?: string; error?: string }>
     pullAdvanced: (projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
     push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
@@ -434,7 +434,7 @@ const dockApi: DockApi = {
     commit: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_COMMIT, projectDir, message),
     checkoutBranch: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_CHECKOUT_BRANCH, projectDir, name),
     createBranch: (projectDir, name, startPoint) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_BRANCH, projectDir, name, startPoint),
-    deleteBranch: (projectDir, name, force) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_BRANCH, projectDir, name, force),
+    deleteBranch: (projectDir, name, force, options) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_BRANCH, projectDir, name, force, options),
     pull: (projectDir, mode) => ipcRenderer.invoke(IPC.GIT_MGR_PULL, projectDir, mode),
     pullAdvanced: (projectDir, remote, branch, rebase, autostash, tags, prune) => ipcRenderer.invoke(IPC.GIT_MGR_PULL_ADVANCED, projectDir, remote, branch, rebase, autostash, tags, prune),
     push: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH, projectDir),

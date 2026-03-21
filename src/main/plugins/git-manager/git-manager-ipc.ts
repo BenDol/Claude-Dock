@@ -105,10 +105,35 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_DELETE_BRANCH, async (_event, projectDir: string, name: string, force?: boolean) => {
+  ipcMain.handle(IPC.GIT_MGR_DELETE_BRANCH, async (_event, projectDir: string, name: string, force?: boolean, options?: { deleteRemote?: boolean; deleteLocal?: boolean }) => {
+    const results: string[] = []
     try {
-      await gitOps.deleteBranch(projectDir, name, force)
-      return { success: true }
+      // Delete remote branch if requested
+      if (options?.deleteRemote) {
+        try {
+          await gitOps.deleteRemoteBranch(projectDir, name)
+          results.push('remote')
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed'
+          if (!options?.deleteLocal) return { success: false, error: `Remote delete failed: ${msg}` }
+          results.push(`remote failed: ${msg}`)
+        }
+      }
+      // Delete local branch (or local tracking branch for remote branches)
+      if (options?.deleteLocal !== false) {
+        // For remote branches like "origin/feature", delete the local tracking ref
+        const localName = name.includes('/') ? name.replace(/^[^/]+\//, '') : name
+        try {
+          await gitOps.deleteBranch(projectDir, localName, force)
+          results.push('local')
+        } catch (err) {
+          // If no options specified (legacy call), throw the error
+          if (!options) throw err
+          const msg = err instanceof Error ? err.message : 'Failed'
+          results.push(`local failed: ${msg}`)
+        }
+      }
+      return { success: true, results }
     } catch (err) {
       getServices().logError('[git-manager] delete branch failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Delete branch failed' }

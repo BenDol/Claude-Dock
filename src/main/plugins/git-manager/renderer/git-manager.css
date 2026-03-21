@@ -3494,6 +3494,35 @@
   margin: 4px 0;
 }
 
+.gm-ctx-danger { color: #f7768e; }
+.gm-ctx-danger:hover { background: #f7768e; color: #fff; }
+.gm-ctx-separator { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+/* Wide context menu variant (used for branch delete dialog) */
+.gm-ctx-menu-wide { min-width: 280px; padding: 0; }
+.gm-ctx-header {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+  padding: 8px 12px; border-bottom: 1px solid var(--border-color);
+}
+.gm-ctx-body { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.gm-ctx-branch-name {
+  font-family: var(--font-mono, monospace); font-size: 11px;
+  color: var(--accent-color); padding: 4px 6px; background: var(--bg-tertiary);
+  border-radius: 3px; word-break: break-all;
+}
+.gm-ctx-checkbox {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-secondary); cursor: pointer;
+}
+.gm-ctx-checkbox input { margin: 0; }
+.gm-ctx-footer {
+  display: flex; justify-content: flex-end; gap: 6px;
+  padding: 8px 12px; border-top: 1px solid var(--border-color);
+}
+.gm-ctx-danger-btn { background: #f7768e !important; color: #fff !important; }
+.gm-ctx-danger-btn:hover { filter: brightness(1.15); }
+.gm-ctx-danger-btn:disabled { opacity: 0.5; }
+
 .gm-ctx-submenu-trigger {
   position: relative;
 }

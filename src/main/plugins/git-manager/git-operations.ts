@@ -676,6 +676,15 @@ export async function deleteBranch(cwd: string, name: string, force?: boolean): 
   await gitExec(cwd, ['branch', force ? '-D' : '-d', name], 10000)
 }
 
+export async function deleteRemoteBranch(cwd: string, remoteBranch: string): Promise<void> {
+  // remoteBranch is in format "origin/feature-x" — split into remote and branch
+  const slashIdx = remoteBranch.indexOf('/')
+  if (slashIdx < 0) throw new Error(`Invalid remote branch format: ${remoteBranch}`)
+  const remote = remoteBranch.slice(0, slashIdx)
+  const branch = remoteBranch.slice(slashIdx + 1)
+  await gitExec(cwd, ['push', remote, '--delete', branch], 30000)
+}
+
 // --- Discard / Delete ---
 
 export async function discardFiles(
