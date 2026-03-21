@@ -432,6 +432,26 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_SYNC_SUBMODULES, async (_event, projectDir: string, subPaths?: string[]) => {
+    try {
+      const output = await gitOps.syncSubmodules(projectDir, subPaths)
+      return { success: true, output }
+    } catch (err) {
+      getServices().logError('[git-manager] sync submodules failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Sync failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_UPDATE_SUBMODULES, async (_event, projectDir: string, subPaths?: string[], init?: boolean) => {
+    try {
+      const output = await gitOps.updateSubmodules(projectDir, subPaths, init)
+      return { success: true, output }
+    } catch (err) {
+      getServices().logError('[git-manager] update submodules failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Update failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GET_REMOTES, async (_event, projectDir: string) => {
     return gitOps.getRemotes(projectDir)
   })

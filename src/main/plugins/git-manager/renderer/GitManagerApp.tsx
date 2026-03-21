@@ -1414,6 +1414,7 @@ const GitManagerApp: React.FC = () => {
                   }
                 })
               }}
+              onRefresh={refresh}
             />
           </CollapsibleSection>
           <CollapsibleSection title="Tags" count={tags.length} defaultCollapsed>
@@ -8554,9 +8555,10 @@ const SubmoduleTree: React.FC<{
   onAddInFolder?: (basePath: string) => void
   onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
-}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove }) => {
+  onRefresh?: () => void
+}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh }) => {
   const tree = useMemo(() => buildSubmoduleTree(submodules), [submodules])
-  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} depth={0} parentPath="" />)}</>
+  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} depth={0} parentPath="" />)}</>
 }
 
 const SubmoduleTreeNodeView: React.FC<{
@@ -8568,9 +8570,10 @@ const SubmoduleTreeNodeView: React.FC<{
   onAddInFolder?: (basePath: string) => void
   onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
+  onRefresh?: () => void
   depth: number
   parentPath: string
-}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, depth, parentPath }) => {
+}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh, depth, parentPath }) => {
   const [collapsed, setCollapsed] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
@@ -8631,6 +8634,7 @@ const SubmoduleTreeNodeView: React.FC<{
             projectDir={projectDir}
             onSwitchBranch={onSwitchBranch}
             onRemove={onRemove}
+            onRefresh={onRefresh}
             onClose={() => setCtxMenu(null)}
           />
         )}
@@ -8660,7 +8664,7 @@ const SubmoduleTreeNodeView: React.FC<{
         )}
       </div>
       {!collapsed && node.children.map((child) => (
-        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} depth={depth + 1} parentPath={folderPath} />
+        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} depth={depth + 1} parentPath={folderPath} />
       ))}
     </>
   )
@@ -8754,9 +8758,11 @@ const SubmoduleContextMenu: React.FC<{
   projectDir: string
   onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
+  onRefresh?: () => void
   onClose: () => void
-}> = ({ x, y, subPath, projectDir, onSwitchBranch, onRemove, onClose }) => {
+}> = ({ x, y, subPath, projectDir, onSwitchBranch, onRemove, onRefresh, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -8766,6 +8772,24 @@ const SubmoduleContextMenu: React.FC<{
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
+  const api = getDockApi()
+
+  const doSync = async () => {
+    setBusy(true)
+    await api.gitManager.syncSubmodules(projectDir, [subPath])
+    setBusy(false)
+    onRefresh?.()
+    onClose()
+  }
+
+  const doUpdate = async () => {
+    setBusy(true)
+    await api.gitManager.updateSubmodules(projectDir, [subPath], true)
+    setBusy(false)
+    onRefresh?.()
+    onClose()
+  }
+
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       <div
@@ -8774,11 +8798,30 @@ const SubmoduleContextMenu: React.FC<{
       >
         Switch branch...
       </div>
+      <div className="gm-ctx-separator" />
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : doSync}>
+        Sync submodule
+      </div>
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : doUpdate}>
+        Update submodule (init)
+      </div>
+      <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item"
-        onClick={() => { getDockApi().app.openInExplorer(projectDir + '/' + subPath); onClose() }}
+        onClick={() => { api.app.openInExplorer(projectDir + '/' + subPath); onClose() }}
       >
         Open in Explorer
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : async () => {
+        setBusy(true)
+        await api.gitManager.syncSubmodules(projectDir)
+        await api.gitManager.updateSubmodules(projectDir, undefined, true)
+        setBusy(false)
+        onRefresh?.()
+        onClose()
+      }}>
+        Sync &amp; Update all submodules
       </div>
       {onRemove && (
         <>

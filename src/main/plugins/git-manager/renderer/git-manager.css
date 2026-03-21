@@ -3495,6 +3495,7 @@
 
 .gm-ctx-danger { color: #f7768e; }
 .gm-ctx-danger:hover { background: #f7768e; color: #fff; }
+.gm-ctx-item-disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 .gm-ctx-separator { height: 1px; background: var(--border-color); margin: 4px 0; }
 
 /* Wide context menu variant (used for branch delete dialog) */

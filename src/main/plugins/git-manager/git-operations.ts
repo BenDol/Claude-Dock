@@ -1513,6 +1513,21 @@ export async function getFileBlob(cwd: string, filePath: string, ref?: string): 
   }
 }
 
+export async function syncSubmodules(cwd: string, subPaths?: string[]): Promise<string> {
+  const args = ['submodule', 'sync']
+  if (subPaths && subPaths.length > 0) args.push('--', ...subPaths)
+  const { stdout, stderr } = await gitExec(cwd, args, 30000)
+  return (stdout + stderr).trim()
+}
+
+export async function updateSubmodules(cwd: string, subPaths?: string[], init?: boolean): Promise<string> {
+  const args = ['submodule', 'update']
+  if (init) args.push('--init')
+  if (subPaths && subPaths.length > 0) args.push('--', ...subPaths)
+  const { stdout, stderr } = await gitExec(cwd, args, 120000)
+  return (stdout + stderr).trim()
+}
+
 export async function addSubmodule(cwd: string, url: string, localPath?: string, branch?: string, force?: boolean): Promise<void> {
   const args = ['submodule', 'add']
   if (branch) args.push('-b', branch)
