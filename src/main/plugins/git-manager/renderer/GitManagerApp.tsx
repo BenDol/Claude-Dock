@@ -3403,8 +3403,8 @@ const CommitDetailPanel: React.FC<{
       })
     }
     const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('[data-linekey]') && !target.closest('.gm-ctx-menu')) {
+      const target = e.target instanceof HTMLElement ? e.target : (e.target as Node)?.parentElement
+      if (!target?.closest('[data-linekey]') && !target?.closest('.gm-ctx-menu')) {
         clearTextHighlights()
         setSelectedLines(new Set())
       }
@@ -3420,7 +3420,8 @@ const CommitDetailPanel: React.FC<{
 
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
-    const target = e.target as HTMLElement
+    const target = e.target instanceof HTMLElement ? e.target : (e.target as Node)?.parentElement
+    if (!target) return
     const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
     if (!isGutter) return // content clicks use native text selection only
     e.preventDefault()
@@ -5228,8 +5229,8 @@ const WorkingDiffViewer: React.FC<{
       })
     }
     const onMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('[data-linekey]') && !target.closest('.gm-ctx-menu')) {
+      const target = e.target instanceof HTMLElement ? e.target : (e.target as Node)?.parentElement
+      if (!target?.closest('[data-linekey]') && !target?.closest('.gm-ctx-menu')) {
         clearTextHighlights()
         setSelectedLines(new Set())
       }
@@ -5245,7 +5246,8 @@ const WorkingDiffViewer: React.FC<{
 
   const handleLineMouseDown = useCallback((key: string, e: React.MouseEvent) => {
     if (e.button !== 0) return
-    const target = e.target as HTMLElement
+    const target = e.target instanceof HTMLElement ? e.target : (e.target as Node)?.parentElement
+    if (!target) return
     const isGutter = target.closest('.gm-diff-line-no') || target.closest('.gm-diff-line-prefix')
     if (!isGutter) return // content clicks use native text selection only
     e.preventDefault()
