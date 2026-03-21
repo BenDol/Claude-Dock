@@ -452,6 +452,16 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_FORCE_REINIT_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
+    try {
+      const output = await gitOps.forceReinitSubmodule(projectDir, subPath)
+      return { success: true, output }
+    } catch (err) {
+      getServices().logError('[git-manager] force reinit submodule failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Force reinit failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GET_REMOTES, async (_event, projectDir: string) => {
     return gitOps.getRemotes(projectDir)
   })

@@ -1202,32 +1202,71 @@ const GitManagerApp: React.FC = () => {
     // Uninitialized submodules have no .git reference, so git commands would
     // silently fall back to the parent repo — showing wrong commits/branches.
     if (sub.status === 'uninitialized') {
+      const doInit = async (thenOpen: boolean) => {
+        const api = getDockApi()
+        // Run sync first (ensures URLs are up to date) then init + update
+        await api.gitManager.syncSubmodules(activeDir, [sub.path])
+        const r = await api.gitManager.updateSubmodules(activeDir, [sub.path], true)
+        if (!r.success) throw new Error(r.error || 'Submodule init failed')
+
+        // Verify the submodule is actually initialized by checking if it's a git repo
+        const check = await api.gitManager.isRepo(activeDir + '/' + sub.path)
+        if (!check) {
+          // The directory likely exists with files but no .git — offer force reinit
+          setActionError({
+            title: 'Submodule directory blocked',
+            message: `The directory "${sub.path}" exists but is not a git repository.\n\n` +
+              `This usually means the directory has files from a previous incomplete init. ` +
+              `To fix this, the directory needs to be removed and re-cloned from the submodule URL.\n\n` +
+              `Warning: Any local files in this directory will be deleted.`,
+            resolutions: [{
+              label: 'Remove & Re-clone',
+              description: `Delete "${sub.path}" and clone fresh from the submodule URL`,
+              danger: true,
+              action: async () => {
+                const fr = await api.gitManager.forceReinitSubmodule(activeDir, sub.path)
+                if (!fr.success) throw new Error(fr.error || 'Force reinit failed')
+                await refresh()
+                if (thenOpen) {
+                  setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+                  wcBusyRef.current = false
+                  resetRepoState()
+                  setActiveDir(activeDir + '/' + sub.path)
+                }
+              }
+            }, {
+              label: 'Open in Explorer',
+              description: 'View the files before deciding',
+              keepOpen: true,
+              action: async () => {
+                api.app.openInExplorer(activeDir + '/' + sub.path)
+              }
+            }]
+          })
+          return
+        }
+
+        await refresh()
+
+        if (thenOpen) {
+          setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+          wcBusyRef.current = false
+          resetRepoState()
+          setActiveDir(activeDir + '/' + sub.path)
+        }
+      }
+
       setActionError({
         title: 'Submodule not initialized',
-        message: `Cannot open submodule "${sub.name}" — it is not initialized.\n\nRun: git submodule update --init "${sub.path}"`,
+        message: `Cannot open submodule "${sub.name}" — it is not initialized.`,
         resolutions: [{
           label: 'Initialize & Open',
-          description: `Initialize the submodule and open it`,
-          action: async () => {
-            const api = getDockApi()
-            const r = await api.gitManager.updateSubmodules(activeDir, [sub.path], true)
-            if (!r.success) throw new Error(r.error || 'Submodule init failed')
-            // Refresh to get updated submodule status, then navigate in
-            await refresh()
-            // Navigate into the now-initialized submodule
-            setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
-            wcBusyRef.current = false
-            resetRepoState()
-            setActiveDir(activeDir + '/' + sub.path)
-          }
+          description: `Sync, init, and open the submodule`,
+          action: () => doInit(true)
         }, {
           label: 'Initialize only',
-          description: `Run git submodule update --init without opening`,
-          action: async () => {
-            const r = await getDockApi().gitManager.updateSubmodules(activeDir, [sub.path], true)
-            if (!r.success) throw new Error(r.error || 'Submodule init failed')
-            refresh()
-          }
+          description: `Run git submodule sync + update --init without opening`,
+          action: () => doInit(false)
         }]
       })
       return

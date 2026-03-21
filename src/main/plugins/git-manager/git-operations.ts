@@ -1538,11 +1538,45 @@ export async function syncSubmodules(cwd: string, subPaths?: string[]): Promise<
 }
 
 export async function updateSubmodules(cwd: string, subPaths?: string[], init?: boolean): Promise<string> {
+  const svc = getServices()
+
   const args = ['submodule', 'update']
   if (init) args.push('--init')
   if (subPaths && subPaths.length > 0) args.push('--', ...subPaths)
   const { stdout, stderr } = await gitExec(cwd, args, 120000)
-  return (stdout + stderr).trim()
+  const output = (stdout + stderr).trim()
+  svc.log(`[git-manager] updateSubmodules: ${output || '(no output)'}`)
+  return output
+}
+
+/**
+ * Force re-initialize a submodule by deiniting, removing its directory, and cloning fresh.
+ * This is needed when the submodule dir exists with files but no .git entry.
+ */
+export async function forceReinitSubmodule(cwd: string, subPath: string): Promise<string> {
+  const svc = getServices()
+  const absPath = path.resolve(cwd, subPath)
+
+  svc.log(`[git-manager] forceReinitSubmodule: deinit + remove + re-clone for ${subPath}`)
+
+  // Deinit clears git's internal submodule state
+  try {
+    await gitExec(cwd, ['submodule', 'deinit', '--force', '--', subPath], 15000)
+  } catch (e) {
+    svc.log(`[git-manager] forceReinitSubmodule: deinit failed (continuing): ${e}`)
+  }
+
+  // Remove the directory so git can clone into it
+  if (fs.existsSync(absPath)) {
+    fs.rmSync(absPath, { recursive: true, force: true })
+    svc.log(`[git-manager] forceReinitSubmodule: removed directory`)
+  }
+
+  // Re-init and clone
+  const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--init', '--', subPath], 120000)
+  const output = (stdout + stderr).trim()
+  svc.log(`[git-manager] forceReinitSubmodule: ${output || '(no output)'}`)
+  return output
 }
 
 export async function addSubmodule(cwd: string, url: string, localPath?: string, branch?: string, force?: boolean): Promise<void> {
