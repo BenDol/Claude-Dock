@@ -15,6 +15,7 @@ import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } f
 import { ActivityTracker } from './activity-tracker'
 import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
+import { NotificationManager } from './notification-manager'
 import { resetPluginTrust } from './plugins/plugin-loader'
 import { PluginUpdateService } from './plugins/plugin-updater'
 import { getOverrides as getPluginOverrides } from './plugins/plugin-update-store'
@@ -523,7 +524,32 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.PLUGIN_UPDATE_INSTALL_ALL, async () => {
     try {
-      return await pluginUpdateService.installAll()
+      const result = await pluginUpdateService.installAll()
+      const pluginInfoList = PluginManager.getInstance().getPluginInfoList()
+      const getName = (id: string) => pluginInfoList.find((p) => p.id === id)?.name || id
+
+      if (result.success.length > 0) {
+        const names = result.success.map(getName)
+        NotificationManager.getInstance().notify({
+          title: 'Plugins Updated',
+          message: `${names.join(', ')} updated successfully.`,
+          type: 'success',
+          source: 'plugin-updater',
+          timeout: 8000
+        })
+      }
+      if (result.failed.length > 0) {
+        const names = result.failed.map((f) => getName(f.pluginId))
+        NotificationManager.getInstance().notify({
+          title: 'Plugin Update Failed',
+          message: `Failed to update: ${names.join(', ')}`,
+          type: 'error',
+          source: 'plugin-updater',
+          timeout: 10000,
+          action: { label: 'View Details', event: 'plugin-update-open' }
+        })
+      }
+      return result
     } catch (err) {
       return { success: [], failed: [{ pluginId: 'all', error: err instanceof Error ? err.message : String(err) }] }
     }
