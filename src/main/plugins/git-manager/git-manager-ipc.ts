@@ -12,13 +12,8 @@ import { registerPrIpc } from './pr/pr-ipc'
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
 
-  ipcMain.handle(IPC.GIT_MGR_IS_REPO, async (_event, projectDir: string, strict?: boolean) => {
-    const isRepo = await gitOps.isGitRepo(projectDir)
-    if (!isRepo) return false
-    // Strict mode: verify git root matches the directory (not just inside a parent repo).
-    // Used when navigating into submodules to detect broken .git references.
-    if (strict) return gitOps.isGitRoot(projectDir)
-    return true
+  ipcMain.handle(IPC.GIT_MGR_IS_REPO, async (_event, projectDir: string) => {
+    return gitOps.isGitRepo(projectDir)
   })
 
   ipcMain.handle(IPC.GIT_MGR_OPEN, (_event, projectDir: string) => {

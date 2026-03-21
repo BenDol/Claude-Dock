@@ -800,12 +800,7 @@ const GitManagerApp: React.FC = () => {
     const api = getDockApi()
     setLoading(true)
     try {
-      // Use strict mode when inside a submodule (activeDir !== projectDir) to
-      // verify the directory is actually a git root — not just inside the parent.
-      // Broken/uninitialized submodules pass the basic isRepo check but their
-      // git commands silently operate on the parent repo.
-      const isSubmodule = activeDir !== projectDir
-      const isRepo = await api.gitManager.isRepo(activeDir, isSubmodule)
+      const isRepo = await api.gitManager.isRepo(activeDir)
       if (gen !== refreshGenRef.current) return // stale
       if (!isRepo) {
         setNotGitRepo(true)

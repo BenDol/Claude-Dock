@@ -153,7 +153,7 @@ export interface DockApi {
     onWindowStateChanged: (callback: (data: { pluginId: string; projectDir: string; open: boolean }) => void) => () => void
   }
   gitManager: {
-    isRepo: (projectDir: string, strict?: boolean) => Promise<boolean>
+    isRepo: (projectDir: string) => Promise<boolean>
     open: (projectDir: string) => Promise<void>
     openCommit: (projectDir: string, commitHash: string) => Promise<void>
     getLog: (projectDir: string, opts?: GitLogOptions) => Promise<GitCommitInfo[]>
@@ -424,7 +424,7 @@ const dockApi: DockApi = {
     }
   },
   gitManager: {
-    isRepo: (projectDir, strict) => ipcRenderer.invoke(IPC.GIT_MGR_IS_REPO, projectDir, strict),
+    isRepo: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_IS_REPO, projectDir),
     open: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN, projectDir),
     openCommit: (projectDir: string, commitHash: string) => ipcRenderer.invoke(IPC.GIT_MGR_OPEN_COMMIT, projectDir, commitHash),
     getLog: (projectDir, opts) => ipcRenderer.invoke(IPC.GIT_MGR_GET_LOG, projectDir, opts),
