@@ -280,6 +280,7 @@ export class GitHubActionsProvider implements CiProvider {
         ['workflow', 'list', '--json', 'id,name,path,state'],
         projectDir
       )
+      if (!stdout.trim()) return []
       const raw = JSON.parse(stdout) as Array<{
         id: number; name: string; path: string; state: string
       }>
