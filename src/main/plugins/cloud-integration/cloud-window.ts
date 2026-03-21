@@ -62,6 +62,14 @@ export class CloudWindowManager {
     this.windows.set(projectDir, win)
     svc().broadcastPluginWindowState('cloud-integration', projectDir, true)
 
+    // Enable DevTools shortcut (F12 / Ctrl+Shift+I) — not available by default in frameless windows
+    win.webContents.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        win.webContents.toggleDevTools()
+      }
+    })
+
     const persistState = () => {
       if (win.isDestroyed()) return
       const bounds = win.getNormalBounds()
