@@ -131,7 +131,6 @@ export default function CloudApp() {
 
   const navigate = useCallback((p: CloudPage) => {
     setPage(p)
-    if (p.view !== 'setup') setNeedsSetup(false)
   }, [])
 
   const onSetupComplete = useCallback(() => {
