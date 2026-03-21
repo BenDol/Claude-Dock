@@ -329,6 +329,10 @@ export class GitLabCiProvider implements CiProvider {
     await glab(['api', '--method', 'POST', `/projects/${projectId}/pipelines/${runId}/retry`], projectDir)
   }
 
+  async dispatchWorkflow(_projectDir: string, _workflowId: number, _ref: string, _inputs?: Record<string, string>): Promise<void> {
+    throw new Error('Pipeline dispatch is not yet supported for GitLab')
+  }
+
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
     try {
       const projectId = await getProjectId(projectDir)

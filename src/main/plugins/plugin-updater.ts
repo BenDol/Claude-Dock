@@ -294,16 +294,32 @@ export class PluginUpdateService {
       //   that plugin's source directory is modified, not on every repo commit)
       // - For latest: check if version is newer, OR if version matches but
       //   the build SHA differs (hotfix to same version)
-      // In both cases, skip if a content-hash match proves the code is identical
-      // (avoids false positives when app and archive were built from different commits)
+      //
+      // IMPORTANT: The "same version, different build" path only applies when
+      // the plugin is currently running from an override.  After a full app
+      // update the overrides are cleared, so the bundled code IS the latest —
+      // the manifest may still reference an older release whose buildSha
+      // doesn't match the new app build, causing false-positive updates that
+      // always fail with a hash mismatch.  Skip them.
       const localPluginSha = __PLUGIN_BUILD_SHAS__?.[info.id]
       let hasUpdate: boolean
       if (profile === 'bleeding-edge') {
+        // Only flag an update if the plugin has an override installed AND
+        // the remote SHA differs; without an override the bundled code is
+        // authoritative (built from the latest bleeding-edge app commit).
         hasUpdate = !!localPluginSha && entry.buildSha !== localPluginSha
+          && !!installedOverride
       } else {
         const newerVersion = isNewerVersion(info.version, entry.version)
+        // Same-version hotfix: only relevant when the user is still on a
+        // previous app build and has no override yet, or their override is
+        // from an older hotfix.  After a fresh app update (no override),
+        // the bundled code already includes the latest changes for this
+        // version — the manifest SHA mismatch is just build-environment
+        // noise, not a real update.
         const sameVersionDifferentBuild = info.version === entry.version
           && !!localPluginSha && entry.buildSha !== localPluginSha
+          && !!installedOverride
         hasUpdate = newerVersion || sameVersionDifferentBuild
       }
 

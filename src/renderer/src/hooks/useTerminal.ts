@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import type { ILinkDecorations } from '@xterm/xterm'
 import { SearchAddon } from '@xterm/addon-search'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
@@ -85,6 +85,63 @@ function looksLikeFilePath(s: string): boolean {
   return true
 }
 
+// Regex matching URLs — same as the default from @xterm/addon-web-links
+const URL_RE = /https?:\/\/[^\s"'<>[\]{}|\\^`]+/g
+
+function ctrlLinkDecorations(): ILinkDecorations {
+  return { pointerCursor: false, underline: false }
+}
+
+function registerWebLinks(term: Terminal): void {
+  term.registerLinkProvider({
+    provideLinks(lineNumber, callback) {
+      const line = term.buffer.active.getLine(lineNumber - 1)
+      if (!line) { callback(undefined); return }
+      const text = line.translateToString(true)
+
+      URL_RE.lastIndex = 0
+      const links: { startIndex: number; url: string }[] = []
+      let m: RegExpExecArray | null
+      while ((m = URL_RE.exec(text)) !== null) {
+        // Trim trailing punctuation that's likely not part of the URL
+        let url = m[0]
+        while (url.length > 0 && /[),.:;!?]$/.test(url)) {
+          url = url.slice(0, -1)
+        }
+        links.push({ startIndex: m.index, url })
+      }
+
+      if (links.length === 0) { callback(undefined); return }
+
+      callback(links.map((l) => {
+        const decorations = ctrlLinkDecorations()
+        return {
+          range: {
+            start: { x: l.startIndex + 1, y: lineNumber },
+            end: { x: l.startIndex + l.url.length + 1, y: lineNumber }
+          },
+          text: l.url,
+          decorations,
+          activate(event: MouseEvent) {
+            if (event.ctrlKey || event.metaKey) {
+              getDockApi().app.openExternal(l.url)
+            }
+          },
+          hover(event: MouseEvent) {
+            const show = event.ctrlKey || event.metaKey
+            decorations.pointerCursor = show
+            decorations.underline = show
+          },
+          leave() {
+            decorations.pointerCursor = false
+            decorations.underline = false
+          }
+        }
+      }))
+    }
+  })
+}
+
 interface FileLink {
   startIndex: number
   length: number
@@ -151,19 +208,33 @@ function registerFilePathLinks(term: Terminal): void {
       if (links.length === 0) { callback(undefined); return }
 
       const projectDir = useDockStore.getState().projectDir
-      callback(links.map((l) => ({
-        range: {
-          start: { x: l.startIndex + 1, y: lineNumber },
-          end: { x: l.startIndex + l.length + 1, y: lineNumber }
-        },
-        text: l.filePath,
-        activate() {
-          const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
-            ? l.filePath
-            : projectDir + '/' + l.filePath
-          getDockApi().app.openInExplorer(resolved)
+      callback(links.map((l) => {
+        const decorations = { pointerCursor: false, underline: false }
+        return {
+          range: {
+            start: { x: l.startIndex + 1, y: lineNumber },
+            end: { x: l.startIndex + l.length + 1, y: lineNumber }
+          },
+          text: l.filePath,
+          decorations,
+          activate(event: MouseEvent) {
+            if (!event.ctrlKey && !event.metaKey) return
+            const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
+              ? l.filePath
+              : projectDir + '/' + l.filePath
+            getDockApi().app.openInExplorer(resolved)
+          },
+          hover(event: MouseEvent) {
+            const show = event.ctrlKey || event.metaKey
+            decorations.pointerCursor = show
+            decorations.underline = show
+          },
+          leave() {
+            decorations.pointerCursor = false
+            decorations.underline = false
+          }
         }
-      })))
+      }))
     }
   })
 }
@@ -287,13 +358,25 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.loadAddon(unicode11Addon)
       term.unicode.activeVersion = '11'
 
-      // Clickable links (Ctrl+click or Alt+click opens in browser)
-      term.loadAddon(new WebLinksAddon((_event, url) => {
-        getDockApi().app.openExternal(url)
-      }))
+      // Clickable URL links — Ctrl+Click to open (underline appears only while Ctrl is held)
+      registerWebLinks(term)
 
       // Clickable file paths from Claude tool output — e.g. Read(src/foo.ts), Write(src/bar.ts)
       registerFilePathLinks(term)
+
+      // Track Ctrl key state so link decorations update live as Ctrl is pressed/released
+      const termElement = term.element
+      if (termElement) {
+        const updateLinkCursor = (e: KeyboardEvent) => {
+          if (e.key === 'Control' || e.key === 'Meta') {
+            termElement.classList.toggle('ctrl-held', e.type === 'keydown')
+          }
+        }
+        window.addEventListener('keydown', updateLinkCursor)
+        window.addEventListener('keyup', updateLinkCursor)
+        // Also clear when window loses focus
+        window.addEventListener('blur', () => termElement.classList.remove('ctrl-held'))
+      }
 
       // Search in scrollback buffer (Ctrl+F)
       const searchAddon = new SearchAddon()

@@ -35,7 +35,8 @@ const debugDefault = updateProfile === 'bleeding-edge'
 // Per-plugin build SHAs: only change when the plugin's own source directory is modified
 const pluginBuildShas: Record<string, string> = {
   'git-sync': getPluginBuildSha('src/main/plugins/git-sync'),
-  'git-manager': getPluginBuildSha('src/main/plugins/git-manager')
+  'git-manager': getPluginBuildSha('src/main/plugins/git-manager'),
+  'cloud-integration': getPluginBuildSha('src/main/plugins/cloud-integration')
 }
 
 export default defineConfig({

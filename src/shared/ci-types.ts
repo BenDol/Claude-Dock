@@ -1,8 +1,21 @@
+export interface CiWorkflowInput {
+  name: string
+  description: string
+  required: boolean
+  default?: string
+  type: 'string' | 'boolean' | 'choice' | 'environment'
+  options?: string[]
+}
+
 export interface CiWorkflow {
   id: number
   name: string
   path: string
   state: 'active' | 'disabled_manually' | 'disabled_inactivity'
+  /** Whether this workflow supports manual dispatch (workflow_dispatch trigger) */
+  canDispatch?: boolean
+  /** Input definitions for workflow_dispatch */
+  inputs?: CiWorkflowInput[]
 }
 
 export interface CiWorkflowRun {

@@ -29,6 +29,8 @@ export class PtyManager {
   // Data batching to reduce IPC overhead
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  /** Timestamp of last data received from each PTY (for idle detection) */
+  private lastDataTime = new Map<string, number>()
   // Resume failure detection — watches early output for marker indicating session not found
   private resumeWatchers = new Map<string, { tail: string; timer: ReturnType<typeof setTimeout> }>()
   // Utility process hosting node-pty
@@ -183,6 +185,7 @@ export class PtyManager {
     if (this.resumeWatchers.has(terminalId) && this.detectResumeFailed(terminalId, data)) {
       return
     }
+    this.lastDataTime.set(terminalId, Date.now())
     const existing = this.pendingData.get(terminalId)
     this.pendingData.set(terminalId, existing ? existing + data : data)
     if (!this.flushTimer) {
@@ -385,6 +388,7 @@ export class PtyManager {
       this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
+      this.lastDataTime.delete(terminalId)
       this.ephemeralIds.delete(terminalId)
       this.interactedIds.delete(terminalId)
       if (!this.suppressSessionChanges) {
@@ -421,5 +425,17 @@ export class PtyManager {
 
   get size(): number {
     return this.ptys.size
+  }
+
+  /**
+   * Returns true if any terminal has received data within the last `idleMs` milliseconds.
+   * Terminals that haven't had output for longer than `idleMs` are considered idle.
+   */
+  hasRecentActivity(idleMs: number): boolean {
+    const now = Date.now()
+    for (const [, lastTime] of this.lastDataTime) {
+      if (now - lastTime < idleMs) return true
+    }
+    return false
   }
 }

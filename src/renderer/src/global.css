@@ -69,6 +69,12 @@ body {
   color: var(--text-primary);
 }
 
+/* Terminal links require Ctrl+Click — suppress pointer cursor unless Ctrl is held */
+.xterm.xterm-cursor-pointer:not(.ctrl-held),
+.xterm:not(.ctrl-held) .xterm-cursor-pointer {
+  cursor: text;
+}
+
 /* Global scrollbar style — override per-element with more specific selectors if needed */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -2835,6 +2841,134 @@ body {
   color: var(--text-primary);
   background: var(--hover-color);
 }
+
+/* Dispatch workflow modal */
+.ci-dispatch-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 40px;
+}
+
+.ci-dispatch-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 340px;
+  max-height: 80%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.ci-dispatch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ci-dispatch-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.ci-dispatch-close:hover { color: var(--text-primary); }
+
+.ci-dispatch-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ci-dispatch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.ci-dispatch-field > span:first-child {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.ci-dispatch-field input,
+.ci-dispatch-field select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+}
+
+.ci-dispatch-field input:focus,
+.ci-dispatch-field select:focus {
+  border-color: var(--accent-color);
+}
+
+.ci-dispatch-hint {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.ci-dispatch-divider {
+  border-top: 1px solid var(--border-color);
+  margin: 2px 0;
+}
+
+.ci-dispatch-inputs-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ci-dispatch-error {
+  font-size: 11px;
+  color: #f7768e;
+  padding: 4px 0;
+}
+
+.ci-dispatch-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ci-dispatch-run-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.ci-dispatch-run-btn:hover:not(:disabled) { opacity: 0.85; }
+.ci-dispatch-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .ci-active-section {
   border-bottom: 1px solid var(--border-color);

@@ -146,6 +146,7 @@ export const IPC = {
   CI_STOP_POLLING: 'ci:stopPolling',
   CI_FIX_WITH_CLAUDE: 'ci:fixWithClaude',
   CI_RERUN_FAILED: 'ci:rerunFailed',
+  CI_DISPATCH_WORKFLOW: 'ci:dispatchWorkflow',
   CI_NAVIGATE_TO_RUN: 'ci:navigateToRun',
 
   // Pull Requests / Merge Requests

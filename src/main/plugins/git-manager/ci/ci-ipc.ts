@@ -141,6 +141,18 @@ export function registerCiIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.CI_DISPATCH_WORKFLOW, async (_event, projectDir: string, workflowId: number, ref: string, inputs?: Record<string, string>) => {
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return { success: false, error: 'No CI provider' }
+    try {
+      await provider.dispatchWorkflow(projectDir, workflowId, ref, inputs)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[ci] dispatchWorkflow failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Dispatch failed' }
+    }
+  })
+
   // Navigate to a CI run in the git-manager plugin window (called from dock window)
   ipcMain.handle(IPC.CI_NAVIGATE_TO_RUN, async (_event, projectDir: string, runId: number) => {
     const mgr = GitManagerWindowManager.getInstance()

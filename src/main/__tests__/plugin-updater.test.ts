@@ -211,7 +211,12 @@ describe('PluginUpdateService', () => {
       expect(updates).toHaveLength(0)
     })
 
-    it('detects same-version update when build SHA differs (hotfix)', async () => {
+    it('detects same-version update when build SHA differs and override exists (hotfix)', async () => {
+      // An override exists — the user previously installed a plugin update,
+      // and now there's a newer hotfix for the same version
+      mockGetOverrides.mockReturnValue({
+        'git-sync': { version: '1.0.0', buildSha: 'old-override-sha', hash: 'old-hash', installedAt: Date.now() }
+      })
       const hotfixManifest = {
         ...remoteManifest,
         plugins: {
@@ -227,6 +232,25 @@ describe('PluginUpdateService', () => {
       expect(updates).toHaveLength(1)
       expect(updates[0].currentVersion).toBe('1.0.0')
       expect(updates[0].newVersion).toBe('1.0.0')
+    })
+
+    it('skips same-version different-SHA when no override exists (fresh app update)', async () => {
+      // After a full app update, overrides are cleared. The bundled code is
+      // the latest — the manifest SHA mismatch is noise, not a real update.
+      mockGetOverrides.mockReturnValue({})
+      const staleManifest = {
+        ...remoteManifest,
+        plugins: {
+          'git-sync': {
+            ...remoteManifest.plugins['git-sync'],
+            version: '1.0.0',
+            buildSha: 'stale-sha-from-older-release'
+          }
+        }
+      }
+      mockFetchJSON.mockResolvedValue(staleManifest)
+      const updates = await service.checkForUpdates('latest')
+      expect(updates).toHaveLength(0)
     })
 
     it('skips dismissed versions', async () => {

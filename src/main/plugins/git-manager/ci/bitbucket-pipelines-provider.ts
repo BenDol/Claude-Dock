@@ -658,6 +658,10 @@ export class BitbucketPipelinesProvider implements CiProvider {
     })
   }
 
+  async dispatchWorkflow(_projectDir: string, _workflowId: number, _ref: string, _inputs?: Record<string, string>): Promise<void> {
+    throw new Error('Pipeline dispatch is not yet supported for Bitbucket')
+  }
+
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
     try {
       const slug = await getRemoteSlug(projectDir)

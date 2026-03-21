@@ -56,6 +56,7 @@ const Launcher: React.FC = () => {
   const [updateError, setUpdateError] = useState('')
   const progressCleanup = useRef<(() => void) | null>(null)
   const [autoUpdating, setAutoUpdating] = useState(false)
+  const [waitingForIdle, setWaitingForIdle] = useState(false)
 
   // Git install state
   const [gitPhase, setGitPhase] = useState<GitPhase>('checking')
@@ -137,7 +138,8 @@ const Launcher: React.FC = () => {
   }, [updatePhase])
 
   // Auto-update: when download completes, install automatically — but only if
-  // no dock windows have running terminals (avoids killing active Claude sessions)
+  // no dock windows have recently active terminals (avoids killing active Claude sessions).
+  // Terminals idle for >2 minutes won't block the update.
   useEffect(() => {
     if (updatePhase !== 'ready' || !autoUpdating) return
 
@@ -150,20 +152,23 @@ const Launcher: React.FC = () => {
         const active = await getDockApi().updater.hasActiveTerminals()
         if (cancelled) return
         if (!active) {
+          setWaitingForIdle(false)
           doInstall()
         } else {
-          // Retry in 30 seconds — terminals are still running
+          // Terminals are active — wait and retry
+          setWaitingForIdle(true)
           timer = setTimeout(tryInstall, 30_000)
         }
       } catch {
         // On error, install anyway (don't block updates indefinitely)
-        if (!cancelled) doInstall()
+        if (!cancelled) { setWaitingForIdle(false); doInstall() }
       }
     }
     tryInstall()
 
     return () => {
       cancelled = true
+      setWaitingForIdle(false)
       if (timer) clearTimeout(timer)
     }
   }, [updatePhase, autoUpdating])
@@ -599,7 +604,9 @@ const Launcher: React.FC = () => {
                     <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm3.78-9.72a.75.75 0 00-1.06-1.06L6.75 9.19 5.28 7.72a.75.75 0 00-1.06 1.06l2 2a.75.75 0 001.06 0l4.5-4.5z" />
                   </svg>
                   <span className="updater-text">
-                    {autoUpdating ? 'Installing update...' : 'Download complete. Ready to install.'}
+                    {autoUpdating
+                      ? (waitingForIdle ? 'Waiting for terminals to go idle...' : 'Installing update...')
+                      : 'Download complete. Ready to install.'}
                   </span>
                 </div>
                 <div className="updater-actions">

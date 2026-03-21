@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
-import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobGroup, CiSetupStatus } from '../../../../shared/ci-types'
+import type { CiWorkflow, CiWorkflowRun, CiWorkflowInput, CiJob, CiJobGroup, CiSetupStatus } from '../../../../shared/ci-types'
 import { groupJobsByMatrix } from '../../../../shared/ci-types'
 import type { GitProvider } from '../../../../shared/remote-url'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
@@ -141,6 +141,9 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
   const baselineLogLinesRef = useRef<Map<string, number>>(new Map())
   /** Which workflow IDs we've already fetched baselines for */
   const baselineFetchedRef = useRef<Set<number>>(new Set())
+
+  // Dispatch workflow modal state
+  const [dispatchOpen, setDispatchOpen] = useState(false)
 
   // Cross-log search state
   const [ciLogOpenLocal, setCiLogOpenLocal] = useState(false)
@@ -856,10 +859,24 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
           ) : (
             <span className="ci-workflow-label">{workflows[0]?.name || 'Pipelines'}</span>
           )}
+          {workflows.some(wf => wf.canDispatch) && (
+            <button className="ci-refresh-btn" onClick={() => setDispatchOpen(true)} title="Run workflow">
+              <PlayIcon />
+            </button>
+          )}
           <button className="ci-refresh-btn" onClick={handleRefresh} title="Refresh">
             <RefreshIcon />
           </button>
         </div>
+        {dispatchOpen && (
+          <DispatchWorkflowModal
+            workflows={workflows.filter(wf => wf.canDispatch)}
+            currentBranch={currentBranch || 'main'}
+            projectDir={projectDir}
+            onClose={() => setDispatchOpen(false)}
+            onDispatched={() => { setDispatchOpen(false); handleRefresh() }}
+          />
+        )}
 
         {/* Filter bar */}
         <div className="ci-filter-bar">
@@ -1755,6 +1772,131 @@ function RefreshIcon() {
       <path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
       <path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
     </svg>
+  )
+}
+
+function PlayIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="5,3 19,12 5,21" />
+    </svg>
+  )
+}
+
+function DispatchWorkflowModal({ workflows, currentBranch, projectDir, onClose, onDispatched }: {
+  workflows: CiWorkflow[]
+  currentBranch: string
+  projectDir: string
+  onClose: () => void
+  onDispatched: () => void
+}) {
+  const [selectedWf, setSelectedWf] = useState<CiWorkflow>(workflows[0])
+  const [ref, setRef] = useState(currentBranch)
+  const [inputs, setInputs] = useState<Record<string, string>>({})
+  const [dispatching, setDispatching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
+
+  // Reset inputs when workflow changes
+  useEffect(() => {
+    const defaults: Record<string, string> = {}
+    for (const input of selectedWf.inputs || []) {
+      defaults[input.name] = input.default || (input.type === 'boolean' ? 'false' : '')
+    }
+    setInputs(defaults)
+    setError(null)
+  }, [selectedWf])
+
+  const handleDispatch = async () => {
+    setDispatching(true)
+    setError(null)
+    try {
+      const result = await getDockApi().ci.dispatchWorkflow(projectDir, selectedWf.id, ref, inputs)
+      if (result.success) {
+        onDispatched()
+      } else {
+        setError(result.error || 'Dispatch failed')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Dispatch failed')
+    }
+    setDispatching(false)
+  }
+
+  const wfInputs = selectedWf.inputs || []
+
+  return (
+    <div className="ci-dispatch-backdrop" ref={backdropRef} onClick={(e) => { if (e.target === backdropRef.current) onClose() }}>
+      <div className="ci-dispatch-modal">
+        <div className="ci-dispatch-header">
+          <span>Run workflow</span>
+          <button className="ci-dispatch-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="ci-dispatch-body">
+          {workflows.length > 1 && (
+            <label className="ci-dispatch-field">
+              <span>Workflow</span>
+              <select value={selectedWf.id} onChange={(e) => {
+                const wf = workflows.find(w => w.id === Number(e.target.value))
+                if (wf) setSelectedWf(wf)
+              }}>
+                {workflows.map(wf => (
+                  <option key={wf.id} value={wf.id}>{wf.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="ci-dispatch-field">
+            <span>Branch</span>
+            <input type="text" value={ref} onChange={(e) => setRef(e.target.value)} spellCheck={false} />
+          </label>
+          {wfInputs.length > 0 && (
+            <>
+              <div className="ci-dispatch-divider" />
+              <div className="ci-dispatch-inputs-title">Inputs</div>
+              {wfInputs.map(input => (
+                <label key={input.name} className="ci-dispatch-field">
+                  <span>{input.name}{input.required ? ' *' : ''}</span>
+                  {input.type === 'boolean' ? (
+                    <select
+                      value={inputs[input.name] || 'false'}
+                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
+                    >
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : input.type === 'choice' && input.options ? (
+                    <select
+                      value={inputs[input.name] || ''}
+                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
+                    >
+                      {input.options.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={inputs[input.name] || ''}
+                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
+                      placeholder={input.default || ''}
+                      spellCheck={false}
+                    />
+                  )}
+                  {input.description && <span className="ci-dispatch-hint">{input.description}</span>}
+                </label>
+              ))}
+            </>
+          )}
+          {error && <div className="ci-dispatch-error">{error}</div>}
+        </div>
+        <div className="ci-dispatch-footer">
+          <button className="ci-dispatch-run-btn" onClick={handleDispatch} disabled={dispatching || !ref.trim()}>
+            {dispatching ? 'Dispatching...' : 'Run workflow'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

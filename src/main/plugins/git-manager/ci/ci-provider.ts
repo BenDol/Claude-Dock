@@ -13,6 +13,7 @@ export interface CiProvider {
   getRunJobs(projectDir: string, runId: number): Promise<CiJob[]>
   cancelRun(projectDir: string, runId: number): Promise<void>
   rerunFailedJobs(projectDir: string, runId: number): Promise<void>
+  dispatchWorkflow(projectDir: string, workflowId: number, ref: string, inputs?: Record<string, string>): Promise<void>
   getJobLog(projectDir: string, jobId: number): Promise<string>
   getRunUrl(projectDir: string, runId: number): Promise<string>
   parseLogSections(rawLog: string): LogSection[]

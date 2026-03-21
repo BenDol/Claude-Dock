@@ -625,10 +625,13 @@ export function registerIpcHandlers(): void {
     return isUpdateLocked()
   })
 
+  // A terminal is "active" for update-blocking purposes if it received PTY data
+  // within the last 2 minutes. Terminals idle longer than that won't block updates.
   ipcMain.handle(IPC.UPDATER_HAS_ACTIVE_TERMINALS, () => {
+    const IDLE_THRESHOLD_MS = 2 * 60 * 1000 // 2 minutes
     const manager = DockManager.getInstance()
     for (const dock of manager.getAllDocks()) {
-      if (dock.ptyManager.size > 0) return true
+      if (dock.ptyManager.hasRecentActivity(IDLE_THRESHOLD_MS)) return true
     }
     return false
   })

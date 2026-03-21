@@ -2,7 +2,7 @@ import { execFile, execFileSync, spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { promisify } from 'util'
 import type { CiProvider } from './ci-provider'
-import type { CiWorkflow, CiWorkflowRun, CiJob, CiJobStep, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
+import type { CiWorkflow, CiWorkflowRun, CiWorkflowInput, CiJob, CiJobStep, CiSetupStatus, LogSection } from '../../../../shared/ci-types'
 import { getServices } from '../services'
 
 const execFileAsync = promisify(execFile)
@@ -61,6 +61,71 @@ function parseMatrixJobName(name: string): { matrixKey: string | null; matrixVal
     matrixValues[String(i)] = vals[i]
   }
   return { matrixKey: key, matrixValues }
+}
+
+/**
+ * Parse workflow_dispatch inputs from a GitHub Actions YAML file.
+ * Uses simple regex parsing to avoid requiring a YAML library.
+ */
+function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
+  // Check if workflow_dispatch is a trigger
+  if (!/workflow_dispatch/i.test(yaml)) return null
+
+  // Find the workflow_dispatch block and its inputs section
+  const wdMatch = yaml.match(/workflow_dispatch\s*:\s*\n([\s\S]*?)(?=\n\S|\n\s*[a-z_]+:(?!\s*\n\s+)|\Z)/)
+  if (!wdMatch) return [] // has workflow_dispatch but no inputs
+
+  const wdBlock = wdMatch[1]
+  const inputsMatch = wdBlock.match(/inputs\s*:\s*\n([\s\S]*?)(?=\n\s{0,3}\S|$)/)
+  if (!inputsMatch) return [] // workflow_dispatch without inputs
+
+  const inputsBlock = inputsMatch[1]
+  const inputs: CiWorkflowInput[] = []
+
+  // Match each input name (indented at input level)
+  const inputRegex = /^(\s+)(\w[\w-]*)\s*:/gm
+  let m: RegExpExecArray | null
+  const inputPositions: { name: string; start: number; indent: number }[] = []
+
+  while ((m = inputRegex.exec(inputsBlock)) !== null) {
+    // Only top-level inputs (consistent indentation)
+    if (inputPositions.length === 0 || m[1].length === inputPositions[0].indent) {
+      inputPositions.push({ name: m[2], start: m.index, indent: m[1].length })
+    }
+  }
+
+  for (let i = 0; i < inputPositions.length; i++) {
+    const pos = inputPositions[i]
+    const nextStart = i + 1 < inputPositions.length ? inputPositions[i + 1].start : inputsBlock.length
+    const block = inputsBlock.slice(pos.start, nextStart)
+
+    const descMatch = block.match(/description\s*:\s*['"]?([^'"\n]+)['"]?/)
+    const reqMatch = block.match(/required\s*:\s*(true|false)/)
+    const defMatch = block.match(/default\s*:\s*['"]?([^'"\n]*)['"]?/)
+    const typeMatch = block.match(/type\s*:\s*(string|boolean|choice|environment|number)/)
+
+    // Parse choice options
+    let options: string[] | undefined
+    const optionsMatch = block.match(/options\s*:\s*\n((?:\s+-\s*.+\n?)*)/)
+    if (optionsMatch) {
+      options = optionsMatch[1].split('\n')
+        .map(l => l.replace(/^\s*-\s*/, '').replace(/['"](.+)['"]/, '$1').trim())
+        .filter(Boolean)
+    }
+
+    const type = (typeMatch?.[1] || 'string') as CiWorkflowInput['type']
+
+    inputs.push({
+      name: pos.name,
+      description: descMatch?.[1]?.trim() || '',
+      required: reqMatch?.[1] === 'true',
+      default: defMatch?.[1]?.trim(),
+      type: type === 'number' as string ? 'string' : type,
+      options
+    })
+  }
+
+  return inputs
 }
 
 export class GitHubActionsProvider implements CiProvider {
@@ -218,12 +283,34 @@ export class GitHubActionsProvider implements CiProvider {
       const raw = JSON.parse(stdout) as Array<{
         id: number; name: string; path: string; state: string
       }>
-      return raw.map((w) => ({
+      const workflows: CiWorkflow[] = raw.map((w) => ({
         id: w.id,
         name: w.name,
         path: w.path,
         state: w.state as CiWorkflow['state']
       }))
+
+      // Fetch workflow_dispatch input definitions from each workflow's YAML
+      await Promise.allSettled(workflows.map(async (wf) => {
+        if (!wf.path) return
+        try {
+          const { stdout: yamlContent } = await gh(
+            ['api', `repos/{owner}/{repo}/contents/${wf.path}`, '-q', '.content'],
+            projectDir
+          )
+          // GitHub returns base64-encoded content
+          const decoded = Buffer.from(yamlContent.trim(), 'base64').toString('utf-8')
+          const inputs = parseWorkflowDispatchInputs(decoded)
+          if (inputs) {
+            wf.canDispatch = true
+            wf.inputs = inputs
+          }
+        } catch {
+          // Can't read workflow file — dispatch status unknown, leave as default
+        }
+      }))
+
+      return workflows
     } catch (err) {
       getServices().logError('[ci-github] getWorkflows failed:', err)
       return []
@@ -340,6 +427,18 @@ export class GitHubActionsProvider implements CiProvider {
 
   async rerunFailedJobs(projectDir: string, runId: number): Promise<void> {
     await gh(['run', 'rerun', String(runId), '--failed'], projectDir)
+  }
+
+  async dispatchWorkflow(projectDir: string, workflowId: number, ref: string, inputs?: Record<string, string>): Promise<void> {
+    const args = ['workflow', 'run', String(workflowId), '--ref', ref]
+    if (inputs) {
+      for (const [key, value] of Object.entries(inputs)) {
+        if (value !== undefined && value !== '') {
+          args.push('-f', `${key}=${value}`)
+        }
+      }
+    }
+    await gh(args, projectDir)
   }
 
   async getJobLog(projectDir: string, jobId: number): Promise<string> {
