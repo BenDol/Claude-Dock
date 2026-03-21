@@ -1202,7 +1202,18 @@ const GitManagerApp: React.FC = () => {
     // Uninitialized submodules have no .git reference, so git commands would
     // silently fall back to the parent repo — showing wrong commits/branches.
     if (sub.status === 'uninitialized') {
-      setActionError(`Cannot open submodule "${sub.name}" — it is not initialized. Run: git submodule update --init "${sub.path}"`)
+      setActionError({
+        title: 'Submodule not initialized',
+        message: `Cannot open submodule "${sub.name}" — it is not initialized.\n\nRun: git submodule update --init "${sub.path}"`,
+        resolutions: [{
+          label: 'Initialize submodule',
+          description: `Run git submodule update --init for "${sub.path}"`,
+          action: async () => {
+            await getDockApi().gitManager.updateSubmodules(activeDir, [sub.path], true)
+            refresh()
+          }
+        }]
+      })
       return
     }
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
@@ -7757,7 +7768,7 @@ const ErrorDialog: React.FC<{
         </div>
         <div className="gm-modal-body">
           <div className="gm-error-dialog-message">{error.message}</div>
-          {error.resolutions.length > 0 && (
+          {(error.resolutions?.length ?? 0) > 0 && (
             <div className="gm-error-dialog-resolutions">
               <div className="gm-error-dialog-resolutions-label">Suggested actions:</div>
               {error.resolutions.map((r) => (
