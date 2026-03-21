@@ -123,10 +123,10 @@ export class GitLabMrProvider implements PrProvider {
   async listPrs(projectDir: string, state?: PrState): Promise<PullRequest[]> {
     try {
       const args = ['mr', 'list', '--output', 'json', '--per-page', '50']
-      if (state === 'open') args.push('--state', 'opened')
-      else if (state === 'closed') args.push('--state', 'closed')
-      else if (state === 'merged') args.push('--state', 'merged')
-      else args.push('--state', 'all')
+      if (state === 'closed') args.push('--closed')
+      else if (state === 'merged') args.push('--merged')
+      else if (state !== 'open') args.push('--all')
+      // 'open' is the default — no flag needed
 
       const { stdout } = await glab(args, projectDir)
       const raw = JSON.parse(stdout) as Array<Record<string, unknown>>

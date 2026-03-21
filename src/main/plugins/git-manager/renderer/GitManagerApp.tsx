@@ -23,7 +23,7 @@ import { highlightDiffHunks, highlightCode } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
 import type { CiLogSearchMatch, CiSearchProgress } from './CiPanel'
-import PrPanel from './PrPanel'
+const PrPanel = React.lazy(() => import('./PrPanel'))
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
 import type { WriteTestsTask, ReferenceThisTask } from '../../../../shared/claude-task-types'
 
@@ -1695,7 +1695,9 @@ const GitManagerApp: React.FC = () => {
           )}
           {enablePrTab && (
             <div style={{ display: activeTab === 'pr' ? 'contents' : 'none' }}>
-              <PrPanel key={activeDir} projectDir={activeDir} provider={repoProvider} currentBranch={currentBranch?.name} active={activeTab === 'pr'} />
+              <React.Suspense fallback={<div className="gm-loading">Loading...</div>}>
+                <PrPanel key={activeDir} projectDir={activeDir} provider={repoProvider} currentBranch={currentBranch?.name} active={activeTab === 'pr'} />
+              </React.Suspense>
             </div>
           )}
         </div>
@@ -3707,10 +3709,8 @@ const VirtualFileList: React.FC<{
 
   const totalHeight = files.length * FILE_ROW_HEIGHT
   const overscan = 5
-  // Skip virtualization when container hasn't been measured yet, all files fit,
-  // or the container isn't the actual scroll element (parent is scrolling instead)
-  const isOwnScrollContainer = containerRef.current ? containerRef.current.scrollHeight > containerRef.current.clientHeight : false
-  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight && isOwnScrollContainer
+  // Skip virtualization when container hasn't been measured yet or all files fit
+  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight
   const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
   const startIdx = shouldVirtualize ? Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan) : 0
   const endIdx = shouldVirtualize ? Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan) : files.length
@@ -3966,9 +3966,20 @@ const WorkingChanges: React.FC<{
   useEffect(() => { setLocalStatus(null) }, [parentStatus])
 
   // Quick re-fetch just the status (not the full app data).
-  // Uses fast mode (-unormal) for polling — collapses untracked dirs but avoids
-  // scanning every file in large repos. Full -uall runs on explicit refresh.
+  // Uses full mode (-uall) so individual untracked files are always listed.
   const refreshStatus = useCallback(async () => {
+    try {
+      const s = await getDockApi().gitManager.getStatus(projectDir)
+      setLocalStatus(s)
+      if (onStatusRefreshed) onStatusRefreshed(s)
+    } catch { /* ignore */ }
+  }, [projectDir, onStatusRefreshed])
+
+  // Lightweight status poll for background auto-refresh.
+  // Uses fast mode (-unormal) which collapses untracked directories but avoids
+  // scanning every file in large repos. Only used for the timed poll, never for
+  // user-triggered actions, to avoid changing the visible file list.
+  const pollStatus = useCallback(async () => {
     try {
       const s = await getDockApi().gitManager.getStatus(projectDir, true)
       setLocalStatus(s)
@@ -4008,7 +4019,7 @@ const WorkingChanges: React.FC<{
     const poll = () => {
       if (document.hasFocus()) {
         pending = false
-        refreshStatus()
+        pollStatus()
       } else {
         pending = true
       }
@@ -4017,7 +4028,7 @@ const WorkingChanges: React.FC<{
     const onFocus = () => {
       if (pending) {
         pending = false
-        refreshStatus()
+        pollStatus()
       }
     }
 
@@ -4032,7 +4043,7 @@ const WorkingChanges: React.FC<{
       if (timer) clearInterval(timer)
       window.removeEventListener('focus', onFocus)
     }
-  }, [projectDir, refreshStatus])
+  }, [projectDir, pollStatus])
 
   // Persist commit message to localStorage
   useEffect(() => {
@@ -8046,7 +8057,7 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'changesRefreshSeconds', label: 'Working changes auto-refresh (seconds, 0 to disable)', type: 'number', default: 5 },
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
   { key: 'enableCiTab', label: 'Show CI tab', type: 'boolean', default: false },
-  { key: 'enablePrTab', label: 'Show Pull Requests tab', type: 'boolean', default: false },
+  { key: 'enablePrTab', label: 'Show Pull/Merge Requests tab', type: 'boolean', default: false },
   { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
     { value: 'started', label: 'Started' },
     { value: 'success', label: 'Success' },

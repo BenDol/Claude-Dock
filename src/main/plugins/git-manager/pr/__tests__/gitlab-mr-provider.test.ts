@@ -127,7 +127,7 @@ describe('GitLabMrProvider', () => {
       expect(prs[1].isDraft).toBe(true)
     })
 
-    it('passes --state opened for open filter', async () => {
+    it('uses no extra flag for open filter (default)', async () => {
       mockGlabCommand({
         'mr list': { stdout: '[]' }
       })
@@ -137,11 +137,13 @@ describe('GitLabMrProvider', () => {
       const call = mockExecFile.mock.calls.find(
         (c: any[]) => c[1]?.includes('mr') && c[1]?.includes('list')
       )
-      expect(call[1]).toContain('--state')
-      expect(call[1]).toContain('opened')
+      // 'open' is the default, no --closed/--merged/--all flag
+      expect(call[1]).not.toContain('--closed')
+      expect(call[1]).not.toContain('--merged')
+      expect(call[1]).not.toContain('--all')
     })
 
-    it('passes --state merged for merged filter', async () => {
+    it('passes --merged for merged filter', async () => {
       mockGlabCommand({
         'mr list': { stdout: '[]' }
       })
@@ -151,7 +153,7 @@ describe('GitLabMrProvider', () => {
       const call = mockExecFile.mock.calls.find(
         (c: any[]) => c[1]?.includes('mr') && c[1]?.includes('list')
       )
-      expect(call[1]).toContain('merged')
+      expect(call[1]).toContain('--merged')
     })
 
     it('returns empty array on error', async () => {

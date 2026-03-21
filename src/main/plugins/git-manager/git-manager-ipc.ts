@@ -7,7 +7,6 @@ import * as gitOps from './git-operations'
 import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 import { registerCiIpc } from './ci/ci-ipc'
-import { registerPrIpc } from './pr/pr-ipc'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -590,7 +589,26 @@ export function registerGitManagerIpc(): void {
   })
 
   registerCiIpc()
-  registerPrIpc()
+
+  // PR IPC handlers are registered lazily — only when the first PR_CHECK_AVAILABLE
+  // call arrives (i.e. the user has enabled the PR tab). This avoids loading all
+  // 3 provider implementations and their CLI resolution at startup.
+  let prIpcRegistered = false
+  ipcMain.handle(IPC.PR_CHECK_AVAILABLE, async (_event, projectDir: string) => {
+    if (!prIpcRegistered) {
+      prIpcRegistered = true
+      ipcMain.removeHandler(IPC.PR_CHECK_AVAILABLE) // remove the bootstrap handler
+      const { registerPrIpc } = require('./pr/pr-ipc')
+      registerPrIpc() // registers the real PR_CHECK_AVAILABLE + all others
+      // Re-invoke the real handler for this call
+      const { PrProviderRegistry } = require('./pr/pr-provider-registry')
+      const provider = await PrProviderRegistry.getInstance().resolve(projectDir)
+      if (!provider) return false
+      const available = await provider.isAvailable(projectDir)
+      return available ? provider.providerKey : false
+    }
+    return false
+  })
 
   getServices().log('[git-manager] IPC handlers registered (v2)')
 }
