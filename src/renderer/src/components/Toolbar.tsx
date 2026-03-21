@@ -109,6 +109,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   }, [projectDir])
 
   // Track which plugins have open windows
+  // Ref to the badge poll function so window-state handler can trigger an immediate refresh
+  const pollBadgesRef = useRef<(() => void) | null>(null)
+
   useEffect(() => {
     if (!projectDir) return
     getDockApi().plugins.getOpenWindows(projectDir).then((ids) => {
@@ -122,6 +125,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         else next.delete(pluginId)
         return next
       })
+      // Immediately refresh toolbar badges when a plugin window opens/closes
+      // (e.g., git-manager window hidden after staging files — badge should update)
+      setTimeout(() => pollBadgesRef.current?.(), 300)
     })
     return cleanup
   }, [projectDir])
@@ -198,9 +204,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
       }
     }
 
+    pollBadgesRef.current = poll
     poll()
     const interval = setInterval(poll, 10000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      pollBadgesRef.current = null
+    }
   }, [projectDir, enabledPlugins])
 
   // Track whether plugin updates are available (for settings button indicator)
