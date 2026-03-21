@@ -1215,21 +1215,20 @@ const GitManagerApp: React.FC = () => {
         const subs = await api.gitManager.getSubmodules(activeDir)
         const updatedSub = subs.find((s) => s.path === sub.path)
         if (!updatedSub || updatedSub.status === 'uninitialized') {
-          // The directory likely exists with files but no .git — offer force reinit.
-          // We throw after setting the new error so ErrorDialog's handleResolution
-          // sees the throw, calls onError (which shows the new dialog) instead of
-          // onResolved (which would clear it).
+          // Init ran but the submodule is still uninitialized.
+          // Use __replaceDialog to swap the current dialog with the appropriate one.
           throw {
             __replaceDialog: true,
             replacement: {
-              title: 'Submodule directory blocked',
-              message: `The directory "${sub.path}" exists but could not be initialized as a git submodule.\n\n` +
-                `This usually means the directory has files from a previous incomplete init that are blocking the clone. ` +
-                `To fix this, the directory needs to be removed and re-cloned from the submodule URL.\n\n` +
-                `Warning: Any local files in this directory will be deleted.`,
+              title: 'Submodule initialization failed',
+              message: `"${sub.path}" could not be initialized.\n\n` +
+                `git submodule update --init completed without errors but the submodule was not cloned. ` +
+                `This usually means the submodule URL is incorrect, inaccessible, or requires authentication.\n\n` +
+                `You can try force re-cloning (removes the directory if it exists and re-clones), ` +
+                `or open a terminal to debug manually.`,
               resolutions: [{
-                label: 'Remove & Re-clone',
-                description: `Delete "${sub.path}" and clone fresh from the submodule URL`,
+                label: 'Force Re-clone',
+                description: `Deinit, remove directory (if exists), and clone fresh`,
                 danger: true,
                 action: async () => {
                   const fr = await api.gitManager.forceReinitSubmodule(activeDir, sub.path)
@@ -1243,11 +1242,11 @@ const GitManagerApp: React.FC = () => {
                   }
                 }
               }, {
-                label: 'Open in Explorer',
-                description: 'View the files before deciding',
+                label: 'Open Git Bash',
+                description: 'Debug manually in a terminal',
                 keepOpen: true,
                 action: async () => {
-                  api.app.openInExplorer(activeDir + '/' + sub.path)
+                  api.gitManager.openBash(activeDir)
                 }
               }]
             }
