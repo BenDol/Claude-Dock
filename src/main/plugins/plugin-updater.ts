@@ -483,11 +483,43 @@ export class PluginUpdateService {
     // Verify content hash — excludes meta.json to match how the manifest computes
     // the hash (meta.json contains build metadata that varies between builds)
     const META_EXCLUDE = new Set(['meta.json'])
-    const actualHash = hashDirectory(overrideDir, META_EXCLUDE)
+    let actualHash = hashDirectory(overrideDir, META_EXCLUDE)
     if (actualHash !== entry.hash) {
-      // Clean up on hash mismatch
-      fs.rmSync(overrideDir, { recursive: true, force: true })
-      throw new Error(`Hash mismatch for ${entry.pluginId}: expected ${entry.hash}, got ${actualHash}`)
+      // Hash mismatch — the cached plugins.zip may be stale (manifest updated
+      // mid-session with a new release while the old zip is still cached).
+      // Invalidate the cache and re-download once before giving up.
+      if (this.pluginsZipPath && fs.existsSync(this.pluginsZipPath)) {
+        log(`[plugin-updater] ${entry.pluginId}: hash mismatch (expected ${entry.hash.slice(0, 12)}, got ${actualHash.slice(0, 12)}), re-downloading plugins.zip`)
+        try { fs.unlinkSync(this.pluginsZipPath) } catch { /* ignore */ }
+        this.pluginsZipPath = null
+
+        // Re-download and re-extract
+        fs.rmSync(overrideDir, { recursive: true, force: true })
+        fs.mkdirSync(overrideDir, { recursive: true })
+        if (entry.downloadUrl.startsWith('file://')) {
+          const localPath = entry.downloadUrl.replace('file://', '').replace(/\//g, path.sep)
+          const tmpDir = path.join(os.tmpdir(), 'claude-dock-plugin-updates')
+          fs.mkdirSync(tmpDir, { recursive: true })
+          this.pluginsZipPath = path.join(tmpDir, 'plugins.zip')
+          fs.copyFileSync(localPath, this.pluginsZipPath)
+        } else {
+          this.pluginsZipPath = await downloadFile(
+            entry.downloadUrl + `?_=${Date.now()}`, // cache-bust
+            'plugins.zip',
+            (downloaded, total) => {
+              entry.progress = { downloaded, total }
+              this.broadcastProgress(entry.pluginId, downloaded, total)
+            }
+          )
+        }
+        await this.extractFromZip(this.pluginsZipPath, entry.archivePath || entry.pluginId, overrideDir)
+        actualHash = hashDirectory(overrideDir, META_EXCLUDE)
+      }
+
+      if (actualHash !== entry.hash) {
+        fs.rmSync(overrideDir, { recursive: true, force: true })
+        throw new Error(`Hash mismatch for ${entry.pluginId}: expected ${entry.hash}, got ${actualHash}`)
+      }
     }
 
     // Rewrite meta.json with the verified content hash (the one from the zip
