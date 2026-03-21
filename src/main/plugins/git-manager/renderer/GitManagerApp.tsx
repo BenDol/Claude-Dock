@@ -1118,6 +1118,7 @@ const GitManagerApp: React.FC = () => {
   }, [remotes])
   const [pushing, setPushing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [checkingOutBranch, setCheckingOutBranch] = useState<string | null>(null)
 
   const handlePush = useCallback(async () => {
     if (pushing) return
@@ -1154,6 +1155,7 @@ const GitManagerApp: React.FC = () => {
   const doCheckout = useCallback(async (checkoutName: string) => {
     const api = getDockApi()
     setError(null)
+    setCheckingOutBranch(checkoutName)
     actionBusyRef.current = true
     try {
       const result = await api.gitManager.checkoutBranch(activeDir, checkoutName)
@@ -1190,6 +1192,7 @@ const GitManagerApp: React.FC = () => {
       setError('Checkout error: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       actionBusyRef.current = false
+      setCheckingOutBranch(null)
     }
   }, [activeDir, refreshAfterCheckout, showActionError])
 
@@ -1499,6 +1502,7 @@ const GitManagerApp: React.FC = () => {
           <CollapsibleSection title="Branches" count={localBranches.length}>
             <LocalBranchTree
               branches={localBranches}
+              checkingOut={checkingOutBranch}
               onCheckout={handleCheckoutBranch}
               onNavigate={navigateToBranch}
               onBranchContextMenu={(e, branch) => {
@@ -6123,16 +6127,17 @@ function buildBranchTree(branches: GitBranchInfo[]): BranchTreeNode {
 
 const LocalBranchTree: React.FC<{
   branches: GitBranchInfo[]
+  checkingOut?: string | null
   onCheckout: (name: string) => void
   onNavigate?: (branchName: string) => void
   onBranchContextMenu?: (e: React.MouseEvent, branch: GitBranchInfo) => void
-}> = ({ branches, onCheckout, onNavigate, onBranchContextMenu }) => {
+}> = ({ branches, checkingOut, onCheckout, onNavigate, onBranchContextMenu }) => {
   const tree = useMemo(() => buildBranchTree(branches), [branches])
 
   return (
     <>
       {[...tree.children.values()].map((node) => (
-        <LocalBranchNode key={node.fullPath} node={node} depth={0} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onBranchContextMenu} />
+        <LocalBranchNode key={node.fullPath} node={node} depth={0} checkingOut={checkingOut} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onBranchContextMenu} />
       ))}
     </>
   )
@@ -6141,27 +6146,30 @@ const LocalBranchTree: React.FC<{
 const LocalBranchNode: React.FC<{
   node: BranchTreeNode
   depth: number
+  checkingOut?: string | null
   onCheckout: (name: string) => void
   onNavigate?: (branchName: string) => void
   onContextMenu?: (e: React.MouseEvent, branch: GitBranchInfo) => void
-}> = ({ node, depth, onCheckout, onNavigate, onContextMenu }) => {
+}> = ({ node, depth, checkingOut, onCheckout, onNavigate, onContextMenu }) => {
   const [collapsed, setCollapsed] = useState(false)
   const isLeaf = node.branch !== undefined && node.children.size === 0
   const isGroup = node.children.size > 0
 
   if (isLeaf) {
     const b = node.branch!
+    const isSwitching = checkingOut === b.name
     return (
       <div
-        className={`gm-sidebar-item${b.current ? ' gm-sidebar-item-active' : ''}`}
+        className={`gm-sidebar-item${b.current ? ' gm-sidebar-item-active' : ''}${isSwitching ? ' gm-sidebar-item-switching' : ''}`}
         style={{ paddingLeft: 22 + depth * 14 }}
         title={b.tracking ? `Tracking: ${b.tracking}` : undefined}
         onClick={() => onNavigate?.(b.name)}
-        onDoubleClick={() => { if (!b.current) onCheckout(b.name) }}
+        onDoubleClick={() => { if (!b.current && !checkingOut) onCheckout(b.name) }}
         onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, b) } }}
       >
+        {isSwitching && <span className="gm-branch-spinner" />}
         <span className="gm-branch-name">{node.name}</span>
-        {(b.ahead > 0 || b.behind > 0) && (
+        {(b.ahead > 0 || b.behind > 0) && !isSwitching && (
           <span className="gm-branch-badges">
             {b.ahead > 0 && <span className="gm-badge gm-badge-ahead">+{b.ahead}</span>}
             {b.behind > 0 && <span className="gm-badge gm-badge-behind">-{b.behind}</span>}
@@ -6202,7 +6210,7 @@ const LocalBranchNode: React.FC<{
         </div>
       )}
       {!collapsed && [...node.children.values()].map((child) => (
-        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onContextMenu} />
+        <LocalBranchNode key={child.fullPath} node={child} depth={depth + 1} checkingOut={checkingOut} onCheckout={onCheckout} onNavigate={onNavigate} onContextMenu={onContextMenu} />
       ))}
     </>
   )

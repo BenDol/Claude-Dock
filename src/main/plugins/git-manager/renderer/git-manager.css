@@ -823,6 +823,25 @@
   flex-shrink: 0;
 }
 
+.gm-sidebar-item-switching {
+  opacity: 0.7;
+}
+
+.gm-branch-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: gm-spin 0.7s linear infinite;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+@keyframes gm-spin {
+  to { transform: rotate(360deg); }
+}
+
 .gm-sidebar-item-kb-focus {
   background: var(--bg-tertiary);
   outline: 1px solid var(--accent-color, #7aa2f7);
