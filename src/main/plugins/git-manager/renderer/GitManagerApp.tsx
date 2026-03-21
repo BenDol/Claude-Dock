@@ -3813,6 +3813,17 @@ const VirtualFileList: React.FC<{
       }
     }
 
+    // Ctrl+A = select all files in this panel
+    if (key === 'a' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      if (files.length > 0) {
+        const allPaths = files.map(f => f.path)
+        onShiftSelect(allPaths, files[files.length - 1].path, isStaged)
+        anchorIdxRef.current = 0
+      }
+      return
+    }
+
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
 
