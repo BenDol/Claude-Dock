@@ -1324,14 +1324,21 @@ function getDataFileExcludes(_cwd: string): string[] {
 }
 
 export async function generateCommitMessage(cwd: string): Promise<string> {
-  // Get staged file list, stat, and diff
+  // Get staged file list, stat, and diff.
+  // Cap diff fetch at 8KB — LLM providers only use 4000 chars anyway, and
+  // fetching multi-MB diffs wastes memory on repos with large binary/data changes.
+  const MAX_DIFF_BYTES = 8 * 1024
   const [namesResult, statResult, diffResult] = await Promise.all([
     gitExec(cwd, ['diff', '--cached', '--name-only'], 5000),
     gitExec(cwd, ['diff', '--cached', '--stat', '--no-color'], 10000),
     // Exclude large data files from the diff to avoid overwhelming the LLM
-    gitExec(cwd, ['diff', '--cached', '--no-color', '--unified=1',
-      '--', '.', ...getDataFileExcludes(cwd)
-    ], 10000).catch(() => ({ stdout: '', stderr: '' }))
+    new Promise<{ stdout: string; stderr: string }>((resolve) => {
+      const args = ['diff', '--cached', '--no-color', '--unified=1', '--', '.', ...getDataFileExcludes(cwd)]
+      execFile('git', args, { cwd, timeout: 10000, maxBuffer: MAX_DIFF_BYTES }, (err, stdout) => {
+        // maxBuffer exceeded just means we got a partial diff — that's fine
+        resolve({ stdout: stdout || '', stderr: '' })
+      })
+    })
   ])
 
   const stat = statResult.stdout.trim()

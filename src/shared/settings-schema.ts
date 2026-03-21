@@ -68,6 +68,7 @@ export interface Settings {
   advanced: {
     debugLogging: boolean
     disableGpuAcceleration: boolean
+    maxHeapSizeMb: number
   }
 }
 
@@ -258,6 +259,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   advanced: {
     debugLogging: false,
-    disableGpuAcceleration: false
+    disableGpuAcceleration: false,
+    maxHeapSizeMb: 2048
   }
 }

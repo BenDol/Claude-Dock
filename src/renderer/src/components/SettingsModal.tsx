@@ -963,6 +963,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     Open DevTools
                   </button>
                 </div>
+                <label>
+                  Memory Limit (MB)
+                  <input
+                    type="number"
+                    min={256}
+                    max={8192}
+                    step={256}
+                    value={settings.advanced.maxHeapSizeMb}
+                    onChange={(e) => update({ advanced: { ...settings.advanced, maxHeapSizeMb: parseInt(e.target.value) || 2048 } })}
+                  />
+                </label>
+                <div className="settings-description">
+                  V8 heap size for renderer processes. Increase if the git-manager crashes on large repos. Requires restart.
+                </div>
                 <div className="settings-divider" />
                 <div className="settings-section-header">Claude CLI</div>
                 <div>

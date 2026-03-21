@@ -43,6 +43,13 @@ initLogger(cliDebug || settingsDebug || buildDebug)
 // On macOS/Linux, Electron inherits a minimal PATH when launched from Finder/desktop.
 enrichPathWithKnownDirs()
 
+// Increase V8 heap limit for renderer processes (default ~256MB).
+// The git-manager renderer can exceed this on large repos with many diffs.
+// Configurable via settings (requires restart). Default: 2048MB.
+const heapSizeMb = (() => { try { return getSetting('advanced')?.maxHeapSizeMb } catch { return undefined } })()
+const effectiveHeap = typeof heapSizeMb === 'number' && heapSizeMb >= 256 ? heapSizeMb : 2048
+app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${effectiveHeap}`)
+
 // Disable GPU acceleration for portable exe — GPU compositing from the temp extraction
 // directory causes rendering failures (tiny terminals, broken canvas) with multiple windows.
 // Also allow users to opt-in via settings for any install type.
