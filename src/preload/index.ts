@@ -19,6 +19,15 @@ import type {
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
 import type { ClaudeTaskRequest } from '../shared/claude-task-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
+import type {
+  CloudProviderId,
+  CloudProviderInfo,
+  CloudDashboardData,
+  CloudCluster,
+  CloudClusterDetail,
+  CloudWorkload,
+  CloudWorkloadDetail
+} from '../shared/cloud-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -277,6 +286,19 @@ export interface DockApi {
     setKey: (key: string) => Promise<{ success: boolean }>
     hasKey: () => Promise<{ hasKey: boolean }>
     clearKey: () => Promise<{ success: boolean }>
+  }
+  cloudIntegration: {
+    open: (projectDir: string) => Promise<void>
+    getProviders: () => Promise<CloudProviderInfo[]>
+    getActiveProvider: (projectDir: string) => Promise<CloudProviderInfo | null>
+    setProvider: (projectDir: string, providerId: CloudProviderId) => Promise<CloudProviderInfo | null>
+    getDashboard: (projectDir: string) => Promise<CloudDashboardData | null>
+    getClusters: (projectDir: string) => Promise<CloudCluster[]>
+    getClusterDetail: (projectDir: string, clusterName: string) => Promise<CloudClusterDetail | null>
+    getWorkloads: (projectDir: string, clusterName?: string) => Promise<CloudWorkload[]>
+    getWorkloadDetail: (projectDir: string, clusterName: string, namespace: string, workloadName: string, kind: string) => Promise<CloudWorkloadDetail | null>
+    getConsoleUrl: (projectDir: string, section: string, params?: Record<string, string>) => Promise<string | null>
+    checkAuth: (projectDir: string) => Promise<boolean>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -570,6 +592,19 @@ const dockApi: DockApi = {
     setKey: (key) => ipcRenderer.invoke(IPC.USAGE_SET_KEY, key),
     hasKey: () => ipcRenderer.invoke(IPC.USAGE_HAS_KEY),
     clearKey: () => ipcRenderer.invoke(IPC.USAGE_CLEAR_KEY)
+  },
+  cloudIntegration: {
+    open: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_OPEN, projectDir),
+    getProviders: () => ipcRenderer.invoke(IPC.CLOUD_GET_PROVIDERS),
+    getActiveProvider: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_ACTIVE_PROVIDER, projectDir),
+    setProvider: (projectDir, providerId) => ipcRenderer.invoke(IPC.CLOUD_SET_PROVIDER, projectDir, providerId),
+    getDashboard: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_DASHBOARD, projectDir),
+    getClusters: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTERS, projectDir),
+    getClusterDetail: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTER_DETAIL, projectDir, clusterName),
+    getWorkloads: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOADS, projectDir, clusterName),
+    getWorkloadDetail: (projectDir, clusterName, namespace, workloadName, kind) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOAD_DETAIL, projectDir, clusterName, namespace, workloadName, kind),
+    getConsoleUrl: (projectDir, section, params) => ipcRenderer.invoke(IPC.CLOUD_GET_CONSOLE_URL, projectDir, section, params),
+    checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

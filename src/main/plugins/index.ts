@@ -12,9 +12,12 @@ declare const __BUILD_SHA__: string
 import { registerServiceFactory, getServiceEntry } from './plugin-service-registry'
 import { setServices as setGitManagerServices } from './git-manager/services'
 import { createBundledServices as createGitManagerServices } from './git-manager/bundled-services'
+import { setServices as setCloudIntegrationServices } from './cloud-integration/services'
+import { createBundledServices as createCloudIntegrationServices } from './cloud-integration/bundled-services'
 
 // Register service factories for built-in plugins
 registerServiceFactory('git-manager', createGitManagerServices, setGitManagerServices)
+registerServiceFactory('cloud-integration', createCloudIntegrationServices, setCloudIntegrationServices)
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.
