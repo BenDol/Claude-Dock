@@ -1209,9 +1209,12 @@ const GitManagerApp: React.FC = () => {
         const r = await api.gitManager.updateSubmodules(activeDir, [sub.path], true)
         if (!r.success) throw new Error(r.error || 'Submodule init failed')
 
-        // Verify the submodule is actually initialized by checking if it's a git repo
-        const check = await api.gitManager.isRepo(activeDir + '/' + sub.path)
-        if (!check) {
+        // Verify the submodule is actually its own git root (not just inside the parent repo).
+        // isRepo() uses --is-inside-work-tree which returns true even for uninitialized submodule
+        // dirs that are inside the parent repo. We need to check the submodules list instead.
+        const subs = await api.gitManager.getSubmodules(activeDir)
+        const updatedSub = subs.find((s) => s.path === sub.path)
+        if (!updatedSub || updatedSub.status === 'uninitialized') {
           // The directory likely exists with files but no .git — offer force reinit
           setActionError({
             title: 'Submodule directory blocked',
