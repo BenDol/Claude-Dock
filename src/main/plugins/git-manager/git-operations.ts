@@ -1617,45 +1617,39 @@ export async function forceReinitSubmodule(cwd: string, subPath: string): Promis
     svc.log(`[git-manager] forceReinitSubmodule: sync failed: ${e}`)
   }
   try {
-    await gitExec(cwd, ['submodule', 'init', '--', subPath], 15000)
-    svc.log(`[git-manager] forceReinitSubmodule: init complete`)
-  } catch (e) {
-    svc.log(`[git-manager] forceReinitSubmodule: init failed: ${e}`)
-  }
-  try {
-    const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--', subPath], 120000)
+    const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--init', '--', subPath], 120000)
     output = (stdout + stderr).trim()
-    svc.log(`[git-manager] forceReinitSubmodule: update ${output || '(no output)'}`)
+    svc.log(`[git-manager] forceReinitSubmodule: update --init ${output || '(no output)'}`)
   } catch (e) {
-    svc.log(`[git-manager] forceReinitSubmodule: update failed: ${e}`)
-    // Last resort: try direct clone if we have the URL
-    if (subUrl) {
-      svc.log(`[git-manager] forceReinitSubmodule: attempting direct clone as fallback`)
-      try {
-        const { stdout: cloneOut, stderr: cloneErr } = await gitExec(cwd, ['clone', subUrl, subPath], 120000)
-        output = (cloneOut + cloneErr).trim()
-        svc.log(`[git-manager] forceReinitSubmodule: direct clone ${output || '(no output)'}`)
-      } catch (cloneErr) {
-        output = cloneErr instanceof Error ? cloneErr.message : String(cloneErr)
-        svc.log(`[git-manager] forceReinitSubmodule: direct clone also failed: ${output}`)
-      }
+    svc.log(`[git-manager] forceReinitSubmodule: update --init failed: ${e}`)
+  }
+
+  // Check if submodule was cloned — if not, try direct git clone as fallback
+  const gitEntry = path.join(absPath, '.git')
+  if (!fs.existsSync(gitEntry) && subUrl) {
+    svc.log(`[git-manager] forceReinitSubmodule: submodule update didn't clone, trying direct git clone`)
+    try {
+      const { stdout: cloneOut, stderr: cloneErr } = await gitExec(cwd, ['clone', subUrl, subPath], 120000)
+      output = (cloneOut + cloneErr).trim()
+      svc.log(`[git-manager] forceReinitSubmodule: direct clone ${output || '(no output)'}`)
+    } catch (cloneErr) {
+      const cloneMsg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr)
+      svc.log(`[git-manager] forceReinitSubmodule: direct clone failed: ${cloneMsg}`)
+      output += '\n' + cloneMsg
     }
   }
 
-  // Verify the submodule was actually cloned
-  const gitEntry = path.join(absPath, '.git')
+  // Final verification
   if (!fs.existsSync(gitEntry)) {
     const urlHint = subUrl ? `\n\nSubmodule URL: ${subUrl}` : ''
     throw new Error(
-      `Submodule "${subPath}" could not be cloned. The directory was removed but git submodule update --init did not recreate it.${urlHint}\n\n` +
+      `Submodule "${subPath}" could not be cloned.${urlHint}\n\n` +
+      `Both "git submodule update --init" and direct "git clone" failed.\n\n` +
       `Possible causes:\n` +
       `  - The submodule URL is incorrect or inaccessible\n` +
-      `  - Authentication is required for the submodule repository\n` +
-      `  - Network connectivity issues\n\n` +
-      `Try running manually in a terminal:\n` +
-      `  git submodule sync "${subPath}"\n` +
-      `  git submodule update --init "${subPath}"` +
-      (output ? `\n\nGit output: ${output}` : '')
+      `  - Authentication is required (try: git clone ${subUrl || '<url>'} in a terminal)\n` +
+      `  - Network connectivity issues` +
+      (output ? `\n\nGit output:\n${output}` : '')
     )
   }
 
