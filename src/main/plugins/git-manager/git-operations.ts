@@ -1414,6 +1414,7 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
     }
 
     // Fallback: if git submodule status returned nothing, try parsing .gitmodules
+    // and check each submodule individually to determine its real status
     if (submodules.length === 0) {
       try {
         const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'], 5000)
@@ -1422,11 +1423,33 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
           if (match) {
             let subPath = match[2].trim().replace(/^\.\//, '')
             if (!subPath || subPath === '.' || subPath === '/') continue
+
+            // Check if this individual submodule is actually initialized
+            // by looking for a .git file/folder in its directory
+            const absSubPath = path.join(cwd, subPath)
+            const gitEntry = path.join(absSubPath, '.git')
+            let status: GitSubmoduleInfo['status'] = 'uninitialized'
+            let hash = '????????'
+
+            if (fs.existsSync(gitEntry)) {
+              // Has .git — it's initialized. Try to get its HEAD hash
+              status = 'current'
+              try {
+                const { stdout: headOut } = await gitExec(absSubPath, ['rev-parse', 'HEAD'], 5000)
+                hash = headOut.trim().slice(0, 8)
+              } catch { /* keep default hash */ }
+              // Check if it has modifications vs what the parent expects
+              try {
+                const { stdout: diffOut } = await gitExec(cwd, ['diff', '--name-only', '--', subPath], 5000)
+                if (diffOut.trim()) status = 'modified'
+              } catch { /* keep current status */ }
+            }
+
             submodules.push({
               name: subPath.split('/').pop() || subPath,
               path: subPath,
-              hash: '????????',
-              status: 'uninitialized'
+              hash,
+              status
             })
           }
         }
