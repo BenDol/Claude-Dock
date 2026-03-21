@@ -78,6 +78,23 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * Check that `cwd` is actually the root of its own git repository, not just
+ * a subdirectory inside a parent repo.  Used when navigating into submodules
+ * to detect broken/uninitialized submodules whose .git reference is missing,
+ * which would cause git commands to silently operate on the parent repo.
+ */
+export async function isGitRoot(cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await gitExec(cwd, ['rev-parse', '--show-toplevel'], 5000)
+    const toplevel = stdout.trim().replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+    const expected = cwd.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+    return toplevel === expected
+  } catch {
+    return false
+  }
+}
+
 // --- Log ---
 
 const LOG_FORMAT = '%H%n%h%n%an%n%ae%n%aI%n%s%n%P%n%D%n---END---'

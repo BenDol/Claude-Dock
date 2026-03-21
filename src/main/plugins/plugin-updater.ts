@@ -70,17 +70,18 @@ function isNewerVersion(current: string, remote: string): boolean {
   return compareVersions(b, a) > 0
 }
 
-function hashDirectory(dirPath: string): string {
+function hashDirectory(dirPath: string, exclude?: Set<string>): string {
   const hash = crypto.createHash('sha256')
   const entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
   for (const entry of entries) {
+    if (exclude && exclude.has(entry.name)) continue
     const fullPath = path.join(dirPath, entry.name)
     if (entry.isFile()) {
       hash.update(entry.name)
       hash.update(fs.readFileSync(fullPath))
     } else if (entry.isDirectory()) {
       hash.update(entry.name)
-      hash.update(hashDirectory(fullPath))
+      hash.update(hashDirectory(fullPath, exclude))
     }
   }
   return hash.digest('hex')
@@ -307,25 +308,19 @@ export class PluginUpdateService {
       log(`[plugin-updater] ${info.id}: localVer=${info.version} remoteVer=${entry.version} localSha=${localPluginSha?.slice(0, 7) || 'none'} remoteSha=${entry.buildSha?.slice(0, 7) || 'none'} commitEpoch=${entry.commitEpoch || 0} appBuildEpoch=${appBuildEpoch} hasOverride=${!!installedOverride} overrideHash=${installedOverride?.hash?.slice(0, 12) || 'none'} entryHash=${entry.hash?.slice(0, 12) || 'none'}`)
       let hasUpdate: boolean
       if (profile === 'bleeding-edge') {
+        // Bleeding-edge: only flag when an override exists and the build SHA
+        // differs. Without an override the bundled code is authoritative.
         hasUpdate = !!localPluginSha && entry.buildSha !== localPluginSha
+          && !!installedOverride
       } else {
         const newerVersion = isNewerVersion(info.version, entry.version)
-        // Same-version hotfix: the plugin was modified after this app was built.
-        // Compare the manifest's per-plugin commit epoch against the app's build
-        // epoch — only flag if the plugin commit is strictly newer.
-        // Falls back to buildSha comparison if epoch data is unavailable.
-        let sameVersionNewer = false
-        if (info.version === entry.version && !!localPluginSha && entry.buildSha !== localPluginSha) {
-          if (entry.commitEpoch && appBuildEpoch) {
-            sameVersionNewer = entry.commitEpoch > appBuildEpoch
-          } else {
-            // No epoch data — fall back to buildSha mismatch (legacy manifests).
-            // Only flag when an override is installed; without one the bundled
-            // code IS the latest and the SHA mismatch is just noise from a
-            // stale manifest (see comment above).
-            sameVersionNewer = !!installedOverride
-          }
-        }
+        // Same-version hotfix: only flag when the user has an installed override
+        // whose content hash differs from the manifest. Without an override,
+        // the bundled code IS the latest (overrides are cleared on app update)
+        // and buildSha mismatches are just build-environment noise.
+        const sameVersionNewer = info.version === entry.version
+          && !!installedOverride
+          && !!entry.hash && installedOverride.hash !== entry.hash
         hasUpdate = newerVersion || sameVersionNewer
         log(`[plugin-updater] ${info.id}: newerVersion=${newerVersion} sameVersionNewer=${sameVersionNewer} hasUpdate=${hasUpdate}`)
       }
@@ -481,15 +476,18 @@ export class PluginUpdateService {
     // Use tar/unzip via child_process for cross-platform zip extraction
     await this.extractFromZip(this.pluginsZipPath, entry.archivePath || entry.pluginId, overrideDir)
 
-    // Verify hash
-    const actualHash = hashDirectory(overrideDir)
+    // Verify content hash — excludes meta.json to match how the manifest computes
+    // the hash (meta.json contains build metadata that varies between builds)
+    const META_EXCLUDE = new Set(['meta.json'])
+    const actualHash = hashDirectory(overrideDir, META_EXCLUDE)
     if (actualHash !== entry.hash) {
       // Clean up on hash mismatch
       fs.rmSync(overrideDir, { recursive: true, force: true })
       throw new Error(`Hash mismatch for ${entry.pluginId}: expected ${entry.hash}, got ${actualHash}`)
     }
 
-    // Write meta.json
+    // Rewrite meta.json with the verified content hash (the one from the zip
+    // may have an older hash value from a previous build)
     const meta: PluginOverrideEntry = {
       version: entry.newVersion,
       buildSha: entry.hash,

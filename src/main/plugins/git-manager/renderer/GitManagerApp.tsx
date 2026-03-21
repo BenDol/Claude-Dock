@@ -800,7 +800,12 @@ const GitManagerApp: React.FC = () => {
     const api = getDockApi()
     setLoading(true)
     try {
-      const isRepo = await api.gitManager.isRepo(activeDir)
+      // Use strict mode when inside a submodule (activeDir !== projectDir) to
+      // verify the directory is actually a git root — not just inside the parent.
+      // Broken/uninitialized submodules pass the basic isRepo check but their
+      // git commands silently operate on the parent repo.
+      const isSubmodule = activeDir !== projectDir
+      const isRepo = await api.gitManager.isRepo(activeDir, isSubmodule)
       if (gen !== refreshGenRef.current) return // stale
       if (!isRepo) {
         setNotGitRepo(true)
@@ -1199,7 +1204,14 @@ const GitManagerApp: React.FC = () => {
   }, [])
 
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
+    // Uninitialized submodules have no .git reference, so git commands would
+    // silently fall back to the parent repo — showing wrong commits/branches.
+    if (sub.status === 'uninitialized') {
+      setActionError(`Cannot open submodule "${sub.name}" — it is not initialized. Run: git submodule update --init "${sub.path}"`)
+      return
+    }
     setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    wcBusyRef.current = false
     resetRepoState()
     setActiveDir(activeDir + '/' + sub.path)
   }, [activeDir, resetRepoState])
