@@ -308,19 +308,23 @@ export class PluginUpdateService {
       log(`[plugin-updater] ${info.id}: localVer=${info.version} remoteVer=${entry.version} localSha=${localPluginSha?.slice(0, 7) || 'none'} remoteSha=${entry.buildSha?.slice(0, 7) || 'none'} commitEpoch=${entry.commitEpoch || 0} appBuildEpoch=${appBuildEpoch} hasOverride=${!!installedOverride} overrideHash=${installedOverride?.hash?.slice(0, 12) || 'none'} entryHash=${entry.hash?.slice(0, 12) || 'none'}`)
       let hasUpdate: boolean
       if (profile === 'bleeding-edge') {
-        // Bleeding-edge: only flag when an override exists and the build SHA
-        // differs. Without an override the bundled code is authoritative.
-        hasUpdate = !!localPluginSha && entry.buildSha !== localPluginSha
-          && !!installedOverride
+        // Bleeding-edge: flag when the build SHA differs AND either:
+        // (a) an override is already installed (update to the override), or
+        // (b) the remote plugin was committed after the app was built
+        //     (genuine new code published after this exe was compiled)
+        const shaChanged = !!localPluginSha && entry.buildSha !== localPluginSha
+        const committedAfterBuild = (entry.commitEpoch || 0) > appBuildEpoch && appBuildEpoch > 0
+        hasUpdate = shaChanged && (!!installedOverride || committedAfterBuild)
+        log(`[plugin-updater] ${info.id}: shaChanged=${shaChanged} committedAfterBuild=${committedAfterBuild} hasUpdate=${hasUpdate}`)
       } else {
         const newerVersion = isNewerVersion(info.version, entry.version)
-        // Same-version hotfix: only flag when the user has an installed override
-        // whose content hash differs from the manifest. Without an override,
-        // the bundled code IS the latest (overrides are cleared on app update)
-        // and buildSha mismatches are just build-environment noise.
+        // Same-version hotfix: flag when the user has an installed override
+        // whose content hash differs, OR when the remote was committed after
+        // the app was built (genuine plugin-only update)
         const sameVersionNewer = info.version === entry.version
-          && !!installedOverride
-          && !!entry.hash && installedOverride.hash !== entry.hash
+          && !!localPluginSha && entry.buildSha !== localPluginSha
+          && ((!!installedOverride && !!entry.hash && installedOverride.hash !== entry.hash)
+            || ((entry.commitEpoch || 0) > appBuildEpoch && appBuildEpoch > 0))
         hasUpdate = newerVersion || sameVersionNewer
         log(`[plugin-updater] ${info.id}: newerVersion=${newerVersion} sameVersionNewer=${sameVersionNewer} hasUpdate=${hasUpdate}`)
       }
