@@ -17,14 +17,7 @@ export class CloudIntegrationPlugin implements DockPlugin {
     try { return require('electron').app.getVersion() } catch { return '0.0.0' }
   }
   readonly lazyLoad = true
-  readonly settingsSchema: PluginSettingDef[] = [
-    {
-      key: 'provider',
-      label: 'Cloud provider (gcp, aws, azure, digitalocean)',
-      type: 'string',
-      defaultValue: 'gcp'
-    }
-  ]
+  readonly settingsSchema: PluginSettingDef[] = []
 
   register(bus: PluginEventBus): void {
     registerCloudIpc()

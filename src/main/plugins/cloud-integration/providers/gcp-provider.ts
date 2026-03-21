@@ -21,7 +21,8 @@ import type {
   WorkloadCondition,
   ClusterStatus,
   WorkloadStatus,
-  WorkloadKind
+  WorkloadKind,
+  CloudSetupStatus
 } from '../../../../shared/cloud-types'
 
 const execFileAsync = promisify(execFile)
@@ -390,6 +391,90 @@ export class GcpProvider implements CloudProvider {
       strategy: raw.spec?.strategy?.type || raw.spec?.updateStrategy?.type || undefined,
       conditions
     }
+  }
+
+  async getSetupStatus(): Promise<CloudSetupStatus> {
+    const steps = [
+      {
+        id: 'install-cli',
+        title: 'Install Google Cloud CLI',
+        description: 'The gcloud CLI is required to communicate with GCP. Download and install it, then restart your terminal.',
+        command: 'https://cloud.google.com/sdk/docs/install',
+        helpUrl: 'https://cloud.google.com/sdk/docs/install',
+        helpLabel: 'Download Google Cloud CLI',
+        verifiable: true
+      },
+      {
+        id: 'authenticate',
+        title: 'Authenticate with GCP',
+        description: 'Sign in to your Google Cloud account. This will open a browser window for authentication.',
+        command: 'gcloud auth login',
+        helpUrl: 'https://cloud.google.com/sdk/gcloud/reference/auth/login',
+        helpLabel: 'Authentication docs',
+        verifiable: true
+      },
+      {
+        id: 'set-project',
+        title: 'Set active project',
+        description: 'Select the GCP project you want to manage. Replace PROJECT_ID with your project ID.',
+        command: 'gcloud config set project PROJECT_ID',
+        helpUrl: 'https://console.cloud.google.com/projectselector2',
+        helpLabel: 'View your projects',
+        verifiable: true
+      },
+      {
+        id: 'install-kubectl',
+        title: 'Install kubectl',
+        description: 'kubectl is required for Kubernetes cluster management. Install it via gcloud components.',
+        command: 'gcloud components install kubectl',
+        helpUrl: 'https://cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl',
+        helpLabel: 'kubectl setup docs',
+        verifiable: true
+      }
+    ]
+
+    // Check which steps are complete
+    let currentStep = 0
+
+    // Step 0: Is gcloud installed?
+    try {
+      await gcloud('version')
+      currentStep = 1
+    } catch {
+      return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+    }
+
+    // Step 1: Is the user authenticated?
+    try {
+      const account = await gcloud('auth', 'list', '--filter=status:ACTIVE', '--format=value(account)')
+      if (account.length > 0) currentStep = 2
+      else return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+    } catch {
+      return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+    }
+
+    // Step 2: Is a project set?
+    try {
+      const project = await gcloud('config', 'get-value', 'project')
+      if (project && project !== '(unset)') {
+        this.projectId = project
+        currentStep = 3
+      } else {
+        return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+      }
+    } catch {
+      return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+    }
+
+    // Step 3: Is kubectl installed?
+    try {
+      await execFileAsync('kubectl', ['version', '--client', '--short'], { timeout: CMD_TIMEOUT, windowsHide: true })
+      currentStep = 4
+    } catch {
+      return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
+    }
+
+    return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: true }
   }
 
   getConsoleUrl(

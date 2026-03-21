@@ -26,7 +26,8 @@ import type {
   CloudCluster,
   CloudClusterDetail,
   CloudWorkload,
-  CloudWorkloadDetail
+  CloudWorkloadDetail,
+  CloudSetupStatus
 } from '../shared/cloud-types'
 
 export interface UpdateInfo {
@@ -300,6 +301,7 @@ export interface DockApi {
     getWorkloadDetail: (projectDir: string, clusterName: string, namespace: string, workloadName: string, kind: string) => Promise<CloudWorkloadDetail | null>
     getConsoleUrl: (projectDir: string, section: string, params?: Record<string, string>) => Promise<string | null>
     checkAuth: (projectDir: string) => Promise<boolean>
+    getSetupStatus: (projectDir: string, providerId?: string) => Promise<CloudSetupStatus | null>
   }
   debug: {
     write: (text: string) => Promise<void>
@@ -606,7 +608,8 @@ const dockApi: DockApi = {
     getWorkloads: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOADS, projectDir, clusterName),
     getWorkloadDetail: (projectDir, clusterName, namespace, workloadName, kind) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOAD_DETAIL, projectDir, clusterName, namespace, workloadName, kind),
     getConsoleUrl: (projectDir, section, params) => ipcRenderer.invoke(IPC.CLOUD_GET_CONSOLE_URL, projectDir, section, params),
-    checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir)
+    checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir),
+    getSetupStatus: (projectDir, providerId) => ipcRenderer.invoke(IPC.CLOUD_GET_SETUP_STATUS, projectDir, providerId)
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),

@@ -149,6 +149,19 @@ export function registerCloudIpc(): void {
     }
   })
 
+  // Get setup wizard status for a provider
+  ipcMain.handle(IPC.CLOUD_GET_SETUP_STATUS, async (_e, projectDir: string, providerId?: string) => {
+    const id = providerId || (svc().getPluginSetting(projectDir, 'cloud-integration', 'provider') as string) || 'gcp'
+    const provider = getProvider(id as any)
+    if (!provider) return null
+    try {
+      return await provider.getSetupStatus()
+    } catch (err) {
+      svc().logError('[cloud-integration] getSetupStatus failed', err)
+      return null
+    }
+  })
+
   svc().log('[cloud-integration] IPC handlers registered')
 }
 
@@ -164,7 +177,8 @@ export function disposeCloudIpc(): void {
     IPC.CLOUD_GET_WORKLOADS,
     IPC.CLOUD_GET_WORKLOAD_DETAIL,
     IPC.CLOUD_GET_CONSOLE_URL,
-    IPC.CLOUD_CHECK_AUTH
+    IPC.CLOUD_CHECK_AUTH,
+    IPC.CLOUD_GET_SETUP_STATUS
   ]
   for (const ch of channels) {
     try { ipcMain.removeHandler(ch) } catch { /* ignore */ }

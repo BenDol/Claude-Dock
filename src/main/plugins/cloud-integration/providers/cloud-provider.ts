@@ -12,7 +12,8 @@ import type {
   CloudCluster,
   CloudClusterDetail,
   CloudWorkload,
-  CloudWorkloadDetail
+  CloudWorkloadDetail,
+  CloudSetupStatus
 } from '../../../../shared/cloud-types'
 
 export interface CloudProvider {
@@ -51,6 +52,9 @@ export interface CloudProvider {
 
   /** Get console URL for a specific section */
   getConsoleUrl(section: 'dashboard' | 'clusters' | 'workloads' | 'cluster' | 'workload', params?: Record<string, string>): string
+
+  /** Get setup wizard status — steps, which are complete, etc. */
+  getSetupStatus(): Promise<CloudSetupStatus>
 
   /** Build provider info for the renderer */
   toInfo(available: boolean): CloudProviderInfo

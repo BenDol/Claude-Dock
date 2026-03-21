@@ -44,13 +44,14 @@ describe('Cloud Types (type safety)', () => {
   it('CloudPage should represent all navigation states', () => {
     const pages: CloudPage[] = [
       { view: 'dashboard' },
+      { view: 'setup' },
       { view: 'kubernetes', tab: 'overview' },
       { view: 'kubernetes', tab: 'clusters' },
       { view: 'kubernetes', tab: 'workloads' },
       { view: 'cluster-detail', clusterName: 'test' },
       { view: 'workload-detail', clusterName: 'c', namespace: 'ns', workloadName: 'w', kind: 'Deployment' }
     ]
-    expect(pages).toHaveLength(6)
+    expect(pages).toHaveLength(7)
   })
 
   it('CloudProviderInfo should have correct shape', () => {
@@ -158,8 +159,7 @@ describe('Cloud Types (type safety)', () => {
 
   it('CloudIntegrationSettings should have correct shape', () => {
     const settings: CloudIntegrationSettings = {
-      provider: 'gcp',
-      gcpProjectId: 'my-project'
+      provider: 'gcp'
     }
     expect(settings.provider).toBe('gcp')
   })

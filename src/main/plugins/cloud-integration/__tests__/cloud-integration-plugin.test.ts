@@ -63,12 +63,9 @@ describe('CloudIntegrationPlugin', () => {
     expect(plugin.lazyLoad).toBe(true)
   })
 
-  it('should have settings schema with provider setting', () => {
+  it('should have empty settings schema (provider is selected in-window)', () => {
     expect(plugin.settingsSchema).toBeDefined()
-    const providerSetting = plugin.settingsSchema!.find((s) => s.key === 'provider')
-    expect(providerSetting).toBeDefined()
-    expect(providerSetting!.type).toBe('string')
-    expect(providerSetting!.defaultValue).toBe('gcp')
+    expect(plugin.settingsSchema).toHaveLength(0)
   })
 
   it('should register successfully', () => {

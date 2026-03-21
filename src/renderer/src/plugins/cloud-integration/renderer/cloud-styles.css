@@ -17,51 +17,152 @@
   justify-content: center;
 }
 
-/* ── Title Bar ──────────────────────────────────────────────────────────── */
+/* ── Title Bar (matches git-manager pattern, uses global win-btn) ─────── */
 
 .cloud-titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  height: var(--toolbar-height, 28px);
+  height: 30px;
+  padding: 0 0 0 8px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 8px;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.cloud-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+}
+
+.cloud-titlebar-center {
+  flex: 1;
+  height: 100%;
+}
+
+.cloud-win-controls {
+  display: flex;
+  height: 100%;
+}
+
+.cloud-win-controls .win-btn {
+  height: 100%;
+  width: 46px;
+  border-radius: 0;
+}
+
+.cloud-provider-icon-small {
+  display: flex;
+  width: 16px;
+  height: 16px;
+}
+
+.cloud-provider-icon-small svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Provider Select Dropdown ────────────────────────────────────────── */
+
+.cloud-provider-select-wrap {
+  position: relative;
+}
+
+.cloud-provider-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+
+.cloud-provider-select-btn:hover {
+  background: var(--hover-color);
+}
+
+.cloud-dropdown-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+.cloud-provider-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 240px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+  z-index: 1000;
+  padding: 4px 0;
+  overflow: hidden;
+}
+
+.cloud-provider-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.cloud-provider-dropdown-item:hover {
+  background: var(--hover-color);
+}
+
+.cloud-provider-dropdown-item.active {
+  background: var(--hover-color);
+}
+
+.cloud-provider-dropdown-icon {
+  display: flex;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
-.cloud-titlebar-title {
-  font-size: 11px;
+.cloud-provider-dropdown-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cloud-provider-dropdown-label {
+  flex: 1;
+  font-weight: 500;
+}
+
+.cloud-provider-dropdown-status {
+  font-size: 10px;
   color: var(--text-secondary);
-  user-select: none;
 }
 
-.cloud-titlebar-buttons {
-  display: flex;
-  gap: 0;
+.cloud-provider-dropdown-status.connected {
+  color: #34d399;
 }
 
-.cloud-titlebar-btn {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  width: 34px;
-  height: var(--toolbar-height, 28px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.cloud-titlebar-btn:hover {
-  background: var(--hover-color);
-  color: var(--text-primary);
-}
-
-.cloud-titlebar-close:hover {
-  background: #e81123;
-  color: #fff;
+.cloud-provider-dropdown-check {
+  color: var(--accent-color);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* ── Body Layout ────────────────────────────────────────────────────────── */
@@ -598,6 +699,22 @@
   transition: background 0.1s;
 }
 
+.cloud-btn-primary {
+  background: var(--accent-color);
+  color: #fff;
+  font-weight: 500;
+}
+
+.cloud-btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+.cloud-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
+}
+
 .cloud-btn-secondary {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -717,4 +834,232 @@
 
 .cloud-overview {
   /* spacer */
+}
+
+/* ── Sidebar Badge ──────────────────────────────────────────────────── */
+
+.cloud-sidebar-badge {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-color);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 4px;
+}
+
+.cloud-sidebar-setup {
+  color: var(--accent-color);
+}
+
+.cloud-sidebar-setup.active {
+  color: var(--accent-color);
+}
+
+/* ── Setup Wizard ───────────────────────────────────────────────────── */
+
+.cloud-setup-provider-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.cloud-setup-provider-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cloud-setup-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.cloud-setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 20px;
+}
+
+.cloud-setup-step {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.cloud-setup-step:last-child {
+  padding-bottom: 0;
+}
+
+/* Vertical connector line between steps */
+.cloud-setup-connector {
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-color);
+}
+
+.cloud-setup-connector.done {
+  background: #34d399;
+}
+
+/* Step indicator (number or check) */
+.cloud-setup-step-indicator {
+  flex-shrink: 0;
+  width: 28px;
+  display: flex;
+  justify-content: center;
+  z-index: 1;
+}
+
+.cloud-setup-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 2px solid var(--border-color);
+}
+
+.cloud-setup-number.active {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  background: rgba(218, 119, 86, 0.1);
+}
+
+.cloud-setup-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #34d399;
+  color: #fff;
+}
+
+/* Step body */
+.cloud-setup-step-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.cloud-setup-step-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.cloud-setup-step.pending .cloud-setup-step-title {
+  color: var(--text-secondary);
+}
+
+.cloud-setup-step.done .cloud-setup-step-title {
+  color: var(--text-secondary);
+}
+
+.cloud-setup-step-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.cloud-setup-step.pending .cloud-setup-step-desc {
+  display: none;
+}
+
+/* Command block */
+.cloud-setup-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.cloud-setup-command code {
+  flex: 1;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cloud-setup-copy-btn {
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.cloud-setup-copy-btn:hover {
+  background: var(--hover-color);
+  color: var(--text-primary);
+}
+
+/* Help link */
+.cloud-setup-help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--accent-color);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cloud-setup-help-link:hover {
+  text-decoration: underline;
+}
+
+/* Actions / verify */
+.cloud-setup-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cloud-setup-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #fbbf24;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  border-radius: 4px;
 }

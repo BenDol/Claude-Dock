@@ -137,16 +137,40 @@ export interface WorkloadCondition {
 
 export type CloudPage =
   | { view: 'dashboard' }
+  | { view: 'setup' }
   | { view: 'kubernetes'; tab: 'overview' | 'clusters' | 'workloads' }
   | { view: 'cluster-detail'; clusterName: string }
   | { view: 'workload-detail'; clusterName: string; namespace: string; workloadName: string; kind: WorkloadKind }
+
+// ── Setup Wizard ─────────────────────────────────────────────────────────────
+
+export interface CloudSetupStep {
+  id: string
+  title: string
+  description: string
+  /** Command the user needs to run (shown in a copyable code block) */
+  command?: string
+  /** URL to open for download/docs */
+  helpUrl?: string
+  /** Label for the help URL link */
+  helpLabel?: string
+  /** Whether this step can be verified automatically */
+  verifiable: boolean
+}
+
+export interface CloudSetupStatus {
+  providerId: CloudProviderId
+  providerName: string
+  icon: string
+  steps: CloudSetupStep[]
+  /** Index of the first incomplete step (all steps before this are done) */
+  currentStep: number
+  /** True when all steps are complete */
+  complete: boolean
+}
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 export interface CloudIntegrationSettings {
   provider: CloudProviderId
-  gcpProjectId?: string
-  awsRegion?: string
-  azureSubscriptionId?: string
-  digitaloceanToken?: string
 }
