@@ -1559,6 +1559,28 @@ export async function forceReinitSubmodule(cwd: string, subPath: string): Promis
 
   svc.log(`[git-manager] forceReinitSubmodule: deinit + remove + re-clone for ${subPath}`)
 
+  // Check the submodule URL first so we can report it if clone fails
+  let subUrl = ''
+  try {
+    const { stdout: urlOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', `submodule.${subPath}.url`], 5000)
+    subUrl = urlOut.trim()
+    svc.log(`[git-manager] forceReinitSubmodule: submodule URL = ${subUrl}`)
+  } catch {
+    // Try with the submodule name instead of path
+    try {
+      const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', `^submodule\\..*\\.path$`], 5000)
+      for (const line of cfgOut.split('\n')) {
+        const m = line.match(/^submodule\.(.+)\.path\s+(.+)$/)
+        if (m && m[2].trim() === subPath) {
+          const { stdout: u } = await gitExec(cwd, ['config', '--file', '.gitmodules', `submodule.${m[1].trim()}.url`], 5000)
+          subUrl = u.trim()
+          break
+        }
+      }
+    } catch { /* ignore */ }
+    svc.log(`[git-manager] forceReinitSubmodule: submodule URL (from name lookup) = ${subUrl || '(not found)'}`)
+  }
+
   // Deinit clears git's internal submodule state
   try {
     await gitExec(cwd, ['submodule', 'deinit', '--force', '--', subPath], 15000)
@@ -1576,6 +1598,24 @@ export async function forceReinitSubmodule(cwd: string, subPath: string): Promis
   const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--init', '--', subPath], 120000)
   const output = (stdout + stderr).trim()
   svc.log(`[git-manager] forceReinitSubmodule: ${output || '(no output)'}`)
+
+  // Verify the submodule was actually cloned
+  const gitEntry = path.join(absPath, '.git')
+  if (!fs.existsSync(gitEntry)) {
+    const urlHint = subUrl ? `\n\nSubmodule URL: ${subUrl}` : ''
+    throw new Error(
+      `Submodule "${subPath}" could not be cloned. The directory was removed but git submodule update --init did not recreate it.${urlHint}\n\n` +
+      `Possible causes:\n` +
+      `  - The submodule URL is incorrect or inaccessible\n` +
+      `  - Authentication is required for the submodule repository\n` +
+      `  - Network connectivity issues\n\n` +
+      `Try running manually in a terminal:\n` +
+      `  git submodule sync "${subPath}"\n` +
+      `  git submodule update --init "${subPath}"` +
+      (output ? `\n\nGit output: ${output}` : '')
+    )
+  }
+
   return output
 }
 
