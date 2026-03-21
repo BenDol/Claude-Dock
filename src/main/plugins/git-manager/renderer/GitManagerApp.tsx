@@ -1206,10 +1206,26 @@ const GitManagerApp: React.FC = () => {
         title: 'Submodule not initialized',
         message: `Cannot open submodule "${sub.name}" — it is not initialized.\n\nRun: git submodule update --init "${sub.path}"`,
         resolutions: [{
-          label: 'Initialize submodule',
-          description: `Run git submodule update --init for "${sub.path}"`,
+          label: 'Initialize & Open',
+          description: `Initialize the submodule and open it`,
           action: async () => {
-            await getDockApi().gitManager.updateSubmodules(activeDir, [sub.path], true)
+            const api = getDockApi()
+            const r = await api.gitManager.updateSubmodules(activeDir, [sub.path], true)
+            if (!r.success) throw new Error(r.error || 'Submodule init failed')
+            // Refresh to get updated submodule status, then navigate in
+            await refresh()
+            // Navigate into the now-initialized submodule
+            setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+            wcBusyRef.current = false
+            resetRepoState()
+            setActiveDir(activeDir + '/' + sub.path)
+          }
+        }, {
+          label: 'Initialize only',
+          description: `Run git submodule update --init without opening`,
+          action: async () => {
+            const r = await getDockApi().gitManager.updateSubmodules(activeDir, [sub.path], true)
+            if (!r.success) throw new Error(r.error || 'Submodule init failed')
             refresh()
           }
         }]
