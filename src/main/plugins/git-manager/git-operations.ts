@@ -497,6 +497,19 @@ export async function getDiff(cwd: string, filePath?: string, staged?: boolean):
   try {
     const { stdout } = await gitExec(cwd, args, 15000)
     const diffs = parseDiffOutput(stdout)
+
+    // Cap total diff lines to prevent renderer OOM on very large diffs
+    const MAX_TOTAL_LINES = 15000
+    let totalLines = 0
+    for (const diff of diffs) {
+      for (const hunk of diff.hunks) {
+        totalLines += hunk.lines.length
+      }
+      if (totalLines > MAX_TOTAL_LINES) {
+        diff.hunks = [{ oldStart: 0, oldCount: 0, newStart: 0, newCount: 0, header: '@@ Diff too large — showing summary only @@', lines: [] }]
+        diff.isBinary = true // signal the viewer to show placeholder instead of content
+      }
+    }
     // If no diff returned for a specific file, it may be untracked or newly added —
     // synthesize a full-content diff so the viewer can display it
     if (diffs.length === 0 && filePath) {

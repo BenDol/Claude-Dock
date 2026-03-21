@@ -96,9 +96,18 @@ export class GitManagerWindowManager {
     win.on('maximize', persistState)
     win.on('unmaximize', persistState)
 
-    // Log renderer crashes and freezes
+    // Auto-recover from renderer crashes by reloading
     win.webContents.on('render-process-gone', (_event, details) => {
       svc().log(`[git-manager] renderer gone for ${projectDir}: reason=${details.reason} exitCode=${details.exitCode}`)
+      if (details.reason === 'crashed' || details.reason === 'oom' || details.reason === 'killed') {
+        svc().log(`[git-manager] auto-reloading after crash for ${projectDir}`)
+        setTimeout(() => {
+          if (!win.isDestroyed()) {
+            const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}`
+            loadPluginWindow(win, svc().paths, queryParam).catch(() => {})
+          }
+        }, 1000)
+      }
     })
     win.on('unresponsive', () => svc().log(`[git-manager] window unresponsive for ${projectDir}`))
     win.on('responsive', () => svc().log(`[git-manager] window responsive again for ${projectDir}`))
