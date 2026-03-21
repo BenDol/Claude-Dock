@@ -1,5 +1,5 @@
 import React from 'react'
-import type { CloudPage, CloudProviderInfo } from '../../../../../../shared/cloud-types'
+import type { CloudPage, CloudProviderInfo } from '../../../../../shared/cloud-types'
 
 interface Props {
   currentPage: CloudPage

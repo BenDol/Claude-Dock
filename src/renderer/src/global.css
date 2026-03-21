@@ -2029,7 +2029,18 @@ body {
   color: var(--text-secondary);
   margin-top: 2px;
   padding-left: 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
+
+.plugin-updated-at {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 .plugin-reset-trust-btn {
   background: none;
   border: 1px solid var(--border-color);

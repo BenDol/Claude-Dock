@@ -6,20 +6,38 @@ interface PluginPanelProps {
   projectDir: string
 }
 
+function formatUpdateDate(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const now = new Date()
+  const diffMs = now.getTime() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60_000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+  return d.toLocaleDateString()
+}
+
 const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [states, setStates] = useState<ProjectPluginStates>({})
+  const [overrides, setOverrides] = useState<Record<string, { version: string; hash: string; installedAt: number }>>({})
   const [loading, setLoading] = useState(true)
   const [expandedSettings, setExpandedSettings] = useState<Set<string>>(new Set())
 
   const refresh = useCallback(async () => {
     const api = getDockApi()
-    const [list, st] = await Promise.all([
+    const [list, st, ov] = await Promise.all([
       api.plugins.getList(),
-      api.plugins.getStates(projectDir)
+      api.plugins.getStates(projectDir),
+      api.plugins.getOverrides()
     ])
     setPlugins(list)
     setStates(st)
+    setOverrides(ov)
     setLoading(false)
   }, [projectDir])
 
@@ -98,7 +116,12 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
               )}
             </div>
             <div className="plugin-description">
-              {plugin.description}
+              <span>{plugin.description}</span>
+              {overrides[plugin.id]?.installedAt > 0 && (
+                <span className="plugin-updated-at" title={new Date(overrides[plugin.id].installedAt).toLocaleString()}>
+                  Updated {formatUpdateDate(overrides[plugin.id].installedAt)}
+                </span>
+              )}
               {plugin.source === 'external' && (
                 <button
                   className="plugin-reset-trust-btn"

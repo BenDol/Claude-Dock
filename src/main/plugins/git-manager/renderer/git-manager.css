@@ -2429,8 +2429,7 @@
 }
 
 .gm-virtual-file-list {
-  overflow-y: auto;
-  max-height: 100%;
+  /* No overflow — parent .gm-changes-file-list handles scrolling */
 }
 
 .gm-virtual-file-list::-webkit-scrollbar {

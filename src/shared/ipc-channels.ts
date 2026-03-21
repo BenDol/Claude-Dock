@@ -56,6 +56,7 @@ export const IPC = {
   PLUGIN_GET_DIR: 'plugin:getDir',
   PLUGIN_OPEN_DIR: 'plugin:openDir',
   PLUGIN_RESET_TRUST: 'plugin:resetTrust',
+  PLUGIN_GET_OVERRIDES: 'plugin:getOverrides',
   DEBUG_WRITE: 'debug:write',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
   DEBUG_OPEN_LOGS: 'debug:openLogs',

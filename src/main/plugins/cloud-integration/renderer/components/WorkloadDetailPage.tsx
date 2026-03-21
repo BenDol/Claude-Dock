@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { getDockApi } from '../../../../lib/ipc-bridge'
-import type { CloudWorkloadDetail, CloudPage, WorkloadKind } from '../../../../../../shared/cloud-types'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import type { CloudWorkloadDetail, CloudPage, WorkloadKind } from '../../../../../shared/cloud-types'
 import StatusBadge from './StatusBadge'
 
 interface Props {

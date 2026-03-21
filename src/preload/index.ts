@@ -147,6 +147,7 @@ export interface DockApi {
     getDir: () => Promise<string>
     openDir: () => Promise<void>
     resetTrust: (pluginId: string) => Promise<{ success: boolean }>
+    getOverrides: () => Promise<Record<string, { version: string; hash: string; installedAt: number }>>
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
     getOpenWindows: (projectDir: string) => Promise<string[]>
     onWindowStateChanged: (callback: (data: { pluginId: string; projectDir: string; open: boolean }) => void) => () => void
@@ -411,6 +412,7 @@ const dockApi: DockApi = {
     getDir: () => ipcRenderer.invoke(IPC.PLUGIN_GET_DIR),
     openDir: () => ipcRenderer.invoke(IPC.PLUGIN_OPEN_DIR),
     resetTrust: (pluginId: string) => ipcRenderer.invoke(IPC.PLUGIN_RESET_TRUST, pluginId),
+    getOverrides: () => ipcRenderer.invoke(IPC.PLUGIN_GET_OVERRIDES),
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     getOpenWindows: (projectDir) => ipcRenderer.invoke(IPC.PLUGIN_GET_OPEN_WINDOWS, projectDir),
     onWindowStateChanged: (callback) => {

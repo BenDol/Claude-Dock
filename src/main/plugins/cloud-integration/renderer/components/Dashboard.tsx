@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { getDockApi } from '../../../../lib/ipc-bridge'
-import type { CloudDashboardData, CloudPage, CloudProviderInfo } from '../../../../../../shared/cloud-types'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import type { CloudDashboardData, CloudPage, CloudProviderInfo } from '../../../../../shared/cloud-types'
 
 interface Props {
   projectDir: string

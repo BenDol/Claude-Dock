@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { getDockApi } from '../../../../lib/ipc-bridge'
-import type { CloudSetupStatus, CloudSetupStep, CloudProviderId } from '../../../../../../shared/cloud-types'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import type { CloudSetupStatus, CloudSetupStep, CloudProviderId } from '../../../../../shared/cloud-types'
 
 interface Props {
   projectDir: string

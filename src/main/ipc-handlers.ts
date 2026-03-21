@@ -486,6 +486,11 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.PLUGIN_GET_OVERRIDES, () => {
+    const { getOverrides } = require('./plugins/plugin-update-store')
+    return getOverrides()
+  })
+
   ipcMain.handle(IPC.PLUGIN_GET_OPEN_WINDOWS, (_event, projectDir: string) => {
     return getOpenPluginIds(projectDir)
   })

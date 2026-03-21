@@ -3636,36 +3636,8 @@ const VirtualFileList: React.FC<{
 }> = React.memo(({ files, section, selectedFile, selectedPaths, stagingPaths, projectDir, onSelect, onShiftSelect, onCtrlSelect, onAction, onBatchAction, onDoubleClick, onContextMenu, actionLabel, actionTitle }) => {
   const api = getDockApi()
   const containerRef = useRef<HTMLDivElement>(null)
-  const [scrollTop, setScrollTop] = useState(0)
-  const [containerHeight, setContainerHeight] = useState(0)
   const isStaged = section === 'staged'
   const anchorIdxRef = useRef(0)
-
-  useLayoutEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const obs = new ResizeObserver((entries) => {
-      for (const e of entries) setContainerHeight(e.contentRect.height)
-    })
-    obs.observe(el)
-    setContainerHeight(el.clientHeight)
-    return () => obs.disconnect()
-  }, [])
-
-  // Clamp scroll when file count changes to prevent blank space
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const maxScroll = Math.max(0, files.length * FILE_ROW_HEIGHT - el.clientHeight)
-    if (el.scrollTop > maxScroll) {
-      el.scrollTop = maxScroll
-      setScrollTop(maxScroll)
-    }
-  }, [files.length])
-
-  const handleScroll = useCallback(() => {
-    if (containerRef.current) setScrollTop(containerRef.current.scrollTop)
-  }, [])
 
   const getRangePaths = useCallback((fromIdx: number, toIdx: number): string[] => {
     const lo = Math.min(fromIdx, toIdx)
@@ -3675,12 +3647,8 @@ const VirtualFileList: React.FC<{
 
   const scrollIntoView = useCallback((idx: number) => {
     if (!containerRef.current) return
-    const targetTop = idx * FILE_ROW_HEIGHT
-    const targetBottom = targetTop + FILE_ROW_HEIGHT
-    const st = containerRef.current.scrollTop
-    const sb = st + containerRef.current.clientHeight
-    if (targetTop < st) containerRef.current.scrollTop = targetTop
-    else if (targetBottom > sb) containerRef.current.scrollTop = targetBottom - containerRef.current.clientHeight
+    const row = containerRef.current.querySelector(`[data-file-idx="${idx}"]`) as HTMLElement | null
+    row?.scrollIntoView({ block: 'nearest' })
   }, [])
 
   // Arrow key navigation + S/U hotkeys for stage/unstage
@@ -3747,28 +3715,17 @@ const VirtualFileList: React.FC<{
     }
   }, [files, isStaged, onSelect, onShiftSelect, onCtrlSelect, getRangePaths])
 
-  const totalHeight = files.length * FILE_ROW_HEIGHT
-  const overscan = 5
-  // Skip virtualization when container hasn't been measured yet or all files fit
-  const shouldVirtualize = containerHeight > 0 && totalHeight > containerHeight
-  const clampedScrollTop = Math.min(scrollTop, Math.max(0, totalHeight - containerHeight))
-  const startIdx = shouldVirtualize ? Math.max(0, Math.floor(clampedScrollTop / FILE_ROW_HEIGHT) - overscan) : 0
-  const endIdx = shouldVirtualize ? Math.min(files.length, Math.ceil((clampedScrollTop + containerHeight) / FILE_ROW_HEIGHT) + overscan) : files.length
-  const visibleFiles = files.slice(startIdx, endIdx)
-  const offsetY = startIdx * FILE_ROW_HEIGHT
-
   if (files.length === 0) return null
 
   return (
-    <div ref={containerRef} className="gm-virtual-file-list" onScroll={handleScroll} onKeyDown={handleKeyDown} tabIndex={0}>
-      <div style={{ height: totalHeight, position: 'relative' }}>
-        <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
-          {visibleFiles.map((f) => {
+    <div ref={containerRef} className="gm-virtual-file-list" onKeyDown={handleKeyDown} tabIndex={0}>
+          {files.map((f, fi) => {
             const isActive = selectedFile?.path === f.path && selectedFile?.staged === isStaged
             const isInSelection = selectedPaths.has(f.path) && selectedFile?.staged === isStaged
             return (
               <div
                 key={f.path}
+                data-file-idx={fi}
                 className={`gm-file-entry${isStaged ? ' gm-file-staged' : ' gm-file-unstaged'}${f.isSubmodule ? ' gm-file-submodule' : ''}${isActive ? ' gm-file-selected' : isInSelection ? ' gm-file-selected gm-file-range-selected' : ''}`}
                 style={{ height: FILE_ROW_HEIGHT }}
                 onMouseDown={(e) => handleMouseDown(e, f)}
@@ -3819,8 +3776,6 @@ const VirtualFileList: React.FC<{
               </div>
             )
           })}
-        </div>
-      </div>
     </div>
   )
 })
