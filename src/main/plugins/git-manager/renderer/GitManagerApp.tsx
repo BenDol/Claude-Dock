@@ -1215,38 +1215,43 @@ const GitManagerApp: React.FC = () => {
         const subs = await api.gitManager.getSubmodules(activeDir)
         const updatedSub = subs.find((s) => s.path === sub.path)
         if (!updatedSub || updatedSub.status === 'uninitialized') {
-          // The directory likely exists with files but no .git — offer force reinit
-          setActionError({
-            title: 'Submodule directory blocked',
-            message: `The directory "${sub.path}" exists but is not a git repository.\n\n` +
-              `This usually means the directory has files from a previous incomplete init. ` +
-              `To fix this, the directory needs to be removed and re-cloned from the submodule URL.\n\n` +
-              `Warning: Any local files in this directory will be deleted.`,
-            resolutions: [{
-              label: 'Remove & Re-clone',
-              description: `Delete "${sub.path}" and clone fresh from the submodule URL`,
-              danger: true,
-              action: async () => {
-                const fr = await api.gitManager.forceReinitSubmodule(activeDir, sub.path)
-                if (!fr.success) throw new Error(fr.error || 'Force reinit failed')
-                await refresh()
-                if (thenOpen) {
-                  setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
-                  wcBusyRef.current = false
-                  resetRepoState()
-                  setActiveDir(activeDir + '/' + sub.path)
+          // The directory likely exists with files but no .git — offer force reinit.
+          // We throw after setting the new error so ErrorDialog's handleResolution
+          // sees the throw, calls onError (which shows the new dialog) instead of
+          // onResolved (which would clear it).
+          throw {
+            __replaceDialog: true,
+            replacement: {
+              title: 'Submodule directory blocked',
+              message: `The directory "${sub.path}" exists but could not be initialized as a git submodule.\n\n` +
+                `This usually means the directory has files from a previous incomplete init that are blocking the clone. ` +
+                `To fix this, the directory needs to be removed and re-cloned from the submodule URL.\n\n` +
+                `Warning: Any local files in this directory will be deleted.`,
+              resolutions: [{
+                label: 'Remove & Re-clone',
+                description: `Delete "${sub.path}" and clone fresh from the submodule URL`,
+                danger: true,
+                action: async () => {
+                  const fr = await api.gitManager.forceReinitSubmodule(activeDir, sub.path)
+                  if (!fr.success) throw new Error(fr.error || 'Force reinit failed')
+                  await refresh()
+                  if (thenOpen) {
+                    setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+                    wcBusyRef.current = false
+                    resetRepoState()
+                    setActiveDir(activeDir + '/' + sub.path)
+                  }
                 }
-              }
-            }, {
-              label: 'Open in Explorer',
-              description: 'View the files before deciding',
-              keepOpen: true,
-              action: async () => {
-                api.app.openInExplorer(activeDir + '/' + sub.path)
-              }
-            }]
-          })
-          return
+              }, {
+                label: 'Open in Explorer',
+                description: 'View the files before deciding',
+                keepOpen: true,
+                action: async () => {
+                  api.app.openInExplorer(activeDir + '/' + sub.path)
+                }
+              }]
+            }
+          }
         }
 
         await refresh()
@@ -1865,6 +1870,7 @@ const GitManagerApp: React.FC = () => {
           onClose={() => setActionError(null)}
           onResolved={() => { setActionError(null); refresh() }}
           onError={(msg) => { setActionError(null); handleSmartError(msg) }}
+          onReplaceError={(newError) => setActionError(newError)}
         />
       )}
       {identitySetup && (
@@ -7801,7 +7807,8 @@ const ErrorDialog: React.FC<{
   onClose: () => void
   onResolved: () => void
   onError: (msg: string) => void
-}> = ({ error, busyRef, onClose, onResolved, onError }) => {
+  onReplaceError?: (newError: ActionError) => void
+}> = ({ error, busyRef, onClose, onResolved, onError, onReplaceError }) => {
   const [busy, setBusy] = useState<string | null>(null)
 
   const handleResolution = async (r: ActionErrorResolution) => {
@@ -7810,8 +7817,16 @@ const ErrorDialog: React.FC<{
     try {
       await r.action()
       if (!r.keepOpen) onResolved()
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Resolution failed')
+    } catch (err: unknown) {
+      // Special case: resolution wants to replace this dialog with a new one
+      if (err && typeof err === 'object' && '__replaceDialog' in err) {
+        const replacement = (err as { replacement: ActionError }).replacement
+        onClose()
+        // Use setTimeout to avoid React state update during render cycle
+        setTimeout(() => onReplaceError?.(replacement), 0)
+      } else {
+        onError(err instanceof Error ? err.message : 'Resolution failed')
+      }
     } finally {
       if (busyRef) busyRef.current = false
       setBusy(null)
