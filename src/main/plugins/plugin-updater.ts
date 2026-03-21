@@ -319,8 +319,11 @@ export class PluginUpdateService {
           if (entry.commitEpoch && appBuildEpoch) {
             sameVersionNewer = entry.commitEpoch > appBuildEpoch
           } else {
-            // No epoch data — fall back to buildSha mismatch (legacy manifests)
-            sameVersionNewer = true
+            // No epoch data — fall back to buildSha mismatch (legacy manifests).
+            // Only flag when an override is installed; without one the bundled
+            // code IS the latest and the SHA mismatch is just noise from a
+            // stale manifest (see comment above).
+            sameVersionNewer = !!installedOverride
           }
         }
         hasUpdate = newerVersion || sameVersionNewer
