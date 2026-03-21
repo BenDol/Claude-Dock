@@ -51,7 +51,7 @@ export async function loadPluginWindow(
 ): Promise<void> {
   const search = queryParam.startsWith('?') ? queryParam.slice(1) : queryParam
 
-  if (paths.rendererOverrideHtml) {
+  if (paths.rendererOverrideHtml && fs.existsSync(paths.rendererOverrideHtml)) {
     await win.loadFile(paths.rendererOverrideHtml, { search })
   } else if (paths.rendererUrl) {
     await win.loadURL(`${paths.rendererUrl}${queryParam}`)

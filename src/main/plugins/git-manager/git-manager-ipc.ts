@@ -643,10 +643,10 @@ export function registerGitManagerIpc(): void {
 
 /** Remove all IPC handlers registered by git-manager (for hot-reload) */
 export function disposeGitManagerIpc(): void {
-  // Remove all GIT_MGR_* handlers
+  // Remove all GIT_MGR_*, CI_*, and PR_* handlers
   for (const [key, channel] of Object.entries(IPC)) {
-    if (key.startsWith('GIT_MGR_')) {
-      ipcMain.removeHandler(channel as string)
+    if (key.startsWith('GIT_MGR_') || key.startsWith('CI_') || key.startsWith('PR_')) {
+      try { ipcMain.removeHandler(channel as string) } catch { /* ok */ }
     }
   }
 }
