@@ -1584,20 +1584,63 @@ export async function forceReinitSubmodule(cwd: string, subPath: string): Promis
   // Deinit clears git's internal submodule state
   try {
     await gitExec(cwd, ['submodule', 'deinit', '--force', '--', subPath], 15000)
+    svc.log(`[git-manager] forceReinitSubmodule: deinit complete`)
   } catch (e) {
     svc.log(`[git-manager] forceReinitSubmodule: deinit failed (continuing): ${e}`)
   }
 
-  // Remove the directory so git can clone into it
-  if (fs.existsSync(absPath)) {
-    fs.rmSync(absPath, { recursive: true, force: true })
-    svc.log(`[git-manager] forceReinitSubmodule: removed directory`)
+  // Also clear the cached module in .git/modules/ which can block re-cloning
+  try {
+    const { stdout: gitDirOut } = await gitExec(cwd, ['rev-parse', '--git-dir'], 5000)
+    const gitDir = gitDirOut.trim()
+    const modulePath = path.join(cwd, gitDir, 'modules', subPath)
+    if (fs.existsSync(modulePath)) {
+      fs.rmSync(modulePath, { recursive: true, force: true })
+      svc.log(`[git-manager] forceReinitSubmodule: removed cached module at ${modulePath}`)
+    }
+  } catch (e) {
+    svc.log(`[git-manager] forceReinitSubmodule: could not clear cached module: ${e}`)
   }
 
-  // Re-init and clone
-  const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--init', '--', subPath], 120000)
-  const output = (stdout + stderr).trim()
-  svc.log(`[git-manager] forceReinitSubmodule: ${output || '(no output)'}`)
+  // Remove the working directory so git can clone into it
+  if (fs.existsSync(absPath)) {
+    fs.rmSync(absPath, { recursive: true, force: true })
+    svc.log(`[git-manager] forceReinitSubmodule: removed working directory`)
+  }
+
+  // Re-sync URL, init, then update (separate steps for reliability)
+  let output = ''
+  try {
+    await gitExec(cwd, ['submodule', 'sync', '--', subPath], 15000)
+    svc.log(`[git-manager] forceReinitSubmodule: sync complete`)
+  } catch (e) {
+    svc.log(`[git-manager] forceReinitSubmodule: sync failed: ${e}`)
+  }
+  try {
+    await gitExec(cwd, ['submodule', 'init', '--', subPath], 15000)
+    svc.log(`[git-manager] forceReinitSubmodule: init complete`)
+  } catch (e) {
+    svc.log(`[git-manager] forceReinitSubmodule: init failed: ${e}`)
+  }
+  try {
+    const { stdout, stderr } = await gitExec(cwd, ['submodule', 'update', '--', subPath], 120000)
+    output = (stdout + stderr).trim()
+    svc.log(`[git-manager] forceReinitSubmodule: update ${output || '(no output)'}`)
+  } catch (e) {
+    svc.log(`[git-manager] forceReinitSubmodule: update failed: ${e}`)
+    // Last resort: try direct clone if we have the URL
+    if (subUrl) {
+      svc.log(`[git-manager] forceReinitSubmodule: attempting direct clone as fallback`)
+      try {
+        const { stdout: cloneOut, stderr: cloneErr } = await gitExec(cwd, ['clone', subUrl, subPath], 120000)
+        output = (cloneOut + cloneErr).trim()
+        svc.log(`[git-manager] forceReinitSubmodule: direct clone ${output || '(no output)'}`)
+      } catch (cloneErr) {
+        output = cloneErr instanceof Error ? cloneErr.message : String(cloneErr)
+        svc.log(`[git-manager] forceReinitSubmodule: direct clone also failed: ${output}`)
+      }
+    }
+  }
 
   // Verify the submodule was actually cloned
   const gitEntry = path.join(absPath, '.git')
