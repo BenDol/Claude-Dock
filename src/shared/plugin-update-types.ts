@@ -9,6 +9,7 @@ export interface PluginUpdateManifest {
 export interface PluginUpdateManifestEntry {
   version: string
   buildSha: string
+  commitEpoch?: number // Unix epoch (seconds) of the last commit that modified this plugin
   hash: string // SHA-256 of extracted plugin contents
   archivePath: string // path inside plugins.zip (e.g. "git-manager/")
   changelog?: string

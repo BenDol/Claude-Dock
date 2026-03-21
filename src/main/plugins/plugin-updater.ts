@@ -33,6 +33,7 @@ import type { PluginManifest } from '../../shared/plugin-manifest'
 declare const __BUILD_SHA__: string
 declare const __DEV__: boolean
 declare const __PLUGIN_BUILD_SHAS__: Record<string, string>
+declare const __APP_BUILD_EPOCH__: number
 
 const GITHUB_REPO = 'BenDol/Claude-Dock'
 const VERIFIED_UPDATERS_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/verified-updaters.json`
@@ -270,14 +271,14 @@ export class PluginUpdateService {
       if (info.source !== 'builtin') continue
 
       const entry = manifest.plugins[info.id]
-      if (!entry) continue
+      if (!entry) { log(`[plugin-updater] ${info.id}: not in manifest, skipping`); continue }
 
       // Skip if user dismissed this version
-      if (dismissed[info.id] === entry.version) continue
+      if (dismissed[info.id] === entry.version) { log(`[plugin-updater] ${info.id}: dismissed version ${entry.version}, skipping`); continue }
 
       // Skip if this exact version is already installed as an override
       const installedOverride = installedOverrides[info.id]
-      if (installedOverride && installedOverride.hash === entry.hash) continue
+      if (installedOverride && installedOverride.hash === entry.hash) { log(`[plugin-updater] ${info.id}: override hash matches manifest hash (${entry.hash?.slice(0, 12)}), skipping`); continue }
 
       // Skip if minAppVersion exceeds current app version
       if (entry.minAppVersion) {
@@ -302,27 +303,29 @@ export class PluginUpdateService {
       // doesn't match the new app build, causing false-positive updates that
       // always fail with a hash mismatch.  Skip them.
       const localPluginSha = __PLUGIN_BUILD_SHAS__?.[info.id]
+      const appBuildEpoch: number = typeof __APP_BUILD_EPOCH__ === 'number' ? __APP_BUILD_EPOCH__ : 0
+      log(`[plugin-updater] ${info.id}: localVer=${info.version} remoteVer=${entry.version} localSha=${localPluginSha?.slice(0, 7) || 'none'} remoteSha=${entry.buildSha?.slice(0, 7) || 'none'} commitEpoch=${entry.commitEpoch || 0} appBuildEpoch=${appBuildEpoch} hasOverride=${!!installedOverride} overrideHash=${installedOverride?.hash?.slice(0, 12) || 'none'} entryHash=${entry.hash?.slice(0, 12) || 'none'}`)
       let hasUpdate: boolean
       if (profile === 'bleeding-edge') {
-        // Only flag an update if the plugin has an override installed AND
-        // the remote SHA differs; without an override the bundled code is
-        // authoritative (built from the latest bleeding-edge app commit).
         hasUpdate = !!localPluginSha && entry.buildSha !== localPluginSha
-          && !!installedOverride
       } else {
         const newerVersion = isNewerVersion(info.version, entry.version)
-        // Same-version hotfix: only relevant when the user is still on a
-        // previous app build and has no override yet, or their override is
-        // from an older hotfix.  After a fresh app update (no override),
-        // the bundled code already includes the latest changes for this
-        // version — the manifest SHA mismatch is just build-environment
-        // noise, not a real update.
-        const sameVersionDifferentBuild = info.version === entry.version
-          && !!localPluginSha && entry.buildSha !== localPluginSha
-          && !!installedOverride
-        hasUpdate = newerVersion || sameVersionDifferentBuild
+        // Same-version hotfix: the plugin was modified after this app was built.
+        // Compare the manifest's per-plugin commit epoch against the app's build
+        // epoch — only flag if the plugin commit is strictly newer.
+        // Falls back to buildSha comparison if epoch data is unavailable.
+        let sameVersionNewer = false
+        if (info.version === entry.version && !!localPluginSha && entry.buildSha !== localPluginSha) {
+          if (entry.commitEpoch && appBuildEpoch) {
+            sameVersionNewer = entry.commitEpoch > appBuildEpoch
+          } else {
+            // No epoch data — fall back to buildSha mismatch (legacy manifests)
+            sameVersionNewer = true
+          }
+        }
+        hasUpdate = newerVersion || sameVersionNewer
+        log(`[plugin-updater] ${info.id}: newerVersion=${newerVersion} sameVersionNewer=${sameVersionNewer} hasUpdate=${hasUpdate}`)
       }
-
 
       if (!hasUpdate) continue
 

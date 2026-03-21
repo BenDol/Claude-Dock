@@ -32,6 +32,13 @@ const isDev = process.env.PRODUCTION_BUILD !== '1'
 const updateProfile = process.env.UPDATE_PROFILE || 'latest'
 const debugDefault = updateProfile === 'bleeding-edge'
 
+// Unix epoch (seconds) of the HEAD commit — used to determine if plugin updates
+// in the manifest are newer than what's bundled in this app build
+let appBuildEpoch = Math.floor(Date.now() / 1000)
+try {
+  appBuildEpoch = parseInt(execSync('git log -1 --format=%ct', { encoding: 'utf-8' }).trim(), 10)
+} catch { /* fallback to current time */ }
+
 // Per-plugin build SHAs: only change when the plugin's own source directory is modified
 const pluginBuildShas: Record<string, string> = {
   'git-sync': getPluginBuildSha('src/main/plugins/git-sync'),
@@ -47,7 +54,8 @@ export default defineConfig({
       __DEV__: JSON.stringify(isDev),
       __UPDATE_PROFILE__: JSON.stringify(updateProfile),
       __DEBUG_DEFAULT__: JSON.stringify(debugDefault),
-      __PLUGIN_BUILD_SHAS__: JSON.stringify(pluginBuildShas)
+      __PLUGIN_BUILD_SHAS__: JSON.stringify(pluginBuildShas),
+      __APP_BUILD_EPOCH__: JSON.stringify(appBuildEpoch)
     },
     build: {
       outDir: 'out/main',

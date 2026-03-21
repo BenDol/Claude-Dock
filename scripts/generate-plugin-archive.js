@@ -65,6 +65,18 @@ function getPluginBuildSha(srcDir) {
   }
 }
 
+/**
+ * Get the Unix epoch (seconds) of the last commit that modified files in the given directory.
+ * Used by the updater to determine if a plugin was modified after the app was built.
+ */
+function getPluginCommitEpoch(srcDir) {
+  try {
+    return parseInt(execSync(`git log -1 --format=%ct -- "${srcDir}"`, { encoding: 'utf-8' }).trim(), 10)
+  } catch {
+    return 0
+  }
+}
+
 function extractPluginMetadata(srcDir, pluginId) {
   const pluginFiles = fs.readdirSync(srcDir).filter(f => f.endsWith('-plugin.ts'))
   if (pluginFiles.length === 0) {
@@ -135,6 +147,7 @@ function main() {
 
     const meta = extractPluginMetadata(srcDir, plugin.id)
     const pluginBuildSha = getPluginBuildSha(srcDir)
+    const pluginCommitEpoch = getPluginCommitEpoch(srcDir)
 
     // Create plugin staging directory
     const pluginStaging = path.join(STAGING_DIR, plugin.id)
@@ -217,6 +230,7 @@ function main() {
     manifest.plugins[plugin.id] = {
       version: appVersion,
       buildSha: pluginBuildSha,
+      commitEpoch: pluginCommitEpoch,
       hash: contentHash,
       archivePath: `${plugin.id}/`,
       changelog: '',
@@ -224,7 +238,7 @@ function main() {
       requiresAppUpdate
     }
 
-    console.log(`  ${plugin.id}: v${appVersion}, pluginSha=${pluginBuildSha.slice(0, 7)}, hash=${contentHash.slice(0, 12)}...`)
+    console.log(`  ${plugin.id}: v${appVersion}, pluginSha=${pluginBuildSha.slice(0, 7)}, epoch=${pluginCommitEpoch}, hash=${contentHash.slice(0, 12)}...`)
   }
 
   // Create plugins.zip
