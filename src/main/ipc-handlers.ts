@@ -17,6 +17,7 @@ import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
 import { resetPluginTrust } from './plugins/plugin-loader'
 import { PluginUpdateService } from './plugins/plugin-updater'
+import { getOverrides as getPluginOverrides } from './plugins/plugin-update-store'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
 
@@ -487,8 +488,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.PLUGIN_GET_OVERRIDES, () => {
-    const { getOverrides } = require('./plugins/plugin-update-store')
-    return getOverrides()
+    return getPluginOverrides()
   })
 
   ipcMain.handle(IPC.PLUGIN_GET_OPEN_WINDOWS, (_event, projectDir: string) => {
