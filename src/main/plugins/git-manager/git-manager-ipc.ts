@@ -452,6 +452,17 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_CHECK_SUBMODULE_ACCESS, async (_event, projectDir: string, subPath: string) => {
+    try {
+      const url = await gitOps.getSubmoduleUrl(projectDir, subPath)
+      if (!url) return { accessible: false, url: null, error: 'Could not find submodule URL in .gitmodules' }
+      const error = await gitOps.checkRemoteAccess(projectDir, url)
+      return { accessible: !error, url, error }
+    } catch (err) {
+      return { accessible: false, url: null, error: err instanceof Error ? err.message : 'Check failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_FORCE_REINIT_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
     try {
       const output = await gitOps.forceReinitSubmodule(projectDir, subPath)

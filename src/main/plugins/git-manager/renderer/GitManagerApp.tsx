@@ -1204,7 +1204,18 @@ const GitManagerApp: React.FC = () => {
     if (sub.status === 'uninitialized') {
       const doInit = async (thenOpen: boolean) => {
         const api = getDockApi()
-        // Run sync first (ensures URLs are up to date) then init + update
+
+        // Check if the submodule URL is accessible before attempting anything
+        const access = await api.gitManager.checkSubmoduleAccess(activeDir, sub.path)
+        if (!access.accessible) {
+          throw new Error(
+            access.url
+              ? `Cannot access submodule repository:\n${access.url}\n\n${access.error}\n\nEnsure the repository exists and the current user has access.`
+              : access.error || 'Submodule URL not found in .gitmodules'
+          )
+        }
+
+        // URL is accessible — proceed with init
         await api.gitManager.syncSubmodules(activeDir, [sub.path])
         const r = await api.gitManager.updateSubmodules(activeDir, [sub.path], true)
         if (!r.success) throw new Error(r.error || 'Submodule init failed')

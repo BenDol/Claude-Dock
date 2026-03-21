@@ -1550,6 +1550,49 @@ export async function updateSubmodules(cwd: string, subPaths?: string[], init?: 
 }
 
 /**
+ * Get the configured URL for a submodule from .gitmodules.
+ */
+export async function getSubmoduleUrl(cwd: string, subPath: string): Promise<string | null> {
+  // Try direct path lookup first
+  try {
+    const { stdout } = await gitExec(cwd, ['config', '--file', '.gitmodules', `submodule.${subPath}.url`], 5000)
+    if (stdout.trim()) return stdout.trim()
+  } catch { /* try name lookup */ }
+  // Fallback: search by path
+  try {
+    const { stdout } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'], 5000)
+    for (const line of stdout.split('\n')) {
+      const m = line.match(/^submodule\.(.+)\.path\s+(.+)$/)
+      if (m && m[2].trim() === subPath) {
+        const { stdout: u } = await gitExec(cwd, ['config', '--file', '.gitmodules', `submodule.${m[1].trim()}.url`], 5000)
+        if (u.trim()) return u.trim()
+      }
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+/**
+ * Check if a remote git URL is accessible. Returns an error message if not, null if OK.
+ * Uses `git ls-remote --exit-code` which is fast (doesn't download objects).
+ */
+export async function checkRemoteAccess(cwd: string, url: string): Promise<string | null> {
+  try {
+    await gitExec(cwd, ['ls-remote', '--exit-code', '--heads', url], 15000)
+    return null // accessible
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/not found|does not exist|repository.*not found/i.test(msg)) {
+      return `Repository not found: ${url}`
+    }
+    if (/authentication|permission denied|could not read/i.test(msg)) {
+      return `Authentication required for: ${url}`
+    }
+    return `Cannot access repository: ${url}\n${msg.split('\n')[0]}`
+  }
+}
+
+/**
  * Force re-initialize a submodule by deiniting, removing its directory, and cloning fresh.
  * This is needed when the submodule dir exists with files but no .git entry.
  */
