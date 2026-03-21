@@ -3971,18 +3971,6 @@ const WorkingChanges: React.FC<{
     } catch { /* ignore */ }
   }, [projectDir, onStatusRefreshed])
 
-  // Lightweight status poll for background auto-refresh.
-  // Uses fast mode (-unormal) which collapses untracked directories but avoids
-  // scanning every file in large repos. Only used for the timed poll, never for
-  // user-triggered actions, to avoid changing the visible file list.
-  const pollStatus = useCallback(async () => {
-    try {
-      const s = await getDockApi().gitManager.getStatus(projectDir, true)
-      setLocalStatus(s)
-      if (onStatusRefreshed) onStatusRefreshed(s)
-    } catch { /* ignore */ }
-  }, [projectDir, onStatusRefreshed])
-
   // Detect files that reappear as unstaged immediately after staging (external process regeneration loop)
   const checkStageLoop = useCallback((stagedPaths: string[], newStatus: GitStatusResult) => {
     const unstagedSet = new Set(newStatus.unstaged.map((f) => f.path).concat(newStatus.untracked.map((f) => f.path)))
@@ -4015,7 +4003,7 @@ const WorkingChanges: React.FC<{
     const poll = () => {
       if (document.hasFocus()) {
         pending = false
-        pollStatus()
+        refreshStatus()
       } else {
         pending = true
       }
@@ -4024,7 +4012,7 @@ const WorkingChanges: React.FC<{
     const onFocus = () => {
       if (pending) {
         pending = false
-        pollStatus()
+        refreshStatus()
       }
     }
 
@@ -4039,7 +4027,7 @@ const WorkingChanges: React.FC<{
       if (timer) clearInterval(timer)
       window.removeEventListener('focus', onFocus)
     }
-  }, [projectDir, pollStatus])
+  }, [projectDir, refreshStatus])
 
   // Persist commit message to localStorage
   useEffect(() => {
