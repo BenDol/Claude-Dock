@@ -60,6 +60,13 @@ export class PluginWindowManager {
     this.windows.set(k, win)
     broadcastPluginWindowState(manifest.id, projectDir, true)
 
+    // Log renderer crashes and freezes
+    win.webContents.on('render-process-gone', (_event, details) => {
+      log(`[plugin-window] ${manifest.id} renderer gone for ${projectDir}: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+    win.on('unresponsive', () => log(`[plugin-window] ${manifest.id} window unresponsive for ${projectDir}`))
+    win.on('responsive', () => log(`[plugin-window] ${manifest.id} window responsive again for ${projectDir}`))
+
     win.on('closed', () => {
       this.windows.delete(k)
       broadcastPluginWindowState(manifest.id, projectDir, false)

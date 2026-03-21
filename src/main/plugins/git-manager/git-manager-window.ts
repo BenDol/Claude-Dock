@@ -70,6 +70,14 @@ export class GitManagerWindowManager {
     this.windows.set(projectDir, win)
     svc().broadcastPluginWindowState('git-manager', projectDir, true)
 
+    // Enable DevTools shortcut (F12 / Ctrl+Shift+I) — not available by default in frameless windows
+    win.webContents.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        win.webContents.toggleDevTools()
+      }
+    })
+
     // Save window state on move/resize/maximize/unmaximize
     const persistState = () => {
       if (win.isDestroyed()) return
@@ -87,6 +95,13 @@ export class GitManagerWindowManager {
     win.on('moved', persistState)
     win.on('maximize', persistState)
     win.on('unmaximize', persistState)
+
+    // Log renderer crashes and freezes
+    win.webContents.on('render-process-gone', (_event, details) => {
+      svc().log(`[git-manager] renderer gone for ${projectDir}: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+    win.on('unresponsive', () => svc().log(`[git-manager] window unresponsive for ${projectDir}`))
+    win.on('responsive', () => svc().log(`[git-manager] window responsive again for ${projectDir}`))
 
     // Intercept user-initiated close (X button, Alt+F4, taskbar close) and hide
     // instead of destroying the window, so reopening is instant.
@@ -155,6 +170,10 @@ export class GitManagerWindowManager {
       this.commitDetailWindows.set(projectDir, new Set())
     }
     this.commitDetailWindows.get(projectDir)!.add(win)
+
+    win.webContents.on('render-process-gone', (_event, details) => {
+      svc().log(`[git-manager] commit detail renderer gone for ${commitHash.slice(0, 8)}: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
 
     win.on('closed', () => {
       this.commitDetailWindows.get(projectDir)?.delete(win)

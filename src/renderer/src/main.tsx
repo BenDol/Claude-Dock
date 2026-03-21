@@ -7,6 +7,23 @@ import './plugins'
 
 import App from './App'
 
+// Forward uncaught renderer errors to the main-process log file.
+// Without these, renderer crashes vanish silently — the main process
+// only knows about them via webContents 'render-process-gone', which
+// doesn't include the JS error message.
+window.onerror = (message, source, lineno, colno, error) => {
+  const text = `[renderer] uncaught error: ${message} at ${source}:${lineno}:${colno}${error?.stack ? '\n' + error.stack : ''}`
+  try { window.dockApi?.debug?.write(text) } catch { /* IPC may be dead */ }
+  console.error(text)
+}
+
+window.onunhandledrejection = (event: PromiseRejectionEvent) => {
+  const reason = event.reason
+  const text = `[renderer] unhandled rejection: ${reason instanceof Error ? reason.message + '\n' + reason.stack : String(reason)}`
+  try { window.dockApi?.debug?.write(text) } catch { /* IPC may be dead */ }
+  console.error(text)
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

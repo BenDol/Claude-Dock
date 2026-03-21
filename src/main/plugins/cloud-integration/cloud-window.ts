@@ -79,6 +79,13 @@ export class CloudWindowManager {
     win.on('maximize', persistState)
     win.on('unmaximize', persistState)
 
+    // Log renderer crashes and freezes
+    win.webContents.on('render-process-gone', (_event, details) => {
+      svc().log(`[cloud-integration] renderer gone for ${projectDir}: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+    win.on('unresponsive', () => svc().log(`[cloud-integration] window unresponsive for ${projectDir}`))
+    win.on('responsive', () => svc().log(`[cloud-integration] window responsive again for ${projectDir}`))
+
     win.on('close', (event) => {
       if (this.forceClosing.has(projectDir)) return
       event.preventDefault()

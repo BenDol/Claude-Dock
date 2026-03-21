@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react'
+import React, { useEffect, useState, useCallback, useRef, Suspense, Component, type ErrorInfo, type ReactNode } from 'react'
 import DockGrid from './components/DockGrid'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
@@ -33,6 +33,66 @@ function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   if (needShift !== e.shiftKey) return false
   if (needAlt !== e.altKey) return false
   return e.key.toLowerCase() === key
+}
+
+/**
+ * Error boundary that catches React render crashes.
+ * Without this, a single component error nukes the entire window (blank screen).
+ * Logs the error to the main-process log file via IPC and shows a recovery UI.
+ */
+class RendererErrorBoundary extends Component<
+  { children: ReactNode; label?: string },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    const text = `[renderer] React error boundary caught: ${error.message}\n${error.stack || ''}\nComponent stack: ${info.componentStack || 'N/A'}`
+    try { getDockApi().debug.write(text) } catch { /* IPC may be dead */ }
+    console.error(text)
+  }
+
+  render() {
+    if (this.state.error) {
+      const label = this.props.label || 'component'
+      return (
+        <div style={{
+          padding: 24, color: 'var(--text-primary, #c0caf5)',
+          background: 'var(--bg-primary, #0f0f14)', height: '100%',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          display: 'flex', flexDirection: 'column', gap: 12
+        }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: '#f87171' }}>
+            {label} crashed
+          </h2>
+          <pre style={{
+            fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            background: 'var(--bg-secondary, #1a1b26)', padding: 12, borderRadius: 6,
+            border: '1px solid var(--border-color, #292e42)', maxHeight: 200, overflow: 'auto'
+          }}>
+            {this.state.error.message}
+            {this.state.error.stack && '\n\n' + this.state.error.stack}
+          </pre>
+          <div>
+            <button
+              onClick={() => this.setState({ error: null })}
+              style={{
+                padding: '6px 14px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+                background: 'var(--accent-color, #da7756)', color: '#fff', border: 'none'
+              }}
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 function App() {
@@ -129,9 +189,11 @@ function App() {
     const PluginComponent = pluginView.component
     return (
       <>
-        <Suspense fallback={<div className="loading">Loading...</div>}>
-          <PluginComponent />
-        </Suspense>
+        <RendererErrorBoundary label={pluginView.pluginId}>
+          <Suspense fallback={<div className="loading">Loading...</div>}>
+            <PluginComponent />
+          </Suspense>
+        </RendererErrorBoundary>
         <ToastContainer />
         {pluginUpdaterModal}
       </>
@@ -140,7 +202,9 @@ function App() {
   if (isLauncher) {
     return (
       <>
-        <LauncherApp />
+        <RendererErrorBoundary label="Launcher">
+          <LauncherApp />
+        </RendererErrorBoundary>
         <ToastContainer />
         {pluginUpdaterModal}
       </>
@@ -148,7 +212,9 @@ function App() {
   }
   return (
     <>
-      <DockApp />
+      <RendererErrorBoundary label="Dock">
+        <DockApp />
+      </RendererErrorBoundary>
       <ToastContainer />
       {pluginUpdaterModal}
     </>
