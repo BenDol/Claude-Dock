@@ -7,6 +7,7 @@ import * as gitOps from './git-operations'
 import type { GitLogOptions, GitSearchOptions } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 import { registerCiIpc } from './ci/ci-ipc'
+import { registerPrIpc } from './pr/pr-ipc'
 
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
@@ -615,9 +616,6 @@ export function registerGitManagerIpc(): void {
 
   registerCiIpc()
 
-  // PR IPC handlers — providers are resolved lazily on first call,
-  // so registering the handlers has no overhead (no CLI resolution until used)
-  const { registerPrIpc } = require('./pr/pr-ipc')
   registerPrIpc()
 
   getServices().log('[git-manager] IPC handlers registered (v2)')
