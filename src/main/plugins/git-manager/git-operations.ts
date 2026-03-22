@@ -175,8 +175,10 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
 
     for (const line of stdout.split('\n')) {
       if (!line.trim()) continue
-      const [name, tracking, trackInfo, head] = line.split('\t')
-      if (!name || /^(HEAD|heads?)(\/|$)/i.test(name)) continue
+      const [rawName, tracking, trackInfo, head] = line.split('\t')
+      if (!rawName || /^HEAD(\/|$)/i.test(rawName)) continue
+      // Strip heads/ prefix if present (submodule tracking branches sometimes include it)
+      const name = rawName.replace(/^heads?\//i, '')
       let ahead = 0, behind = 0
       if (trackInfo) {
         const aheadMatch = trackInfo.match(/ahead (\d+)/)
@@ -225,8 +227,12 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
     ], 10000)
 
     for (const line of stdout.split('\n')) {
-      const name = line.trim()
-      if (!name || name.endsWith('/HEAD') || /\/(HEAD|heads?)\//i.test(name) || /^(HEAD|heads?)\//i.test(name)) continue
+      let name = line.trim()
+      if (!name || name.endsWith('/HEAD')) continue
+      // Strip heads/ prefix from remote branch names (e.g. origin/heads/1.0.2 -> origin/1.0.2)
+      name = name.replace(/^([^/]+\/)heads\//i, '$1')
+      // Skip HEAD-only refs
+      if (/\/HEAD$/i.test(name)) continue
       // Skip if already covered by a local tracking branch
       branches.push({
         name,
@@ -698,23 +704,35 @@ export async function checkoutBranch(cwd: string, name: string, trackRemote?: st
   log(`[git-manager] checkoutBranch: name=${name} trackRemote=${trackRemote || 'none'} cwd=${cwd}`)
 
   if (trackRemote) {
-    // Step 1: Try creating a new local tracking branch
-    try {
-      await gitExec(cwd, ['checkout', '-b', name, '--track', trackRemote], 15000)
-      log(`[git-manager] checkoutBranch: created tracking branch ${name} -> ${trackRemote}`)
-      return
-    } catch (e1) {
-      log(`[git-manager] checkoutBranch: -b --track failed: ${e1 instanceof Error ? e1.message.split('\n')[0] : e1}`)
+    // Build list of remote ref variants to try. Submodules often use refs like
+    // origin/heads/1.0.2 but the UI strips the heads/ prefix for display,
+    // so we need to try both the displayed name and the heads/ variant.
+    const remotePrefix = trackRemote.match(/^([^/]+\/)/)?.[1] || ''
+    const branchPart = trackRemote.slice(remotePrefix.length)
+    const variants = [trackRemote]
+    if (!branchPart.startsWith('heads/')) {
+      variants.push(`${remotePrefix}heads/${branchPart}`)
     }
 
-    // Step 2: Try force-creating/resetting the branch to the remote ref
-    try {
-      await gitExec(cwd, ['checkout', '-B', name, trackRemote], 15000)
-      log(`[git-manager] checkoutBranch: force-created branch ${name} from ${trackRemote}`)
-      try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
-      return
-    } catch (e2) {
-      log(`[git-manager] checkoutBranch: -B failed: ${e2 instanceof Error ? e2.message.split('\n')[0] : e2}`)
+    for (const remote of variants) {
+      // Step 1: Try creating a new local tracking branch
+      try {
+        await gitExec(cwd, ['checkout', '-b', name, '--track', remote], 15000)
+        log(`[git-manager] checkoutBranch: created tracking branch ${name} -> ${remote}`)
+        return
+      } catch (e1) {
+        log(`[git-manager] checkoutBranch: -b --track ${remote} failed: ${e1 instanceof Error ? e1.message.split('\n')[0] : e1}`)
+      }
+
+      // Step 2: Try force-creating/resetting the branch to the remote ref
+      try {
+        await gitExec(cwd, ['checkout', '-B', name, remote], 15000)
+        log(`[git-manager] checkoutBranch: force-created branch ${name} from ${remote}`)
+        try { await gitExec(cwd, ['branch', '--set-upstream-to', remote, name], 5000) } catch { /* best effort */ }
+        return
+      } catch (e2) {
+        log(`[git-manager] checkoutBranch: -B ${remote} failed: ${e2 instanceof Error ? e2.message.split('\n')[0] : e2}`)
+      }
     }
 
     // Step 3: Try plain checkout (works if there's only one remote with this branch)
@@ -728,24 +746,25 @@ export async function checkoutBranch(cwd: string, name: string, trackRemote?: st
           return
         }
       } catch { /* detached */ }
-      // Detached — undo and throw
       log(`[git-manager] checkoutBranch: plain checkout resulted in detached HEAD, trying recovery`)
     } catch (e3) {
       log(`[git-manager] checkoutBranch: plain checkout failed: ${e3 instanceof Error ? e3.message.split('\n')[0] : e3}`)
     }
 
-    // Step 4: Last resort — create branch at the remote's commit hash directly
-    try {
-      const { stdout: commitHash } = await gitExec(cwd, ['rev-parse', trackRemote], 5000)
-      const hash = commitHash.trim()
-      if (hash) {
-        await gitExec(cwd, ['checkout', '-B', name, hash], 15000)
-        try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
-        log(`[git-manager] checkoutBranch: created branch ${name} at ${hash.slice(0, 7)} (resolved from ${trackRemote})`)
-        return
+    // Step 4: Last resort — resolve the remote ref to a commit hash
+    for (const remote of variants) {
+      try {
+        const { stdout: commitHash } = await gitExec(cwd, ['rev-parse', remote], 5000)
+        const hash = commitHash.trim()
+        if (hash) {
+          await gitExec(cwd, ['checkout', '-B', name, hash], 15000)
+          try { await gitExec(cwd, ['branch', '--set-upstream-to', remote, name], 5000) } catch { /* best effort */ }
+          log(`[git-manager] checkoutBranch: created branch ${name} at ${hash.slice(0, 7)} (resolved from ${remote})`)
+          return
+        }
+      } catch (e4) {
+        log(`[git-manager] checkoutBranch: rev-parse ${remote} failed: ${e4 instanceof Error ? e4.message.split('\n')[0] : e4}`)
       }
-    } catch (e4) {
-      log(`[git-manager] checkoutBranch: rev-parse recovery failed: ${e4 instanceof Error ? e4.message.split('\n')[0] : e4}`)
     }
   }
 
