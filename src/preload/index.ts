@@ -175,7 +175,7 @@ export interface DockApi {
     stage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     unstage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     commit: (projectDir: string, message: string) => Promise<{ success: boolean; hash?: string; error?: string }>
-    checkoutBranch: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
+    checkoutBranch: (projectDir: string, name: string, trackRemote?: string) => Promise<{ success: boolean; error?: string }>
     createBranch: (projectDir: string, name: string, startPoint?: string) => Promise<{ success: boolean; error?: string }>
     deleteBranch: (projectDir: string, name: string, force?: boolean, options?: { deleteRemote?: boolean; deleteLocal?: boolean }) => Promise<{ success: boolean; error?: string }>
     pull: (projectDir: string, mode?: 'merge' | 'rebase') => Promise<{ success: boolean; output?: string; error?: string }>
@@ -467,7 +467,7 @@ const dockApi: DockApi = {
     stage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_STAGE, projectDir, paths),
     unstage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_UNSTAGE, projectDir, paths),
     commit: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_COMMIT, projectDir, message),
-    checkoutBranch: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_CHECKOUT_BRANCH, projectDir, name),
+    checkoutBranch: (projectDir, name, trackRemote) => ipcRenderer.invoke(IPC.GIT_MGR_CHECKOUT_BRANCH, projectDir, name, trackRemote),
     createBranch: (projectDir, name, startPoint) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_BRANCH, projectDir, name, startPoint),
     deleteBranch: (projectDir, name, force, options) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_BRANCH, projectDir, name, force, options),
     pull: (projectDir, mode) => ipcRenderer.invoke(IPC.GIT_MGR_PULL, projectDir, mode),

@@ -86,9 +86,9 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_CHECKOUT_BRANCH, async (_event, projectDir: string, name: string) => {
+  ipcMain.handle(IPC.GIT_MGR_CHECKOUT_BRANCH, async (_event, projectDir: string, name: string, trackRemote?: string) => {
     try {
-      await gitOps.checkoutBranch(projectDir, name)
+      await gitOps.checkoutBranch(projectDir, name, trackRemote)
       return { success: true }
     } catch (err) {
       getServices().logError('[git-manager] checkout failed:', err)

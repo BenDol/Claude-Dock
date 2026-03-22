@@ -692,7 +692,17 @@ export async function createCommit(cwd: string, message: string): Promise<{ hash
 
 // --- Branch operations ---
 
-export async function checkoutBranch(cwd: string, name: string): Promise<void> {
+export async function checkoutBranch(cwd: string, name: string, trackRemote?: string): Promise<void> {
+  if (trackRemote) {
+    // Explicitly create a local branch tracking the remote — needed when multiple
+    // remotes have the same branch name (git checkout alone would be ambiguous)
+    try {
+      await gitExec(cwd, ['checkout', '-b', name, '--track', trackRemote], 15000)
+      return
+    } catch {
+      // Branch may already exist locally — fall through to plain checkout
+    }
+  }
   await gitExec(cwd, ['checkout', name], 15000)
 }
 
@@ -1391,124 +1401,222 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
   }
 }
 
+// Submodule cache: keyed by cwd, stores the result + a HEAD hash so we can
+// invalidate when the parent repo changes.  The per-submodule detail (dirty
+// status, branch) is fetched lazily in the background and merged in.
+const submoduleCache = new Map<string, { head: string; base: GitSubmoduleInfo[]; full: GitSubmoduleInfo[] | null; pending: Promise<GitSubmoduleInfo[]> | null }>()
+
 export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
   try {
-    // Use lenient execution: git submodule status may exit non-zero
-    // (e.g., conflicting or partially-initialized submodules) while still
-    // printing valid data to stdout. gitExec rejects on non-zero exit and
-    // discards stdout, so we call execFile directly here.
-    const stdout = await new Promise<string>((resolve) => {
-      execFile('git', ['submodule', 'status'], { cwd, timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (err, out) => {
-        if (err) getServices().log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])
-        resolve(out || '')
-      })
-    })
-
-    const submodules: GitSubmoduleInfo[] = []
-
-    for (const line of stdout.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      // Format: " <hash> <path> (<desc>)" or "+<hash> <path> (<desc>)" or "-<hash> <path>"
-      // First char: ' ' = current, '+' = modified, '-' = uninitialized
-      const prefix = trimmed[0]
-      let status: GitSubmoduleInfo['status'] = 'current'
-      if (prefix === '+') status = 'modified'
-      else if (prefix === '-') status = 'uninitialized'
-
-      const rest = (prefix === ' ' || prefix === '+' || prefix === '-')
-        ? trimmed.slice(1).trim()
-        : trimmed
-
-      const parts = rest.split(/\s+/)
-      const hash = parts[0] || ''
-      let subPath = parts[1] || ''
-      if (!subPath) continue
-      // Normalize: strip leading './' and reject self-referential paths
-      subPath = subPath.replace(/^\.\//, '')
-      if (!subPath || subPath === '.' || subPath === '/') continue
-
-      submodules.push({
-        name: subPath.split('/').pop() || subPath,
-        path: subPath,
-        hash: hash.slice(0, 8),
-        status
-      })
-    }
-
-    // Fallback: if git submodule status returned nothing, try parsing .gitmodules
-    // and check each submodule individually to determine its real status
-    if (submodules.length === 0) {
-      try {
-        const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'], 5000)
-        for (const cfgLine of cfgOut.split('\n')) {
-          const match = cfgLine.match(/^submodule\.(.+)\.path\s+(.+)$/)
-          if (match) {
-            let subPath = match[2].trim().replace(/^\.\//, '')
-            if (!subPath || subPath === '.' || subPath === '/') continue
-
-            // Check if this individual submodule is actually initialized
-            // by looking for a .git file/folder in its directory
-            const absSubPath = path.join(cwd, subPath)
-            const gitEntry = path.join(absSubPath, '.git')
-            let status: GitSubmoduleInfo['status'] = 'uninitialized'
-            let hash = '????????'
-
-            if (fs.existsSync(gitEntry)) {
-              // Has .git — it's initialized. Try to get its HEAD hash
-              status = 'current'
-              try {
-                const { stdout: headOut } = await gitExec(absSubPath, ['rev-parse', 'HEAD'], 5000)
-                hash = headOut.trim().slice(0, 8)
-              } catch { /* keep default hash */ }
-              // Check if it has modifications vs what the parent expects
-              try {
-                const { stdout: diffOut } = await gitExec(cwd, ['diff', '--name-only', '--', subPath], 5000)
-                if (diffOut.trim()) status = 'modified'
-              } catch { /* keep current status */ }
-            }
-
-            submodules.push({
-              name: subPath.split('/').pop() || subPath,
-              path: subPath,
-              hash,
-              status
-            })
-          }
-        }
-        if (submodules.length > 0) getServices().log(`[git-manager] getSubmodules: recovered ${submodules.length} submodule(s) from .gitmodules fallback`)
-      } catch {
-        // No .gitmodules or config parse failed — truly no submodules
-      }
-    }
-
-    // Read tracking branches from .gitmodules for all submodules
-    const trackingBranches = new Map<string, string>()
+    // Check if the cache is still valid (same parent HEAD)
+    let currentHead = ''
     try {
-      const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.branch$'], 5000)
-      for (const cfgLine of cfgOut.split('\n')) {
-        const match = cfgLine.match(/^submodule\.(.+)\.branch\s+(.+)$/)
-        if (match) {
-          // Key is the submodule name in .gitmodules, value is the branch
-          const subPath = match[1].trim()
-          trackingBranches.set(subPath, match[2].trim())
-        }
+      const { stdout: headOut } = await gitExec(cwd, ['rev-parse', 'HEAD'], 3000)
+      currentHead = headOut.trim()
+    } catch { /* ignore */ }
+
+    const cached = submoduleCache.get(cwd)
+    if (cached && cached.head === currentHead && currentHead) {
+      // Cache hit — return full (detailed) if available, otherwise base (fast)
+      if (cached.full) return cached.full
+      if (cached.base.length > 0) {
+        // Base list is ready, details still loading — return what we have
+        return cached.base
       }
-    } catch {
-      // No .gitmodules or no branch config — that's fine
     }
 
-    // Check dirty working tree, change count, current branch, and detached HEAD for each initialized submodule
-    const pathMod = require('path') as typeof import('path')
+    // --- Fast path: get the submodule list without per-submodule details ---
+    const base = await getSubmoduleList(cwd)
+    if (base.length === 0) {
+      submoduleCache.set(cwd, { head: currentHead, base: [], full: [], pending: null })
+      return []
+    }
+
+    // Store the base list immediately so the UI can render structure
+    const entry = { head: currentHead, base, full: null as GitSubmoduleInfo[] | null, pending: null as Promise<GitSubmoduleInfo[]> | null }
+    submoduleCache.set(cwd, entry)
+
+    // --- Slow path: enrich with per-submodule details in background ---
+    if (!entry.pending) {
+      entry.pending = enrichSubmoduleDetails(cwd, base).then((enriched) => {
+        entry.full = enriched
+        entry.pending = null
+        return enriched
+      }).catch(() => {
+        entry.pending = null
+        return base
+      })
+    }
+
+    return entry.pending
+  } catch (err) {
+    getServices().logError('[git-manager] getSubmodules failed:', err)
+    return []
+  }
+}
+
+/** Invalidate submodule cache for a directory (called after operations that change submodules) */
+export function invalidateSubmoduleCache(cwd: string): void {
+  submoduleCache.delete(cwd)
+}
+
+/**
+ * Fast submodule list — just names, paths, hashes, and status.
+ * Uses `git submodule status` with fallback to .gitmodules parsing.
+ */
+async function getSubmoduleList(cwd: string): Promise<GitSubmoduleInfo[]> {
+  const stdout = await new Promise<string>((resolve) => {
+    execFile('git', ['submodule', 'status'], { cwd, timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (err, out) => {
+      if (err) getServices().log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])
+      resolve(out || '')
+    })
+  })
+
+  const submodules: GitSubmoduleInfo[] = []
+
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const prefix = trimmed[0]
+    let status: GitSubmoduleInfo['status'] = 'current'
+    if (prefix === '+') status = 'modified'
+    else if (prefix === '-') status = 'uninitialized'
+
+    const rest = (prefix === ' ' || prefix === '+' || prefix === '-')
+      ? trimmed.slice(1).trim()
+      : trimmed
+
+    const parts = rest.split(/\s+/)
+    const hash = parts[0] || ''
+    let subPath = parts[1] || ''
+    if (!subPath) continue
+    subPath = subPath.replace(/^\.\//, '')
+    if (!subPath || subPath === '.' || subPath === '/') continue
+
+    submodules.push({
+      name: subPath.split('/').pop() || subPath,
+      path: subPath,
+      hash: hash.slice(0, 8),
+      status
+    })
+  }
+
+  // Fallback: parse .gitmodules if git submodule status returned nothing
+  if (submodules.length === 0) {
+    try {
+      const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.path$'], 5000)
+      for (const cfgLine of cfgOut.split('\n')) {
+        const match = cfgLine.match(/^submodule\.(.+)\.path\s+(.+)$/)
+        if (match) {
+          let subPath = match[2].trim().replace(/^\.\//, '')
+          if (!subPath || subPath === '.' || subPath === '/') continue
+
+          const absSubPath = path.join(cwd, subPath)
+          const gitEntry = path.join(absSubPath, '.git')
+          let status: GitSubmoduleInfo['status'] = 'uninitialized'
+          let hash = '????????'
+
+          if (fs.existsSync(gitEntry)) {
+            status = 'current'
+            try {
+              const { stdout: headOut } = await gitExec(absSubPath, ['rev-parse', 'HEAD'], 5000)
+              hash = headOut.trim().slice(0, 8)
+            } catch { /* keep default hash */ }
+            try {
+              const { stdout: diffOut } = await gitExec(cwd, ['diff', '--name-only', '--', subPath], 5000)
+              if (diffOut.trim()) status = 'modified'
+            } catch { /* keep current status */ }
+          }
+
+          submodules.push({
+            name: subPath.split('/').pop() || subPath,
+            path: subPath,
+            hash,
+            status
+          })
+        }
+      }
+      if (submodules.length > 0) getServices().log(`[git-manager] getSubmodules: recovered ${submodules.length} submodule(s) from .gitmodules fallback`)
+    } catch {
+      // No .gitmodules or config parse failed — truly no submodules
+    }
+  }
+
+  return submodules
+}
+
+/**
+ * Enrich submodule list with per-submodule details: dirty status, change count,
+ * current branch, tracking branch. Uses `git submodule foreach` to batch queries
+ * into a single process spawn instead of 2N individual git calls.
+ */
+async function enrichSubmoduleDetails(cwd: string, submodules: GitSubmoduleInfo[]): Promise<GitSubmoduleInfo[]> {
+  const enriched = submodules.map((s) => ({ ...s }))
+  const initialized = enriched.filter((s) => s.status !== 'uninitialized')
+  if (initialized.length === 0) return enriched
+
+  // Read tracking branches from .gitmodules in one call
+  const trackingBranches = new Map<string, string>()
+  try {
+    const { stdout: cfgOut } = await gitExec(cwd, ['config', '--file', '.gitmodules', '--get-regexp', '^submodule\\..*\\.branch$'], 5000)
+    for (const cfgLine of cfgOut.split('\n')) {
+      const match = cfgLine.match(/^submodule\.(.+)\.branch\s+(.+)$/)
+      if (match) trackingBranches.set(match[1].trim(), match[2].trim())
+    }
+  } catch { /* no branch config */ }
+
+  // Use `git submodule foreach` to get branch + dirty status in one spawn
+  // instead of 2 spawns per submodule.  Output format per submodule:
+  //   ===<path>===
+  //   BRANCH:<branch-name-or-HEAD>
+  //   DIRTY:<0-or-count>
+  try {
+    const script = process.platform === 'win32'
+      ? 'echo ====$sm_path==== && git rev-parse --abbrev-ref HEAD && git status --porcelain'
+      : 'echo "====$sm_path====" && git rev-parse --abbrev-ref HEAD && git status --porcelain'
+
+    const { stdout: foreachOut } = await gitExec(cwd, ['submodule', 'foreach', '--quiet', script], 15000)
+
+    let currentPath = ''
+    let branchLine = ''
+    const dirtyLines: string[] = []
+
+    const flush = () => {
+      if (!currentPath) return
+      const sub = initialized.find((s) => s.path === currentPath)
+      if (sub) {
+        if (branchLine && branchLine !== 'HEAD') {
+          sub.branch = branchLine
+          sub.isDetached = false
+        } else {
+          sub.isDetached = true
+        }
+        const count = dirtyLines.filter(Boolean).length
+        sub.hasDirtyWorkTree = count > 0
+        sub.changeCount = count
+      }
+    }
+
+    for (const line of foreachOut.split('\n')) {
+      const pathMatch = line.match(/^====(.+)====$/)
+      if (pathMatch) {
+        flush()
+        currentPath = pathMatch[1]
+        branchLine = ''
+        dirtyLines.length = 0
+      } else if (!branchLine && currentPath) {
+        branchLine = line.trim()
+      } else if (currentPath) {
+        if (line.trim()) dirtyLines.push(line.trim())
+      }
+    }
+    flush()
+  } catch (err) {
+    // Fallback: individual per-submodule queries (slower but more resilient)
+    getServices().log('[git-manager] getSubmodules: foreach failed, falling back to individual queries:', err instanceof Error ? err.message.split('\n')[0] : err)
     await Promise.allSettled(
-      submodules.map(async (sub) => {
-        if (sub.status === 'uninitialized') return
-
-        // Set tracking branch from .gitmodules
-        sub.trackingBranch = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
-
-        const subCwd = pathMod.join(cwd, sub.path)
-        // Run status and branch checks in parallel per submodule
+      initialized.map(async (sub) => {
+        const subCwd = path.join(cwd, sub.path)
         const [statusResult, branchResult] = await Promise.allSettled([
           gitExec(subCwd, ['status', '--porcelain'], 5000),
           gitExec(subCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
@@ -1517,28 +1625,22 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
           const lines = statusResult.value.stdout.trim().split('\n').filter(Boolean)
           sub.hasDirtyWorkTree = lines.length > 0
           sub.changeCount = lines.length
-        } else {
-          getServices().log(`[git-manager] getSubmodules: status failed for ${sub.path}:`, statusResult.reason?.message?.split('\n')[0])
         }
         if (branchResult.status === 'fulfilled') {
           const branch = branchResult.value.stdout.trim()
-          if (branch && branch !== 'HEAD') {
-            sub.branch = branch
-            sub.isDetached = false
-          } else {
-            sub.isDetached = true
-          }
-        } else {
-          getServices().log(`[git-manager] getSubmodules: branch check failed for ${sub.path}:`, branchResult.reason?.message?.split('\n')[0])
+          if (branch && branch !== 'HEAD') { sub.branch = branch; sub.isDetached = false }
+          else sub.isDetached = true
         }
       })
     )
-
-    return submodules
-  } catch (err) {
-    getServices().logError('[git-manager] getSubmodules failed:', err)
-    return []
   }
+
+  // Apply tracking branches
+  for (const sub of enriched) {
+    sub.trackingBranch = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
+  }
+
+  return enriched
 }
 
 /**
@@ -1580,6 +1682,7 @@ export async function syncSubmodules(cwd: string, subPaths?: string[]): Promise<
   const args = ['submodule', 'sync']
   if (subPaths && subPaths.length > 0) args.push('--', ...subPaths)
   const { stdout, stderr } = await gitExec(cwd, args, 30000)
+  invalidateSubmoduleCache(cwd)
   return (stdout + stderr).trim()
 }
 
@@ -1592,6 +1695,7 @@ export async function updateSubmodules(cwd: string, subPaths?: string[], init?: 
   const { stdout, stderr } = await gitExec(cwd, args, 120000)
   const output = (stdout + stderr).trim()
   svc.log(`[git-manager] updateSubmodules: ${output || '(no output)'}`)
+  invalidateSubmoduleCache(cwd)
   return output
 }
 
@@ -1753,6 +1857,7 @@ export async function addSubmodule(cwd: string, url: string, localPath?: string,
   if (localPath) args.push(localPath)
   getServices().log(`[git-manager] addSubmodule: git ${args.join(' ')} in ${cwd}`)
   await gitExec(cwd, args, 60000)
+  invalidateSubmoduleCache(cwd)
 }
 
 export async function registerSubmodule(cwd: string, subPath: string): Promise<void> {
@@ -1826,6 +1931,7 @@ export async function registerSubmodule(cwd: string, subPath: string): Promise<v
 export async function removeSubmodule(cwd: string, subPath: string): Promise<void> {
   getServices().log(`[git-manager] removeSubmodule: ${subPath} in ${cwd}`)
   await gitExec(cwd, ['rm', '-f', subPath], 30000)
+  invalidateSubmoduleCache(cwd)
 }
 
 // --- Merge conflict operations ---

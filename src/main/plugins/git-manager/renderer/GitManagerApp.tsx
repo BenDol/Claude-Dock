@@ -1152,13 +1152,13 @@ const GitManagerApp: React.FC = () => {
     }
   }, [refresh, refreshing])
 
-  const doCheckout = useCallback(async (checkoutName: string) => {
+  const doCheckout = useCallback(async (checkoutName: string, trackRemote?: string) => {
     const api = getDockApi()
     setError(null)
     setCheckingOutBranch(checkoutName)
     actionBusyRef.current = true
     try {
-      const result = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+      const result = await api.gitManager.checkoutBranch(activeDir, checkoutName, trackRemote)
       if (result.success) { setError(null); refreshAfterCheckout(); return }
 
       const errMsg = result.error || 'Checkout failed'
@@ -1172,7 +1172,7 @@ const GitManagerApp: React.FC = () => {
             return
           }
         }
-        const r2 = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+        const r2 = await api.gitManager.checkoutBranch(activeDir, checkoutName, trackRemote)
         if (!r2.success) {
           setError('Checkout failed after stash: ' + (r2.error || 'Unknown error'))
           return
@@ -1183,7 +1183,7 @@ const GitManagerApp: React.FC = () => {
         showActionError('Checkout branch', errMsg, {
           branchName: checkoutName,
           retry: async () => {
-            const r = await api.gitManager.checkoutBranch(activeDir, checkoutName)
+            const r = await api.gitManager.checkoutBranch(activeDir, checkoutName, trackRemote)
             if (!r.success) throw new Error(r.error || 'Checkout still failed')
           }
         })
@@ -1198,8 +1198,12 @@ const GitManagerApp: React.FC = () => {
 
   const handleCheckoutBranch = useCallback(async (name: string) => {
     const api = getDockApi()
-    const isRemote = branches.some((b) => b.remote && b.name === name)
+    const remoteBranch = branches.find((b) => b.remote && b.name === name)
+    const isRemote = !!remoteBranch
     const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
+    // Pass the full remote ref (e.g. "origin/feature-x") so git can create
+    // a local tracking branch when one doesn't exist yet
+    const trackRemote = isRemote ? name : undefined
 
     // Check if any Claude terminals are actively working before switching branches
     try {
@@ -1217,7 +1221,7 @@ const GitManagerApp: React.FC = () => {
           ),
           confirmLabel: 'Switch anyway',
           danger: true,
-          onConfirm: () => { setConfirmModal(null); doCheckout(checkoutName) }
+          onConfirm: () => { setConfirmModal(null); doCheckout(checkoutName, trackRemote) }
         })
         return
       }
@@ -1225,7 +1229,7 @@ const GitManagerApp: React.FC = () => {
       // If the check fails, proceed without warning
     }
 
-    doCheckout(checkoutName)
+    doCheckout(checkoutName, trackRemote)
   }, [activeDir, branches, doCheckout])
 
   // Clear all repo-specific state so stale data from the previous repo is never shown
@@ -1246,6 +1250,7 @@ const GitManagerApp: React.FC = () => {
     setSearchResults([])
     setSearchOpen(false)
     setLoading(true)
+    setActiveTab('log')
     // Allow auto-switch to changes tab for the new repo
     initialLoadRef.current = true
   }, [])
