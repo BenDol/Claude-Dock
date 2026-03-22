@@ -164,6 +164,10 @@ export class PluginUpdateService {
       return
     }
 
+    // Pause file watcher during install to avoid double-reload
+    const { PluginFileWatcher } = require('./plugin-file-watcher') as typeof import('./plugin-file-watcher')
+    PluginFileWatcher.pause()
+
     try {
       log(`[plugin-updater] ${pluginId}: installing (${entry.currentVersion} -> ${entry.newVersion}, source=${entry.source})`)
       this.setStatus(pluginId, 'downloading')
@@ -191,6 +195,10 @@ export class PluginUpdateService {
       entry.error = msg
       this.setStatus(pluginId, 'failed')
       throw err
+    } finally {
+      // Resume file watcher after install completes (success or failure)
+      // Small delay to let file system settle after extraction
+      setTimeout(() => PluginFileWatcher.resume(), 2000)
     }
   }
 

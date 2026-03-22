@@ -4,6 +4,8 @@ import { app } from 'electron'
 import { PluginManager } from './plugin-manager'
 import type { DockPlugin } from './plugin'
 import { loadRuntimePlugins, getPluginsDir } from './plugin-loader'
+import { PluginFileWatcher } from './plugin-file-watcher'
+import { getSetting } from '../settings-store'
 import { getOverrides, removeOverride, getSeenOverrideHashes } from './plugin-update-store'
 import { createSafeStore } from '../safe-store'
 import { log } from '../logger'
@@ -219,6 +221,14 @@ export function registerPlugins(): void {
     }
 
     log(`[plugins] deferred registration complete (${deferred.length} built-in + runtime)`)
+
+    // Start live plugin reload watcher in dev mode or when enabled in settings
+    const isDev = typeof __DEV__ !== 'undefined' && __DEV__
+    const liveReload = (() => { try { return getSetting('advanced')?.livePluginReload } catch { return false } })()
+    if (isDev || liveReload) {
+      const watcher = new PluginFileWatcher()
+      watcher.start(getPluginsDir())
+    }
   })
 }
 

@@ -1030,6 +1030,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description">
                   V8 heap size for renderer processes. Increase if the git-manager crashes on large repos. Requires restart.
                 </div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.advanced.livePluginReload}
+                    onChange={(e) => update({ advanced: { ...settings.advanced, livePluginReload: e.target.checked } })}
+                  />
+                  Live Plugin Reload
+                </label>
+                <div className="settings-description">
+                  Watch plugin files for changes and reload automatically. Requires restart.
+                </div>
                 <div className="settings-divider" />
                 <div className="settings-section-header">Claude CLI</div>
                 <div>
