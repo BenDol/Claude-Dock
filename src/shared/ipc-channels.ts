@@ -201,6 +201,9 @@ export const IPC = {
   CLOUD_CHECK_AUTH: 'cloud:checkAuth',
   CLOUD_GET_SETUP_STATUS: 'cloud:getSetupStatus',
 
+  // Telemetry
+  TELEMETRY_SET_CONSENT: 'telemetry:setConsent',
+
   // Usage / Anthropic API
   USAGE_FETCH: 'usage:fetch',
   USAGE_CACHED: 'usage:cached',

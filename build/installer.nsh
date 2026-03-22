@@ -1,6 +1,12 @@
 ; Custom NSIS macros for Claude Dock installer
 ; electron-builder calls these at the appropriate lifecycle points
 
+!macro customInstall
+  ; Write telemetry pre-consent flag — the app reads this on first launch
+  ; and auto-enables anonymous usage telemetry (skipping the consent prompt)
+  WriteRegStr HKCU "Software\ClaudeDock" "TelemetryConsent" "1"
+!macroend
+
 !macro customUnInstall
   ; Remove "Open with Claude Dock" context menu entries from the registry
   ; These are under HKCU so no admin rights needed

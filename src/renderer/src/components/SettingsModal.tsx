@@ -731,6 +731,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                 </label>
                 <div className="settings-divider" />
+                <div className="settings-section-header">Privacy</div>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.telemetry?.enabled ?? false}
+                    onChange={(e) => {
+                      getDockApi().telemetry.setConsent(e.target.checked)
+                      update({ telemetry: { ...settings.telemetry, enabled: e.target.checked, consentGiven: true } } as any)
+                    }}
+                  />
+                  Share anonymous usage telemetry
+                </label>
+                <div className="settings-description">
+                  Sends anonymous session stats (duration, crash count, feature usage) to help improve Claude Dock. No personal data, terminal content, or file paths are ever collected.
+                </div>
+                <div className="settings-divider" />
                 <div className="settings-section-header">Dock MCP Server</div>
                 <div className="settings-row">
                   <span className="settings-label">

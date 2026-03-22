@@ -58,6 +58,9 @@ const Launcher: React.FC = () => {
   const [autoUpdating, setAutoUpdating] = useState(false)
   const [waitingForIdle, setWaitingForIdle] = useState(false)
 
+  // Telemetry consent
+  const [telemetryPhase, setTelemetryPhase] = useState<'checking' | 'prompt' | 'resolved'>('checking')
+
   // Git install state
   const [gitPhase, setGitPhase] = useState<GitPhase>('checking')
   const [gitError, setGitError] = useState('')
@@ -106,6 +109,15 @@ const Launcher: React.FC = () => {
     }).catch(() => {
       doUpdateCheck()
     })
+
+    // Check telemetry consent
+    api.settings.get().then((settings) => {
+      if (settings.telemetry?.consentGiven) {
+        setTelemetryPhase('resolved')
+      } else {
+        setTelemetryPhase('prompt')
+      }
+    }).catch(() => setTelemetryPhase('resolved'))
 
     // Check Git first (Claude check happens after git resolves via second useEffect)
     api.git.check()
@@ -648,6 +660,37 @@ const Launcher: React.FC = () => {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {telemetryPhase === 'prompt' && (
+          <div className="claude-setup-banner">
+            <div className="updater-row">
+              <svg className="updater-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 16A8 8 0 108 0a8 8 0 000 16zm.93-9.412l-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.399l-.353.001.082-.382 2.17-.477h.015zM8 5.5a1 1 0 110-2 1 1 0 010 2z" />
+              </svg>
+              <span className="updater-text"><strong>Help Improve Claude Dock</strong></span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', padding: '4px 0 8px 22px', lineHeight: 1.5 }}>
+              Share anonymous usage data to help improve Claude Dock.<br />
+              <strong>Collected:</strong> session duration, feature usage flags, crash counts, OS platform.<br />
+              <strong>Never collected:</strong> terminal content, file names, git data, IP addresses, or anything identifying.<br />
+              You can opt out anytime in Settings.
+            </div>
+            <div className="updater-actions">
+              <button className="updater-btn updater-btn-primary" onClick={() => {
+                getDockApi().telemetry.setConsent(true)
+                setTelemetryPhase('resolved')
+              }}>
+                Yes, Share Data
+              </button>
+              <button className="updater-btn updater-btn-secondary" onClick={() => {
+                getDockApi().telemetry.setConsent(false)
+                setTelemetryPhase('resolved')
+              }}>
+                No Thanks
+              </button>
+            </div>
           </div>
         )}
 

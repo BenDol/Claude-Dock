@@ -10,11 +10,12 @@ import { registerPlugins, PluginManager } from './plugins'
 import { PluginUpdateService } from './plugins/plugin-updater'
 import { NotificationManager } from './notification-manager'
 import { initLogger, log, logInfo, logError } from './logger'
-import { getSetting } from './settings-store'
+import { getSetting, setSettings } from './settings-store'
 import { updateJumpList } from './recent-store'
 import { enrichPathWithKnownDirs } from './claude-cli'
 import { loadPendingProject, cleanStaleLock } from './pending-project'
 import { refreshContextMenuIfNeeded, autoRegisterContextMenuOnce } from './context-menu-integration'
+import { TelemetryCollector, checkInstallerConsent } from './telemetry'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -114,14 +115,17 @@ if (!gotLock) {
   // Detect GPU process crashes — primary suspect for the "both windows freeze" issue
   app.on('child-process-gone', (_event, details) => {
     logError(`Child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
+    try { TelemetryCollector.getInstance().recordCrash(`child-process-gone:${details.type}`) } catch { /* ok */ }
   })
 
   process.on('uncaughtException', (err) => {
     logError('Uncaught exception:', err)
+    try { TelemetryCollector.getInstance().recordCrash('uncaughtException') } catch { /* ok */ }
   })
 
   process.on('unhandledRejection', (reason) => {
     logError('Unhandled rejection:', reason)
+    try { TelemetryCollector.getInstance().recordCrash('unhandledRejection') } catch { /* ok */ }
   })
 
   app.whenReady().then(async () => {
@@ -132,6 +136,18 @@ if (!gotLock) {
     installCli()
     updateJumpList()
     try { migrateIfNeeded() } catch (e) { log(`MCP migration error: ${e}`) }
+
+    // Telemetry: check installer consent flag on first launch, then initialize
+    try {
+      const t = getSetting('telemetry')
+      if (!t?.consentGiven && checkInstallerConsent()) {
+        const collector = TelemetryCollector.getInstance()
+        const deviceId = collector.getOrCreateDeviceId()
+        setSettings({ telemetry: { enabled: true, consentGiven: true, deviceId } } as any)
+        log('[telemetry] installer consent detected, auto-enabled')
+      }
+      TelemetryCollector.getInstance() // ensure initialized (sends pending from prior crash)
+    } catch (e) { log(`[telemetry] init error: ${e}`) }
 
     // Context menu registration uses synchronous shell commands (reg, csc.exe).
     // Defer to avoid blocking the launcher window from appearing.
@@ -165,6 +181,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    try { TelemetryCollector.getInstance().flush() } catch (e) { log(`[telemetry] flush error: ${e}`) }
     try { ActivityTracker.getInstance().shutdown() } catch (e) { log(`ActivityTracker.shutdown error: ${e}`) }
     try { PluginManager.getInstance().dispose() } catch (e) { log(`PluginManager.dispose error: ${e}`) }
     DockManager.getInstance().shutdownAll()

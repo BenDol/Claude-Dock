@@ -70,6 +70,11 @@ export interface Settings {
     preferredShell: 'default' | 'bash' | 'cmd' | 'powershell' | 'pwsh'
     defaultHeight: number
   }
+  telemetry: {
+    enabled: boolean
+    consentGiven: boolean
+    deviceId: string
+  }
   advanced: {
     debugLogging: boolean
     disableGpuAcceleration: boolean
@@ -266,6 +271,11 @@ export const DEFAULT_SETTINGS: Settings = {
     enabled: true,
     preferredShell: 'default',
     defaultHeight: 200
+  },
+  telemetry: {
+    enabled: false,
+    consentGiven: false,
+    deviceId: ''
   },
   advanced: {
     debugLogging: false,

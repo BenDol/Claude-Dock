@@ -267,6 +267,9 @@ export interface DockApi {
     getDefaultBranch: (projectDir: string) => Promise<string>
     getNewUrl: (projectDir: string, sourceBranch: string, targetBranch: string) => Promise<string | null>
   }
+  telemetry: {
+    setConsent: (consent: boolean) => Promise<void>
+  }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
     emit: (notification: DockNotification) => void
@@ -571,6 +574,9 @@ const dockApi: DockApi = {
     create: (projectDir, request) => ipcRenderer.invoke(IPC.PR_CREATE, projectDir, request),
     getDefaultBranch: (projectDir) => ipcRenderer.invoke(IPC.PR_GET_DEFAULT_BRANCH, projectDir),
     getNewUrl: (projectDir, sourceBranch, targetBranch) => ipcRenderer.invoke(IPC.PR_GET_NEW_URL, projectDir, sourceBranch, targetBranch)
+  },
+  telemetry: {
+    setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent)
   },
   notifications: {
     onShow: (callback) => {

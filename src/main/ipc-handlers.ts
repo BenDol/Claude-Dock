@@ -21,6 +21,7 @@ import { PluginUpdateService } from './plugins/plugin-updater'
 import { getOverrides as getPluginOverrides } from './plugins/plugin-update-store'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
+import { TelemetryCollector } from './telemetry'
 
 declare const __DEV__: boolean
 
@@ -47,6 +48,7 @@ export function registerIpcHandlers(): void {
           dock.id, terminalId, `Terminal`, sessionId, dock.projectDir
         )
       } catch (e) { log(`ActivityTracker.addTerminal error: ${e}`) }
+      try { TelemetryCollector.getInstance().recordTerminalSpawn() } catch { /* ok */ }
       pluginManager.emitTerminalPostSpawn(dock.projectDir, terminalId, sessionId)
       log(`TERMINAL_SPAWN: ${terminalId} spawned`)
       return true
@@ -613,6 +615,18 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.PLUGIN_UPDATE_MARK_OVERRIDE_SEEN, (_event, pluginId: string, hash: string) => {
     const { markOverrideSeen } = require('./plugins/plugin-update-store')
     markOverrideSeen(pluginId, hash)
+  })
+
+  // Telemetry consent
+  ipcMain.handle(IPC.TELEMETRY_SET_CONSENT, (_event, consent: boolean) => {
+    try {
+      const collector = TelemetryCollector.getInstance()
+      const deviceId = consent ? collector.getOrCreateDeviceId() : (getSettings().telemetry?.deviceId || '')
+      setSettings({ telemetry: { enabled: consent, consentGiven: true, deviceId } } as any)
+      log(`[telemetry] consent set: ${consent}`)
+    } catch (err) {
+      logError('[telemetry] setConsent failed:', err)
+    }
   })
 
   // Usage / Anthropic API

@@ -1,0 +1,7 @@
+name = "claude-dock-telemetry"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Set GITHUB_TOKEN as a secret:
+#   wrangler secret put GITHUB_TOKEN
+# Use a fine-grained PAT with only "Contents: Read and write" on the telemetry repo
