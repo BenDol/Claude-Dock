@@ -30,7 +30,8 @@ const SRC_PLUGINS = path.join(ROOT, 'src', 'main', 'plugins')
 const BUILTIN_PLUGINS = [
   { id: 'git-sync', srcDir: 'git-sync', entry: 'git-sync-plugin.ts' },
   { id: 'git-manager', srcDir: 'git-manager', entry: 'git-manager-plugin.ts',
-    rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' }
+    rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' },
+  { id: 'cloud-integration', srcDir: 'cloud-integration', entry: 'cloud-integration-plugin.ts' }
 ]
 
 /**
