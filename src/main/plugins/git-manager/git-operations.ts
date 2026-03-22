@@ -700,7 +700,25 @@ export async function checkoutBranch(cwd: string, name: string, trackRemote?: st
       await gitExec(cwd, ['checkout', '-b', name, '--track', trackRemote], 15000)
       return
     } catch {
-      // Branch may already exist locally — fall through to plain checkout
+      // Branch may already exist locally — try switching to it and setting upstream
+      try {
+        await gitExec(cwd, ['checkout', name], 15000)
+        // Verify we're not in detached HEAD — if we are, the checkout resolved to
+        // a tag or direct ref instead of creating/switching to a local branch
+        const { stdout: headRef } = await gitExec(cwd, ['symbolic-ref', '--short', 'HEAD'], 5000)
+        if (headRef.trim()) {
+          // On a branch — set its upstream to the remote
+          try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
+          return
+        }
+      } catch {
+        // symbolic-ref fails when HEAD is detached — fall through to recovery
+      }
+      // Detached HEAD — force-create the local branch at current HEAD and track
+      try {
+        await gitExec(cwd, ['checkout', '-B', name, trackRemote], 15000)
+        return
+      } catch { /* fall through to plain checkout as last resort */ }
     }
   }
   await gitExec(cwd, ['checkout', name], 15000)
