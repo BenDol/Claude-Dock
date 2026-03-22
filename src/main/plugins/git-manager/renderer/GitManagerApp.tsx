@@ -1065,6 +1065,8 @@ const GitManagerApp: React.FC = () => {
   }, [handleSelectCommit])
 
   const navigateToBranch = useCallback(async (branchName: string) => {
+    // Skip synthetic detached HEAD names — they're not valid git refs
+    if (branchName.startsWith('(detached')) return
     const api = getDockApi()
     try {
       const log = await api.gitManager.getLog(activeDir, { maxCount: 1, branch: branchName })

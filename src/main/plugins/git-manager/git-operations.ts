@@ -694,35 +694,62 @@ export async function createCommit(cwd: string, message: string): Promise<{ hash
 // --- Branch operations ---
 
 export async function checkoutBranch(cwd: string, name: string, trackRemote?: string): Promise<void> {
-  getServices().log(`[git-manager] checkoutBranch: name=${name} trackRemote=${trackRemote || 'none'} cwd=${cwd}`)
+  const log = getServices().log
+  log(`[git-manager] checkoutBranch: name=${name} trackRemote=${trackRemote || 'none'} cwd=${cwd}`)
+
   if (trackRemote) {
-    // Explicitly create a local branch tracking the remote — needed when multiple
-    // remotes have the same branch name (git checkout alone would be ambiguous)
+    // Step 1: Try creating a new local tracking branch
     try {
       await gitExec(cwd, ['checkout', '-b', name, '--track', trackRemote], 15000)
+      log(`[git-manager] checkoutBranch: created tracking branch ${name} -> ${trackRemote}`)
       return
-    } catch {
-      // Branch may already exist locally — try switching to it and setting upstream
+    } catch (e1) {
+      log(`[git-manager] checkoutBranch: -b --track failed: ${e1 instanceof Error ? e1.message.split('\n')[0] : e1}`)
+    }
+
+    // Step 2: Try force-creating/resetting the branch to the remote ref
+    try {
+      await gitExec(cwd, ['checkout', '-B', name, trackRemote], 15000)
+      log(`[git-manager] checkoutBranch: force-created branch ${name} from ${trackRemote}`)
+      try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
+      return
+    } catch (e2) {
+      log(`[git-manager] checkoutBranch: -B failed: ${e2 instanceof Error ? e2.message.split('\n')[0] : e2}`)
+    }
+
+    // Step 3: Try plain checkout (works if there's only one remote with this branch)
+    try {
+      await gitExec(cwd, ['checkout', name], 15000)
+      // Verify we're on a branch, not detached
       try {
-        await gitExec(cwd, ['checkout', name], 15000)
-        // Verify we're not in detached HEAD — if we are, the checkout resolved to
-        // a tag or direct ref instead of creating/switching to a local branch
         const { stdout: headRef } = await gitExec(cwd, ['symbolic-ref', '--short', 'HEAD'], 5000)
         if (headRef.trim()) {
-          // On a branch — set its upstream to the remote
-          try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
+          log(`[git-manager] checkoutBranch: plain checkout succeeded, on branch ${headRef.trim()}`)
           return
         }
-      } catch {
-        // symbolic-ref fails when HEAD is detached — fall through to recovery
-      }
-      // Detached HEAD — force-create the local branch at current HEAD and track
-      try {
-        await gitExec(cwd, ['checkout', '-B', name, trackRemote], 15000)
+      } catch { /* detached */ }
+      // Detached — undo and throw
+      log(`[git-manager] checkoutBranch: plain checkout resulted in detached HEAD, trying recovery`)
+    } catch (e3) {
+      log(`[git-manager] checkoutBranch: plain checkout failed: ${e3 instanceof Error ? e3.message.split('\n')[0] : e3}`)
+    }
+
+    // Step 4: Last resort — create branch at the remote's commit hash directly
+    try {
+      const { stdout: commitHash } = await gitExec(cwd, ['rev-parse', trackRemote], 5000)
+      const hash = commitHash.trim()
+      if (hash) {
+        await gitExec(cwd, ['checkout', '-B', name, hash], 15000)
+        try { await gitExec(cwd, ['branch', '--set-upstream-to', trackRemote, name], 5000) } catch { /* best effort */ }
+        log(`[git-manager] checkoutBranch: created branch ${name} at ${hash.slice(0, 7)} (resolved from ${trackRemote})`)
         return
-      } catch { /* fall through to plain checkout as last resort */ }
+      }
+    } catch (e4) {
+      log(`[git-manager] checkoutBranch: rev-parse recovery failed: ${e4 instanceof Error ? e4.message.split('\n')[0] : e4}`)
     }
   }
+
+  // No trackRemote or all recovery attempts failed
   await gitExec(cwd, ['checkout', name], 15000)
 }
 
