@@ -802,6 +802,7 @@
   cursor: pointer;
   transition: background 0.1s;
   gap: 4px;
+  position: relative;
 }
 
 .gm-sidebar-item:hover {
@@ -815,12 +816,14 @@
 
 .gm-sidebar-item-active:not(.gm-sidebar-item-submodule)::before {
   content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 3px;
   height: 16px;
   background: var(--accent-color);
-  border-radius: 2px;
-  margin-right: 6px;
-  flex-shrink: 0;
+  border-radius: 0 2px 2px 0;
 }
 
 .gm-sidebar-item-switching {
