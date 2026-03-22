@@ -36,7 +36,8 @@ async function gcloud(...args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync('gcloud', args, {
       timeout: CMD_TIMEOUT,
-      windowsHide: true
+      windowsHide: true,
+      shell: process.platform === 'win32' // gcloud is a .cmd on Windows
     })
     return stdout.trim()
   } catch (err: any) {
