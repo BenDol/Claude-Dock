@@ -1369,6 +1369,100 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Shell Panel */
+.shell-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.shell-panel-handle {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  cursor: row-resize;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.shell-panel-grip {
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-color);
+  margin-right: 6px;
+}
+
+.shell-panel-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.shell-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 2px;
+}
+
+.shell-panel-close:hover {
+  background: var(--hover-color);
+  color: var(--text-primary);
+}
+
+.shell-panel-terminal {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Bottom-left toggle button to open shell panel */
+.shell-toggle-bottom {
+  position: absolute;
+  bottom: 6px;
+  left: 8px;
+  z-index: 10;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.terminal-card:hover .shell-toggle-bottom,
+.shell-toggle-bottom:focus {
+  opacity: 0.7;
+}
+
+.shell-toggle-bottom:hover {
+  opacity: 1;
+  background: var(--hover-color);
+  color: var(--text-primary);
+}
+
+/* Active indicator on header toggle when shell is open */
+.terminal-action-active {
+  color: var(--accent-color) !important;
+}
+
 /* Terminal Search Bar */
 .terminal-search-bar {
   position: absolute;

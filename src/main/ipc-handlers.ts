@@ -92,6 +92,34 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // --- Shell panel PTY ---
+
+  ipcMain.handle(IPC.SHELL_SPAWN, (event, shellId: string) => {
+    const dock = getDockForEvent(event)
+    if (dock) {
+      const settings = getSettings()
+      const preference = settings.shellPanel?.preferredShell || 'default'
+      dock.ptyManager.spawnShell(shellId, dock.projectDir, preference)
+      return true
+    }
+    return false
+  })
+
+  ipcMain.handle(IPC.SHELL_WRITE, (event, shellId: string, data: string) => {
+    const dock = getDockForEvent(event)
+    if (dock) dock.ptyManager.write(shellId, data)
+  })
+
+  ipcMain.handle(IPC.SHELL_RESIZE, (event, shellId: string, cols: number, rows: number) => {
+    const dock = getDockForEvent(event)
+    if (dock) dock.ptyManager.resize(shellId, cols, rows)
+  })
+
+  ipcMain.handle(IPC.SHELL_KILL, (event, shellId: string) => {
+    const dock = getDockForEvent(event)
+    if (dock) dock.ptyManager.kill(shellId)
+  })
+
   ipcMain.handle(IPC.DOCK_GET_INFO, (event) => {
     const dock = getDockForEvent(event)
     if (dock) {

@@ -67,9 +67,13 @@ export class DockWindow {
 
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
-        if (!this.window.isDestroyed()) {
-          this.window.webContents.send(IPC.TERMINAL_DATA, terminalId, data)
+        if (this.window.isDestroyed()) return
+        // Route shell panel PTY data to the SHELL_DATA channel
+        if (terminalId.startsWith('shell:')) {
+          this.window.webContents.send(IPC.SHELL_DATA, terminalId, data)
+          return
         }
+        this.window.webContents.send(IPC.TERMINAL_DATA, terminalId, data)
         // Accumulate output for buffer persistence
         if (ENABLE_BUFFER_STORAGE) {
           try {
@@ -87,9 +91,13 @@ export class DockWindow {
         try { this.idleNotifier.trackData(terminalId, data) } catch (e) { log(`IdleNotifier.trackData error: ${e}`) }
       },
       (terminalId, exitCode) => {
-        if (!this.window.isDestroyed()) {
-          this.window.webContents.send(IPC.TERMINAL_EXIT, terminalId, exitCode)
+        if (this.window.isDestroyed()) return
+        // Route shell panel PTY exit to the SHELL_EXIT channel
+        if (terminalId.startsWith('shell:')) {
+          this.window.webContents.send(IPC.SHELL_EXIT, terminalId, exitCode)
+          return
         }
+        this.window.webContents.send(IPC.TERMINAL_EXIT, terminalId, exitCode)
         try { ActivityTracker.getInstance().setTerminalAlive(this.id, terminalId, false) } catch (e) { log(`ActivityTracker.setTerminalAlive error: ${e}`) }
         try { this.idleNotifier.removeTerminal(terminalId) } catch (e) { log(`IdleNotifier.removeTerminal error: ${e}`) }
       },

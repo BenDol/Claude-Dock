@@ -694,6 +694,43 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </div>
                 {ctxMenuStatus && <div className="settings-update-status">{ctxMenuStatus}</div>}
                 <div className="settings-divider" />
+                <div className="settings-section-header">Shell Panel</div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={settings.shellPanel?.enabled ?? true}
+                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, enabled: e.target.checked } } as any)}
+                  />
+                  Enable embedded shell panel in terminals
+                </label>
+                <div className="settings-description">
+                  Adds a toggleable shell panel at the bottom of each Claude terminal. Opens with the button in the terminal header or bottom-left corner.
+                </div>
+                <label>
+                  Preferred Shell
+                  <select
+                    value={settings.shellPanel?.preferredShell ?? 'default'}
+                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, preferredShell: e.target.value } } as any)}
+                  >
+                    <option value="default">Default (system shell)</option>
+                    <option value="bash">Bash</option>
+                    <option value="cmd">Command Prompt (cmd)</option>
+                    <option value="powershell">PowerShell</option>
+                    <option value="pwsh">PowerShell Core (pwsh)</option>
+                  </select>
+                </label>
+                <label>
+                  Default Height (px)
+                  <input
+                    type="number"
+                    min={80}
+                    max={600}
+                    step={10}
+                    value={settings.shellPanel?.defaultHeight ?? 200}
+                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, defaultHeight: parseInt(e.target.value) || 200 } } as any)}
+                  />
+                </label>
+                <div className="settings-divider" />
                 <div className="settings-section-header">Dock MCP Server</div>
                 <div className="settings-row">
                   <span className="settings-label">

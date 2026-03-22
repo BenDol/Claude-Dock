@@ -6,6 +6,14 @@ export const IPC = {
   TERMINAL_KILL: 'terminal:kill',
   TERMINAL_GET_SESSION_ID: 'terminal:getSessionId',
   TERMINAL_SYNC_ORDER: 'terminal:syncOrder',
+  // Shell panel PTY (embedded non-Claude shell per terminal)
+  SHELL_SPAWN: 'shell:spawn',
+  SHELL_WRITE: 'shell:write',
+  SHELL_RESIZE: 'shell:resize',
+  SHELL_KILL: 'shell:kill',
+  SHELL_DATA: 'shell:data',       // Main -> Renderer
+  SHELL_EXIT: 'shell:exit',       // Main -> Renderer
+
   DOCK_GET_INFO: 'dock:getInfo',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',

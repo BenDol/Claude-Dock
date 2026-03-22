@@ -65,6 +65,11 @@ export interface Settings {
     showUsageMeter: boolean
     spendLimitUsd: number
   }
+  shellPanel: {
+    enabled: boolean
+    preferredShell: 'default' | 'bash' | 'cmd' | 'powershell' | 'pwsh'
+    defaultHeight: number
+  }
   advanced: {
     debugLogging: boolean
     disableGpuAcceleration: boolean
@@ -256,6 +261,11 @@ export const DEFAULT_SETTINGS: Settings = {
   anthropic: {
     showUsageMeter: true,
     spendLimitUsd: 100
+  },
+  shellPanel: {
+    enabled: true,
+    preferredShell: 'default',
+    defaultHeight: 200
   },
   advanced: {
     debugLogging: false,

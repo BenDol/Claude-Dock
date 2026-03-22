@@ -1,7 +1,7 @@
 import * as path from 'path'
 import * as crypto from 'crypto'
 import { utilityProcess, UtilityProcess } from 'electron'
-import { getDefaultShell, getShellArgs } from './util/shell'
+import { getDefaultShell, getShellArgs, resolveShell } from './util/shell'
 import { log, logError } from './logger'
 
 export interface PtyInstance {
@@ -156,6 +156,42 @@ export class PtyManager {
         if (resumeId && process.platform === 'win32') {
           this.scheduleResizePoke(terminalId)
         }
+      }
+    })
+  }
+
+  /**
+   * Spawn a plain shell PTY (no Claude command). Used for the embedded shell panel.
+   * These are ephemeral — no session persistence, no launch queue, no resume.
+   */
+  spawnShell(shellId: string, cwd: string, shellPreference: string): void {
+    const { shell, args } = resolveShell(shellPreference)
+    log(`pty.spawnShell: shellId=${shellId} shell=${shell} cwd=${cwd}`)
+
+    const instance: PtyInstance = {
+      id: shellId,
+      pid: 0,
+      cwd,
+      sessionId: shellId,
+      cols: 80,
+      rows: 24,
+      isResume: false
+    }
+    this.ptys.set(shellId, instance)
+
+    this.sendToHost({
+      type: 'spawn',
+      terminalId: shellId,
+      shell,
+      args,
+      cwd,
+      sessionId: shellId,
+      cols: 80,
+      rows: 24,
+      env: {
+        ...process.env as Record<string, string>,
+        COLORTERM: 'truecolor',
+        TERM_PROGRAM: 'claude-dock-shell'
       }
     })
   }

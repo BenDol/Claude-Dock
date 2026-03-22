@@ -1,8 +1,11 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useState, lazy, Suspense } from 'react'
 import TerminalView from './TerminalView'
 import TerminalTitle from './TerminalTitle'
 import { useDockStore } from '../stores/dock-store'
+import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
+
+const ShellPanel = lazy(() => import('./ShellPanel'))
 
 interface TerminalCardProps {
   terminalId: string
@@ -100,6 +103,13 @@ function parsePermissionIndicator(flags: string | undefined): { label: string; t
   return { label, tooltip: parts.join(' · ') }
 }
 
+const ShellIcon: React.FC = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </svg>
+)
+
 const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive, isFocused }) => {
   const removeTerminal = useDockStore((s) => s.removeTerminal)
   const isUnlocked = useDockStore((s) => s.unlockedTerminals.has(terminalId))
@@ -107,6 +117,18 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const isActive = useDockStore((s) => s.activeTerminals.has(terminalId))
   const claudeFlags = useDockStore((s) => s.claudeTaskFlags.get(terminalId))
   const permIndicator = parsePermissionIndicator(claudeFlags)
+  const shellEnabled = useSettingsStore((s) => s.settings.shellPanel?.enabled ?? true)
+  const defaultShellHeight = useSettingsStore((s) => s.settings.shellPanel?.defaultHeight ?? 200)
+  const [shellOpen, setShellOpen] = useState(false)
+  const [shellHeight, setShellHeight] = useState(defaultShellHeight)
+  const [shellMounted, setShellMounted] = useState(false)
+
+  const toggleShell = useCallback(() => {
+    setShellOpen((prev) => {
+      if (!prev) setShellMounted(true) // mount on first open, keep mounted after
+      return !prev
+    })
+  }, [])
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
@@ -154,6 +176,15 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         </div>
         <div className="terminal-card-actions">
           <div className={`terminal-actions-panel ${actionsOpen ? 'open' : ''}`}>
+            {shellEnabled && (
+              <button
+                className={`terminal-action-btn${shellOpen ? ' terminal-action-active' : ''}`}
+                onClick={toggleShell}
+                title={shellOpen ? 'Close shell panel' : 'Open shell panel'}
+              >
+                <ShellIcon />
+              </button>
+            )}
             <button className="terminal-action-btn" onClick={handleCopySessionId} title="Copy session ID">
               <CopyIdIcon copied={copied} />
             </button>
@@ -181,7 +212,28 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         </div>
       </div>
       <div className="terminal-card-body">
-        <TerminalView terminalId={terminalId} isFocused={isFocused} />
+        <div className="terminal-card-split" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+            <TerminalView terminalId={terminalId} isFocused={isFocused} />
+            {shellEnabled && !shellOpen && (
+              <button className="shell-toggle-bottom" onClick={toggleShell} title="Open shell panel">
+                <ShellIcon />
+              </button>
+            )}
+          </div>
+          {shellEnabled && shellMounted && (
+            <Suspense fallback={null}>
+              <div style={shellOpen ? undefined : { height: 0, overflow: 'hidden' }}>
+                <ShellPanel
+                  terminalId={terminalId}
+                  height={shellHeight}
+                  onHeightChange={setShellHeight}
+                  onClose={toggleShell}
+                />
+              </div>
+            </Suspense>
+          )}
+        </div>
       </div>
     </div>
   )

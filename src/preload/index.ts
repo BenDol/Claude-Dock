@@ -81,6 +81,14 @@ export interface DockApi {
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
   }
+  shell: {
+    spawn: (shellId: string) => Promise<boolean>
+    write: (shellId: string, data: string) => Promise<void>
+    resize: (shellId: string, cols: number, rows: number) => Promise<void>
+    kill: (shellId: string) => Promise<void>
+    onData: (callback: (shellId: string, data: string) => void) => () => void
+    onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
+  }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
     restart: () => Promise<void>
@@ -336,6 +344,22 @@ const dockApi: DockApi = {
       }
       ipcRenderer.on(IPC.TERMINAL_EXIT, handler)
       return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler)
+    }
+  },
+  shell: {
+    spawn: (shellId) => ipcRenderer.invoke(IPC.SHELL_SPAWN, shellId),
+    write: (shellId, data) => ipcRenderer.invoke(IPC.SHELL_WRITE, shellId, data),
+    resize: (shellId, cols, rows) => ipcRenderer.invoke(IPC.SHELL_RESIZE, shellId, cols, rows),
+    kill: (shellId) => ipcRenderer.invoke(IPC.SHELL_KILL, shellId),
+    onData: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, shellId: string, data: string) => callback(shellId, data)
+      ipcRenderer.on(IPC.SHELL_DATA, handler)
+      return () => ipcRenderer.removeListener(IPC.SHELL_DATA, handler)
+    },
+    onExit: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, shellId: string, exitCode: number) => callback(shellId, exitCode)
+      ipcRenderer.on(IPC.SHELL_EXIT, handler)
+      return () => ipcRenderer.removeListener(IPC.SHELL_EXIT, handler)
     }
   },
   dock: {
