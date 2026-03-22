@@ -693,6 +693,7 @@ export async function createCommit(cwd: string, message: string): Promise<{ hash
 // --- Branch operations ---
 
 export async function checkoutBranch(cwd: string, name: string, trackRemote?: string): Promise<void> {
+  getServices().log(`[git-manager] checkoutBranch: name=${name} trackRemote=${trackRemote || 'none'} cwd=${cwd}`)
   if (trackRemote) {
     // Explicitly create a local branch tracking the remote — needed when multiple
     // remotes have the same branch name (git checkout alone would be ambiguous)

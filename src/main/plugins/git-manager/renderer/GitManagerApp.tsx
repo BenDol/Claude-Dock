@@ -1251,8 +1251,6 @@ const GitManagerApp: React.FC = () => {
     setSearchOpen(false)
     setLoading(true)
     setActiveTab('log')
-    // Allow auto-switch to changes tab for the new repo
-    initialLoadRef.current = true
   }, [])
 
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
@@ -6546,10 +6544,13 @@ const BranchDropdown: React.FC<{
 
   const handleSelect = (name: string, isRemote: boolean) => {
     setOpen(false)
-    // For remote branches, strip the remote prefix (e.g. "origin/feature" -> "feature")
-    const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
-    if (checkoutName !== currentBranch) {
-      onCheckout(checkoutName)
+    // Pass the full name (including remote prefix for remote branches) so the
+    // checkout handler can detect it's remote and set up proper tracking
+    if (isRemote) {
+      const localName = name.replace(/^[^/]+\//, '')
+      if (localName !== currentBranch) onCheckout(name)
+    } else {
+      if (name !== currentBranch) onCheckout(name)
     }
   }
 
@@ -7112,8 +7113,9 @@ const BranchRefContextMenu: React.FC<{
   const doCheckout = () => {
     onClose()
     const name = isRemote ? branchName.replace(/^[^/]+\//, '') : branchName
-    if (onCheckout) onCheckout(name)
-    else api.gitManager.checkoutBranch(projectDir, name).then((r) => {
+    const trackRemote = isRemote ? branchName : undefined
+    if (onCheckout) onCheckout(branchName)
+    else api.gitManager.checkoutBranch(projectDir, name, trackRemote).then((r) => {
       if (!r.success) onError(`Checkout failed: ${r.error || 'Unknown error'}`)
       onAction()
     })
@@ -9040,9 +9042,10 @@ const SwitchSubmoduleBranchModal: React.FC<{
   const handleCheckout = async (name: string, isRemote: boolean) => {
     if (busy) return
     const checkoutName = isRemote ? name.replace(/^[^/]+\//, '') : name
+    const trackRemote = isRemote ? name : undefined
     setBusy(true)
     try {
-      const r = await getDockApi().gitManager.checkoutBranch(subDir, checkoutName)
+      const r = await getDockApi().gitManager.checkoutBranch(subDir, checkoutName, trackRemote)
       if (r.success) { onDone(); onClose() }
       else onError(`Switch branch failed: ${r.error || 'Unknown error'}`)
     } catch (e) {
