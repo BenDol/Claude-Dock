@@ -47,8 +47,19 @@ export default function ToastContainer() {
       if (notification.projectDir) {
         if (!projectDir || norm(notification.projectDir) !== norm(projectDir)) return
       }
-      const entry: ToastEntry = { ...notification, exiting: false }
-      setToasts((prev) => [...prev.slice(-4), entry]) // keep max 5
+
+      // uniqueId dedup: skip if a toast with the same uniqueId is already visible
+      if (notification.uniqueId) {
+        setToasts((prev) => {
+          const alreadyVisible = prev.some((t) => t.uniqueId === notification.uniqueId && !t.exiting)
+          if (alreadyVisible) return prev // drop — already showing
+          const entry: ToastEntry = { ...notification, exiting: false }
+          return [...prev.slice(-4), entry]
+        })
+      } else {
+        const entry: ToastEntry = { ...notification, exiting: false }
+        setToasts((prev) => [...prev.slice(-4), entry]) // keep max 5
+      }
 
       const timeout = notification.timeout ?? 5000
       if (timeout > 0) {

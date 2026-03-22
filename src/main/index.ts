@@ -307,6 +307,8 @@ function schedulePluginUpdateCheck(): void {
             type: 'info',
             source: 'plugin-updater',
             timeout: 0,
+            uniqueId: 'plugin-updates-available',
+            uniquePerSession: true,
             actions: [
               { label: 'View', event: 'plugin-update-open' },
               { label: 'Update All', event: 'plugin-update-all' }
@@ -360,6 +362,8 @@ function schedulePluginUpdateCheck(): void {
               type: 'info',
               source: 'plugin-updater',
               timeout: 0,
+              uniqueId: 'plugin-updates-available',
+              uniquePerSession: true,
               actions: [
                 { label: 'View', event: 'plugin-update-open' },
                 { label: 'Update All', event: 'plugin-update-all' }

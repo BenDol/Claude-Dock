@@ -83,6 +83,12 @@ export interface DockNotification {
   data?: Record<string, unknown>
   /** Auto-mark this notification as read after N milliseconds if still unread */
   autoReadMs?: number
+  /** If set, only one toast with this uniqueId can be visible at a time.
+   *  New notifications with the same uniqueId are dropped while one is on screen. */
+  uniqueId?: string
+  /** If true, only show this notification once per app session.
+   *  Subsequent notifications with the same uniqueId are dropped for the rest of the session. */
+  uniquePerSession?: boolean
 }
 
 export interface CiSetupStep {

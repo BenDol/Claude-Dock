@@ -8,6 +8,8 @@ let idCounter = 0
 
 export class NotificationManager {
   private static instance: NotificationManager | null = null
+  /** Unique IDs seen this session — for uniquePerSession deduplication */
+  private sessionSeenIds = new Set<string>()
 
   static getInstance(): NotificationManager {
     if (!NotificationManager.instance) {
@@ -24,6 +26,15 @@ export class NotificationManager {
         log('[notification] blocked (source:', notification.source + ')', notification.title)
         return
       }
+    }
+
+    // uniquePerSession: drop if already shown this session
+    if (notification.uniqueId && notification.uniquePerSession) {
+      if (this.sessionSeenIds.has(notification.uniqueId)) {
+        log('[notification] blocked (uniquePerSession, already shown):', notification.uniqueId)
+        return
+      }
+      this.sessionSeenIds.add(notification.uniqueId)
     }
 
     const full: DockNotification = {
