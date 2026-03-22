@@ -2601,7 +2601,7 @@ const CommitLog: React.FC<{
           )}
         </span>
         <span className="gm-col-message">
-          {c.refs.length > 0 && c.refs.filter((r) => r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/HEAD\//i.test(r) && !/^HEAD\//i.test(r)).map((r) => {
+          {c.refs.length > 0 && c.refs.filter((r) => r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/(HEAD|heads?)\//i.test(r) && !/^(HEAD|heads?)\//i.test(r)).map((r) => {
             const isTag = r.startsWith('tag: ')
             const isRemote = r.includes('/')
             const label = r.replace(/^HEAD -> /, '').replace(/^tag: /, '')
@@ -6788,7 +6788,7 @@ const CommitContextMenu: React.FC<{
 
   // Branches that point at this commit
   const commitBranches = commit.refs
-    .filter((r) => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD'))
+    .filter((r) => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/(HEAD|heads?)\//i.test(r) && !/^(HEAD|heads?)\//i.test(r))
     .map((r) => r.replace(/^HEAD -> /, ''))
     .filter(Boolean)
 
@@ -7251,7 +7251,7 @@ const ResetModal: React.FC<{
               <div className="gm-reset-subject">{commit.subject}</div>
               <div className="gm-reset-meta">Author: {commit.author}</div>
               <div className="gm-reset-meta">Commit date: {new Date(commit.date).toLocaleString()}</div>
-              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/HEAD\//i.test(r) && !/^HEAD\//i.test(r)).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
+              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/(HEAD|heads?)\//i.test(r) && !/^(HEAD|heads?)\//i.test(r)).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
             </div>
           </div>
           <div className="gm-reset-type-label">Reset type</div>

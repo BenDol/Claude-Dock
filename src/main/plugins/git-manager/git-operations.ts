@@ -176,7 +176,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
     for (const line of stdout.split('\n')) {
       if (!line.trim()) continue
       const [name, tracking, trackInfo, head] = line.split('\t')
-      if (!name || /^HEAD(\/|$)/i.test(name)) continue
+      if (!name || /^(HEAD|heads?)(\/|$)/i.test(name)) continue
       let ahead = 0, behind = 0
       if (trackInfo) {
         const aheadMatch = trackInfo.match(/ahead (\d+)/)
@@ -226,7 +226,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
 
     for (const line of stdout.split('\n')) {
       const name = line.trim()
-      if (!name || name.endsWith('/HEAD') || /\/HEAD\/|^HEAD\//i.test(name)) continue
+      if (!name || name.endsWith('/HEAD') || /\/(HEAD|heads?)\//i.test(name) || /^(HEAD|heads?)\//i.test(name)) continue
       // Skip if already covered by a local tracking branch
       branches.push({
         name,
