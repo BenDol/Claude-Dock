@@ -313,8 +313,8 @@ function CreatePrDialog({ projectDir, currentBranch, prLabel, provider, onClose,
   )]
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="gm-pr-create-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay">
+      <div className="gm-pr-create-dialog">
         <div className="gm-pr-create-header">
           <h3>New {prLabel}</h3>
           <button className="modal-close" onClick={onClose}>&times;</button>
