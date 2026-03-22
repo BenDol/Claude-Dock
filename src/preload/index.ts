@@ -192,6 +192,7 @@ export interface DockApi {
     stashPop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
     stashDrop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
     getSubmodules: (projectDir: string) => Promise<GitSubmoduleInfo[]>
+    refreshSubmodule: (projectDir: string, subPath: string) => Promise<Partial<GitSubmoduleInfo> | null>
     generateCommitMsg: (projectDir: string) => Promise<{ success: boolean; message?: string; error?: string }>
     reset: (projectDir: string, hash: string, mode: string) => Promise<{ success: boolean; error?: string }>
     revert: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
@@ -484,6 +485,7 @@ const dockApi: DockApi = {
     stashPop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_POP, projectDir, index),
     stashDrop: (projectDir, index) => ipcRenderer.invoke(IPC.GIT_MGR_STASH_DROP, projectDir, index),
     getSubmodules: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SUBMODULES, projectDir),
+    refreshSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REFRESH_SUBMODULE, projectDir, subPath),
     generateCommitMsg: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GENERATE_COMMIT_MSG, projectDir),
     reset: (projectDir, hash, mode) => ipcRenderer.invoke(IPC.GIT_MGR_RESET, projectDir, hash, mode),
     revert: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_REVERT, projectDir, hash),

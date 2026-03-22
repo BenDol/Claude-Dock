@@ -176,6 +176,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
     for (const line of stdout.split('\n')) {
       if (!line.trim()) continue
       const [name, tracking, trackInfo, head] = line.split('\t')
+      if (!name || /^HEAD(\/|$)/i.test(name)) continue
       let ahead = 0, behind = 0
       if (trackInfo) {
         const aheadMatch = trackInfo.match(/ahead (\d+)/)
@@ -225,7 +226,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
 
     for (const line of stdout.split('\n')) {
       const name = line.trim()
-      if (!name || name.endsWith('/HEAD')) continue
+      if (!name || name.endsWith('/HEAD') || /\/HEAD\/|^HEAD\//i.test(name)) continue
       // Skip if already covered by a local tracking branch
       branches.push({
         name,
@@ -1420,63 +1421,61 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
   }
 }
 
-// Submodule cache: keyed by cwd, stores the result + a HEAD hash so we can
-// invalidate when the parent repo changes.  The per-submodule detail (dirty
-// status, branch) is fetched lazily in the background and merged in.
-const submoduleCache = new Map<string, { head: string; base: GitSubmoduleInfo[]; full: GitSubmoduleInfo[] | null; pending: Promise<GitSubmoduleInfo[]> | null }>()
-
 export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
   try {
-    // Check if the cache is still valid (same parent HEAD)
-    let currentHead = ''
-    try {
-      const { stdout: headOut } = await gitExec(cwd, ['rev-parse', 'HEAD'], 3000)
-      currentHead = headOut.trim()
-    } catch { /* ignore */ }
-
-    const cached = submoduleCache.get(cwd)
-    if (cached && cached.head === currentHead && currentHead) {
-      // Cache hit — return full (detailed) if available, otherwise base (fast)
-      if (cached.full) return cached.full
-      if (cached.base.length > 0) {
-        // Base list is ready, details still loading — return what we have
-        return cached.base
-      }
-    }
-
-    // --- Fast path: get the submodule list without per-submodule details ---
     const base = await getSubmoduleList(cwd)
-    if (base.length === 0) {
-      submoduleCache.set(cwd, { head: currentHead, base: [], full: [], pending: null })
-      return []
-    }
-
-    // Store the base list immediately so the UI can render structure
-    const entry = { head: currentHead, base, full: null as GitSubmoduleInfo[] | null, pending: null as Promise<GitSubmoduleInfo[]> | null }
-    submoduleCache.set(cwd, entry)
-
-    // --- Slow path: enrich with per-submodule details in background ---
-    if (!entry.pending) {
-      entry.pending = enrichSubmoduleDetails(cwd, base).then((enriched) => {
-        entry.full = enriched
-        entry.pending = null
-        return enriched
-      }).catch(() => {
-        entry.pending = null
-        return base
-      })
-    }
-
-    return entry.pending
+    if (base.length === 0) return []
+    return await enrichSubmoduleDetails(cwd, base)
   } catch (err) {
     getServices().logError('[git-manager] getSubmodules failed:', err)
     return []
   }
 }
 
-/** Invalidate submodule cache for a directory (called after operations that change submodules) */
-export function invalidateSubmoduleCache(cwd: string): void {
-  submoduleCache.delete(cwd)
+/** Invalidate submodule cache (no-op — kept for API compatibility with callers) */
+export function invalidateSubmoduleCache(_cwd: string): void {
+  // Cache was removed; the foreach optimization handles speed.
+}
+
+/**
+ * Refresh a single submodule's details (branch, dirty status) without
+ * reloading the entire submodule list.  Used when navigating back from
+ * a submodule to update just the one that may have changed.
+ */
+export async function refreshSingleSubmodule(cwd: string, subPath: string): Promise<Partial<GitSubmoduleInfo> | null> {
+  const subCwd = path.join(cwd, subPath)
+  try {
+    const [statusResult, branchResult, diffResult] = await Promise.allSettled([
+      gitExec(subCwd, ['status', '--porcelain'], 5000),
+      gitExec(subCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000),
+      gitExec(cwd, ['diff', '--name-only', '--', subPath], 5000)
+    ])
+
+    const patch: Partial<GitSubmoduleInfo> = { path: subPath }
+
+    if (statusResult.status === 'fulfilled') {
+      const lines = statusResult.value.stdout.trim().split('\n').filter(Boolean)
+      patch.hasDirtyWorkTree = lines.length > 0
+      patch.changeCount = lines.length
+    }
+    if (branchResult.status === 'fulfilled') {
+      const branch = branchResult.value.stdout.trim()
+      if (branch && branch !== 'HEAD') { patch.branch = branch; patch.isDetached = false }
+      else { patch.isDetached = true; patch.branch = undefined }
+    }
+    if (diffResult.status === 'fulfilled') {
+      patch.status = diffResult.value.stdout.trim() ? 'modified' : 'current'
+    }
+    // Get current HEAD hash
+    try {
+      const { stdout: headOut } = await gitExec(subCwd, ['rev-parse', 'HEAD'], 3000)
+      patch.hash = headOut.trim().slice(0, 8)
+    } catch { /* keep existing */ }
+
+    return patch
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -1590,9 +1589,9 @@ async function enrichSubmoduleDetails(cwd: string, submodules: GitSubmoduleInfo[
   //   BRANCH:<branch-name-or-HEAD>
   //   DIRTY:<0-or-count>
   try {
-    const script = process.platform === 'win32'
-      ? 'echo ====$sm_path==== && git rev-parse --abbrev-ref HEAD && git status --porcelain'
-      : 'echo "====$sm_path====" && git rev-parse --abbrev-ref HEAD && git status --porcelain'
+    // git submodule foreach always uses a POSIX shell (even on Windows),
+    // so quoting is consistent across platforms.
+    const script = 'echo "====$sm_path====" && git rev-parse --abbrev-ref HEAD && git status --porcelain'
 
     const { stdout: foreachOut } = await gitExec(cwd, ['submodule', 'foreach', '--quiet', script], 15000)
 

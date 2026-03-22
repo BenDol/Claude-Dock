@@ -269,6 +269,10 @@ export function registerGitManagerIpc(): void {
     return gitOps.getSubmodules(projectDir)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_REFRESH_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
+    return gitOps.refreshSingleSubmodule(projectDir, subPath)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GENERATE_COMMIT_MSG, async (_event, projectDir: string) => {
     try {
       const message = await gitOps.generateCommitMessage(projectDir)

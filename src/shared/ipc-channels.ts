@@ -96,6 +96,7 @@ export const IPC = {
   GIT_MGR_STASH_POP: 'gitMgr:stashPop',
   GIT_MGR_STASH_DROP: 'gitMgr:stashDrop',
   GIT_MGR_GET_SUBMODULES: 'gitMgr:getSubmodules',
+  GIT_MGR_REFRESH_SUBMODULE: 'gitMgr:refreshSubmodule',
   GIT_MGR_GENERATE_COMMIT_MSG: 'gitMgr:generateCommitMsg',
   GIT_MGR_RESET: 'gitMgr:reset',
   GIT_MGR_REVERT: 'gitMgr:revert',

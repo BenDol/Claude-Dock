@@ -34,6 +34,8 @@ const standaloneCommitHash = params.get('commitHash') || ''
 interface NavEntry {
   dir: string
   label: string
+  /** The submodule path that was navigated into (relative to dir) */
+  subPath?: string
 }
 
 /** Send a write-tests task to the dock window */
@@ -1344,7 +1346,7 @@ const GitManagerApp: React.FC = () => {
       })
       return
     }
-    setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir, subPath: sub.path }])
     wcBusyRef.current = false
     resetRepoState()
     setActiveDir(activeDir + '/' + sub.path)
@@ -1355,8 +1357,24 @@ const GitManagerApp: React.FC = () => {
       const next = [...prev]
       const entry = next.pop()
       if (entry) {
+        // Full reset + reload for the parent repo
         resetRepoState()
         setActiveDir(entry.dir)
+
+        // After the full refresh loads submodules, patch the specific
+        // submodule we just came from so its branch/status is up-to-date
+        // without waiting for the full foreach to complete.
+        if (entry.subPath) {
+          const subPathToRefresh = entry.subPath
+          const parentDir = entry.dir
+          getDockApi().gitManager.refreshSubmodule(parentDir, subPathToRefresh).then((patch) => {
+            if (patch) {
+              setSubmodules((subs) =>
+                subs.map((s) => s.path === subPathToRefresh ? { ...s, ...patch } : s)
+              )
+            }
+          }).catch(() => { /* full refresh will cover it */ })
+        }
       }
       return next
     })
@@ -2583,7 +2601,7 @@ const CommitLog: React.FC<{
           )}
         </span>
         <span className="gm-col-message">
-          {c.refs.length > 0 && c.refs.filter((r) => r !== 'HEAD' && !r.endsWith('/HEAD')).map((r) => {
+          {c.refs.length > 0 && c.refs.filter((r) => r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/HEAD\//i.test(r) && !/^HEAD\//i.test(r)).map((r) => {
             const isTag = r.startsWith('tag: ')
             const isRemote = r.includes('/')
             const label = r.replace(/^HEAD -> /, '').replace(/^tag: /, '')
@@ -7233,7 +7251,7 @@ const ResetModal: React.FC<{
               <div className="gm-reset-subject">{commit.subject}</div>
               <div className="gm-reset-meta">Author: {commit.author}</div>
               <div className="gm-reset-meta">Commit date: {new Date(commit.date).toLocaleString()}</div>
-              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD')).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
+              <div className="gm-reset-meta">Branch(es): {commit.refs.filter(r => !r.startsWith('tag:') && r !== 'HEAD' && !r.endsWith('/HEAD') && !/\/HEAD\//i.test(r) && !/^HEAD\//i.test(r)).map(r => r.replace(/^HEAD -> /, '')).join(', ') || 'n/a'}</div>
             </div>
           </div>
           <div className="gm-reset-type-label">Reset type</div>
