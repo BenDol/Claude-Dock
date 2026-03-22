@@ -42,7 +42,11 @@ registerToolbarAction({
         api.gitManager.getStatus(projectDir),
         api.gitManager.getBehindCount(projectDir)
       ])
-      const localChanges = status.staged.length + status.unstaged.length + status.untracked.length
+      // Exclude submodule entries that only have dirty working trees (no new commits) — they're visual indicators, not stageable
+      const stageableUnstaged = [...status.unstaged, ...status.untracked].filter(
+        (f) => !f.isSubmodule || (f.submoduleAhead ?? 0) > 0
+      )
+      const localChanges = status.staged.length + stageableUnstaged.length
       if (behind > 0 && localChanges > 0) return `${localChanges}\u2193${behind}`
       if (behind > 0) return `\u2193${behind}`
       if (localChanges > 0) return localChanges

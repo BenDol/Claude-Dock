@@ -31,6 +31,16 @@ const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
 const standaloneCommitHash = params.get('commitHash') || ''
 
+/** Submodule entries with only dirty working trees (no new commits) are
+ *  visual indicators, not stageable changes. This filters them from counts. */
+function countStageableChanges(status: GitStatusResult | null): number {
+  if (!status) return 0
+  const stageableUnstaged = [...status.unstaged, ...status.untracked].filter(
+    (f) => !f.isSubmodule || (f.submoduleAhead ?? 0) > 0
+  )
+  return status.staged.length + stageableUnstaged.length
+}
+
 interface NavEntry {
   dir: string
   label: string
@@ -909,7 +919,7 @@ const GitManagerApp: React.FC = () => {
       // On initial load, switch to changes tab if there are staged/unstaged changes
       if (initialLoadRef.current) {
         initialLoadRef.current = false
-        if (statusData.staged.length + statusData.unstaged.length + statusData.untracked.length > 0) {
+        if (countStageableChanges(statusData) > 0) {
           setActiveTab('changes')
         }
       }
@@ -1473,7 +1483,7 @@ const GitManagerApp: React.FC = () => {
             </button>
           ) : (
             <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
-              <ChangesIcon /> Changes{status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 ? <span className="gm-toolbar-count gm-toolbar-count-changes">{status.staged.length + status.unstaged.length + status.untracked.length}</span> : null}
+              <ChangesIcon /> Changes{countStageableChanges(status) > 0 ? <span className="gm-toolbar-count gm-toolbar-count-changes">{countStageableChanges(status)}</span> : null}
             </button>
           )}
           <button className="gm-toolbar-btn" onClick={() => api.gitManager.openBash(activeDir)} title="Open Git Bash">
@@ -1672,9 +1682,9 @@ const GitManagerApp: React.FC = () => {
             >
               Working Changes
               {wcBusy && activeTab !== 'changes' && <span className="gm-tab-spinner" />}
-              {status && (status.staged.length + status.unstaged.length + status.untracked.length) > 0 && (
+              {countStageableChanges(status) > 0 && (
                 <span className="gm-tab-badge">
-                  {status.staged.length + status.unstaged.length + status.untracked.length}
+                  {countStageableChanges(status)}
                 </span>
               )}
             </button>
@@ -4298,6 +4308,13 @@ const WorkingChanges: React.FC<{
 
   const api = getDockApi()
   const allUnstaged = [...status.unstaged, ...status.untracked]
+  // Submodule entries that only have dirty working trees (no new commits)
+  // are visual indicators — they shouldn't count toward change totals
+  // or be included in Stage All operations.
+  const isStageable = (f: GitFileStatusEntry) =>
+    !f.isSubmodule || (f.submoduleAhead ?? 0) > 0
+  const stageableUnstaged = allUnstaged.filter(isStageable)
+  const stageableCount = status.staged.length + stageableUnstaged.length
 
   const pendingActionRef = useRef<'commit' | 'commit-push' | null>(null)
   const [pendingAction, setPendingAction] = useState<'commit' | 'commit-push' | null>(null)
@@ -4407,7 +4424,7 @@ const WorkingChanges: React.FC<{
 
   const handleStageAll = async () => {
     setBusy(true)
-    const paths = allUnstaged.map((f) => f.path)
+    const paths = stageableUnstaged.map((f) => f.path)
     setStagingPaths(new Set(paths))
     const BATCH = 50
     let failed = false
@@ -4506,6 +4523,9 @@ const WorkingChanges: React.FC<{
   }
 
   const handleStageFile = async (filePath: string) => {
+    // Skip submodule entries that only have dirty working trees (not stageable)
+    const entry = allUnstaged.find((f) => f.path === filePath)
+    if (entry && !isStageable(entry)) return
     setStagingPaths((prev) => new Set(prev).add(filePath))
     const r = await api.gitManager.stage(projectDir, [filePath])
     if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
@@ -4578,8 +4598,14 @@ const WorkingChanges: React.FC<{
   }
 
   const handleBatchStage = async (paths: string[]) => {
-    setStagingPaths(new Set(paths))
-    const r = await api.gitManager.stage(projectDir, paths)
+    // Filter out non-stageable submodule entries
+    const stageable = paths.filter((p) => {
+      const entry = allUnstaged.find((f) => f.path === p)
+      return !entry || isStageable(entry)
+    })
+    if (stageable.length === 0) return
+    setStagingPaths(new Set(stageable))
+    const r = await api.gitManager.stage(projectDir, stageable)
     if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
     await refreshStatus()
     setStagingPaths(new Set())
@@ -4778,14 +4804,14 @@ const WorkingChanges: React.FC<{
               <button onClick={() => setGenError(null)}>&#10005;</button>
             </div>
           )}
-          {status.staged.length === 0 && allUnstaged.length > 0 ? (
+          {status.staged.length === 0 && stageableUnstaged.length > 0 ? (
             <div className="gm-commit-btn-group">
               <button
                 className="gm-commit-btn gm-commit-btn-stash"
                 onClick={handleStageAll}
                 disabled={busy}
               >
-                {busy ? <><span className="gm-commit-spinner" /> Staging...</> : `Stage All (${allUnstaged.length} files)`}
+                {busy ? <><span className="gm-commit-spinner" /> Staging...</> : `Stage All (${stageableUnstaged.length} files)`}
               </button>
             </div>
           ) : (
