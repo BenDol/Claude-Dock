@@ -722,6 +722,21 @@ const GitManagerApp: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // Block Ctrl+A from selecting all page text (browser default).
+  // Inputs/textareas keep native select-all; the file list panels
+  // handle Ctrl+A themselves via their own onKeyDown handler.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // Zoom: Ctrl+MWB and Ctrl++/- with persistence
   useEffect(() => {
     const ZOOM_KEY = 'gm-zoom'

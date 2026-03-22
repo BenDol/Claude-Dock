@@ -36,6 +36,19 @@ export default function CloudApp() {
     })
   }, [loadSettings])
 
+  // Block Ctrl+A from selecting all page text (browser default)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // Zoom: Ctrl+MouseWheel and Ctrl++/- with persistence
   useEffect(() => {
     const ZOOM_KEY = 'cloud-zoom'
