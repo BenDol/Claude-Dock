@@ -7,6 +7,7 @@ import { IPC } from '../../shared/ipc-channels'
 import { fetchJSON, downloadFile, extractHostname } from '../http-utils'
 import { log, logError } from '../logger'
 import { PluginManager } from './plugin-manager'
+import { PluginFileWatcher } from './plugin-file-watcher'
 import { getServiceEntry } from './plugin-service-registry'
 import { trustPlugin } from './plugin-loader'
 import { isAppUpdateInProgress } from '../pending-project'
@@ -165,8 +166,7 @@ export class PluginUpdateService {
     }
 
     // Pause file watcher during install to avoid double-reload
-    const { PluginFileWatcher } = require('./plugin-file-watcher') as typeof import('./plugin-file-watcher')
-    PluginFileWatcher.pause()
+    try { PluginFileWatcher.pause() } catch { /* watcher may not be active */ }
 
     try {
       log(`[plugin-updater] ${pluginId}: installing (${entry.currentVersion} -> ${entry.newVersion}, source=${entry.source})`)
@@ -198,7 +198,7 @@ export class PluginUpdateService {
     } finally {
       // Resume file watcher after install completes (success or failure)
       // Small delay to let file system settle after extraction
-      setTimeout(() => PluginFileWatcher.resume(), 2000)
+      try { setTimeout(() => PluginFileWatcher.resume(), 2000) } catch { /* watcher may not be active */ }
     }
   }
 
