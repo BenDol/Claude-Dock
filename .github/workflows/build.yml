@@ -96,8 +96,7 @@ jobs:
           PLUGINS_ONLY=true
           while IFS= read -r file; do
             case "$file" in
-              src/main/plugins/git-manager/*) ;;
-              src/main/plugins/git-sync/*) ;;
+              src/main/plugins/*) ;;
               scripts/generate-plugin-archive.js) ;;
               *)
                 echo "Non-plugin file changed: $file"
