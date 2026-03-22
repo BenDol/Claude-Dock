@@ -1604,7 +1604,7 @@ async function enrichSubmoduleDetails(cwd: string, submodules: GitSubmoduleInfo[
       const sub = initialized.find((s) => s.path === currentPath)
       if (sub) {
         if (branchLine && branchLine !== 'HEAD') {
-          sub.branch = branchLine
+          sub.branch = branchLine.replace(/^heads?\//i, '')
           sub.isDetached = false
         } else {
           sub.isDetached = true
@@ -1646,16 +1646,17 @@ async function enrichSubmoduleDetails(cwd: string, submodules: GitSubmoduleInfo[
         }
         if (branchResult.status === 'fulfilled') {
           const branch = branchResult.value.stdout.trim()
-          if (branch && branch !== 'HEAD') { sub.branch = branch; sub.isDetached = false }
+          if (branch && branch !== 'HEAD') { sub.branch = branch.replace(/^heads?\//i, ''); sub.isDetached = false }
           else sub.isDetached = true
         }
       })
     )
   }
 
-  // Apply tracking branches
+  // Apply tracking branches (strip heads/ prefix from .gitmodules branch values)
   for (const sub of enriched) {
-    sub.trackingBranch = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
+    const tb = trackingBranches.get(sub.name) || trackingBranches.get(sub.path)
+    sub.trackingBranch = tb?.replace(/^heads?\//i, '')
   }
 
   return enriched
