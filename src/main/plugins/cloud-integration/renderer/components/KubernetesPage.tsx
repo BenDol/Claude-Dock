@@ -42,7 +42,7 @@ function detectSetupIssue(errorText: string): SetupIssue | null {
     }
   }
 
-  if (['dial tcp', 'connectex', 'connection attempt failed', 'cannot connect to cluster', 'connected host has failed to respond'].some((p) => lower.includes(p))) {
+  if (['dial tcp', 'connectex', 'connection attempt failed', 'cannot connect to cluster', 'connected host has failed to respond', 'context deadline exceeded', 'connect: connection refused', 'connect: connection timed out'].some((p) => lower.includes(p))) {
     return {
       type: 'connection-failed' as any,
       message: 'Cannot reach the cluster API server. The cluster may be private, behind a VPN, or the endpoint may be unreachable from this network.',
