@@ -366,7 +366,7 @@ export class GcpProvider implements CloudProvider {
     }
   }
 
-  async getWorkloads(clusterName?: string): Promise<CloudWorkload[]> {
+  async getWorkloads(clusterName?: string, clusterLocation?: string): Promise<CloudWorkload[]> {
     const projectId = await this.getProjectId()
 
     // If no specific cluster, iterate all clusters so kubectl is properly configured for each
@@ -381,7 +381,8 @@ export class GcpProvider implements CloudProvider {
       const allWorkloads: CloudWorkload[] = []
       for (const cluster of clusters) {
         try {
-          const w = await this.getWorkloads(cluster.name)
+          // Pass location to avoid a redundant gcloud clusters list call
+          const w = await this.getWorkloads(cluster.name, cluster.location)
           allWorkloads.push(...w)
         } catch (e: any) {
           // Propagate setup errors (missing plugin) so the UI can show resolution
@@ -396,15 +397,19 @@ export class GcpProvider implements CloudProvider {
     svcLog(`getWorkloads: fetching for cluster "${clusterName}"`)
 
     // Get credentials for the specified cluster
-    const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
-    if (clusters.length > 0) {
-      const loc = clusters[0].location || clusters[0].zone
-      svcLog(`getWorkloads: configuring kubectl for "${clusterName}" in ${loc}`)
-      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
-    } else {
-      svcLogError(`getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
-      return []
+    let loc = clusterLocation
+    if (!loc) {
+      // Location not provided — look it up (only happens for direct single-cluster calls)
+      const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
+      if (clusters.length === 0) {
+        svcLogError(`getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
+        return []
+      }
+      loc = clusters[0].location || clusters[0].zone
     }
+
+    svcLog(`getWorkloads: configuring kubectl for "${clusterName}" in ${loc}`)
+    await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
 
     const workloads: CloudWorkload[] = []
 
