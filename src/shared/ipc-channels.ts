@@ -200,6 +200,7 @@ export const IPC = {
   CLOUD_GET_WORKLOAD_DETAIL: 'cloud:getWorkloadDetail',
   CLOUD_GET_CONSOLE_URL: 'cloud:getConsoleUrl',
   CLOUD_CHECK_AUTH: 'cloud:checkAuth',
+  CLOUD_REAUTH: 'cloud:reauth',
   CLOUD_GET_SETUP_STATUS: 'cloud:getSetupStatus',
 
   // Telemetry

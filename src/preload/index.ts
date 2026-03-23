@@ -318,6 +318,7 @@ export interface DockApi {
     getWorkloadDetail: (projectDir: string, clusterName: string, namespace: string, workloadName: string, kind: string) => Promise<CloudWorkloadDetail | null>
     getConsoleUrl: (projectDir: string, section: string, params?: Record<string, string>) => Promise<string | null>
     checkAuth: (projectDir: string) => Promise<boolean>
+    reauth: (projectDir: string) => Promise<boolean>
     getSetupStatus: (projectDir: string, providerId?: string) => Promise<CloudSetupStatus | null>
   }
   debug: {
@@ -647,18 +648,27 @@ const dockApi: DockApi = {
     getDashboard: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_DASHBOARD, projectDir),
     getClusters: async (projectDir) => {
       const r = await ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTERS, projectDir)
-      if (r?.error) throw new Error(r.error)
+      if (r?.error) {
+        const err = new Error(r.error) as any
+        err.authExpired = !!r.authExpired
+        throw err
+      }
       return r?.data ?? r  // handle both { data } and plain array (backward compat)
     },
     getClusterDetail: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTER_DETAIL, projectDir, clusterName),
     getWorkloads: async (projectDir, clusterName) => {
       const r = await ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOADS, projectDir, clusterName)
-      if (r?.error) throw new Error(r.error)
+      if (r?.error) {
+        const err = new Error(r.error) as any
+        err.authExpired = !!r.authExpired
+        throw err
+      }
       return r?.data ?? r
     },
     getWorkloadDetail: (projectDir, clusterName, namespace, workloadName, kind) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOAD_DETAIL, projectDir, clusterName, namespace, workloadName, kind),
     getConsoleUrl: (projectDir, section, params) => ipcRenderer.invoke(IPC.CLOUD_GET_CONSOLE_URL, projectDir, section, params),
     checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir),
+    reauth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_REAUTH, projectDir),
     getSetupStatus: (projectDir, providerId) => ipcRenderer.invoke(IPC.CLOUD_GET_SETUP_STATUS, projectDir, providerId)
   },
   debug: {
