@@ -88,15 +88,16 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
 
-          # Plugin-only paths: files exclusively inside plugin subdirectories
-          # or the plugin archive script. Everything else triggers a full build.
-          # Note: src/shared/* changes trigger a full build because both the app
-          # and plugins depend on shared types — we can't be sure it's safe to
-          # only rebuild plugins.
+          # Plugin-only paths: files inside plugin subdirectories (e.g.
+          # src/main/plugins/git-manager/...) or the archive script.
+          # Top-level files in src/main/plugins/ (plugin-manager.ts, etc.)
+          # are framework code that requires a full app rebuild.
+          # src/shared/* also triggers a full build since both app and
+          # plugins depend on shared types.
           PLUGINS_ONLY=true
           while IFS= read -r file; do
             case "$file" in
-              src/main/plugins/*) ;;
+              src/main/plugins/*/*) ;;
               scripts/generate-plugin-archive.js) ;;
               *)
                 echo "Non-plugin file changed: $file"
