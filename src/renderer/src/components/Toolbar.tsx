@@ -3,6 +3,7 @@ import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
+import { useToolbarNavigation } from '../hooks/useToolbarNavigation'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
 import type { GitProvider } from '../../../shared/remote-url'
@@ -77,6 +78,9 @@ const FolderIcon: React.FC = () => (
 
 
 const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSettings }) => {
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  useToolbarNavigation(toolbarRef)
+
   const terminalCount = useDockStore((s) => s.terminals.length)
   const rcCount = useDockStore((s) => s.rcTerminals.size)
   const hasLoadingTerminals = useDockStore((s) => s.loadingTerminals.size > 0)
@@ -318,11 +322,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const api = getDockApi()
 
   return (
-    <div className="toolbar">
+    <div className="toolbar" ref={toolbarRef} role="toolbar" aria-label="Dock toolbar">
       <div className="toolbar-left">
         <WorkspaceDropdown projectDir={projectDir} />
         <span className="toolbar-count">{terminalCount} terminal{terminalCount !== 1 ? 's' : ''}</span>
         <button
+          data-toolbar-btn
+          tabIndex={-1}
           className={`toolbar-btn toolbar-btn-icon${rcCount > 0 ? ' toolbar-btn-active' : ''}`}
           onClick={toggleRemoteControl}
           disabled={toggling || hasLoadingTerminals}
@@ -341,11 +347,13 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
       </div>
       <div className="toolbar-center" />
       <div className="toolbar-right">
-        <button className="toolbar-btn toolbar-btn-icon" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
+        <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
           <PlusIcon />
         </button>
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
+            data-toolbar-btn
+            tabIndex={-1}
             key={action.id}
             className={`toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap${openPluginWindows.has(action.id) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => action.onClick(projectDir)}
@@ -364,6 +372,8 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
         ))}
         {runtimeActions.filter((a) => enabledPlugins === null || enabledPlugins.has(a.pluginId)).map((action) => (
           <button
+            data-toolbar-btn
+            tabIndex={-1}
             key={action.pluginId}
             className={`toolbar-btn toolbar-btn-icon${openPluginWindows.has(action.pluginId) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => getDockApi().plugins.invoke(action.action, projectDir)}
@@ -373,6 +383,8 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
           </button>
         ))}
         <button
+          data-toolbar-btn
+          tabIndex={-1}
           className="toolbar-btn toolbar-btn-icon"
           onClick={() => api.app.openInExplorer(projectDir)}
           title="Open in file explorer"
@@ -380,7 +392,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
           <FolderIcon />
         </button>
         <NotificationDropdown />
-        <button className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap" onClick={onOpenSettings} title="Settings (Ctrl+,)">
+        <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           <SettingsIcon />
           {hasPluginUpdates && <span className="toolbar-update-dot" />}
         </button>

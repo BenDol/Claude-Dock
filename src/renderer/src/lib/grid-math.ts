@@ -2,6 +2,9 @@ import type { Layout } from 'react-grid-layout'
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
+/** Sentinel returned when navigating up past the top row */
+export const TOOLBAR_FOCUS_ID = '__toolbar__'
+
 /** Check if a layout item covers a given grid position */
 function coversPosition(l: Layout, x: number, y: number): boolean {
   return x >= l.x && x < l.x + l.w && y >= l.y && y < l.y + l.h
@@ -46,12 +49,28 @@ export function findAdjacentTerminal(
     const inTargetRow = layout.filter(
       (l) => l.i !== currentId && targetY >= l.y && targetY < l.y + l.h
     )
-    if (inTargetRow.length === 0) return null
+    if (inTargetRow.length === 0) {
+      // No terminal in the target row — navigating up past the top goes to toolbar
+      if (direction === 'up' && targetY < 0) return TOOLBAR_FOCUS_ID
+      return null
+    }
     inTargetRow.sort((a, b) => Math.abs(a.x - current.x) - Math.abs(b.x - current.x))
     return inTargetRow[0].i
   }
 
   return null
+}
+
+/**
+ * Find the terminal to focus when navigating down from the toolbar.
+ * Returns the leftmost terminal in the top row (row 0).
+ */
+export function findTerminalFromToolbar(layout: Layout[]): string | null {
+  if (layout.length === 0) return null
+  const topRow = layout.filter((l) => l.y === 0)
+  if (topRow.length === 0) return layout[0].i
+  topRow.sort((a, b) => a.x - b.x)
+  return topRow[0].i
 }
 
 export function computeAutoLayout(

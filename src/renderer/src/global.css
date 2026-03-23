@@ -475,6 +475,17 @@ body {
   background: var(--hover-color);
 }
 
+/* Keyboard focus indicator for toolbar buttons */
+[data-toolbar-btn]:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -1px;
+  border-radius: 3px;
+}
+
+[data-toolbar-btn]:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .toolbar-btn-icon {
   display: flex;
   align-items: center;
@@ -1834,6 +1845,15 @@ body {
 .settings-tab.active {
   background: var(--accent-color);
   color: white;
+}
+
+.settings-tab:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.settings-tab:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .settings-group {

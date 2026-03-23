@@ -10,7 +10,7 @@ import { useDockStore } from './stores/dock-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
-import { computeAutoLayout, findAdjacentTerminal, type Direction } from './lib/grid-math'
+import { computeAutoLayout, findAdjacentTerminal, findTerminalFromToolbar, TOOLBAR_FOCUS_ID, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
 import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, MergeResolveTask, TaskPermissions } from '../../shared/claude-task-types'
@@ -701,14 +701,33 @@ function DockApp() {
     })
   }, [])
 
-  // Directional terminal focus navigation
+  // Directional focus navigation — supports grid ↔ toolbar transitions
   const focusDirection = useCallback((direction: Direction) => {
     const state = useDockStore.getState()
-    if (!state.focusedTerminalId || state.terminals.length < 2) return
+
+    // If currently in toolbar, only down returns to the grid
+    if (state.focusRegion === 'toolbar') {
+      if (direction === 'down') {
+        const maxCols = useSettingsStore.getState().settings.grid.maxColumns
+        const { layout } = computeAutoLayout(state.terminals.map((t) => t.id), maxCols)
+        const targetId = findTerminalFromToolbar(layout)
+        if (targetId) {
+          useDockStore.getState().setFocusedTerminal(targetId)
+          window.dispatchEvent(new CustomEvent('refocus-terminal'))
+        }
+      }
+      // Left/right/up are handled by the toolbar's own hook
+      return
+    }
+
+    // Grid navigation
+    if (!state.focusedTerminalId || state.terminals.length === 0) return
     const maxCols = useSettingsStore.getState().settings.grid.maxColumns
     const { layout } = computeAutoLayout(state.terminals.map((t) => t.id), maxCols)
     const targetId = findAdjacentTerminal(layout, state.focusedTerminalId, direction)
-    if (targetId) {
+    if (targetId === TOOLBAR_FOCUS_ID) {
+      useDockStore.getState().setFocusRegion('toolbar')
+    } else if (targetId) {
       useDockStore.getState().setFocusedTerminal(targetId)
     }
   }, [])

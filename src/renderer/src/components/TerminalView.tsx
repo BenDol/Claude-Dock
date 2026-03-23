@@ -193,12 +193,25 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, fit, scrollToBottom])
 
+  // Focus terminal when it becomes the active one — but only if focus is in the grid
+  const focusRegion = useDockStore((s) => s.focusRegion)
   useEffect(() => {
-    if (isFocused && !loading) {
+    if (isFocused && !loading && focusRegion === 'grid') {
       const timer = setTimeout(() => focus(), 50)
       return () => clearTimeout(timer)
     }
-  }, [isFocused, loading, focus])
+  }, [isFocused, loading, focus, focusRegion])
+
+  // Re-focus when returning from toolbar navigation
+  useEffect(() => {
+    const handler = () => {
+      if (useDockStore.getState().focusedTerminalId === terminalId) {
+        setTimeout(() => focus(), 50)
+      }
+    }
+    window.addEventListener('refocus-terminal', handler)
+    return () => window.removeEventListener('refocus-terminal', handler)
+  }, [terminalId, focus])
 
   const handleScrollBtn = useCallback(() => {
     if (autoScroll) {

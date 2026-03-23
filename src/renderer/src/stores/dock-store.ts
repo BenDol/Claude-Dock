@@ -8,6 +8,8 @@ interface DockState {
   terminals: TerminalInfo[]
   gridMode: GridMode
   focusedTerminalId: string | null
+  /** Which region of the UI currently has keyboard focus */
+  focusRegion: 'grid' | 'toolbar'
   nextTerminalNum: number
   unlockedTerminals: Set<string>
   rcTerminals: Set<string>
@@ -37,6 +39,7 @@ interface DockState {
   toggleTerminalLock: (id: string) => void
   swapTerminals: (id1: string, id2: string) => void
   setFocusedTerminal: (id: string | null) => void
+  setFocusRegion: (region: 'grid' | 'toolbar') => void
   focusNextTerminal: () => void
   setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
@@ -55,6 +58,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   terminals: [],
   gridMode: 'auto',
   focusedTerminalId: null,
+  focusRegion: 'grid',
   nextTerminalNum: 1,
   unlockedTerminals: new Set<string>(),
   rcTerminals: new Set<string>(),
@@ -133,7 +137,8 @@ export const useDockStore = create<DockState>((set, get) => ({
       return { terminals }
     }),
 
-  setFocusedTerminal: (id) => set({ focusedTerminalId: id }),
+  setFocusedTerminal: (id) => set({ focusedTerminalId: id, focusRegion: 'grid' }),
+  setFocusRegion: (region) => set({ focusRegion: region }),
 
   focusNextTerminal: () =>
     set((state) => {

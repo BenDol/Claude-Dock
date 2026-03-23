@@ -259,10 +259,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
           <h2>Settings</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
-        <div className="settings-tabs">
+        <div
+          className="settings-tabs"
+          role="tablist"
+          onKeyDown={(e) => {
+            const tabs: SettingsTab[] = ['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior']
+            const idx = tabs.indexOf(tab)
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault()
+              setTab(tabs[(idx + 1) % tabs.length])
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              setTab(tabs[(idx - 1 + tabs.length) % tabs.length])
+            }
+          }}
+        >
           {(['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior'] as SettingsTab[]).map((t) => (
             <button
               key={t}
+              role="tab"
+              aria-selected={tab === t}
+              tabIndex={tab === t ? 0 : -1}
               className={`settings-tab ${tab === t ? 'active' : ''}`}
               onClick={() => setTab(t)}
             >
