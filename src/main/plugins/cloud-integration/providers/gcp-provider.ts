@@ -84,6 +84,26 @@ async function gcloudJson<T>(...args: string[]): Promise<T> {
   return JSON.parse(raw)
 }
 
+/** Patterns indicating the GKE auth plugin is missing */
+const GKE_PLUGIN_MISSING_PATTERNS = [
+  'gke-gcloud-auth-plugin',
+  'executable gke-gcloud-auth-plugin'
+]
+
+function isGkePluginMissing(message: string): boolean {
+  const lower = message.toLowerCase()
+  return GKE_PLUGIN_MISSING_PATTERNS.some((p) => lower.includes(p.toLowerCase()))
+}
+
+/** Tagged error for missing GKE auth plugin */
+export class GkePluginMissingError extends Error {
+  readonly gkePluginMissing = true
+  constructor() {
+    super('The gke-gcloud-auth-plugin is required for kubectl to authenticate with GKE clusters. Run: gcloud components install gke-gcloud-auth-plugin')
+    this.name = 'GkePluginMissingError'
+  }
+}
+
 async function kubectl(...args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync('kubectl', args, {
@@ -92,6 +112,10 @@ async function kubectl(...args: string[]): Promise<string> {
     })
     return stdout.trim()
   } catch (err: any) {
+    const msg = err.stderr || err.message || ''
+    if (isGkePluginMissing(msg)) {
+      throw new GkePluginMissingError()
+    }
     throw new Error(`kubectl ${args.join(' ')} failed: ${err.message}`)
   }
 }
@@ -360,6 +384,8 @@ export class GcpProvider implements CloudProvider {
           const w = await this.getWorkloads(cluster.name)
           allWorkloads.push(...w)
         } catch (e: any) {
+          // Propagate setup errors (missing plugin) so the UI can show resolution
+          if ((e as any).gkePluginMissing || (e as any).authExpired) throw e
           svcLogError(`getWorkloads: failed for cluster "${cluster.name}":`, e.message)
         }
       }

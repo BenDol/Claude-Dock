@@ -319,7 +319,7 @@ export interface DockApi {
     getWorkloadDetail: (projectDir: string, clusterName: string, namespace: string, workloadName: string, kind: string) => Promise<CloudWorkloadDetail | null>
     getConsoleUrl: (projectDir: string, section: string, params?: Record<string, string>) => Promise<string | null>
     checkAuth: (projectDir: string) => Promise<boolean>
-    reauth: (projectDir: string) => Promise<boolean>
+    reauth: (projectDir: string, command?: string) => Promise<boolean>
     getSetupStatus: (projectDir: string, providerId?: string) => Promise<CloudSetupStatus | null>
   }
   debug: {
@@ -674,7 +674,7 @@ const dockApi: DockApi = {
     getWorkloadDetail: (projectDir, clusterName, namespace, workloadName, kind) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOAD_DETAIL, projectDir, clusterName, namespace, workloadName, kind),
     getConsoleUrl: (projectDir, section, params) => ipcRenderer.invoke(IPC.CLOUD_GET_CONSOLE_URL, projectDir, section, params),
     checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir),
-    reauth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_REAUTH, projectDir),
+    reauth: (projectDir, command) => ipcRenderer.invoke(IPC.CLOUD_REAUTH, projectDir, command),
     getSetupStatus: (projectDir, providerId) => ipcRenderer.invoke(IPC.CLOUD_GET_SETUP_STATUS, projectDir, providerId)
   },
   debug: {

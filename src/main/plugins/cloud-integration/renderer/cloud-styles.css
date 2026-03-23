@@ -809,6 +809,14 @@
   font-size: 11px;
 }
 
+.cloud-error-hint code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+}
+
 .cloud-reauth-btn,
 .cloud-retry-btn {
   margin-top: 10px;

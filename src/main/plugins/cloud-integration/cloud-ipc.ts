@@ -149,8 +149,12 @@ export function registerCloudIpc(): void {
     }
   })
 
-  // Re-authenticate by running auth command in the dock's shell panel
-  ipcMain.handle(IPC.CLOUD_REAUTH, async (_e, projectDir: string) => {
+  // Run a setup/auth command in the dock's shell panel
+  ipcMain.handle(IPC.CLOUD_REAUTH, async (_e, projectDir: string, customCommand?: string) => {
+    if (customCommand) {
+      svc().log('[cloud-integration] reauth: running custom command:', customCommand, 'for', projectDir)
+      return svc().runInDockShell(projectDir, customCommand)
+    }
     const provider = getActiveProvider(projectDir)
     if (!provider) {
       svc().logError('[cloud-integration] reauth: no provider configured')

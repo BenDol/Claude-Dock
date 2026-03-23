@@ -13,19 +13,51 @@ interface Props {
   onOpenConsole: (section: string, params?: Record<string, string>) => void
 }
 
+type SetupIssue = {
+  type: 'auth-expired' | 'gke-plugin-missing'
+  message: string
+  actionLabel: string
+  command: string
+}
+
+/** Detect actionable setup problems from error messages */
+function detectSetupIssue(errorText: string): SetupIssue | null {
+  const lower = errorText.toLowerCase()
+
+  if (['gke-gcloud-auth-plugin', 'executable gke-gcloud-auth-plugin'].some((p) => lower.includes(p))) {
+    return {
+      type: 'gke-plugin-missing',
+      message: 'The gke-gcloud-auth-plugin is required for kubectl to connect to GKE clusters.',
+      actionLabel: 'Install Plugin',
+      command: 'gcloud components install gke-gcloud-auth-plugin'
+    }
+  }
+
+  if (['credentials have expired', 'please re-authenticate', 'invalid_grant', 'auth tokens', 'gcloud auth login'].some((p) => lower.includes(p))) {
+    return {
+      type: 'auth-expired',
+      message: 'Your cloud credentials have expired.',
+      actionLabel: 'Re-authenticate',
+      command: 'gcloud auth login'
+    }
+  }
+
+  return null
+}
+
 export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenConsole }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(tab)
   const [clusters, setClusters] = useState<CloudCluster[]>([])
   const [workloads, setWorkloads] = useState<CloudWorkload[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [authExpired, setAuthExpired] = useState(false)
-  const [reauthenticating, setReauthenticating] = useState(false)
+  const [setupIssue, setSetupIssue] = useState<SetupIssue | null>(null)
+  const [fixingSetup, setFixingSetup] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
-    setAuthExpired(false)
+    setSetupIssue(null)
     const errors: string[] = []
     const api = getDockApi().cloudIntegration
 
@@ -50,34 +82,30 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
     if (errors.length > 0) {
       const joined = errors.join('\n')
       setError(joined)
-      // Detect auth errors from the message itself — most robust, avoids IPC serialization issues
-      const authPatterns = ['credentials have expired', 'please re-authenticate', 'invalid_grant', 'auth tokens', 'gcloud auth login']
-      const lower = joined.toLowerCase()
-      if (authPatterns.some((p) => lower.includes(p))) {
-        setAuthExpired(true)
-      }
+      const issue = detectSetupIssue(joined)
+      if (issue) setSetupIssue(issue)
     }
     setLoading(false)
   }, [projectDir])
 
-  const handleReauth = useCallback(async () => {
-    setReauthenticating(true)
+  const handleFixSetup = useCallback(async () => {
+    if (!setupIssue) return
+    setFixingSetup(true)
     try {
-      const sent = await getDockApi().cloudIntegration.reauth(projectDir)
+      const sent = await getDockApi().cloudIntegration.reauth(projectDir, setupIssue.command)
       if (sent) {
-        // Command was sent to the dock's shell panel — switch to "waiting for auth" state
-        setError('Authentication started in the dock terminal. Click "Retry" after signing in.')
-        setAuthExpired(false)
+        setError(`Running "${setupIssue.command}" in the dock terminal. Click "Retry" when done.`)
+        setSetupIssue(null)
       } else {
-        setError('Could not open shell. Please run "gcloud auth login" manually in a terminal.')
-        setAuthExpired(false)
+        setError(`Could not open shell. Please run "${setupIssue.command}" manually in a terminal.`)
+        setSetupIssue(null)
       }
     } catch {
-      setError('Could not open shell. Please run "gcloud auth login" manually in a terminal.')
-      setAuthExpired(false)
+      setError(`Could not open shell. Please run "${setupIssue.command}" manually in a terminal.`)
+      setSetupIssue(null)
     }
-    setReauthenticating(false)
-  }, [projectDir])
+    setFixingSetup(false)
+  }, [projectDir, setupIssue])
 
   useEffect(() => {
     loadData()
@@ -121,17 +149,19 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
       {loading && <div className="cloud-loading-indicator">Loading Kubernetes data...</div>}
       {error && (
         <div className="cloud-error">
-          {authExpired ? (
+          {setupIssue ? (
             <>
-              <p>Your cloud credentials have expired.</p>
+              <p>{setupIssue.message}</p>
               <button
                 className="cloud-reauth-btn"
-                onClick={handleReauth}
-                disabled={reauthenticating}
+                onClick={handleFixSetup}
+                disabled={fixingSetup}
               >
-                {reauthenticating ? 'Authenticating...' : 'Re-authenticate'}
+                {fixingSetup ? 'Running...' : setupIssue.actionLabel}
               </button>
-              <p className="cloud-error-hint">Runs the auth command in a dock shell terminal.</p>
+              <p className="cloud-error-hint">
+                Runs <code>{setupIssue.command}</code> in the dock shell terminal.
+              </p>
             </>
           ) : (
             <>
