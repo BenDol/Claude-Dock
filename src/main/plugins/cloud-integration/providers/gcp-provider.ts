@@ -413,50 +413,58 @@ export class GcpProvider implements CloudProvider {
 
     const workloads: CloudWorkload[] = []
 
-    // Helper: re-throw setup errors (missing plugin, expired auth) so the UI can show resolution
-    const rethrowSetupErrors = (e: any) => {
-      if (e?.gkePluginMissing || e?.authExpired) throw e
+    // Fetch all workload types in parallel to avoid sequential 30s timeouts
+    const [depsResult, stsResult, dsResult, jobsResult] = await Promise.allSettled([
+      kubectlJson<any>('get', 'deployments', '--all-namespaces'),
+      kubectlJson<any>('get', 'statefulsets', '--all-namespaces'),
+      kubectlJson<any>('get', 'daemonsets', '--all-namespaces'),
+      kubectlJson<any>('get', 'jobs', '--all-namespaces')
+    ])
+
+    let failures = 0
+
+    if (depsResult.status === 'fulfilled') {
+      for (const d of depsResult.value.items || []) workloads.push(this.mapDeployment(d, clusterName, projectId))
+      svcLog(`getWorkloads: ${depsResult.value.items?.length || 0} deployment(s) in "${clusterName}"`)
+    } else {
+      failures++
+      // Propagate setup errors (missing plugin, expired auth)
+      if ((depsResult.reason as any)?.gkePluginMissing || (depsResult.reason as any)?.authExpired) throw depsResult.reason
+      svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, depsResult.reason?.message)
     }
 
-    // Fetch deployments
-    try {
-      const deps = await kubectlJson<any>('get', 'deployments', '--all-namespaces')
-      const count = deps.items?.length || 0
-      for (const d of deps.items || []) {
-        workloads.push(this.mapDeployment(d, clusterName, projectId))
-      }
-      svcLog(`getWorkloads: ${count} deployment(s) in "${clusterName}"`)
-    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, e.message) }
+    if (stsResult.status === 'fulfilled') {
+      for (const s of stsResult.value.items || []) workloads.push(this.mapStatefulSet(s, clusterName, projectId))
+      if (stsResult.value.items?.length > 0) svcLog(`getWorkloads: ${stsResult.value.items.length} statefulset(s) in "${clusterName}"`)
+    } else {
+      failures++
+      if ((stsResult.reason as any)?.gkePluginMissing || (stsResult.reason as any)?.authExpired) throw stsResult.reason
+      svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, stsResult.reason?.message)
+    }
 
-    // Fetch statefulsets
-    try {
-      const sts = await kubectlJson<any>('get', 'statefulsets', '--all-namespaces')
-      const count = sts.items?.length || 0
-      for (const s of sts.items || []) {
-        workloads.push(this.mapStatefulSet(s, clusterName, projectId))
-      }
-      if (count > 0) svcLog(`getWorkloads: ${count} statefulset(s) in "${clusterName}"`)
-    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, e.message) }
+    if (dsResult.status === 'fulfilled') {
+      for (const d of dsResult.value.items || []) workloads.push(this.mapDaemonSet(d, clusterName, projectId))
+      if (dsResult.value.items?.length > 0) svcLog(`getWorkloads: ${dsResult.value.items.length} daemonset(s) in "${clusterName}"`)
+    } else {
+      failures++
+      if ((dsResult.reason as any)?.gkePluginMissing || (dsResult.reason as any)?.authExpired) throw dsResult.reason
+      svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, dsResult.reason?.message)
+    }
 
-    // Fetch daemonsets
-    try {
-      const ds = await kubectlJson<any>('get', 'daemonsets', '--all-namespaces')
-      const count = ds.items?.length || 0
-      for (const d of ds.items || []) {
-        workloads.push(this.mapDaemonSet(d, clusterName, projectId))
-      }
-      if (count > 0) svcLog(`getWorkloads: ${count} daemonset(s) in "${clusterName}"`)
-    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, e.message) }
+    if (jobsResult.status === 'fulfilled') {
+      for (const j of jobsResult.value.items || []) workloads.push(this.mapJob(j, clusterName, projectId))
+      if (jobsResult.value.items?.length > 0) svcLog(`getWorkloads: ${jobsResult.value.items.length} job(s) in "${clusterName}"`)
+    } else {
+      failures++
+      if ((jobsResult.reason as any)?.gkePluginMissing || (jobsResult.reason as any)?.authExpired) throw jobsResult.reason
+      svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, jobsResult.reason?.message)
+    }
 
-    // Fetch jobs
-    try {
-      const jobs = await kubectlJson<any>('get', 'jobs', '--all-namespaces')
-      const count = jobs.items?.length || 0
-      for (const j of jobs.items || []) {
-        workloads.push(this.mapJob(j, clusterName, projectId))
-      }
-      if (count > 0) svcLog(`getWorkloads: ${count} job(s) in "${clusterName}"`)
-    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, e.message) }
+    // If ALL kubectl calls failed, surface the error instead of returning empty
+    if (failures === 4) {
+      const firstError = (depsResult as PromiseRejectedResult).reason
+      throw new Error(`kubectl cannot connect to cluster "${clusterName}": ${firstError?.message || 'all requests failed'}`)
+    }
 
     svcLog(`getWorkloads: ${workloads.length} total workload(s) for "${clusterName}"`)
     return workloads
