@@ -88,6 +88,26 @@ const KeybindInput: React.FC<{
   )
 }
 
+/** Accordion section for grouping settings. Multiple can be open at once. */
+const SettingsAccordion: React.FC<{
+  title: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}> = ({ title, defaultOpen = false, children }) => {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className={`settings-accordion${open ? ' open' : ''}`}>
+      <button className="settings-accordion-header" onClick={() => setOpen(!open)}>
+        <svg className="settings-accordion-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3,2 7,5 3,8" />
+        </svg>
+        <span>{title}</span>
+      </button>
+      {open && <div className="settings-accordion-body">{children}</div>}
+    </div>
+  )
+}
+
 interface SettingsModalProps {
   onClose: () => void
 }
@@ -549,6 +569,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             )}
             {tab === 'behavior' && (
               <div className="settings-group">
+                <SettingsAccordion title="General" defaultOpen>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -578,6 +599,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   />
                   Auto-spawn first terminal
                 </label>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Notifications">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -589,8 +613,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description">
                   Incoming notifications will not trigger the unread badge.
                 </div>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Idle Notification</div>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -625,8 +647,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => updateBehavior({ idleNotificationDelayMs: parseInt(e.target.value) || 5000 })}
                   />
                 </label>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Block Notifications From</div>
+                <div className="settings-subsection-header">Block Notifications From</div>
                 <div className="settings-description">
                   Mute toast notifications from selected sources.
                 </div>
@@ -649,8 +670,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     </label>
                   )
                 })}
-                <div className="settings-divider" />
-                <div className="settings-section-header">Shell Integration</div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Shell Integration">
                 <div className="settings-row">
                   <span className="settings-label">
                     Context Menu: {ctxMenuRegistered === null ? '...' : ctxMenuRegistered ? 'Registered' : 'Not Registered'}
@@ -693,8 +715,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                   Adds &quot;Open with Claude Dock&quot; to your file manager&apos;s right-click context menu.
                 </div>
                 {ctxMenuStatus && <div className="settings-update-status">{ctxMenuStatus}</div>}
-                <div className="settings-divider" />
-                <div className="settings-section-header">Shell Panel</div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Shell Panel">
                 <label>
                   <input
                     type="checkbox"
@@ -730,8 +753,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => update({ shellPanel: { ...settings.shellPanel, defaultHeight: parseInt(e.target.value) || 200 } } as any)}
                   />
                 </label>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Privacy</div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Privacy">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -746,8 +770,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description">
                   Sends anonymous session stats (duration, crash count, feature usage) to help improve Claude Dock. No personal data, terminal content, or file paths are ever collected.
                 </div>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Dock MCP Server</div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Dock MCP Server">
                 <div className="settings-row">
                   <span className="settings-label">
                     Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}
@@ -834,8 +859,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description" style={{ paddingLeft: 24 }}>
                   Allow Claude sessions to send messages to each other for coordination.
                 </div>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Anthropic API</div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Anthropic API">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -960,7 +986,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     Manage API keys on Anthropic Console
                   </button>
                 </div>
-                <div className="settings-divider" />
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Updates">
                 <label>
                   Update Profile
                   <select
@@ -1008,6 +1036,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <div className="settings-update-status">{updateCheckStatus}</div>
                   )}
                 </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Advanced">
                 <div>
                   <button
                     className="settings-check-update-btn"
@@ -1041,8 +1072,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 <div className="settings-description">
                   Watch plugin files for changes and reload automatically. Requires restart.
                 </div>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Claude CLI</div>
+                <div className="settings-subsection-header">Claude CLI</div>
                 <div>
                   <button
                     className="settings-check-update-btn"
@@ -1058,6 +1088,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     <div className="settings-update-status">{pathCheckStatus}</div>
                   )}
                 </div>
+                </SettingsAccordion>
               </div>
             )}
           </div>

@@ -1756,6 +1756,55 @@ body {
   margin-bottom: 4px;
 }
 
+.settings-subsection-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 8px 0 4px;
+}
+
+/* Settings Accordion */
+.settings-accordion {
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.settings-accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-secondary);
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.settings-accordion-header:hover {
+  background: var(--hover-color);
+}
+
+.settings-accordion-chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.settings-accordion.open .settings-accordion-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-accordion-body {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color);
+}
+
 .settings-row {
   display: flex;
   align-items: center;
