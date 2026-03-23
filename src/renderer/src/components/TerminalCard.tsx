@@ -1,4 +1,4 @@
-import React, { useCallback, useState, lazy, Suspense } from 'react'
+import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react'
 import TerminalView from './TerminalView'
 import TerminalTitle from './TerminalTitle'
 import { useDockStore } from '../stores/dock-store'
