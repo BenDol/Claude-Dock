@@ -215,7 +215,8 @@ export class GcpProvider implements CloudProvider {
       let totalPods = 0
       for (const cluster of clusters) {
         try {
-          await gcloud('container', 'clusters', 'get-credentials', cluster.name, `--location=${cluster.location}`)
+          const pid = await this.getProjectId()
+          await gcloud('container', 'clusters', 'get-credentials', cluster.name, `--location=${cluster.location}`, `--project=${pid}`)
           const raw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
           totalPods += raw.split('\n').filter((l) => l.trim()).length
         } catch { /* skip unreachable clusters */ }
@@ -259,7 +260,7 @@ export class GcpProvider implements CloudProvider {
 
     // Get credentials for this cluster so kubectl works
     try {
-      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`)
+      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
     } catch {
       // May already be configured
     }
@@ -330,7 +331,9 @@ export class GcpProvider implements CloudProvider {
         try {
           const w = await this.getWorkloads(cluster.name)
           allWorkloads.push(...w)
-        } catch { /* skip unreachable clusters */ }
+        } catch (e: any) {
+          console.warn(`[cloud-integration] getWorkloads failed for cluster "${cluster.name}":`, e.message)
+        }
       }
       return allWorkloads
     }
@@ -339,7 +342,10 @@ export class GcpProvider implements CloudProvider {
     const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
     if (clusters.length > 0) {
       const loc = clusters[0].location || clusters[0].zone
-      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`)
+      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
+    } else {
+      console.warn(`[cloud-integration] getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
+      return []
     }
 
     const workloads: CloudWorkload[] = []
@@ -350,7 +356,7 @@ export class GcpProvider implements CloudProvider {
       for (const d of deps.items || []) {
         workloads.push(this.mapDeployment(d, clusterName, projectId))
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { console.warn(`[cloud-integration] kubectl get deployments failed for ${clusterName}:`, e.message) }
 
     // Fetch statefulsets
     try {
@@ -358,7 +364,7 @@ export class GcpProvider implements CloudProvider {
       for (const s of sts.items || []) {
         workloads.push(this.mapStatefulSet(s, clusterName, projectId))
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { console.warn(`[cloud-integration] kubectl get statefulsets failed for ${clusterName}:`, e.message) }
 
     // Fetch daemonsets
     try {
@@ -366,7 +372,7 @@ export class GcpProvider implements CloudProvider {
       for (const d of ds.items || []) {
         workloads.push(this.mapDaemonSet(d, clusterName, projectId))
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { console.warn(`[cloud-integration] kubectl get daemonsets failed for ${clusterName}:`, e.message) }
 
     // Fetch jobs
     try {
@@ -374,7 +380,7 @@ export class GcpProvider implements CloudProvider {
       for (const j of jobs.items || []) {
         workloads.push(this.mapJob(j, clusterName, projectId))
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { console.warn(`[cloud-integration] kubectl get jobs failed for ${clusterName}:`, e.message) }
 
     return workloads
   }
