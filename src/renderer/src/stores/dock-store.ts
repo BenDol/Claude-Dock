@@ -22,6 +22,8 @@ interface DockState {
   activeTerminals: Set<string>
   /** Set of terminal IDs that were spawned from saved sessions (resume) */
   resumedTerminals: Set<string>
+  /** Pending shell command to run in a terminal's shell panel (set by SHELL_RUN_COMMAND) */
+  pendingShellCommand: string | null
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -41,6 +43,7 @@ interface DockState {
   setTerminalPersistentTask: (id: string, persistent: boolean) => void
   setTerminalActive: (id: string, active: boolean) => void
   markTerminalResumed: (id: string) => void
+  setPendingShellCommand: (command: string | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -58,6 +61,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   claudePersistentTaskTerminals: new Set<string>(),
   activeTerminals: new Set<string>(),
   resumedTerminals: new Set<string>(),
+  pendingShellCommand: null,
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -188,5 +192,7 @@ export const useDockStore = create<DockState>((set, get) => ({
       const next = new Set(state.resumedTerminals)
       next.add(id)
       return { resumedTerminals: next }
-    })
+    }),
+
+  setPendingShellCommand: (command) => set({ pendingShellCommand: command })
 }))

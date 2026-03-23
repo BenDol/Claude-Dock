@@ -119,9 +119,12 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const permIndicator = parsePermissionIndicator(claudeFlags)
   const shellEnabled = useSettingsStore((s) => s.settings.shellPanel?.enabled ?? true)
   const defaultShellHeight = useSettingsStore((s) => s.settings.shellPanel?.defaultHeight ?? 200)
+  const pendingShellCommand = useDockStore((s) => s.pendingShellCommand)
+  const setPendingShellCommand = useDockStore((s) => s.setPendingShellCommand)
   const [shellOpen, setShellOpen] = useState(false)
   const [shellHeight, setShellHeight] = useState(defaultShellHeight)
   const [shellMounted, setShellMounted] = useState(false)
+  const [shellInitialCommand, setShellInitialCommand] = useState<string | null>(null)
 
   const toggleShell = useCallback(() => {
     setShellOpen((prev) => {
@@ -129,6 +132,23 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
       return !prev
     })
   }, [])
+
+  // When a pending shell command arrives and this is the focused terminal, open shell and run it
+  useEffect(() => {
+    if (!pendingShellCommand || !isFocused) return
+    const cmd = pendingShellCommand
+    setPendingShellCommand(null)
+
+    if (shellOpen) {
+      // Shell already open — write the command directly
+      getDockApi().shell.write(`shell:${terminalId}`, cmd + '\n')
+    } else {
+      // Open shell with the command as initialCommand (ShellPanel will write it after spawn)
+      setShellInitialCommand(cmd)
+      setShellMounted(true)
+      setShellOpen(true)
+    }
+  }, [pendingShellCommand, isFocused, shellOpen, terminalId, setPendingShellCommand])
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
@@ -229,6 +249,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   height={shellHeight}
                   onHeightChange={setShellHeight}
                   onClose={toggleShell}
+                  initialCommand={shellInitialCommand}
                 />
               </div>
             </Suspense>

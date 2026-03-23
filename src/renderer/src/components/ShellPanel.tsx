@@ -1,20 +1,23 @@
 import React, { useCallback, useRef, useEffect } from 'react'
 import { useShellTerminal } from '../hooks/useShellTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
+import { getDockApi } from '../lib/ipc-bridge'
 
 interface ShellPanelProps {
   terminalId: string
   height: number
   onHeightChange: (h: number) => void
   onClose: () => void
+  initialCommand?: string | null
 }
 
 const MIN_HEIGHT = 80
 const MAX_RATIO = 0.8 // max 80% of parent
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightChange, onClose }) => {
+const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightChange, onClose, initialCommand }) => {
   const shellId = `shell:${terminalId}`
   const { initTerminal, fit, focus } = useShellTerminal({ shellId })
+  const commandSentRef = useRef(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const resizeRef = useResizeObserver(fit, 100)
 
@@ -29,6 +32,17 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
     },
     [resizeRef, initTerminal, focus]
   )
+
+  // Write initial command after shell is ready
+  useEffect(() => {
+    if (!initialCommand || commandSentRef.current) return
+    commandSentRef.current = true
+    // Give the shell a moment to start before writing the command
+    const timer = setTimeout(() => {
+      getDockApi().shell.write(shellId, initialCommand + '\n')
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [initialCommand, shellId])
 
   // Re-fit when height changes
   useEffect(() => {

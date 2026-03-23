@@ -150,16 +150,17 @@ export function registerCloudIpc(): void {
     }
   })
 
-  // Re-authenticate with the active provider (e.g. refresh expired tokens)
+  // Re-authenticate by running auth command in the dock's shell panel
   ipcMain.handle(IPC.CLOUD_REAUTH, async (_e, projectDir: string) => {
     const provider = getActiveProvider(projectDir)
     if (!provider) return false
-    try {
-      return await provider.reauthenticate()
-    } catch (err) {
-      svc().logError('[cloud-integration] reauthenticate failed', err)
-      return false
-    }
+    const command = provider.id === 'gcp' ? 'gcloud auth login'
+      : provider.id === 'aws' ? 'aws sso login'
+      : provider.id === 'azure' ? 'az login'
+      : provider.id === 'digitalocean' ? 'doctl auth login'
+      : null
+    if (!command) return false
+    return svc().runInDockShell(projectDir, command)
   })
 
   // Get setup wizard status for a provider

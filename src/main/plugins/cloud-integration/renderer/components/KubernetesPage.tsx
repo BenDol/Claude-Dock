@@ -58,19 +58,21 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
   const handleReauth = useCallback(async () => {
     setReauthenticating(true)
     try {
-      const success = await getDockApi().cloudIntegration.reauth(projectDir)
-      if (success) {
-        await loadData()
+      const sent = await getDockApi().cloudIntegration.reauth(projectDir)
+      if (sent) {
+        // Command was sent to the dock's shell panel — switch to "waiting for auth" state
+        setError('Authentication started in the dock terminal. Click "Retry" after signing in.')
+        setAuthExpired(false)
       } else {
-        setError('Re-authentication failed. Please try running "gcloud auth login" manually in a terminal.')
+        setError('Could not open shell. Please run "gcloud auth login" manually in a terminal.')
         setAuthExpired(false)
       }
     } catch {
-      setError('Re-authentication failed. Please try running "gcloud auth login" manually in a terminal.')
+      setError('Could not open shell. Please run "gcloud auth login" manually in a terminal.')
       setAuthExpired(false)
     }
     setReauthenticating(false)
-  }, [projectDir, loadData])
+  }, [projectDir])
 
   useEffect(() => {
     loadData()

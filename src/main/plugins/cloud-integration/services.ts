@@ -10,6 +10,9 @@ export interface CloudIntegrationServices {
   log: (...args: unknown[]) => void
   logError: (...args: unknown[]) => void
 
+  /** Run a command in the dock's shell panel for the given project. Returns true if the dock was found. */
+  runInDockShell: (projectDir: string, command: string) => boolean
+
   getSettings: () => { theme: { mode: string } }
   getPluginSetting: (projectDir: string, pluginId: string, key: string) => unknown
 

@@ -88,6 +88,7 @@ export interface DockApi {
     kill: (shellId: string) => Promise<void>
     onData: (callback: (shellId: string, data: string) => void) => () => void
     onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
+    onRunCommand: (callback: (command: string) => void) => () => void
   }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
@@ -365,6 +366,11 @@ const dockApi: DockApi = {
       const handler = (_event: Electron.IpcRendererEvent, shellId: string, exitCode: number) => callback(shellId, exitCode)
       ipcRenderer.on(IPC.SHELL_EXIT, handler)
       return () => ipcRenderer.removeListener(IPC.SHELL_EXIT, handler)
+    },
+    onRunCommand: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, command: string) => callback(command)
+      ipcRenderer.on(IPC.SHELL_RUN_COMMAND, handler)
+      return () => ipcRenderer.removeListener(IPC.SHELL_RUN_COMMAND, handler)
     }
   },
   dock: {

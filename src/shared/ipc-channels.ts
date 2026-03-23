@@ -13,6 +13,7 @@ export const IPC = {
   SHELL_KILL: 'shell:kill',
   SHELL_DATA: 'shell:data',       // Main -> Renderer
   SHELL_EXIT: 'shell:exit',       // Main -> Renderer
+  SHELL_RUN_COMMAND: 'shell:runCommand', // Main -> Renderer (open shell panel + run command)
 
   DOCK_GET_INFO: 'dock:getInfo',
   SETTINGS_GET: 'settings:get',

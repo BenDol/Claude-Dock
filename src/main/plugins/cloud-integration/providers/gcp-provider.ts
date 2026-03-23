@@ -3,7 +3,7 @@
  * Uses the `gcloud` CLI to fetch cluster and workload data.
  */
 
-import { execFile, spawn } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { CloudProvider } from './cloud-provider'
 import type {
@@ -174,25 +174,8 @@ export class GcpProvider implements CloudProvider {
   }
 
   async reauthenticate(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const cmd = process.platform === 'win32' ? 'gcloud.cmd' : 'gcloud'
-      const child = spawn(cmd, ['auth', 'login'], {
-        stdio: 'ignore',
-        detached: true,
-        shell: process.platform === 'win32',
-        windowsHide: false  // let the browser open visibly
-      })
-
-      child.on('close', (code) => {
-        resolve(code === 0)
-      })
-
-      child.on('error', () => {
-        resolve(false)
-      })
-
-      child.unref()
-    })
+    // Auth is handled by the IPC layer running the command in the dock's shell panel
+    return false
   }
 
   async getProject(): Promise<CloudProject> {

@@ -126,6 +126,13 @@ function App() {
     return () => window.removeEventListener('app-restart', handler)
   }, [])
 
+  // Listen for shell run-command from main process (e.g. cloud re-auth)
+  useEffect(() => {
+    return getDockApi().shell.onRunCommand((command) => {
+      useDockStore.getState().setPendingShellCommand(command)
+    })
+  }, [])
+
   // When a plugin window opens, show "updated" notification if that plugin has a new override
   useEffect(() => {
     if (!pluginView) return
