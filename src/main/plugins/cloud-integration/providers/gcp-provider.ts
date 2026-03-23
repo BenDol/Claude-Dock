@@ -32,6 +32,8 @@ const GCP_ICON = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/
 
 /** Timeout for gcloud commands in ms */
 const CMD_TIMEOUT = 30_000
+/** Shorter timeout for kubectl — fails faster when cluster is unreachable */
+const KUBECTL_TIMEOUT = 15_000
 
 const TAG = '[cloud-integration:gcp]'
 function svcLog(...args: unknown[]): void { try { getServices().log(TAG, ...args) } catch { /* services not ready */ } }
@@ -106,8 +108,8 @@ export class GkePluginMissingError extends Error {
 
 async function kubectl(...args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('kubectl', args, {
-      timeout: CMD_TIMEOUT,
+    const { stdout } = await execFileAsync('kubectl', [...args, '--request-timeout=10s'], {
+      timeout: KUBECTL_TIMEOUT,
       windowsHide: true
     })
     return stdout.trim()
