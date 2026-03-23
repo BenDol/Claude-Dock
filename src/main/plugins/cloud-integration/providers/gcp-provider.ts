@@ -408,6 +408,11 @@ export class GcpProvider implements CloudProvider {
 
     const workloads: CloudWorkload[] = []
 
+    // Helper: re-throw setup errors (missing plugin, expired auth) so the UI can show resolution
+    const rethrowSetupErrors = (e: any) => {
+      if (e?.gkePluginMissing || e?.authExpired) throw e
+    }
+
     // Fetch deployments
     try {
       const deps = await kubectlJson<any>('get', 'deployments', '--all-namespaces')
@@ -416,7 +421,7 @@ export class GcpProvider implements CloudProvider {
         workloads.push(this.mapDeployment(d, clusterName, projectId))
       }
       svcLog(`getWorkloads: ${count} deployment(s) in "${clusterName}"`)
-    } catch (e: any) { svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, e.message) }
+    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, e.message) }
 
     // Fetch statefulsets
     try {
@@ -426,7 +431,7 @@ export class GcpProvider implements CloudProvider {
         workloads.push(this.mapStatefulSet(s, clusterName, projectId))
       }
       if (count > 0) svcLog(`getWorkloads: ${count} statefulset(s) in "${clusterName}"`)
-    } catch (e: any) { svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, e.message) }
+    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, e.message) }
 
     // Fetch daemonsets
     try {
@@ -436,7 +441,7 @@ export class GcpProvider implements CloudProvider {
         workloads.push(this.mapDaemonSet(d, clusterName, projectId))
       }
       if (count > 0) svcLog(`getWorkloads: ${count} daemonset(s) in "${clusterName}"`)
-    } catch (e: any) { svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, e.message) }
+    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, e.message) }
 
     // Fetch jobs
     try {
@@ -446,7 +451,7 @@ export class GcpProvider implements CloudProvider {
         workloads.push(this.mapJob(j, clusterName, projectId))
       }
       if (count > 0) svcLog(`getWorkloads: ${count} job(s) in "${clusterName}"`)
-    } catch (e: any) { svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, e.message) }
+    } catch (e: any) { rethrowSetupErrors(e); svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, e.message) }
 
     svcLog(`getWorkloads: ${workloads.length} total workload(s) for "${clusterName}"`)
     return workloads
