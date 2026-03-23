@@ -218,12 +218,15 @@ export class PluginUpdateService {
 
     for (const entry of installable) {
       try {
+        log(`[plugin-updater] ${entry.pluginId}: installing (${entry.currentVersion} -> ${entry.newVersion}, source=${entry.source})`)
         await this.installUpdate(entry.pluginId)
         success.push(entry.pluginId)
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        logError(`[plugin-updater] installAll: ${entry.pluginId} failed:`, msg)
         failed.push({
           pluginId: entry.pluginId,
-          error: err instanceof Error ? err.message : String(err)
+          error: msg
         })
       }
     }
