@@ -1934,14 +1934,17 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 0;
-  margin-bottom: 4px;
-  width: 100%;
+  padding: 6px 6px;
+  margin: 0 -6px 4px;
+  width: calc(100% + 12px);
   text-align: left;
+  border-radius: 4px;
+  transition: background 0.1s, color 0.1s;
 }
 
 .settings-section-toggle:hover {
   color: var(--accent-color);
+  background: var(--hover-color);
 }
 
 .settings-section-chevron {
