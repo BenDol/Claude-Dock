@@ -19,7 +19,7 @@ import { log } from './logger'
 declare const __BUILD_SHA__: string
 
 // The Worker URL — replace with your deployed Cloudflare Worker
-const TELEMETRY_ENDPOINT = 'https://claude-dock-telemetry.workers.dev/telemetry'
+const TELEMETRY_ENDPOINT = 'https://claude-dock-telemetry.dolb90.workers.dev/telemetry'
 const MAX_PAYLOAD_SIZE = 2048
 
 export interface TelemetryPayload {
