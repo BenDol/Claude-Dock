@@ -6,6 +6,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { CloudProvider } from './cloud-provider'
+import { getServices } from '../services'
 import type {
   CloudProviderId,
   CloudProviderInfo,
@@ -31,6 +32,10 @@ const GCP_ICON = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/
 
 /** Timeout for gcloud commands in ms */
 const CMD_TIMEOUT = 30_000
+
+const TAG = '[cloud-integration:gcp]'
+function svcLog(...args: unknown[]): void { try { getServices().log(TAG, ...args) } catch { /* services not ready */ } }
+function svcLogError(...args: unknown[]): void { try { getServices().logError(TAG, ...args) } catch { /* services not ready */ } }
 
 /** Patterns that indicate expired/invalid auth tokens */
 const AUTH_ERROR_PATTERNS = [
@@ -167,8 +172,11 @@ export class GcpProvider implements CloudProvider {
   async checkAuth(): Promise<boolean> {
     try {
       const account = await gcloud('auth', 'list', '--filter=status:ACTIVE', '--format=value(account)')
-      return account.length > 0
-    } catch {
+      const authed = account.length > 0
+      svcLog('checkAuth:', authed ? `authenticated as ${account}` : 'no active account')
+      return authed
+    } catch (e: any) {
+      svcLogError('checkAuth failed:', e.message)
       return false
     }
   }
@@ -181,6 +189,7 @@ export class GcpProvider implements CloudProvider {
   async getProject(): Promise<CloudProject> {
     if (!this.projectId) {
       this.projectId = await gcloud('config', 'get-value', 'project')
+      svcLog('resolved project:', this.projectId)
     }
     return {
       id: this.projectId,
@@ -193,7 +202,8 @@ export class GcpProvider implements CloudProvider {
     try {
       const region = await gcloud('config', 'get-value', 'compute/region')
       return region || undefined
-    } catch {
+    } catch (e: any) {
+      svcLog('getDefaultRegion: not set or unavailable')
       return undefined
     }
   }
@@ -201,11 +211,13 @@ export class GcpProvider implements CloudProvider {
   private async getProjectId(): Promise<string> {
     if (!this.projectId) {
       this.projectId = await gcloud('config', 'get-value', 'project')
+      svcLog('resolved project:', this.projectId)
     }
     return this.projectId
   }
 
   async getKubernetesSummary(): Promise<CloudKubernetesSummary> {
+    svcLog('getKubernetesSummary: fetching...')
     try {
       const clusters = await this.getClusters()
       const healthy = clusters.filter((c) => c.status === 'RUNNING').length
@@ -218,10 +230,15 @@ export class GcpProvider implements CloudProvider {
           const pid = await this.getProjectId()
           await gcloud('container', 'clusters', 'get-credentials', cluster.name, `--location=${cluster.location}`, `--project=${pid}`)
           const raw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
-          totalPods += raw.split('\n').filter((l) => l.trim()).length
-        } catch { /* skip unreachable clusters */ }
+          const count = raw.split('\n').filter((l) => l.trim()).length
+          totalPods += count
+          svcLog(`getKubernetesSummary: cluster "${cluster.name}" has ${count} pods`)
+        } catch (e: any) {
+          svcLogError(`getKubernetesSummary: failed to get pods for cluster "${cluster.name}":`, e.message)
+        }
       }
 
+      svcLog(`getKubernetesSummary: ${clusters.length} clusters, ${totalNodes} nodes, ${totalPods} pods`)
       return {
         clusterCount: clusters.length,
         totalNodes,
@@ -229,14 +246,17 @@ export class GcpProvider implements CloudProvider {
         healthyClusters: healthy,
         unhealthyClusters: clusters.length - healthy
       }
-    } catch {
+    } catch (e: any) {
+      svcLogError('getKubernetesSummary: failed entirely:', e.message)
       return { clusterCount: 0, totalNodes: 0, totalPods: 0, healthyClusters: 0, unhealthyClusters: 0 }
     }
   }
 
   async getClusters(): Promise<CloudCluster[]> {
     const projectId = await this.getProjectId()
+    svcLog(`getClusters: listing clusters for project "${projectId}"`)
     const raw = await gcloudJson<any[]>('container', 'clusters', 'list')
+    svcLog(`getClusters: found ${raw.length} cluster(s)`)
 
     return raw.map((c: any) => ({
       name: c.name,
@@ -251,6 +271,7 @@ export class GcpProvider implements CloudProvider {
   }
 
   async getClusterDetail(clusterName: string): Promise<CloudClusterDetail> {
+    svcLog(`getClusterDetail: fetching "${clusterName}"`)
     const projectId = await this.getProjectId()
     const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
     if (clusters.length === 0) throw new Error(`Cluster "${clusterName}" not found`)
@@ -261,8 +282,9 @@ export class GcpProvider implements CloudProvider {
     // Get credentials for this cluster so kubectl works
     try {
       await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
-    } catch {
-      // May already be configured
+      svcLog(`getClusterDetail: kubectl configured for "${clusterName}"`)
+    } catch (e: any) {
+      svcLog(`getClusterDetail: get-credentials skipped for "${clusterName}" (may already be configured):`, e.message)
     }
 
     let nodes: CloudNode[] = []
@@ -282,25 +304,27 @@ export class GcpProvider implements CloudProvider {
           version: n.status?.nodeInfo?.kubeletVersion || ''
         }
       })
-    } catch { /* cluster may not be reachable */ }
+      svcLog(`getClusterDetail: ${nodes.length} node(s) for "${clusterName}"`)
+    } catch (e: any) {
+      svcLogError(`getClusterDetail: kubectl get nodes failed for "${clusterName}":`, e.message)
+    }
 
     try {
       const nsRaw = await kubectlJson<any>('get', 'namespaces')
       namespaces = (nsRaw.items || []).map((ns: any) => ns.metadata.name)
-    } catch { /* ignore */ }
+      svcLog(`getClusterDetail: ${namespaces.length} namespace(s) for "${clusterName}"`)
+    } catch (e: any) {
+      svcLogError(`getClusterDetail: kubectl get namespaces failed for "${clusterName}":`, e.message)
+    }
 
     try {
       const podsRaw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
       const podLines = podsRaw.split('\n').filter((l) => l.trim())
       totalPods = podLines.length
-
-      // Count pods per node
-      for (const line of podLines) {
-        const parts = line.trim().split(/\s+/)
-        // kubectl output: NAMESPACE NAME READY STATUS RESTARTS AGE NODE (when using -o wide)
-        // Without -o wide we don't get node, so skip node counting in basic mode
-      }
-    } catch { /* ignore */ }
+      svcLog(`getClusterDetail: ${totalPods} pod(s) for "${clusterName}"`)
+    } catch (e: any) {
+      svcLogError(`getClusterDetail: kubectl get pods failed for "${clusterName}":`, e.message)
+    }
 
     return {
       name: c.name,
@@ -323,8 +347,12 @@ export class GcpProvider implements CloudProvider {
 
     // If no specific cluster, iterate all clusters so kubectl is properly configured for each
     if (!clusterName) {
+      svcLog('getWorkloads: fetching workloads across all clusters')
       const clusters = await this.getClusters()
-      if (clusters.length === 0) return []
+      if (clusters.length === 0) {
+        svcLog('getWorkloads: no clusters found, returning empty')
+        return []
+      }
 
       const allWorkloads: CloudWorkload[] = []
       for (const cluster of clusters) {
@@ -332,19 +360,23 @@ export class GcpProvider implements CloudProvider {
           const w = await this.getWorkloads(cluster.name)
           allWorkloads.push(...w)
         } catch (e: any) {
-          console.warn(`[cloud-integration] getWorkloads failed for cluster "${cluster.name}":`, e.message)
+          svcLogError(`getWorkloads: failed for cluster "${cluster.name}":`, e.message)
         }
       }
+      svcLog(`getWorkloads: found ${allWorkloads.length} total workload(s) across ${clusters.length} cluster(s)`)
       return allWorkloads
     }
+
+    svcLog(`getWorkloads: fetching for cluster "${clusterName}"`)
 
     // Get credentials for the specified cluster
     const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
     if (clusters.length > 0) {
       const loc = clusters[0].location || clusters[0].zone
+      svcLog(`getWorkloads: configuring kubectl for "${clusterName}" in ${loc}`)
       await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
     } else {
-      console.warn(`[cloud-integration] getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
+      svcLogError(`getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
       return []
     }
 
@@ -353,35 +385,44 @@ export class GcpProvider implements CloudProvider {
     // Fetch deployments
     try {
       const deps = await kubectlJson<any>('get', 'deployments', '--all-namespaces')
+      const count = deps.items?.length || 0
       for (const d of deps.items || []) {
         workloads.push(this.mapDeployment(d, clusterName, projectId))
       }
-    } catch (e: any) { console.warn(`[cloud-integration] kubectl get deployments failed for ${clusterName}:`, e.message) }
+      svcLog(`getWorkloads: ${count} deployment(s) in "${clusterName}"`)
+    } catch (e: any) { svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, e.message) }
 
     // Fetch statefulsets
     try {
       const sts = await kubectlJson<any>('get', 'statefulsets', '--all-namespaces')
+      const count = sts.items?.length || 0
       for (const s of sts.items || []) {
         workloads.push(this.mapStatefulSet(s, clusterName, projectId))
       }
-    } catch (e: any) { console.warn(`[cloud-integration] kubectl get statefulsets failed for ${clusterName}:`, e.message) }
+      if (count > 0) svcLog(`getWorkloads: ${count} statefulset(s) in "${clusterName}"`)
+    } catch (e: any) { svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, e.message) }
 
     // Fetch daemonsets
     try {
       const ds = await kubectlJson<any>('get', 'daemonsets', '--all-namespaces')
+      const count = ds.items?.length || 0
       for (const d of ds.items || []) {
         workloads.push(this.mapDaemonSet(d, clusterName, projectId))
       }
-    } catch (e: any) { console.warn(`[cloud-integration] kubectl get daemonsets failed for ${clusterName}:`, e.message) }
+      if (count > 0) svcLog(`getWorkloads: ${count} daemonset(s) in "${clusterName}"`)
+    } catch (e: any) { svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, e.message) }
 
     // Fetch jobs
     try {
       const jobs = await kubectlJson<any>('get', 'jobs', '--all-namespaces')
+      const count = jobs.items?.length || 0
       for (const j of jobs.items || []) {
         workloads.push(this.mapJob(j, clusterName, projectId))
       }
-    } catch (e: any) { console.warn(`[cloud-integration] kubectl get jobs failed for ${clusterName}:`, e.message) }
+      if (count > 0) svcLog(`getWorkloads: ${count} job(s) in "${clusterName}"`)
+    } catch (e: any) { svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, e.message) }
 
+    svcLog(`getWorkloads: ${workloads.length} total workload(s) for "${clusterName}"`)
     return workloads
   }
 
@@ -391,6 +432,7 @@ export class GcpProvider implements CloudProvider {
     workloadName: string,
     kind: string
   ): Promise<CloudWorkloadDetail> {
+    svcLog(`getWorkloadDetail: ${kind}/${workloadName} in ${namespace} on "${clusterName}"`)
     const projectId = await this.getProjectId()
 
     // Ensure we have credentials
@@ -398,8 +440,10 @@ export class GcpProvider implements CloudProvider {
     if (clusters.length > 0) {
       const loc = clusters[0].location || clusters[0].zone
       try {
-        await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`)
-      } catch { /* may already be configured */ }
+        await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
+      } catch (e: any) {
+        svcLog(`getWorkloadDetail: get-credentials skipped (may already be configured):`, e.message)
+      }
     }
 
     const resourceType = kind.toLowerCase() + 's'
@@ -415,7 +459,10 @@ export class GcpProvider implements CloudProvider {
       try {
         const podsRaw = await kubectlJson<any>('get', 'pods', '-n', namespace, `-l=${selector}`)
         pods = (podsRaw.items || []).map((p: any) => this.mapPod(p))
-      } catch { /* ignore */ }
+        svcLog(`getWorkloadDetail: ${pods.length} pod(s) for ${kind}/${workloadName}`)
+      } catch (e: any) {
+        svcLogError(`getWorkloadDetail: kubectl get pods failed for ${kind}/${workloadName}:`, e.message)
+      }
     }
 
     const conditions: WorkloadCondition[] = (raw.status?.conditions || []).map((c: any) => ({
@@ -449,6 +496,7 @@ export class GcpProvider implements CloudProvider {
   }
 
   async getSetupStatus(): Promise<CloudSetupStatus> {
+    svcLog('getSetupStatus: checking setup steps...')
     const steps = [
       {
         id: 'install-cli',
@@ -529,6 +577,7 @@ export class GcpProvider implements CloudProvider {
       return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: false }
     }
 
+    svcLog(`getSetupStatus: all steps complete`)
     return { providerId: this.id, providerName: this.name, icon: this.getIcon(), steps, currentStep, complete: true }
   }
 

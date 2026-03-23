@@ -26,7 +26,11 @@ export function createBundledServices(): CloudIntegrationServices {
       const normDir = normalize(projectDir)
       const dock = docks.find((d) => normalize(d.projectDir) === normDir)
         || docks.find((d) => normDir.startsWith(normalize(d.projectDir) + '/'))
-      if (!dock || dock.window.isDestroyed()) return false
+      if (!dock || dock.window.isDestroyed()) {
+        logError('[cloud-integration] runInDockShell: no dock found for', projectDir)
+        return false
+      }
+      log('[cloud-integration] runInDockShell: sending command to dock:', command)
       dock.window.webContents.send(IPC.SHELL_RUN_COMMAND, command)
       dock.window.focus()
       return true

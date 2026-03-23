@@ -23,11 +23,13 @@ export class CloudIntegrationPlugin implements DockPlugin {
     registerCloudIpc()
 
     bus.on('project:postClose', this.id, ({ projectDir }) => {
+      getServices().log('[cloud-integration] project closed, closing window for', projectDir)
       CloudWindowManager.getInstance().close(projectDir)
     })
 
     bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
       if (pluginId === this.id) {
+        getServices().log('[cloud-integration] plugin disabled, closing window for', projectDir)
         CloudWindowManager.getInstance().close(projectDir)
       }
     })
@@ -36,6 +38,7 @@ export class CloudIntegrationPlugin implements DockPlugin {
   }
 
   dispose(): void {
+    try { getServices().log('[cloud-integration] plugin disposing') } catch { /* ok */ }
     disposeCloudIpc()
     CloudWindowManager.getInstance().closeAll()
   }
