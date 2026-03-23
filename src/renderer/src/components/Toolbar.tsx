@@ -523,6 +523,12 @@ const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => 
                     </div>
                   </>
                 )}
+                <div className="ws-dropdown-divider" />
+                <div className="ws-dropdown-actions">
+                  <button className="ws-dropdown-action ws-dropdown-action-close" onClick={() => { setOpen(false); getDockApi().app.closeAll() }}>
+                    <WsCloseIcon /> Close All
+                  </button>
+                </div>
               </>
             ) : (
               <div className="ws-clone-form">
@@ -593,6 +599,12 @@ const WsBrowseIcon: React.FC = () => (
 const WsCloneIcon: React.FC = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M16 17l5-5-5-5" /><path d="M21 12H9" /><path d="M9 3H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5" />
+  </svg>
+)
+
+const WsCloseIcon: React.FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="9" y1="9" x2="15" y2="15" /><line x1="15" y1="9" x2="9" y2="15" />
   </svg>
 )
 

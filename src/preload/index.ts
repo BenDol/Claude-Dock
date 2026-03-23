@@ -110,6 +110,7 @@ export interface DockApi {
     openExternal: (url: string) => Promise<void>
     openInExplorer: (dir: string) => Promise<void>
     relaunch: () => Promise<void>
+    closeAll: () => Promise<void>
   }
   updater: {
     check: (profile: string) => Promise<UpdateInfo>
@@ -398,7 +399,8 @@ const dockApi: DockApi = {
     focusDockPath: (dir) => ipcRenderer.invoke(IPC.APP_FOCUS_DOCK_PATH, dir),
     openExternal: (url) => ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL, url),
     openInExplorer: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_IN_EXPLORER, dir),
-    relaunch: () => ipcRenderer.invoke(IPC.APP_RELAUNCH)
+    relaunch: () => ipcRenderer.invoke(IPC.APP_RELAUNCH),
+    closeAll: () => ipcRenderer.invoke(IPC.APP_CLOSE_ALL)
   },
   updater: {
     check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),

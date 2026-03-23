@@ -201,6 +201,37 @@ export function registerIpcHandlers(): void {
     win?.close()
   })
 
+  // Close all dock windows. If any have running terminals, focus the first one
+  // so the user sees the close confirmation dialog (handled by DockWindow's 'close' event).
+  ipcMain.handle(IPC.APP_CLOSE_ALL, async () => {
+    const manager = DockManager.getInstance()
+    const docks = manager.getAllDocks()
+
+    // Find docks with active terminals — they need confirmation
+    const withTerminals = docks.filter((d) => d.ptyManager.size > 0)
+    const withoutTerminals = docks.filter((d) => d.ptyManager.size === 0)
+
+    // Close docks without terminals immediately
+    for (const dock of withoutTerminals) {
+      dock.window.destroy()
+    }
+
+    if (withTerminals.length === 0) {
+      // No terminals anywhere — all closed, quit the app
+      app.quit()
+      return
+    }
+
+    // Focus the first dock with terminals and trigger its close dialog.
+    // The DockWindow 'close' handler will show the confirmation.
+    // Close each one sequentially — if user cancels, stop.
+    for (const dock of withTerminals) {
+      dock.window.show()
+      dock.window.focus()
+      dock.window.close() // triggers the close event handler with confirmation dialog
+    }
+  })
+
   ipcMain.handle(IPC.APP_PICK_DIRECTORY, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory'],

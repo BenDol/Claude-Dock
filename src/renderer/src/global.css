@@ -236,6 +236,18 @@ body {
   flex-shrink: 0;
 }
 
+.ws-dropdown-action-close {
+  color: var(--text-secondary);
+}
+
+.ws-dropdown-action-close:hover {
+  color: #f7768e;
+}
+
+.ws-dropdown-action-close:hover svg {
+  color: #f7768e;
+}
+
 .ws-dropdown-divider {
   height: 1px;
   background: var(--border-color);
