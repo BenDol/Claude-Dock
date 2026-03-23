@@ -130,7 +130,7 @@ describe('Cloud Integration IPC', () => {
 
     const handler = handlers.get(IPC.CLOUD_GET_CLUSTERS)!
     const result = await handler({}, '/project')
-    expect(result).toEqual(clusters)
+    expect(result).toEqual({ data: clusters })
   })
 
   it('CLOUD_GET_CLUSTER_DETAIL should call provider getClusterDetail', async () => {
@@ -149,7 +149,7 @@ describe('Cloud Integration IPC', () => {
 
     const handler = handlers.get(IPC.CLOUD_GET_WORKLOADS)!
     const result = await handler({}, '/project', 'cluster1')
-    expect(result).toEqual(workloads)
+    expect(result).toEqual({ data: workloads })
     expect(mockGetWorkloads).toHaveBeenCalledWith('cluster1')
   })
 
@@ -191,7 +191,7 @@ describe('Cloud Integration IPC', () => {
     mockGetClusters.mockRejectedValue(new Error('network error'))
     const handler = handlers.get(IPC.CLOUD_GET_CLUSTERS)!
     const result = await handler({}, '/project')
-    expect(result).toEqual([])
+    expect(result).toEqual({ data: [], error: 'network error' })
     expect(mockLogError).toHaveBeenCalled()
   })
 

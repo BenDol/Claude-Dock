@@ -28,6 +28,7 @@ describe('GcpProvider', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockExecFile.mockReset()
     provider = new GcpProvider()
   })
 
@@ -209,6 +210,12 @@ describe('GcpProvider', () => {
     it('should fetch and merge deployments, statefulsets, daemonsets, and jobs', async () => {
       // getProjectId
       mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
+      // gcloudJson clusters list (for credential setup)
+      mockExecFile.mockResolvedValueOnce(mockCmdJson([
+        { name: 'test-cluster', location: 'us-central1' }
+      ]))
+      // get-credentials
+      mockExecFile.mockResolvedValueOnce(mockCmd(''))
 
       // kubectl get deployments
       mockExecFile.mockResolvedValueOnce(mockCmdJson({
@@ -240,7 +247,7 @@ describe('GcpProvider', () => {
       // kubectl get jobs
       mockExecFile.mockResolvedValueOnce(mockCmdJson({ items: [] }))
 
-      const workloads = await provider.getWorkloads()
+      const workloads = await provider.getWorkloads('test-cluster')
       expect(workloads).toHaveLength(2)
 
       const deployment = workloads.find((w) => w.name === 'web-app')!
@@ -257,6 +264,12 @@ describe('GcpProvider', () => {
 
     it('should handle kubectl failures gracefully and return partial results', async () => {
       mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
+      // gcloudJson clusters list (for credential setup)
+      mockExecFile.mockResolvedValueOnce(mockCmdJson([
+        { name: 'test-cluster', location: 'us-central1' }
+      ]))
+      // get-credentials
+      mockExecFile.mockResolvedValueOnce(mockCmd(''))
       // Deployments succeed
       mockExecFile.mockResolvedValueOnce(mockCmdJson({
         items: [{
@@ -272,7 +285,7 @@ describe('GcpProvider', () => {
       // Jobs fail
       mockExecFile.mockRejectedValueOnce(new Error('connection refused'))
 
-      const workloads = await provider.getWorkloads()
+      const workloads = await provider.getWorkloads('test-cluster')
       expect(workloads).toHaveLength(1)
       expect(workloads[0].name).toBe('app')
     })
@@ -396,8 +409,12 @@ describe('GcpProvider', () => {
         { name: 'c1', status: 'RUNNING', location: 'us-central1-a', currentNodeCount: 3, currentMasterVersion: '1.28', createTime: '' },
         { name: 'c2', status: 'ERROR', location: 'us-east1-b', currentNodeCount: 1, currentMasterVersion: '1.27', createTime: '' }
       ]))
-      // kubectl get pods (for total count)
+      // get-credentials for c1
+      mockExecFile.mockResolvedValueOnce(mockCmd(''))
+      // kubectl get pods for c1
       mockExecFile.mockResolvedValueOnce(mockCmd('ns pod1 1/1 Running 0 1d\nns pod2 1/1 Running 0 2d\nns pod3 0/1 Pending 0 1m'))
+      // get-credentials for c2 (unreachable cluster)
+      mockExecFile.mockRejectedValueOnce(new Error('cluster unreachable'))
 
       const summary = await provider.getKubernetesSummary()
       expect(summary.clusterCount).toBe(2)
