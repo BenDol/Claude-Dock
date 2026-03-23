@@ -6,7 +6,6 @@ import { ipcMain } from 'electron'
 import { IPC } from '../../../shared/ipc-channels'
 import type { CloudProviderId, CloudProviderInfo, CloudDashboardData } from '../../../shared/cloud-types'
 import { getProvider, getAllProviders } from './providers'
-import { CloudAuthError } from './providers/gcp-provider'
 import { CloudWindowManager } from './cloud-window'
 import { getServices } from './services'
 
@@ -86,7 +85,7 @@ export function registerCloudIpc(): void {
       return { data: await provider.getClusters() }
     } catch (err: any) {
       svc().logError('[cloud-integration] getClusters failed', err)
-      return { data: [], error: err.message || 'Failed to fetch clusters', authExpired: err instanceof CloudAuthError }
+      return { data: [], error: err.message || 'Failed to fetch clusters', authExpired: !!err.authExpired }
     }
   })
 
@@ -110,7 +109,7 @@ export function registerCloudIpc(): void {
       return { data: await provider.getWorkloads(clusterName) }
     } catch (err: any) {
       svc().logError('[cloud-integration] getWorkloads failed', err)
-      return { data: [], error: err.message || 'Failed to fetch workloads', authExpired: err instanceof CloudAuthError }
+      return { data: [], error: err.message || 'Failed to fetch workloads', authExpired: !!err.authExpired }
     }
   })
 
