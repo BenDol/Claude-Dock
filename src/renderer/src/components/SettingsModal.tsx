@@ -88,23 +88,26 @@ const KeybindInput: React.FC<{
   )
 }
 
-/** Accordion section for grouping settings. Multiple can be open at once. */
+/** Collapsible section header — same visual style as settings-section-header
+ *  but clickable to expand/collapse the content below it. */
 const SettingsAccordion: React.FC<{
   title: string
   defaultOpen?: boolean
+  noDivider?: boolean
   children: React.ReactNode
-}> = ({ title, defaultOpen = false, children }) => {
+}> = ({ title, defaultOpen = false, noDivider, children }) => {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className={`settings-accordion${open ? ' open' : ''}`}>
-      <button className="settings-accordion-header" onClick={() => setOpen(!open)}>
-        <svg className="settings-accordion-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="3,2 7,5 3,8" />
+    <>
+      {!noDivider && <div className="settings-divider" />}
+      <button className={`settings-section-toggle${open ? ' open' : ''}`} onClick={() => setOpen(!open)}>
+        <svg className="settings-section-chevron" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="2,1 6,4 2,7" />
         </svg>
-        <span>{title}</span>
+        {title}
       </button>
-      {open && <div className="settings-accordion-body">{children}</div>}
-    </div>
+      {open && children}
+    </>
   )
 }
 
@@ -569,7 +572,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             )}
             {tab === 'behavior' && (
               <div className="settings-group">
-                <SettingsAccordion title="General" defaultOpen>
+                <SettingsAccordion title="General" defaultOpen noDivider>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"

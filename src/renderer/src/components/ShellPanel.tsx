@@ -55,8 +55,10 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
     e.preventDefault()
     const startY = e.clientY
     const startHeight = height
-    const parent = panelRef.current?.parentElement
-    const maxHeight = parent ? parent.clientHeight * MAX_RATIO : 600
+    // Walk up to the flex column container (terminal-card-split) for max height,
+    // not the immediate wrapper div which has no explicit height
+    const splitContainer = panelRef.current?.closest('.terminal-card-split') as HTMLElement | null
+    const maxHeight = splitContainer ? splitContainer.clientHeight * MAX_RATIO : 600
 
     const onMove = (ev: MouseEvent) => {
       const delta = startY - ev.clientY // dragging up increases height

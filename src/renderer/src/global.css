@@ -1763,46 +1763,35 @@ body {
   margin: 8px 0 4px;
 }
 
-/* Settings Accordion */
-.settings-accordion {
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  margin-bottom: 6px;
-  overflow: hidden;
-}
-
-.settings-accordion-header {
+/* Collapsible section toggle — looks like settings-section-header but clickable */
+.settings-section-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 7px 10px;
-  background: var(--bg-secondary);
-  border: none;
-  color: var(--text-primary);
-  font-size: 12px;
+  gap: 5px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-primary);
+  background: none;
+  border: none;
   cursor: pointer;
+  padding: 0;
+  margin-bottom: 4px;
+  width: 100%;
   text-align: left;
-  transition: background 0.1s;
 }
 
-.settings-accordion-header:hover {
-  background: var(--hover-color);
+.settings-section-toggle:hover {
+  color: var(--accent-color);
 }
 
-.settings-accordion-chevron {
+.settings-section-chevron {
   flex-shrink: 0;
   transition: transform 0.15s;
+  opacity: 0.5;
 }
 
-.settings-accordion.open .settings-accordion-chevron {
+.settings-section-toggle.open .settings-section-chevron {
   transform: rotate(90deg);
-}
-
-.settings-accordion-body {
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-color);
 }
 
 .settings-row {
