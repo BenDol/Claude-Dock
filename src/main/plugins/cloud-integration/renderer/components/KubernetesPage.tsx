@@ -42,6 +42,15 @@ function detectSetupIssue(errorText: string): SetupIssue | null {
     }
   }
 
+  if (['dial tcp', 'connectex', 'connection attempt failed', 'cannot connect to cluster', 'connected host has failed to respond'].some((p) => lower.includes(p))) {
+    return {
+      type: 'connection-failed' as any,
+      message: 'Cannot reach the cluster API server. The cluster may be private, behind a VPN, or the endpoint may be unreachable from this network.',
+      actionLabel: 'Open Console',
+      command: ''
+    }
+  }
+
   return null
 }
 
@@ -152,16 +161,27 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
           {setupIssue ? (
             <>
               <p>{setupIssue.message}</p>
-              <button
-                className="cloud-reauth-btn"
-                onClick={handleFixSetup}
-                disabled={fixingSetup}
-              >
-                {fixingSetup ? 'Running...' : setupIssue.actionLabel}
-              </button>
-              <p className="cloud-error-hint">
-                Runs <code>{setupIssue.command}</code> in the dock shell terminal.
-              </p>
+              {setupIssue.command ? (
+                <>
+                  <button
+                    className="cloud-reauth-btn"
+                    onClick={handleFixSetup}
+                    disabled={fixingSetup}
+                  >
+                    {fixingSetup ? 'Running...' : setupIssue.actionLabel}
+                  </button>
+                  <p className="cloud-error-hint">
+                    Runs <code>{setupIssue.command}</code> in the dock shell terminal.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <button className="cloud-reauth-btn" onClick={() => onOpenConsole('clusters')}>
+                    {setupIssue.actionLabel}
+                  </button>
+                  <button className="cloud-retry-btn" onClick={loadData} style={{ marginLeft: 8 }}>Retry</button>
+                </>
+              )}
             </>
           ) : (
             <>

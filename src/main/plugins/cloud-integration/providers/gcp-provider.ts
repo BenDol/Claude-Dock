@@ -379,16 +379,22 @@ export class GcpProvider implements CloudProvider {
       }
 
       const allWorkloads: CloudWorkload[] = []
+      const clusterErrors: string[] = []
       for (const cluster of clusters) {
         try {
           // Pass location to avoid a redundant gcloud clusters list call
           const w = await this.getWorkloads(cluster.name, cluster.location)
           allWorkloads.push(...w)
         } catch (e: any) {
-          // Propagate setup errors (missing plugin) so the UI can show resolution
+          // Propagate setup errors (missing plugin, auth) so the UI can show resolution
           if ((e as any).gkePluginMissing || (e as any).authExpired) throw e
           svcLogError(`getWorkloads: failed for cluster "${cluster.name}":`, e.message)
+          clusterErrors.push(`${cluster.name}: ${e.message}`)
         }
+      }
+      // If every cluster failed, propagate so the UI shows an error instead of empty
+      if (clusterErrors.length === clusters.length && allWorkloads.length === 0) {
+        throw new Error(clusterErrors[0])
       }
       svcLog(`getWorkloads: found ${allWorkloads.length} total workload(s) across ${clusters.length} cluster(s)`)
       return allWorkloads
