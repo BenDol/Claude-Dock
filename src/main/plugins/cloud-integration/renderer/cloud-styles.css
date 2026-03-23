@@ -803,6 +803,47 @@
   font-size: 12px;
 }
 
+.cloud-error-hint {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.cloud-reauth-btn,
+.cloud-retry-btn {
+  margin-top: 10px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.cloud-reauth-btn {
+  background: #4285f4;
+  color: #fff;
+}
+
+.cloud-reauth-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.cloud-reauth-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.cloud-retry-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.cloud-retry-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .cloud-empty {
   padding: 32px;
   text-align: center;

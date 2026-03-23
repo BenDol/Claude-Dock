@@ -6,6 +6,7 @@ import { ipcMain } from 'electron'
 import { IPC } from '../../../shared/ipc-channels'
 import type { CloudProviderId, CloudProviderInfo, CloudDashboardData } from '../../../shared/cloud-types'
 import { getProvider, getAllProviders } from './providers'
+import { CloudAuthError } from './providers/gcp-provider'
 import { CloudWindowManager } from './cloud-window'
 import { getServices } from './services'
 
@@ -85,7 +86,7 @@ export function registerCloudIpc(): void {
       return { data: await provider.getClusters() }
     } catch (err: any) {
       svc().logError('[cloud-integration] getClusters failed', err)
-      return { data: [], error: err.message || 'Failed to fetch clusters' }
+      return { data: [], error: err.message || 'Failed to fetch clusters', authExpired: err instanceof CloudAuthError }
     }
   })
 
@@ -109,7 +110,7 @@ export function registerCloudIpc(): void {
       return { data: await provider.getWorkloads(clusterName) }
     } catch (err: any) {
       svc().logError('[cloud-integration] getWorkloads failed', err)
-      return { data: [], error: err.message || 'Failed to fetch workloads' }
+      return { data: [], error: err.message || 'Failed to fetch workloads', authExpired: err instanceof CloudAuthError }
     }
   })
 
@@ -149,6 +150,18 @@ export function registerCloudIpc(): void {
     }
   })
 
+  // Re-authenticate with the active provider (e.g. refresh expired tokens)
+  ipcMain.handle(IPC.CLOUD_REAUTH, async (_e, projectDir: string) => {
+    const provider = getActiveProvider(projectDir)
+    if (!provider) return false
+    try {
+      return await provider.reauthenticate()
+    } catch (err) {
+      svc().logError('[cloud-integration] reauthenticate failed', err)
+      return false
+    }
+  })
+
   // Get setup wizard status for a provider
   ipcMain.handle(IPC.CLOUD_GET_SETUP_STATUS, async (_e, projectDir: string, providerId?: string) => {
     const id = providerId || (svc().getPluginSetting(projectDir, 'cloud-integration', 'provider') as string) || 'gcp'
@@ -178,6 +191,7 @@ export function disposeCloudIpc(): void {
     IPC.CLOUD_GET_WORKLOAD_DETAIL,
     IPC.CLOUD_GET_CONSOLE_URL,
     IPC.CLOUD_CHECK_AUTH,
+    IPC.CLOUD_REAUTH,
     IPC.CLOUD_GET_SETUP_STATUS
   ]
   for (const ch of channels) {

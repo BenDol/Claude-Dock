@@ -191,7 +191,7 @@ describe('Cloud Integration IPC', () => {
     mockGetClusters.mockRejectedValue(new Error('network error'))
     const handler = handlers.get(IPC.CLOUD_GET_CLUSTERS)!
     const result = await handler({}, '/project')
-    expect(result).toEqual({ data: [], error: 'network error' })
+    expect(result).toEqual({ data: [], error: 'network error', authExpired: false })
     expect(mockLogError).toHaveBeenCalled()
   })
 

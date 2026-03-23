@@ -61,6 +61,10 @@ export class AzureProvider implements CloudProvider {
     throw new Error('Azure provider not yet implemented')
   }
 
+  async reauthenticate(): Promise<boolean> {
+    return false // not yet implemented
+  }
+
   async getSetupStatus(): Promise<CloudSetupStatus> {
     return {
       providerId: this.id, providerName: this.name, icon: this.getIcon(),

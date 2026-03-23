@@ -3,7 +3,7 @@
  * Uses the `gcloud` CLI to fetch cluster and workload data.
  */
 
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import type { CloudProvider } from './cloud-provider'
 import type {
@@ -32,6 +32,31 @@ const GCP_ICON = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/
 /** Timeout for gcloud commands in ms */
 const CMD_TIMEOUT = 30_000
 
+/** Patterns that indicate expired/invalid auth tokens */
+const AUTH_ERROR_PATTERNS = [
+  'invalid_grant',
+  'token has been expired or revoked',
+  'refreshing your current auth tokens',
+  'please run:.*gcloud auth login',
+  'request had invalid authentication credentials',
+  'not authorized'
+]
+
+/** Check if an error message indicates an auth/token problem */
+function isAuthError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return AUTH_ERROR_PATTERNS.some((p) => lower.includes(p.toLowerCase()) || new RegExp(p, 'i').test(lower))
+}
+
+/** Tagged error that carries an authExpired flag for the IPC layer */
+export class CloudAuthError extends Error {
+  readonly authExpired = true
+  constructor(message: string) {
+    super(message)
+    this.name = 'CloudAuthError'
+  }
+}
+
 async function gcloud(...args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync('gcloud', args, {
@@ -41,6 +66,10 @@ async function gcloud(...args: string[]): Promise<string> {
     })
     return stdout.trim()
   } catch (err: any) {
+    const msg = err.stderr || err.message || ''
+    if (isAuthError(msg)) {
+      throw new CloudAuthError('Your Google Cloud credentials have expired. Please re-authenticate.')
+    }
     throw new Error(`gcloud ${args.join(' ')} failed: ${err.message}`)
   }
 }
@@ -142,6 +171,28 @@ export class GcpProvider implements CloudProvider {
     } catch {
       return false
     }
+  }
+
+  async reauthenticate(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const cmd = process.platform === 'win32' ? 'gcloud.cmd' : 'gcloud'
+      const child = spawn(cmd, ['auth', 'login'], {
+        stdio: 'ignore',
+        detached: true,
+        shell: process.platform === 'win32',
+        windowsHide: false  // let the browser open visibly
+      })
+
+      child.on('close', (code) => {
+        resolve(code === 0)
+      })
+
+      child.on('error', () => {
+        resolve(false)
+      })
+
+      child.unref()
+    })
   }
 
   async getProject(): Promise<CloudProject> {

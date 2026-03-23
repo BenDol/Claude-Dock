@@ -19,11 +19,15 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
   const [workloads, setWorkloads] = useState<CloudWorkload[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [authExpired, setAuthExpired] = useState(false)
+  const [reauthenticating, setReauthenticating] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setAuthExpired(false)
     const errors: string[] = []
+    let hasAuthError = false
     const api = getDockApi().cloudIntegration
 
     // Load clusters and workloads independently so one failure doesn't block the other
@@ -35,18 +39,38 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
     if (clustersResult.status === 'fulfilled') {
       setClusters(clustersResult.value)
     } else {
+      if ((clustersResult.reason as any)?.authExpired) hasAuthError = true
       errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
     }
 
     if (workloadsResult.status === 'fulfilled') {
       setWorkloads(workloadsResult.value)
     } else {
+      if ((workloadsResult.reason as any)?.authExpired) hasAuthError = true
       errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
     }
 
+    if (hasAuthError) setAuthExpired(true)
     if (errors.length > 0) setError(errors.join('\n'))
     setLoading(false)
   }, [projectDir])
+
+  const handleReauth = useCallback(async () => {
+    setReauthenticating(true)
+    try {
+      const success = await getDockApi().cloudIntegration.reauth(projectDir)
+      if (success) {
+        await loadData()
+      } else {
+        setError('Re-authentication failed. Please try running "gcloud auth login" manually in a terminal.')
+        setAuthExpired(false)
+      }
+    } catch {
+      setError('Re-authentication failed. Please try running "gcloud auth login" manually in a terminal.')
+      setAuthExpired(false)
+    }
+    setReauthenticating(false)
+  }, [projectDir, loadData])
 
   useEffect(() => {
     loadData()
@@ -88,7 +112,28 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
       </div>
 
       {loading && <div className="cloud-loading-indicator">Loading Kubernetes data...</div>}
-      {error && <div className="cloud-error"><p>{error}</p></div>}
+      {error && (
+        <div className="cloud-error">
+          {authExpired ? (
+            <>
+              <p>Your cloud credentials have expired.</p>
+              <button
+                className="cloud-reauth-btn"
+                onClick={handleReauth}
+                disabled={reauthenticating}
+              >
+                {reauthenticating ? 'Authenticating...' : 'Re-authenticate'}
+              </button>
+              <p className="cloud-error-hint">This will open a browser window to sign in.</p>
+            </>
+          ) : (
+            <>
+              <p>{error}</p>
+              <button className="cloud-retry-btn" onClick={loadData}>Retry</button>
+            </>
+          )}
+        </div>
+      )}
 
       {!loading && !error && activeTab === 'overview' && (
         <OverviewTab clusters={clusters} workloads={workloads} onNavigate={onNavigate} />

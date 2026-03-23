@@ -56,6 +56,9 @@ export interface CloudProvider {
   /** Get setup wizard status — steps, which are complete, etc. */
   getSetupStatus(): Promise<CloudSetupStatus>
 
+  /** Re-authenticate with the provider (e.g. refresh expired tokens). Returns true on success. */
+  reauthenticate(): Promise<boolean>
+
   /** Build provider info for the renderer */
   toInfo(available: boolean): CloudProviderInfo
 }
