@@ -177,12 +177,15 @@ export class GcpProvider implements CloudProvider {
       const healthy = clusters.filter((c) => c.status === 'RUNNING').length
       const totalNodes = clusters.reduce((sum, c) => sum + c.nodeCount, 0)
 
-      // Best-effort pod count
+      // Best-effort pod count — configure kubectl for each cluster and sum pods
       let totalPods = 0
-      try {
-        const raw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
-        totalPods = raw.split('\n').filter((l) => l.trim()).length
-      } catch { /* kubectl might not be configured for all clusters */ }
+      for (const cluster of clusters) {
+        try {
+          await gcloud('container', 'clusters', 'get-credentials', cluster.name, `--location=${cluster.location}`)
+          const raw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
+          totalPods += raw.split('\n').filter((l) => l.trim()).length
+        } catch { /* skip unreachable clusters */ }
+      }
 
       return {
         clusterCount: clusters.length,
@@ -283,15 +286,26 @@ export class GcpProvider implements CloudProvider {
   async getWorkloads(clusterName?: string): Promise<CloudWorkload[]> {
     const projectId = await this.getProjectId()
 
-    // If a cluster is specified, get credentials first
-    if (clusterName) {
-      const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
-      if (clusters.length > 0) {
-        const loc = clusters[0].location || clusters[0].zone
+    // If no specific cluster, iterate all clusters so kubectl is properly configured for each
+    if (!clusterName) {
+      const clusters = await this.getClusters()
+      if (clusters.length === 0) return []
+
+      const allWorkloads: CloudWorkload[] = []
+      for (const cluster of clusters) {
         try {
-          await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`)
-        } catch { /* may already be configured */ }
+          const w = await this.getWorkloads(cluster.name)
+          allWorkloads.push(...w)
+        } catch { /* skip unreachable clusters */ }
       }
+      return allWorkloads
+    }
+
+    // Get credentials for the specified cluster
+    const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
+    if (clusters.length > 0) {
+      const loc = clusters[0].location || clusters[0].zone
+      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`)
     }
 
     const workloads: CloudWorkload[] = []
@@ -300,7 +314,7 @@ export class GcpProvider implements CloudProvider {
     try {
       const deps = await kubectlJson<any>('get', 'deployments', '--all-namespaces')
       for (const d of deps.items || []) {
-        workloads.push(this.mapDeployment(d, clusterName || 'current', projectId))
+        workloads.push(this.mapDeployment(d, clusterName, projectId))
       }
     } catch { /* ignore */ }
 
@@ -308,7 +322,7 @@ export class GcpProvider implements CloudProvider {
     try {
       const sts = await kubectlJson<any>('get', 'statefulsets', '--all-namespaces')
       for (const s of sts.items || []) {
-        workloads.push(this.mapStatefulSet(s, clusterName || 'current', projectId))
+        workloads.push(this.mapStatefulSet(s, clusterName, projectId))
       }
     } catch { /* ignore */ }
 
@@ -316,7 +330,7 @@ export class GcpProvider implements CloudProvider {
     try {
       const ds = await kubectlJson<any>('get', 'daemonsets', '--all-namespaces')
       for (const d of ds.items || []) {
-        workloads.push(this.mapDaemonSet(d, clusterName || 'current', projectId))
+        workloads.push(this.mapDaemonSet(d, clusterName, projectId))
       }
     } catch { /* ignore */ }
 
@@ -324,7 +338,7 @@ export class GcpProvider implements CloudProvider {
     try {
       const jobs = await kubectlJson<any>('get', 'jobs', '--all-namespaces')
       for (const j of jobs.items || []) {
-        workloads.push(this.mapJob(j, clusterName || 'current', projectId))
+        workloads.push(this.mapJob(j, clusterName, projectId))
       }
     } catch { /* ignore */ }
 

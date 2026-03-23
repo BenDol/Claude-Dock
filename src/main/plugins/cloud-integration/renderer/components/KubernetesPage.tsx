@@ -23,17 +23,28 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
-    try {
-      const api = getDockApi().cloudIntegration
-      const [c, w] = await Promise.all([
-        api.getClusters(projectDir),
-        api.getWorkloads(projectDir)
-      ])
-      setClusters(c)
-      setWorkloads(w)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data')
+    const errors: string[] = []
+    const api = getDockApi().cloudIntegration
+
+    // Load clusters and workloads independently so one failure doesn't block the other
+    const [clustersResult, workloadsResult] = await Promise.allSettled([
+      api.getClusters(projectDir),
+      api.getWorkloads(projectDir)
+    ])
+
+    if (clustersResult.status === 'fulfilled') {
+      setClusters(clustersResult.value)
+    } else {
+      errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
     }
+
+    if (workloadsResult.status === 'fulfilled') {
+      setWorkloads(workloadsResult.value)
+    } else {
+      errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
+    }
+
+    if (errors.length > 0) setError(errors.join('\n'))
     setLoading(false)
   }, [projectDir])
 

@@ -80,12 +80,12 @@ export function registerCloudIpc(): void {
   // Get clusters
   ipcMain.handle(IPC.CLOUD_GET_CLUSTERS, async (_e, projectDir: string) => {
     const provider = getActiveProvider(projectDir)
-    if (!provider) return []
+    if (!provider) return { data: [], error: 'No cloud provider configured' }
     try {
-      return await provider.getClusters()
-    } catch (err) {
+      return { data: await provider.getClusters() }
+    } catch (err: any) {
       svc().logError('[cloud-integration] getClusters failed', err)
-      return []
+      return { data: [], error: err.message || 'Failed to fetch clusters' }
     }
   })
 
@@ -104,12 +104,12 @@ export function registerCloudIpc(): void {
   // Get workloads
   ipcMain.handle(IPC.CLOUD_GET_WORKLOADS, async (_e, projectDir: string, clusterName?: string) => {
     const provider = getActiveProvider(projectDir)
-    if (!provider) return []
+    if (!provider) return { data: [], error: 'No cloud provider configured' }
     try {
-      return await provider.getWorkloads(clusterName)
-    } catch (err) {
+      return { data: await provider.getWorkloads(clusterName) }
+    } catch (err: any) {
       svc().logError('[cloud-integration] getWorkloads failed', err)
-      return []
+      return { data: [], error: err.message || 'Failed to fetch workloads' }
     }
   })
 

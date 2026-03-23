@@ -645,9 +645,17 @@ const dockApi: DockApi = {
     getActiveProvider: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_ACTIVE_PROVIDER, projectDir),
     setProvider: (projectDir, providerId) => ipcRenderer.invoke(IPC.CLOUD_SET_PROVIDER, projectDir, providerId),
     getDashboard: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_DASHBOARD, projectDir),
-    getClusters: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTERS, projectDir),
+    getClusters: async (projectDir) => {
+      const r = await ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTERS, projectDir)
+      if (r?.error) throw new Error(r.error)
+      return r?.data ?? r  // handle both { data } and plain array (backward compat)
+    },
     getClusterDetail: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_CLUSTER_DETAIL, projectDir, clusterName),
-    getWorkloads: (projectDir, clusterName) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOADS, projectDir, clusterName),
+    getWorkloads: async (projectDir, clusterName) => {
+      const r = await ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOADS, projectDir, clusterName)
+      if (r?.error) throw new Error(r.error)
+      return r?.data ?? r
+    },
     getWorkloadDetail: (projectDir, clusterName, namespace, workloadName, kind) => ipcRenderer.invoke(IPC.CLOUD_GET_WORKLOAD_DETAIL, projectDir, clusterName, namespace, workloadName, kind),
     getConsoleUrl: (projectDir, section, params) => ipcRenderer.invoke(IPC.CLOUD_GET_CONSOLE_URL, projectDir, section, params),
     checkAuth: (projectDir) => ipcRenderer.invoke(IPC.CLOUD_CHECK_AUTH, projectDir),
