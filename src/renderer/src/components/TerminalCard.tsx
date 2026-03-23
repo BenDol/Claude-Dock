@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react'
+import React, { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react'
 import TerminalView from './TerminalView'
 import TerminalTitle from './TerminalTitle'
 import { useDockStore } from '../stores/dock-store'
@@ -111,11 +111,10 @@ const ShellIcon: React.FC = () => (
 )
 
 const WorktreeIcon: React.FC = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="6" y1="3" x2="6" y2="15" />
-    <circle cx="18" cy="6" r="3" />
-    <circle cx="6" cy="18" r="3" />
-    <path d="M18 9a9 9 0 0 1-9 9" />
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="22" x2="12" y2="10" />
+    <polyline points="6 4 12 10 18 4" />
+    <line x1="12" y1="10" x2="12" y2="2" />
   </svg>
 )
 
@@ -147,11 +146,18 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const addTerminal = useDockStore((s) => s.addTerminal)
   const setTerminalWorktree = useDockStore((s) => s.setTerminalWorktree)
   const [worktreePopover, setWorktreePopover] = useState(false)
+  const [worktreePos, setWorktreePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean }[]>([])
   const [branches, setBranches] = useState<{ name: string; current: boolean }[]>([])
   const [wtLoading, setWtLoading] = useState(false)
+  const wtBtnRef = useRef<HTMLButtonElement>(null)
 
   const openWorktreePopover = useCallback(async () => {
+    // Calculate position from button for fixed positioning (escapes overflow: hidden)
+    if (wtBtnRef.current) {
+      const rect = wtBtnRef.current.getBoundingClientRect()
+      setWorktreePos({ x: rect.right, y: rect.top })
+    }
     setWorktreePopover(true)
     setWtLoading(true)
     const api = getDockApi()
@@ -326,11 +332,13 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                 <ShellIcon />
               </button>
             )}
-            <button className={`worktree-toggle-bottom${worktreePath ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : 'Start a git worktree'}>
+            <button ref={wtBtnRef} className={`worktree-toggle-bottom${worktreePath ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : 'Start a git worktree'}>
               <WorktreeIcon />
             </button>
             {worktreePopover && (
-              <div className="worktree-popover">
+              <>
+              <div className="worktree-popover-backdrop" onClick={() => setWorktreePopover(false)} />
+              <div className="worktree-popover" style={{ position: 'fixed', bottom: 'auto', right: 'auto', top: Math.max(8, worktreePos.y - 300), left: Math.max(8, worktreePos.x - 248) }}>
                 <div className="worktree-popover-header">
                   <span>Git Worktrees</span>
                   <button className="worktree-popover-close" onClick={() => setWorktreePopover(false)}>&times;</button>
@@ -362,6 +370,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   </div>
                 )}
               </div>
+              </>
             )}
           </div>
           {shellEnabled && shellMounted && (

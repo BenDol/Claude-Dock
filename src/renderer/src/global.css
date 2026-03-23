@@ -1517,12 +1517,16 @@ body {
   color: var(--accent-color);
 }
 
+/* Worktree popover backdrop */
+.worktree-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
 /* Worktree popover */
 .worktree-popover {
-  position: absolute;
-  bottom: 30px;
-  right: 8px;
-  z-index: 20;
+  z-index: 200;
   width: 240px;
   max-height: 300px;
   background: var(--bg-secondary);
