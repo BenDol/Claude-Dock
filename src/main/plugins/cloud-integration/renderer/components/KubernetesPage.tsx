@@ -27,7 +27,6 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
     setError(null)
     setAuthExpired(false)
     const errors: string[] = []
-    let hasAuthError = false
     const api = getDockApi().cloudIntegration
 
     // Load clusters and workloads independently so one failure doesn't block the other
@@ -39,19 +38,25 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
     if (clustersResult.status === 'fulfilled') {
       setClusters(clustersResult.value)
     } else {
-      if ((clustersResult.reason as any)?.authExpired) hasAuthError = true
       errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
     }
 
     if (workloadsResult.status === 'fulfilled') {
       setWorkloads(workloadsResult.value)
     } else {
-      if ((workloadsResult.reason as any)?.authExpired) hasAuthError = true
       errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
     }
 
-    if (hasAuthError) setAuthExpired(true)
-    if (errors.length > 0) setError(errors.join('\n'))
+    if (errors.length > 0) {
+      const joined = errors.join('\n')
+      setError(joined)
+      // Detect auth errors from the message itself — most robust, avoids IPC serialization issues
+      const authPatterns = ['credentials have expired', 'please re-authenticate', 'invalid_grant', 'auth tokens', 'gcloud auth login']
+      const lower = joined.toLowerCase()
+      if (authPatterns.some((p) => lower.includes(p))) {
+        setAuthExpired(true)
+      }
+    }
     setLoading(false)
   }, [projectDir])
 
@@ -126,7 +131,7 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
               >
                 {reauthenticating ? 'Authenticating...' : 'Re-authenticate'}
               </button>
-              <p className="cloud-error-hint">This will open a browser window to sign in.</p>
+              <p className="cloud-error-hint">Runs the auth command in a dock shell terminal.</p>
             </>
           ) : (
             <>
