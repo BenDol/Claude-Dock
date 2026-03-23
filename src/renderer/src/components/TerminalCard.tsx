@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import TerminalView from './TerminalView'
 import TerminalTitle from './TerminalTitle'
 import { useDockStore } from '../stores/dock-store'
@@ -152,12 +153,15 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [wtLoading, setWtLoading] = useState(false)
   const wtBtnRef = useRef<HTMLButtonElement>(null)
 
+  // Recalculate popover position when it opens
+  useEffect(() => {
+    if (!worktreePopover || !wtBtnRef.current) return
+    const rect = wtBtnRef.current.getBoundingClientRect()
+    // Position above the button, aligned to right edge
+    setWorktreePos({ x: rect.right - 240, y: rect.top - 4 })
+  }, [worktreePopover])
+
   const openWorktreePopover = useCallback(async () => {
-    // Calculate position from button for fixed positioning (escapes overflow: hidden)
-    if (wtBtnRef.current) {
-      const rect = wtBtnRef.current.getBoundingClientRect()
-      setWorktreePos({ x: rect.right, y: rect.bottom })
-    }
     setWorktreePopover(true)
     setWtLoading(true)
     const api = getDockApi()
@@ -358,44 +362,6 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
             <button ref={wtBtnRef} className={`worktree-toggle-bottom${worktreePath ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : 'Start a git worktree'}>
               <WorktreeIcon />
             </button>
-            {worktreePopover && (
-              <>
-              <div className="worktree-popover-backdrop" onClick={() => setWorktreePopover(false)} />
-              <div className="worktree-popover" style={{ position: 'fixed', right: 'auto', bottom: 'auto', top: Math.max(8, worktreePos.y - 310), left: Math.max(8, worktreePos.x - 240) }}>
-                <div className="worktree-popover-header">
-                  <span>Git Worktrees</span>
-                  <button className="worktree-popover-close" onClick={() => setWorktreePopover(false)}>&times;</button>
-                </div>
-                {wtLoading ? (
-                  <div className="worktree-popover-loading">Loading...</div>
-                ) : (
-                  <div className="worktree-popover-body">
-                    {worktrees.filter(wt => !wt.isMain).length > 0 && (
-                      <>
-                        <div className="worktree-popover-label">Existing Worktrees</div>
-                        {worktrees.filter(wt => !wt.isMain).map(wt => (
-                          <button key={wt.path} className="worktree-popover-item" onClick={() => handleSelectWorktree(wt.path)} title={wt.path}>
-                            <span className="worktree-popover-branch">{wt.branch || wt.head}</span>
-                          </button>
-                        ))}
-                        <div className="worktree-popover-divider" />
-                      </>
-                    )}
-                    <div className="worktree-popover-label">New Worktree from Branch</div>
-                    {branches.slice(0, 30).map(b => (
-                      <button key={b.name} className="worktree-popover-item" onClick={() => handleCreateWorktree(b.name)}>
-                        <span className="worktree-popover-branch">{b.name.replace(/^[^/]+\//, '')}</span>
-                        {b.current && <span style={{ fontSize: 9, color: 'var(--accent-color)', marginLeft: 4 }}>current</span>}
-                      </button>
-                    ))}
-                    {branches.length === 0 && (
-                      <div className="worktree-popover-empty">No branches available</div>
-                    )}
-                  </div>
-                )}
-              </div>
-              </>
-            )}
           </div>
           {shellEnabled && shellMounted && (
             <Suspense fallback={null}>
@@ -412,6 +378,45 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           )}
         </div>
       </div>
+      {worktreePopover && createPortal(
+        <>
+          <div className="worktree-popover-backdrop" onClick={() => setWorktreePopover(false)} />
+          <div className="worktree-popover" style={{ top: Math.max(8, worktreePos.y - 310), left: Math.max(8, worktreePos.x) }}>
+            <div className="worktree-popover-header">
+              <span>Git Worktrees</span>
+              <button className="worktree-popover-close" onClick={() => setWorktreePopover(false)}>&times;</button>
+            </div>
+            {wtLoading ? (
+              <div className="worktree-popover-loading">Loading...</div>
+            ) : (
+              <div className="worktree-popover-body">
+                {worktrees.filter(wt => !wt.isMain).length > 0 && (
+                  <>
+                    <div className="worktree-popover-label">Existing Worktrees</div>
+                    {worktrees.filter(wt => !wt.isMain).map(wt => (
+                      <button key={wt.path} className="worktree-popover-item" onClick={() => handleSelectWorktree(wt.path)} title={wt.path}>
+                        <span className="worktree-popover-branch">{wt.branch || wt.head}</span>
+                      </button>
+                    ))}
+                    <div className="worktree-popover-divider" />
+                  </>
+                )}
+                <div className="worktree-popover-label">New Worktree from Branch</div>
+                {branches.slice(0, 30).map(b => (
+                  <button key={b.name} className="worktree-popover-item" onClick={() => handleCreateWorktree(b.name)}>
+                    <span className="worktree-popover-branch">{b.name.replace(/^[^/]+\//, '')}</span>
+                    {b.current && <span style={{ fontSize: 9, color: 'var(--accent-color)', marginLeft: 4 }}>current</span>}
+                  </button>
+                ))}
+                {branches.length === 0 && (
+                  <div className="worktree-popover-empty">No branches available</div>
+                )}
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
     </div>
   )
 }

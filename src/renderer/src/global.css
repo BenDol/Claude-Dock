@@ -1526,6 +1526,7 @@ body {
 
 /* Worktree popover */
 .worktree-popover {
+  position: fixed;
   z-index: 200;
   width: 240px;
   max-height: 300px;
