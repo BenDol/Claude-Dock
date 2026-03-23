@@ -156,7 +156,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     // Calculate position from button for fixed positioning (escapes overflow: hidden)
     if (wtBtnRef.current) {
       const rect = wtBtnRef.current.getBoundingClientRect()
-      setWorktreePos({ x: rect.right, y: rect.top })
+      setWorktreePos({ x: rect.right, y: rect.bottom })
     }
     setWorktreePopover(true)
     setWtLoading(true)
@@ -167,7 +167,30 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         api.gitManager.getBranches(projectDir)
       ])
       setWorktrees(wts)
-      setBranches(brs.filter((b: any) => !b.remote).map((b: any) => ({ name: b.name, current: b.current })))
+      // Include all branches (local + remote) — worktrees can be created from any
+      // Strip remote prefix for display but keep the full name for checkout
+      const allBranches = brs.map((b: any) => ({
+        name: b.name as string,
+        displayName: b.remote ? (b.name as string).replace(/^[^/]+\//, '') : b.name as string,
+        current: b.current as boolean,
+        remote: b.remote as boolean
+      }))
+      // Deduplicate: if a local and remote branch have the same name, keep local
+      const seen = new Set<string>()
+      const deduped: typeof allBranches = []
+      for (const b of allBranches.filter((b: any) => !b.remote)) {
+        seen.add(b.displayName)
+        deduped.push(b)
+      }
+      for (const b of allBranches.filter((b: any) => b.remote)) {
+        if (!seen.has(b.displayName)) {
+          seen.add(b.displayName)
+          deduped.push(b)
+        }
+      }
+      // Exclude branches that already have a worktree
+      const wtBranches = new Set(wts.map((w: any) => w.branch))
+      setBranches(deduped.filter((b) => !wtBranches.has(b.displayName)).map((b) => ({ name: b.name, current: b.current })))
     } catch { /* ignore */ }
     setWtLoading(false)
   }, [projectDir])
@@ -338,7 +361,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
             {worktreePopover && (
               <>
               <div className="worktree-popover-backdrop" onClick={() => setWorktreePopover(false)} />
-              <div className="worktree-popover" style={{ position: 'fixed', bottom: 'auto', right: 'auto', top: Math.max(8, worktreePos.y - 300), left: Math.max(8, worktreePos.x - 248) }}>
+              <div className="worktree-popover" style={{ position: 'fixed', right: 'auto', bottom: 'auto', top: Math.max(8, worktreePos.y - 310), left: Math.max(8, worktreePos.x - 240) }}>
                 <div className="worktree-popover-header">
                   <span>Git Worktrees</span>
                   <button className="worktree-popover-close" onClick={() => setWorktreePopover(false)}>&times;</button>
@@ -359,13 +382,14 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                       </>
                     )}
                     <div className="worktree-popover-label">New Worktree from Branch</div>
-                    {branches.filter(b => !b.current).slice(0, 20).map(b => (
+                    {branches.slice(0, 30).map(b => (
                       <button key={b.name} className="worktree-popover-item" onClick={() => handleCreateWorktree(b.name)}>
-                        <span className="worktree-popover-branch">{b.name}</span>
+                        <span className="worktree-popover-branch">{b.name.replace(/^[^/]+\//, '')}</span>
+                        {b.current && <span style={{ fontSize: 9, color: 'var(--accent-color)', marginLeft: 4 }}>current</span>}
                       </button>
                     ))}
-                    {branches.filter(b => !b.current).length === 0 && (
-                      <div className="worktree-popover-empty">No other branches available</div>
+                    {branches.length === 0 && (
+                      <div className="worktree-popover-empty">No branches available</div>
                     )}
                   </div>
                 )}
