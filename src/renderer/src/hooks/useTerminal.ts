@@ -243,9 +243,12 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       const ephemeral = isTask && !state.claudePersistentTaskTerminals.has(terminalId)
       const taskFlags = state.claudeTaskFlags.get(terminalId)
 
+      // Check if this terminal has a worktree assigned
+      const worktreeCwd = state.terminalWorktrees.get(terminalId)
+
       if (ephemeral) {
         // Ephemeral task terminal — task flags only, no session persistence
-        getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags })
+        getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags, cwd: worktreeCwd })
       } else {
         // Persistent terminal (regular or task) — merge task flags with defaults
         let flags = taskFlags
@@ -265,7 +268,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             useDockStore.getState().setTerminalClaudeFlags(terminalId, flags)
           }
         }
-        getDockApi().terminal.spawn(terminalId, flags ? { claudeFlags: flags } : undefined)
+        const spawnOpts: { claudeFlags?: string; cwd?: string } = {}
+        if (flags) spawnOpts.claudeFlags = flags
+        if (worktreeCwd) spawnOpts.cwd = worktreeCwd
+        getDockApi().terminal.spawn(terminalId, Object.keys(spawnOpts).length > 0 ? spawnOpts : undefined)
       }
     }
   }, [terminalId])

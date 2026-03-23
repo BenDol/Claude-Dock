@@ -2149,6 +2149,87 @@ export async function continueMerge(cwd: string): Promise<void> {
   }
 }
 
+// --- Git Worktrees ---
+
+export interface GitWorktreeInfo {
+  path: string
+  branch: string
+  head: string
+  isMain: boolean
+  isBare: boolean
+}
+
+export async function listWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
+  try {
+    const { stdout } = await gitExec(cwd, ['worktree', 'list', '--porcelain'], 10000)
+    const worktrees: GitWorktreeInfo[] = []
+    let current: Partial<GitWorktreeInfo> = {}
+
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        if (current.path) worktrees.push(current as GitWorktreeInfo)
+        current = { path: line.slice(9).trim(), branch: '', head: '', isMain: false, isBare: false }
+      } else if (line.startsWith('HEAD ')) {
+        current.head = line.slice(5).trim().slice(0, 8)
+      } else if (line.startsWith('branch ')) {
+        // refs/heads/main -> main
+        current.branch = line.slice(7).trim().replace(/^refs\/heads\//, '')
+      } else if (line === 'bare') {
+        current.isBare = true
+      } else if (line === '') {
+        // Empty line separates entries
+      }
+    }
+    if (current.path) worktrees.push(current as GitWorktreeInfo)
+
+    // First worktree is always the main one
+    if (worktrees.length > 0) worktrees[0].isMain = true
+
+    getServices().log(`[git-manager] listWorktrees: found ${worktrees.length} worktree(s) for ${cwd}`)
+    return worktrees
+  } catch (err) {
+    getServices().logError('[git-manager] listWorktrees failed:', err)
+    return []
+  }
+}
+
+export async function addWorktree(cwd: string, branch: string, targetPath?: string): Promise<string> {
+  // Default path: sibling directory named <project>-worktrees/<branch>
+  const projectName = path.basename(cwd)
+  const worktreeBase = path.join(path.dirname(cwd), `${projectName}-worktrees`)
+  const safeBranch = branch.replace(/[/\\]/g, '-')
+  const worktreePath = targetPath || path.join(worktreeBase, safeBranch)
+
+  getServices().log(`[git-manager] addWorktree: branch=${branch} path=${worktreePath} cwd=${cwd}`)
+  fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
+  await gitExec(cwd, ['worktree', 'add', worktreePath, branch], 30000)
+  getServices().log(`[git-manager] addWorktree: created successfully at ${worktreePath}`)
+  return worktreePath
+}
+
+export async function addWorktreeNewBranch(cwd: string, newBranch: string, startPoint?: string): Promise<string> {
+  const projectName = path.basename(cwd)
+  const worktreeBase = path.join(path.dirname(cwd), `${projectName}-worktrees`)
+  const safeBranch = newBranch.replace(/[/\\]/g, '-')
+  const worktreePath = path.join(worktreeBase, safeBranch)
+
+  getServices().log(`[git-manager] addWorktreeNewBranch: newBranch=${newBranch} startPoint=${startPoint || 'HEAD'} path=${worktreePath}`)
+  fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
+  const args = ['worktree', 'add', '-b', newBranch, worktreePath]
+  if (startPoint) args.push(startPoint)
+  await gitExec(cwd, args, 30000)
+  getServices().log(`[git-manager] addWorktreeNewBranch: created successfully at ${worktreePath}`)
+  return worktreePath
+}
+
+export async function removeWorktree(cwd: string, worktreePath: string, force?: boolean): Promise<void> {
+  getServices().log(`[git-manager] removeWorktree: path=${worktreePath} force=${!!force} cwd=${cwd}`)
+  const args = ['worktree', 'remove', worktreePath]
+  if (force) args.push('--force')
+  await gitExec(cwd, args, 15000)
+  getServices().log(`[git-manager] removeWorktree: removed ${worktreePath}`)
+}
+
 // --- Search ---
 
 const searchGeneration = new Map<string, number>()

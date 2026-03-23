@@ -5,6 +5,7 @@ export const IPC = {
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_KILL: 'terminal:kill',
   TERMINAL_GET_SESSION_ID: 'terminal:getSessionId',
+  TERMINAL_RESUME_IN_NATIVE: 'terminal:resumeInNative', // args: terminalId, claudeFlags?
   TERMINAL_SYNC_ORDER: 'terminal:syncOrder',
   // Shell panel PTY (embedded non-Claude shell per terminal)
   SHELL_SPAWN: 'shell:spawn',
@@ -146,6 +147,9 @@ export const IPC = {
   GIT_MGR_PREVIEW_GITIGNORE: 'gitMgr:previewGitignore',
   GIT_MGR_ADD_TO_GITIGNORE: 'gitMgr:addToGitignore',
   GIT_MGR_MIGRATE_TO_LFS: 'gitMgr:migrateToLfs',
+  GIT_MGR_LIST_WORKTREES: 'gitMgr:listWorktrees',
+  GIT_MGR_ADD_WORKTREE: 'gitMgr:addWorktree',
+  GIT_MGR_REMOVE_WORKTREE: 'gitMgr:removeWorktree',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',

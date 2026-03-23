@@ -72,11 +72,12 @@ export interface GitInstallResult {
 
 export interface DockApi {
   terminal: {
-    spawn: (terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string }) => Promise<boolean>
+    spawn: (terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string }) => Promise<boolean>
     write: (terminalId: string, data: string) => Promise<void>
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>
     getSessionId: (terminalId: string) => Promise<string | null>
+    resumeInNative: (terminalId: string, claudeFlags?: string) => Promise<{ success: boolean; resumeCmd?: string; error?: string }>
     syncOrder: (terminalIds: string[]) => Promise<void>
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
@@ -238,6 +239,9 @@ export interface DockApi {
     previewGitignore: (projectDir: string, pattern: string) => Promise<string[]>
     addToGitignore: (projectDir: string, pattern: string, removeFromIndex: boolean) => Promise<{ success: boolean; error?: string }>
     migrateToLfs: (projectDir: string, filePaths: string[]) => Promise<{ success: boolean; message?: string; error?: string }>
+    listWorktrees: (projectDir: string) => Promise<{ path: string; branch: string; head: string; isMain: boolean }[]>
+    addWorktree: (projectDir: string, branch: string, targetPath?: string) => Promise<{ success: boolean; path?: string; error?: string }>
+    removeWorktree: (projectDir: string, worktreePath: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -337,6 +341,7 @@ const dockApi: DockApi = {
     resize: (terminalId, cols, rows) => ipcRenderer.invoke(IPC.TERMINAL_RESIZE, terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_KILL, terminalId),
     getSessionId: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_GET_SESSION_ID, terminalId),
+    resumeInNative: (terminalId, claudeFlags) => ipcRenderer.invoke(IPC.TERMINAL_RESUME_IN_NATIVE, terminalId, claudeFlags),
     syncOrder: (terminalIds) => ipcRenderer.invoke(IPC.TERMINAL_SYNC_ORDER, terminalIds),
     onData: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, terminalId: string, data: string) => {
@@ -542,6 +547,9 @@ const dockApi: DockApi = {
     previewGitignore: (projectDir, pattern) => ipcRenderer.invoke(IPC.GIT_MGR_PREVIEW_GITIGNORE, projectDir, pattern),
     addToGitignore: (projectDir, pattern, removeFromIndex) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_TO_GITIGNORE, projectDir, pattern, removeFromIndex),
     migrateToLfs: (projectDir, filePaths) => ipcRenderer.invoke(IPC.GIT_MGR_MIGRATE_TO_LFS, projectDir, filePaths),
+    listWorktrees: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_LIST_WORKTREES, projectDir),
+    addWorktree: (projectDir, branch, targetPath) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_WORKTREE, projectDir, branch, targetPath),
+    removeWorktree: (projectDir, worktreePath, force) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_WORKTREE, projectDir, worktreePath, force),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

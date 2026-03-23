@@ -24,6 +24,8 @@ interface DockState {
   resumedTerminals: Set<string>
   /** Pending shell command to run in a terminal's shell panel (set by SHELL_RUN_COMMAND) */
   pendingShellCommand: string | null
+  /** Maps terminal ID → git worktree path (terminals working from a worktree) */
+  terminalWorktrees: Map<string, string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -44,6 +46,7 @@ interface DockState {
   setTerminalActive: (id: string, active: boolean) => void
   markTerminalResumed: (id: string) => void
   setPendingShellCommand: (command: string | null) => void
+  setTerminalWorktree: (id: string, worktreePath: string | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -62,6 +65,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   activeTerminals: new Set<string>(),
   resumedTerminals: new Set<string>(),
   pendingShellCommand: null,
+  terminalWorktrees: new Map<string, string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -194,5 +198,15 @@ export const useDockStore = create<DockState>((set, get) => ({
       return { resumedTerminals: next }
     }),
 
-  setPendingShellCommand: (command) => set({ pendingShellCommand: command })
+  setPendingShellCommand: (command) => set({ pendingShellCommand: command }),
+
+  setTerminalWorktree: (id, worktreePath) => set((state) => {
+    const terminalWorktrees = new Map(state.terminalWorktrees)
+    if (worktreePath) {
+      terminalWorktrees.set(id, worktreePath)
+    } else {
+      terminalWorktrees.delete(id)
+    }
+    return { terminalWorktrees }
+  })
 }))

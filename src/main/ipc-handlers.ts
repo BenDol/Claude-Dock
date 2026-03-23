@@ -28,19 +28,20 @@ declare const __DEV__: boolean
 export function registerIpcHandlers(): void {
   const manager = DockManager.getInstance()
 
-  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string }) => {
+  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string }) => {
     const dock = getDockForEvent(event)
     if (dock) {
       const ephemeral = options?.ephemeral ?? false
       const claudeFlags = options?.claudeFlags
-      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}${ephemeral ? ' (ephemeral)' : ''}${claudeFlags ? ` flags="${claudeFlags}"` : ''}`)
+      const spawnCwd = options?.cwd || dock.projectDir
+      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}${ephemeral ? ' (ephemeral)' : ''}${claudeFlags ? ` flags="${claudeFlags}"` : ''}${options?.cwd ? ` cwd=${options.cwd}` : ''}`)
       pluginManager.emitTerminalPreSpawn(dock.projectDir, terminalId)
       const resumeId = ephemeral ? undefined : dock.getNextResumeId()
       // Restore saved terminal buffer before PTY starts (for resumed sessions)
       if (resumeId) {
         dock.restoreBuffer(terminalId, resumeId)
       }
-      dock.ptyManager.spawn(terminalId, dock.projectDir, resumeId, ephemeral, claudeFlags)
+      dock.ptyManager.spawn(terminalId, spawnCwd, resumeId, ephemeral, claudeFlags)
       // Register with activity tracker (non-critical)
       const sessionId = dock.ptyManager.getSessionId(terminalId) || ''
       try {
@@ -82,6 +83,88 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_GET_SESSION_ID, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     return dock?.ptyManager.getSessionId(terminalId) ?? null
+  })
+
+  ipcMain.handle(IPC.TERMINAL_RESUME_IN_NATIVE, async (event, terminalId: string, claudeFlags?: string) => {
+    const dock = getDockForEvent(event)
+    if (!dock) {
+      log(`TERMINAL_RESUME_IN_NATIVE: no dock found for ${terminalId}`)
+      return { success: false, error: 'No dock found' }
+    }
+
+    const sessionId = dock.ptyManager.getSessionId(terminalId)
+    if (!sessionId) {
+      log(`TERMINAL_RESUME_IN_NATIVE: no session ID for ${terminalId}`)
+      return { success: false, error: 'No session ID for this terminal' }
+    }
+
+    // Build resume command with permission flags carried over
+    const flagStr = claudeFlags ? ' ' + claudeFlags : ''
+    const resumeCmd = `claude --resume ${sessionId}${flagStr}`
+    log(`TERMINAL_RESUME_IN_NATIVE: ${terminalId} session=${sessionId} flags=${claudeFlags || '(none)'} cmd="${resumeCmd}" cwd=${dock.projectDir}`)
+
+    // Send Ctrl+C to cancel any running activity
+    try {
+      dock.ptyManager.write(terminalId, '\x03') // Ctrl+C
+      log(`TERMINAL_RESUME_IN_NATIVE: sent Ctrl+C to ${terminalId}`)
+    } catch (e: any) {
+      log(`TERMINAL_RESUME_IN_NATIVE: Ctrl+C failed for ${terminalId} (may already be dead): ${e.message}`)
+    }
+
+    // Open native terminal with the resume command
+    const { spawn } = require('child_process') as typeof import('child_process')
+    try {
+      if (process.platform === 'win32') {
+        // Windows Terminal (wt.exe) or fallback to cmd
+        try {
+          spawn('wt.exe', ['-d', dock.projectDir, 'cmd', '/k', resumeCmd], { detached: true, stdio: 'ignore' }).unref()
+          log(`TERMINAL_RESUME_IN_NATIVE: launched wt.exe for ${terminalId}`)
+        } catch (wtErr: any) {
+          log(`TERMINAL_RESUME_IN_NATIVE: wt.exe failed (${wtErr.message}), falling back to cmd.exe`)
+          spawn('cmd.exe', ['/k', `cd /d "${dock.projectDir}" && ${resumeCmd}`], { detached: true, stdio: 'ignore' }).unref()
+          log(`TERMINAL_RESUME_IN_NATIVE: launched cmd.exe for ${terminalId}`)
+        }
+      } else if (process.platform === 'darwin') {
+        const script = `tell application "Terminal" to do script "cd '${dock.projectDir}' && ${resumeCmd}"`
+        spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref()
+        log(`TERMINAL_RESUME_IN_NATIVE: launched Terminal.app for ${terminalId}`)
+      } else {
+        // Linux: try common terminal emulators
+        const terminals = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm']
+        let launched = false
+        for (const term of terminals) {
+          try {
+            if (term === 'gnome-terminal') {
+              spawn(term, ['--working-directory', dock.projectDir, '--', 'bash', '-c', `${resumeCmd}; exec bash`], { detached: true, stdio: 'ignore' }).unref()
+            } else if (term === 'konsole') {
+              spawn(term, ['--workdir', dock.projectDir, '-e', 'bash', '-c', `${resumeCmd}; exec bash`], { detached: true, stdio: 'ignore' }).unref()
+            } else {
+              spawn(term, ['-e', 'bash', '-c', `cd '${dock.projectDir}' && ${resumeCmd}; exec bash`], { detached: true, stdio: 'ignore' }).unref()
+            }
+            launched = true
+            log(`TERMINAL_RESUME_IN_NATIVE: launched ${term} for ${terminalId}`)
+            break
+          } catch (e: any) {
+            log(`TERMINAL_RESUME_IN_NATIVE: ${term} failed: ${e.message}`)
+            continue
+          }
+        }
+        if (!launched) {
+          logError(`TERMINAL_RESUME_IN_NATIVE: no terminal emulator found on Linux for ${terminalId}`)
+          return { success: false, error: 'No terminal emulator found' }
+        }
+      }
+    } catch (err: any) {
+      logError(`TERMINAL_RESUME_IN_NATIVE: failed to open native terminal for ${terminalId}: ${err.message}`)
+      return { success: false, error: err.message || 'Failed to open native terminal' }
+    }
+
+    // Kill the dock terminal after a brief delay to let Ctrl+C propagate
+    setTimeout(() => {
+      dock.ptyManager.kill(terminalId)
+      log(`TERMINAL_RESUME_IN_NATIVE: killed dock PTY for ${terminalId}`)
+    }, 500)
+    return { success: true, resumeCmd }
   })
 
   ipcMain.handle(IPC.TERMINAL_SYNC_ORDER, (event, terminalIds: string[]) => {

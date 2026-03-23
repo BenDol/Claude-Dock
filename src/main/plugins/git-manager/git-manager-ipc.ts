@@ -647,6 +647,30 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_LIST_WORKTREES, async (_event, projectDir: string) => {
+    return gitOps.listWorktrees(projectDir)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_ADD_WORKTREE, async (_event, projectDir: string, branch: string, targetPath?: string) => {
+    try {
+      const worktreePath = await gitOps.addWorktree(projectDir, branch, targetPath)
+      return { success: true, path: worktreePath }
+    } catch (err) {
+      getServices().logError('[git-manager] add worktree failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Add worktree failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_REMOVE_WORKTREE, async (_event, projectDir: string, worktreePath: string, force?: boolean) => {
+    try {
+      await gitOps.removeWorktree(projectDir, worktreePath, force)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[git-manager] remove worktree failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Remove worktree failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
     const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
       type: 'merge-resolve',

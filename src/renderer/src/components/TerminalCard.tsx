@@ -110,6 +110,23 @@ const ShellIcon: React.FC = () => (
   </svg>
 )
 
+const WorktreeIcon: React.FC = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="6" y1="3" x2="6" y2="15" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <path d="M18 9a9 9 0 0 1-9 9" />
+  </svg>
+)
+
+const ExternalTerminalIcon: React.FC = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+    <polyline points="15 3 21 3 21 9" />
+    <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+)
+
 const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive, isFocused }) => {
   const removeTerminal = useDockStore((s) => s.removeTerminal)
   const isUnlocked = useDockStore((s) => s.unlockedTerminals.has(terminalId))
@@ -125,6 +142,51 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [shellHeight, setShellHeight] = useState(defaultShellHeight)
   const [shellMounted, setShellMounted] = useState(false)
   const [shellInitialCommand, setShellInitialCommand] = useState<string | null>(null)
+  const worktreePath = useDockStore((s) => s.terminalWorktrees.get(terminalId))
+  const projectDir = useDockStore((s) => s.projectDir)
+  const addTerminal = useDockStore((s) => s.addTerminal)
+  const setTerminalWorktree = useDockStore((s) => s.setTerminalWorktree)
+  const [worktreePopover, setWorktreePopover] = useState(false)
+  const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean }[]>([])
+  const [branches, setBranches] = useState<{ name: string; current: boolean }[]>([])
+  const [wtLoading, setWtLoading] = useState(false)
+
+  const openWorktreePopover = useCallback(async () => {
+    setWorktreePopover(true)
+    setWtLoading(true)
+    const api = getDockApi()
+    try {
+      const [wts, brs] = await Promise.all([
+        api.gitManager.listWorktrees(projectDir),
+        api.gitManager.getBranches(projectDir)
+      ])
+      setWorktrees(wts)
+      setBranches(brs.filter((b: any) => !b.remote).map((b: any) => ({ name: b.name, current: b.current })))
+    } catch { /* ignore */ }
+    setWtLoading(false)
+  }, [projectDir])
+
+  const handleCreateWorktree = useCallback(async (branch: string) => {
+    setWorktreePopover(false)
+    const api = getDockApi()
+    try {
+      const result = await api.gitManager.addWorktree(projectDir, branch)
+      if (result.success && result.path) {
+        // Spawn a new terminal in the worktree
+        const nextId = `term-${Date.now()}-wt`
+        addTerminal(nextId)
+        setTerminalWorktree(nextId, result.path)
+      }
+    } catch { /* ignore */ }
+  }, [projectDir, addTerminal, setTerminalWorktree])
+
+  const handleSelectWorktree = useCallback((wtPath: string) => {
+    setWorktreePopover(false)
+    // Spawn a new terminal in the existing worktree
+    const nextId = `term-${Date.now()}-wt`
+    addTerminal(nextId)
+    setTerminalWorktree(nextId, wtPath)
+  }, [addTerminal, setTerminalWorktree])
 
   const toggleShell = useCallback(() => {
     setShellOpen((prev) => {
@@ -180,6 +242,22 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     }
   }, [terminalId])
 
+  const [resuming, setResuming] = useState(false)
+  const handleResumeInNative = useCallback(async () => {
+    setResuming(true)
+    try {
+      const result = await getDockApi().terminal.resumeInNative(terminalId, claudeFlags)
+      if (result.success) {
+        // Terminal will be killed by the backend after Ctrl+C propagates;
+        // remove it from the dock after a short delay
+        setTimeout(() => {
+          removeTerminal(terminalId)
+        }, 800)
+      }
+    } catch { /* ignore */ }
+    setResuming(false)
+  }, [terminalId, claudeFlags, removeTerminal])
+
   const [actionsOpen, setActionsOpen] = useState(false)
 
   return (
@@ -211,6 +289,14 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
             <button className="terminal-action-btn" onClick={handleClear} title="Clear (/clear)">
               <ClearIcon />
             </button>
+            <button
+              className="terminal-action-btn"
+              onClick={handleResumeInNative}
+              disabled={resuming}
+              title="Resume in native terminal"
+            >
+              <ExternalTerminalIcon />
+            </button>
           </div>
           <button
             className="terminal-action-btn terminal-actions-toggle"
@@ -239,6 +325,43 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               <button className="shell-toggle-bottom" onClick={toggleShell} title="Open shell panel">
                 <ShellIcon />
               </button>
+            )}
+            <button className={`worktree-toggle-bottom${worktreePath ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : 'Start a git worktree'}>
+              <WorktreeIcon />
+            </button>
+            {worktreePopover && (
+              <div className="worktree-popover">
+                <div className="worktree-popover-header">
+                  <span>Git Worktrees</span>
+                  <button className="worktree-popover-close" onClick={() => setWorktreePopover(false)}>&times;</button>
+                </div>
+                {wtLoading ? (
+                  <div className="worktree-popover-loading">Loading...</div>
+                ) : (
+                  <div className="worktree-popover-body">
+                    {worktrees.filter(wt => !wt.isMain).length > 0 && (
+                      <>
+                        <div className="worktree-popover-label">Existing Worktrees</div>
+                        {worktrees.filter(wt => !wt.isMain).map(wt => (
+                          <button key={wt.path} className="worktree-popover-item" onClick={() => handleSelectWorktree(wt.path)} title={wt.path}>
+                            <span className="worktree-popover-branch">{wt.branch || wt.head}</span>
+                          </button>
+                        ))}
+                        <div className="worktree-popover-divider" />
+                      </>
+                    )}
+                    <div className="worktree-popover-label">New Worktree from Branch</div>
+                    {branches.filter(b => !b.current).slice(0, 20).map(b => (
+                      <button key={b.name} className="worktree-popover-item" onClick={() => handleCreateWorktree(b.name)}>
+                        <span className="worktree-popover-branch">{b.name}</span>
+                      </button>
+                    ))}
+                    {branches.filter(b => !b.current).length === 0 && (
+                      <div className="worktree-popover-empty">No other branches available</div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           {shellEnabled && shellMounted && (
