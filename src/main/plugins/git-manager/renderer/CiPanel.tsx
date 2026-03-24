@@ -1858,13 +1858,11 @@ function DispatchWorkflowModal({ workflows, currentBranch, projectDir, onClose, 
                 <label key={input.name} className="ci-dispatch-field">
                   <span>{input.name}{input.required ? ' *' : ''}</span>
                   {input.type === 'boolean' ? (
-                    <select
-                      value={inputs[input.name] || 'false'}
-                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
-                    >
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
+                    <input
+                      type="checkbox"
+                      checked={inputs[input.name] === 'true'}
+                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.checked ? 'true' : 'false' }))}
+                    />
                   ) : input.type === 'choice' && input.options ? (
                     <select
                       value={inputs[input.name] || ''}

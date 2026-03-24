@@ -3557,7 +3557,7 @@ label:hover .setting-scope-btn,
   font-size: 11px;
 }
 
-.ci-dispatch-field input,
+.ci-dispatch-field input:not([type="checkbox"]),
 .ci-dispatch-field select {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -3568,9 +3568,18 @@ label:hover .setting-scope-btn,
   outline: none;
 }
 
-.ci-dispatch-field input:focus,
+.ci-dispatch-field input:not([type="checkbox"]):focus,
 .ci-dispatch-field select:focus {
   border-color: var(--accent-color);
+}
+
+.ci-dispatch-field input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 4px 0;
+  accent-color: var(--accent-color);
+  cursor: pointer;
+  align-self: flex-start;
 }
 
 .ci-dispatch-hint {
