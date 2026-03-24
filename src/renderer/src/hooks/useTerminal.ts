@@ -576,27 +576,70 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   // at the wrong scroll position when fit() is called spuriously.
   const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 })
   const lastContainerSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 })
+  // Debounced PTY resize timer — coalesces rapid fit() calls into a single resize
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const fitInner = useCallback((force?: boolean) => {
     if (!fitAddonRef.current || !termRef.current || !containerRef.current) return
     try {
       if (!force) {
-        // Check if container size actually changed (within 1px tolerance for subpixel)
         const w = containerRef.current.clientWidth
         const h = containerRef.current.clientHeight
         if (Math.abs(w - lastContainerSizeRef.current.w) < 2 && Math.abs(h - lastContainerSizeRef.current.h) < 2) {
-          return // container hasn't meaningfully resized — skip fit entirely
+          return
         }
         lastContainerSizeRef.current = { w, h }
       } else {
         lastContainerSizeRef.current = { w: containerRef.current.clientWidth, h: containerRef.current.clientHeight }
       }
 
+      // Refit xterm's internal layout (recalculates cols/rows for new container size)
       fitAddonRef.current.fit()
       const { cols, rows } = termRef.current
-      if (cols !== lastDimsRef.current.cols || rows !== lastDimsRef.current.rows) {
-        lastDimsRef.current = { cols, rows }
-        getDockApi().terminal.resize(terminalId, cols, rows)
-      }
+
+      // Only send resize to PTY if dimensions actually changed
+      if (cols === lastDimsRef.current.cols && rows === lastDimsRef.current.rows) return
+      lastDimsRef.current = { cols, rows }
+
+      // Debounce the PTY resize to coalesce rapid layout changes (e.g., shell panel
+      // opening causes multiple ResizeObserver callbacks). This also ensures ConPTY
+      // gets a single SIGWINCH after layout settles, not multiple rapid ones that
+      // cause Claude's TUI to redraw at the wrong scroll position.
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = setTimeout(() => {
+        resizeTimerRef.current = null
+        if (!termRef.current) return
+        const term = termRef.current
+        const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null
+
+        // CRITICAL: Before telling the PTY about the new size, temporarily scroll
+        // to the bottom. ConPTY/Claude TUI redraws from the current viewport position
+        // on SIGWINCH. If the user was scrolled up, the TUI header would be redrawn
+        // at that position, making the content appear to "jump". By scrolling to bottom
+        // first, the redraw happens at the right place.
+        const wasScrolledUp = scrolledUpRef.current
+        if (wasScrolledUp && viewport) {
+          programmaticScrollRef.current = true
+          term.scrollToBottom()
+        }
+
+        getDockApi().terminal.resize(terminalId, lastDimsRef.current.cols, lastDimsRef.current.rows)
+
+        // After the PTY processes the resize (give it a frame + buffer), restore
+        // the user's scroll position if they were scrolled up
+        if (wasScrolledUp && viewport) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (scrolledUpRef.current || wasScrolledUp) {
+                // Don't restore — let the user re-scroll manually.
+                // The alternative (restoring exact position) is fragile because
+                // line wrapping changes after resize, making the old position wrong.
+              }
+              programmaticScrollRef.current = false
+            })
+          })
+        }
+      }, 150)
     } catch {
       // Ignore fit errors
     }
