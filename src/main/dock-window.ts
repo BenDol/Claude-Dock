@@ -90,23 +90,6 @@ export class DockWindow {
           return
         }
 
-        // Intercept custom OSC escape sequences for shell commands:
-        //   \x1b]dock;shell;<command>\x07     — type + submit (Enter)
-        //   \x1b]dock;typeshell;<command>\x07  — type only (no Enter)
-        // This is the fallback when MCP is not available.
-        const oscPattern = /\x1b\]dock;(type)?shell;([^\x07]*)\x07/g
-        let oscMatch: RegExpExecArray | null
-        while ((oscMatch = oscPattern.exec(data)) !== null) {
-          const noSubmit = !!oscMatch[1] // 'type' prefix means no submit
-          const command = oscMatch[2]
-          if (command) {
-            log(`[shell-command] intercepted OSC escape sequence: ${command} (submit=${!noSubmit})`)
-            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, command, !noSubmit)
-          }
-        }
-        // Strip all dock escape sequences from the terminal output
-        data = data.replace(/\x1b\]dock;(type)?shell;[^\x07]*\x07/g, '')
-        if (!data) return // nothing left to display
 
         this.window.webContents.send(IPC.TERMINAL_DATA, terminalId, data)
         // Accumulate output for buffer persistence

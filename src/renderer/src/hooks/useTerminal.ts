@@ -280,14 +280,6 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
               parts.push(`--add-dir "${dir}"`)
             }
           }
-          // If the shell panel is enabled, tell Claude about it.
-          // When MCP is installed, Claude discovers dock_run_in_shell automatically.
-          // Without MCP, tell Claude about the escape sequence mechanism.
-          const shellPanel = useSettingsStore.getState().settings.shellPanel
-          if (shellPanel?.enabled !== false) {
-            const shellPrompt = 'You are running inside Claude Dock which has an embedded shell panel. To run a shell command (tests, builds, git, etc.) without interrupting this conversation, use the Bash tool to output this exact escape sequence: printf \'\\033]dock;shell;YOUR_COMMAND_HERE\\007\' Replace YOUR_COMMAND_HERE with the actual command. The dock will intercept it, open the shell panel if needed, and execute the command there. To type a command without submitting, use: printf \'\\033]dock;typeshell;COMMAND\\007\' Prefer this over running long commands directly when you want to keep the conversation responsive.'
-            parts.push(`--append-system-prompt "${shellPrompt.replace(/"/g, '\\"')}"`)
-          }
           flags = parts.length > 0 ? parts.join(' ') : undefined
           // Store default flags so the terminal header can display them
           if (flags) {
@@ -404,6 +396,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       // Send real terminal dimensions to PTY immediately (not the default 80x24)
       const { cols, rows } = term
       getDockApi().terminal.resize(terminalId, cols, rows)
+
+      // Seed the dimension/size refs so subsequent fit() calls can detect changes
+      lastDimsRef.current = { cols, rows }
+      lastContainerSizeRef.current = { w: container.clientWidth, h: container.clientHeight }
 
       termRef.current = term
       fitAddonRef.current = fitAddon
@@ -575,23 +571,41 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     [terminalId]
   )
 
-  // Fit on resize — only sends resize IPC if dimensions actually changed
-  // to avoid ConPTY repainting the terminal (which disrupts scroll position)
+  // Fit on resize — skips both xterm reflow and PTY resize if dimensions
+  // haven't actually changed. This prevents ConPTY/Claude TUI from redrawing
+  // at the wrong scroll position when fit() is called spuriously.
   const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 })
-  const fit = useCallback(() => {
-    if (fitAddonRef.current && termRef.current) {
-      try {
-        fitAddonRef.current.fit()
-        const { cols, rows } = termRef.current
-        if (cols !== lastDimsRef.current.cols || rows !== lastDimsRef.current.rows) {
-          lastDimsRef.current = { cols, rows }
-          getDockApi().terminal.resize(terminalId, cols, rows)
+  const lastContainerSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 })
+  const fitInner = useCallback((force?: boolean) => {
+    if (!fitAddonRef.current || !termRef.current || !containerRef.current) return
+    try {
+      if (!force) {
+        // Check if container size actually changed (within 1px tolerance for subpixel)
+        const w = containerRef.current.clientWidth
+        const h = containerRef.current.clientHeight
+        if (Math.abs(w - lastContainerSizeRef.current.w) < 2 && Math.abs(h - lastContainerSizeRef.current.h) < 2) {
+          return // container hasn't meaningfully resized — skip fit entirely
         }
-      } catch {
-        // Ignore fit errors
+        lastContainerSizeRef.current = { w, h }
+      } else {
+        lastContainerSizeRef.current = { w: containerRef.current.clientWidth, h: containerRef.current.clientHeight }
       }
+
+      fitAddonRef.current.fit()
+      const { cols, rows } = termRef.current
+      if (cols !== lastDimsRef.current.cols || rows !== lastDimsRef.current.rows) {
+        lastDimsRef.current = { cols, rows }
+        getDockApi().terminal.resize(terminalId, cols, rows)
+      }
+    } catch {
+      // Ignore fit errors
     }
   }, [terminalId])
+
+  // Standard fit — only runs if container size changed
+  const fit = useCallback(() => fitInner(false), [fitInner])
+  // Force fit — always runs (for font/theme changes that need reflow at same size)
+  const forceFit = useCallback(() => fitInner(true), [fitInner])
 
   // Cleanup
   useEffect(() => {
@@ -614,15 +628,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     termRef.current.options.cursorStyle = termCursorStyle
     termRef.current.options.cursorBlink = termCursorBlink
 
-    // Re-fit after font changes so xterm recalculates layout
+    // Re-fit after font changes so xterm recalculates layout (force — size didn't change but font did)
     setTimeout(() => {
       if (fitAddonRef.current && termRef.current) {
         try {
-          fit()
+          forceFit()
         } catch { /* ignore */ }
       }
     }, 50)
-  }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId])
+  }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId, forceFit])
 
   // Re-fit after grid reposition — only scroll to bottom if user wasn't scrolled up
   useEffect(() => {
