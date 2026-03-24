@@ -7,6 +7,7 @@
  *
  * Tools:
  *   dock_status          — View what other terminals are working on + unread messages
+ *   dock_run_in_shell    — Run a command in the dock's shell panel (opens it if closed)
  *   dock_send_message    — Send a message to another terminal (requires messaging enabled)
  *   dock_check_messages  — Check for messages sent to this terminal (requires messaging enabled)
  *
@@ -25,6 +26,8 @@ const dataDir =
 const activityFile = path.join(dataDir, 'dock-activity.json')
 const configFile = path.join(dataDir, 'dock-config.json')
 const messagesFile = path.join(dataDir, 'dock-messages.json')
+
+const shellCommandsFile = path.join(dataDir, 'dock-shell-commands.json')
 
 const MESSAGE_TTL = 3600000 // 1 hour
 
@@ -245,6 +248,28 @@ function handleMessage(msg) {
             required: []
           }
         }
+        {
+          name: 'dock_run_in_shell',
+          description:
+            'Run a command in the Claude Dock shell panel. The shell panel is a separate terminal ' +
+            'embedded in the dock window — use it for running tests, builds, git commands, or any ' +
+            'shell operation without interrupting your current conversation. The shell panel opens ' +
+            'automatically if not already open. The command runs in the project directory.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              command: {
+                type: 'string',
+                description: 'The shell command to execute (e.g. "npm test", "git status", "make build")'
+              },
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project directory. Used to route the command to the correct dock window.'
+              }
+            },
+            required: ['command']
+          }
+        }
       ]
 
       if (isMessagingEnabled()) {
@@ -314,6 +339,47 @@ function handleMessage(msg) {
           return jsonRpcResponse(id, {
             content: [{ type: 'text', text: status }]
           })
+        }
+
+        case 'dock_run_in_shell': {
+          const { command, project_dir } = args
+          if (!command) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameter: command.' }]
+            })
+          }
+
+          try {
+            // Write command to the shared file for the dock to pick up
+            const entry = {
+              id: crypto.randomUUID(),
+              command,
+              projectDir: project_dir || null,
+              timestamp: Date.now()
+            }
+
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(shellCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+
+            // Prune old commands (> 30 seconds) to prevent stale buildup
+            const cutoff = Date.now() - 30000
+            commands = commands.filter(c => c.timestamp > cutoff)
+            commands.push(entry)
+
+            fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
+
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Command sent to dock shell: ${command}` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to send command to dock shell: ${err.message || err}` }],
+              isError: true
+            })
+          }
         }
 
         case 'dock_send_message': {

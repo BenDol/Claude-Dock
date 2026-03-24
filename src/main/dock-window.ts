@@ -1,4 +1,5 @@
-import { BrowserWindow, dialog, shell } from 'electron'
+import { BrowserWindow, dialog, shell, app } from 'electron'
+import * as fs from 'fs'
 import * as path from 'path'
 import { PtyManager } from './pty-manager'
 import { IPC } from '../shared/ipc-channels'
@@ -24,6 +25,8 @@ export class DockWindow {
   readonly ptyManager: PtyManager
   private readonly idleNotifier: IdleNotifier
   private readonly projectSettingsWatcher: ProjectSettingsWatcher
+  private shellCommandWatcher: ReturnType<typeof setInterval> | null = null
+  private processedCommandIds = new Set<string>()
   private savedResumeIds: string[]
   private outputBuffers = new Map<string, string>()
 
@@ -75,6 +78,9 @@ export class DockWindow {
     })
     this.projectSettingsWatcher.start()
 
+    // Poll for MCP shell commands (file-based bridge from claude-dock-mcp.js)
+    this.startShellCommandWatcher()
+
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
         if (this.window.isDestroyed()) return
@@ -83,6 +89,23 @@ export class DockWindow {
           this.window.webContents.send(IPC.SHELL_DATA, terminalId, data)
           return
         }
+
+        // Intercept custom OSC escape sequence for shell commands:
+        //   \x1b]dock;shell;<command>\x07
+        // This is the fallback when MCP is not available — Claude can emit
+        // this sequence via its tool output and we route it to the shell panel.
+        const oscMatch = data.match(/\x1b\]dock;shell;([^\x07]*)\x07/)
+        if (oscMatch) {
+          const command = oscMatch[1]
+          if (command) {
+            log(`[shell-command] intercepted OSC escape sequence: ${command}`)
+            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, command)
+          }
+          // Strip the escape sequence from the terminal output
+          data = data.replace(/\x1b\]dock;shell;[^\x07]*\x07/g, '')
+          if (!data) return // nothing left to display
+        }
+
         this.window.webContents.send(IPC.TERMINAL_DATA, terminalId, data)
         // Accumulate output for buffer persistence
         if (ENABLE_BUFFER_STORAGE) {
@@ -196,9 +219,65 @@ export class DockWindow {
     this.window.on('closed', () => {
       this.ptyManager.killAll()
       this.projectSettingsWatcher.stop()
+      if (this.shellCommandWatcher) clearInterval(this.shellCommandWatcher)
       try { ActivityTracker.getInstance().removeDock(this.id) } catch (e) { log(`ActivityTracker.removeDock error: ${e}`) }
       try { this.idleNotifier.dispose() } catch (e) { log(`IdleNotifier.dispose error: ${e}`) }
     })
+  }
+
+  /**
+   * Poll dock-shell-commands.json for commands sent by the MCP server.
+   * Commands are matched to this dock by projectDir and routed to the
+   * shell panel via SHELL_RUN_COMMAND IPC.
+   */
+  private startShellCommandWatcher(): void {
+    const cmdFile = path.join(
+      app.getPath('userData'),
+      'dock-shell-commands.json'
+    )
+    const normProjectDir = this.projectDir.replace(/\\/g, '/').toLowerCase()
+
+    this.shellCommandWatcher = setInterval(() => {
+      try {
+        if (!fs.existsSync(cmdFile)) return
+        const raw = fs.readFileSync(cmdFile, 'utf-8')
+        const commands = JSON.parse(raw)
+        if (!Array.isArray(commands)) return
+
+        const cutoff = Date.now() - 30000 // ignore commands older than 30s
+        let changed = false
+
+        for (const cmd of commands) {
+          if (!cmd.id || !cmd.command || cmd.timestamp < cutoff) continue
+          if (this.processedCommandIds.has(cmd.id)) continue
+
+          // Match by projectDir if specified, otherwise send to all docks
+          if (cmd.projectDir) {
+            const normCmd = cmd.projectDir.replace(/\\/g, '/').toLowerCase()
+            if (normCmd !== normProjectDir && !normProjectDir.startsWith(normCmd + '/')) continue
+          }
+
+          this.processedCommandIds.add(cmd.id)
+          changed = true
+
+          if (!this.window.isDestroyed()) {
+            log(`[shell-command] routing MCP command to shell: ${cmd.command}`)
+            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command)
+          }
+        }
+
+        // Clean up processed IDs to prevent memory growth
+        if (this.processedCommandIds.size > 100) {
+          const ids = commands.map((c: any) => c.id).filter(Boolean)
+          const activeIds = new Set(ids)
+          for (const id of this.processedCommandIds) {
+            if (!activeIds.has(id)) this.processedCommandIds.delete(id)
+          }
+        }
+      } catch {
+        // File read/parse errors are expected (race with MCP writer)
+      }
+    }, 500) // Poll every 500ms
   }
 
   private trackWindowState(): void {
