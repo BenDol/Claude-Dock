@@ -230,22 +230,39 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   // When a pending shell command arrives, route it to the targeted terminal
   // (or the focused terminal if no target is specified)
   const [shellSubmitCommand, setShellSubmitCommand] = useState(true)
+  const [shellTypeOverride, setShellTypeOverride] = useState<string | null>(null)
   useEffect(() => {
     if (!pendingShellCommand) return
-    const { command: cmd, submit, targetTerminalId } = pendingShellCommand
+    const { command: cmd, submit, targetTerminalId, shellType } = pendingShellCommand
     // If a specific terminal is targeted, only that terminal handles it
     // Otherwise fall back to the focused terminal
     const isTarget = targetTerminalId ? targetTerminalId === terminalId : isFocused
     if (!isTarget) return
     setPendingShellCommand(null)
 
-    if (shellAreaOpen) {
-      // Shell already open — write the command to the first shell
+    if (shellAreaOpen && !shellType) {
+      // Shell already open with default type — write the command directly
       getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\r' : cmd)
+    } else if (shellAreaOpen && shellType) {
+      // Shell is open but a different shell type was requested — kill the old one,
+      // reopen with the new type. This handles the case where Claude needs bash
+      // but cmd.exe was open.
+      getDockApi().shell.kill(`shell:${terminalId}:0`)
+      setShellAreaOpen(false)
+      setShellAreaMounted(false)
+      // Small delay for cleanup, then reopen
+      setTimeout(() => {
+        setShellInitialCommand(cmd)
+        setShellSubmitCommand(submit)
+        setShellTypeOverride(shellType)
+        setShellAreaMounted(true)
+        setShellAreaOpen(true)
+      }, 200)
     } else {
-      // Open shell area with the command as initialCommand
+      // Shell not open — open with the requested type
       setShellInitialCommand(cmd)
       setShellSubmitCommand(submit)
+      setShellTypeOverride(shellType)
       setShellAreaMounted(true)
       setShellAreaOpen(true)
     }
@@ -377,6 +394,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   defaultHeight={defaultShellHeight}
                   initialCommand={shellInitialCommand}
                   submitCommand={shellSubmitCommand}
+                  shellType={shellTypeOverride}
                   onAllClosed={() => setShellAreaOpen(false)}
                 />
               </div>

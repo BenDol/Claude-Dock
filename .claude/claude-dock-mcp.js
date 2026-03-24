@@ -273,6 +273,11 @@ function handleMessage(msg) {
               submit: {
                 type: 'boolean',
                 description: 'Whether to press Enter after typing the command. Default: true.'
+              },
+              shell: {
+                type: 'string',
+                enum: ['default', 'bash', 'cmd', 'powershell', 'pwsh'],
+                description: 'Shell type to use. Use "bash" for bash/shell scripts, "cmd" for Windows batch, "powershell"/"pwsh" for PowerShell scripts. Default: uses the user\'s configured shell.'
               }
             },
             required: ['command']
@@ -350,7 +355,7 @@ function handleMessage(msg) {
         }
 
         case 'dock_run_in_shell': {
-          const { command, project_dir, session_id, submit } = args
+          const { command, project_dir, session_id, submit, shell } = args
           if (!command) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: command.' }]
@@ -372,6 +377,7 @@ function handleMessage(msg) {
               projectDir: resolvedProjectDir,
               sessionId: session_id || null,
               submit: submit !== false, // default true
+              shell: shell || null, // null = use configured default
               timestamp: Date.now()
             }
 

@@ -128,8 +128,8 @@ function App() {
 
   // Listen for shell run-command from main process (e.g. cloud re-auth)
   useEffect(() => {
-    return getDockApi().shell.onRunCommand((command, submit, targetTerminalId) => {
-      useDockStore.getState().setPendingShellCommand({ command, submit, targetTerminalId })
+    return getDockApi().shell.onRunCommand((command, submit, targetTerminalId, shellType) => {
+      useDockStore.getState().setPendingShellCommand({ command, submit, targetTerminalId, shellType })
     })
   }, [])
 

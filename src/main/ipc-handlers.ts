@@ -180,11 +180,11 @@ export function registerIpcHandlers(): void {
 
   // --- Shell panel PTY ---
 
-  ipcMain.handle(IPC.SHELL_SPAWN, (event, shellId: string) => {
+  ipcMain.handle(IPC.SHELL_SPAWN, (event, shellId: string, shellType?: string) => {
     const dock = getDockForEvent(event)
     if (dock) {
-      const settings = getSettings()
-      const preference = settings.shellPanel?.preferredShell || 'default'
+      // Use the requested shell type if provided, otherwise fall back to settings
+      const preference = shellType || getSettings().shellPanel?.preferredShell || 'default'
       dock.ptyManager.spawnShell(shellId, dock.projectDir, preference)
       return true
     }

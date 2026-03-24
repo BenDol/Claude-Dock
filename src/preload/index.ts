@@ -83,13 +83,13 @@ export interface DockApi {
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
   }
   shell: {
-    spawn: (shellId: string) => Promise<boolean>
+    spawn: (shellId: string, shellType?: string) => Promise<boolean>
     write: (shellId: string, data: string) => Promise<void>
     resize: (shellId: string, cols: number, rows: number) => Promise<void>
     kill: (shellId: string) => Promise<void>
     onData: (callback: (shellId: string, data: string) => void) => () => void
     onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
-    onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null) => void) => () => void
+    onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null, shellType: string | null) => void) => () => void
   }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
@@ -362,7 +362,7 @@ const dockApi: DockApi = {
     }
   },
   shell: {
-    spawn: (shellId) => ipcRenderer.invoke(IPC.SHELL_SPAWN, shellId),
+    spawn: (shellId, shellType) => ipcRenderer.invoke(IPC.SHELL_SPAWN, shellId, shellType),
     write: (shellId, data) => ipcRenderer.invoke(IPC.SHELL_WRITE, shellId, data),
     resize: (shellId, cols, rows) => ipcRenderer.invoke(IPC.SHELL_RESIZE, shellId, cols, rows),
     kill: (shellId) => ipcRenderer.invoke(IPC.SHELL_KILL, shellId),
@@ -377,7 +377,7 @@ const dockApi: DockApi = {
       return () => ipcRenderer.removeListener(IPC.SHELL_EXIT, handler)
     },
     onRunCommand: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, command: string, submit?: boolean, targetTerminalId?: string | null) => callback(command, submit ?? true, targetTerminalId ?? null)
+      const handler = (_event: Electron.IpcRendererEvent, command: string, submit?: boolean, targetTerminalId?: string | null, shellType?: string | null) => callback(command, submit ?? true, targetTerminalId ?? null, shellType ?? null)
       ipcRenderer.on(IPC.SHELL_RUN_COMMAND, handler)
       return () => ipcRenderer.removeListener(IPC.SHELL_RUN_COMMAND, handler)
     }

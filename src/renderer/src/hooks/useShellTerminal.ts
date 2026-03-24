@@ -9,6 +9,8 @@ import { getEffectiveTerminalColors } from '../lib/theme'
 
 interface UseShellTerminalOptions {
   shellId: string
+  /** Override shell type (e.g. 'bash', 'cmd'). Omit to use configured default. */
+  shellType?: string
 }
 
 /**
@@ -16,7 +18,7 @@ interface UseShellTerminalOptions {
  * No Claude-specific features (link detection, undo, search, loading state).
  * Spawns a plain shell PTY on mount, kills on unmount.
  */
-export function useShellTerminal({ shellId }: UseShellTerminalOptions) {
+export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -29,7 +31,7 @@ export function useShellTerminal({ shellId }: UseShellTerminalOptions) {
   useEffect(() => {
     if (!spawnedRef.current) {
       spawnedRef.current = true
-      getDockApi().shell.spawn(shellId)
+      getDockApi().shell.spawn(shellId, shellType)
     }
   }, [shellId])
 

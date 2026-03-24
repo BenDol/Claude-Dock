@@ -25,7 +25,7 @@ interface DockState {
   /** Set of terminal IDs that were spawned from saved sessions (resume) */
   resumedTerminals: Set<string>
   /** Pending shell command to run in a terminal's shell panel (set by SHELL_RUN_COMMAND) */
-  pendingShellCommand: { command: string; submit: boolean; targetTerminalId: string | null } | null
+  pendingShellCommand: { command: string; submit: boolean; targetTerminalId: string | null; shellType: string | null } | null
   /** Maps terminal ID → git worktree path (terminals working from a worktree) */
   terminalWorktrees: Map<string, string>
 
@@ -48,7 +48,7 @@ interface DockState {
   setTerminalPersistentTask: (id: string, persistent: boolean) => void
   setTerminalActive: (id: string, active: boolean) => void
   markTerminalResumed: (id: string) => void
-  setPendingShellCommand: (command: { command: string; submit: boolean; targetTerminalId: string | null } | null) => void
+  setPendingShellCommand: (command: { command: string; submit: boolean; targetTerminalId: string | null; shellType: string | null } | null) => void
   setTerminalWorktree: (id: string, worktreePath: string | null) => void
 }
 

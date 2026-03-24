@@ -15,11 +15,13 @@ interface ShellPanelProps {
   initialCommand?: string | null
   /** If false, type the command without pressing Enter. Default: true */
   submitCommand?: boolean
+  /** Override the shell type (e.g. 'bash', 'cmd', 'powershell'). null = use configured default */
+  shellType?: string | null
   label?: string
 }
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, submitCommand = true, label }) => {
-  const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId })
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, submitCommand = true, shellType, label }) => {
+  const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
   const [linked, setLinked] = useState(false)
