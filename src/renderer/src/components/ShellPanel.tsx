@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react'
+import React, { useCallback, useRef, useEffect, useState, useLayoutEffect } from 'react'
 import { useShellTerminal } from '../hooks/useShellTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
 import { getDockApi } from '../lib/ipc-bridge'
@@ -22,6 +22,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
   const resizeRef = useResizeObserver(fit, 100)
   const [linked, setLinked] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const addDropdownRef = useRef<HTMLDivElement>(null)
 
   const terminalRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -57,6 +58,23 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
     const handler = () => setAddOpen(false)
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+  }, [addOpen])
+
+  // Reposition dropdown if it overflows the viewport
+  useLayoutEffect(() => {
+    if (!addOpen || !addDropdownRef.current) return
+    const el = addDropdownRef.current
+    const rect = el.getBoundingClientRect()
+    // Flip horizontal if overflowing right
+    if (rect.right > window.innerWidth - 4) {
+      el.style.left = 'auto'
+      el.style.right = '0'
+    }
+    // Flip vertical if overflowing top
+    if (rect.top < 4) {
+      el.style.bottom = 'auto'
+      el.style.top = '100%'
+    }
   }, [addOpen])
 
   // Read shell terminal content and paste it into the Claude terminal as context
@@ -115,7 +133,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
               </svg>
             </button>
             {addOpen && (
-              <div className="shell-add-dropdown">
+              <div className="shell-add-dropdown" ref={addDropdownRef}>
                 {onStackBelow && (
                   <button className="shell-add-item" onClick={() => { onStackBelow(); setAddOpen(false) }}>
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
