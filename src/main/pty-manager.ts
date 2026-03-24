@@ -329,13 +329,14 @@ export class PtyManager {
 
   getSessionIds(): string[] {
     return Array.from(this.ptys.entries())
-      .filter(([id]) => !this.ephemeralIds.has(id) && this.interactedIds.has(id))
+      // Exclude ephemeral terminals, non-interacted terminals, and shell panel PTYs
+      .filter(([id]) => !this.ephemeralIds.has(id) && this.interactedIds.has(id) && !id.startsWith('shell:'))
       .map(([, p]) => p.sessionId)
   }
 
   getOrderedSessionIds(terminalIds: string[]): string[] {
     return terminalIds
-      .filter((id) => !this.ephemeralIds.has(id) && this.interactedIds.has(id))
+      .filter((id) => !this.ephemeralIds.has(id) && this.interactedIds.has(id) && !id.startsWith('shell:'))
       .map((id) => this.ptys.get(id)?.sessionId)
       .filter((s): s is string => !!s)
   }
