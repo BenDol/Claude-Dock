@@ -119,7 +119,7 @@ function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
     if (type === 'string' && (defaultVal === 'true' || defaultVal === 'false')) {
       type = 'boolean'
     }
-    getServices().log(`[ci-github] parseInput: name=${pos.name} type=${type} default=${defaultVal} typeMatch=${typeMatch?.[1]}`)
+    getServices().log(`[ci-github] parseInput: name=${pos.name} type=${type} default=${defaultVal} block=${JSON.stringify(block.slice(0, 200))}`)
 
     inputs.push({
       name: pos.name,
