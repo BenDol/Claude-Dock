@@ -247,7 +247,7 @@ function handleMessage(msg) {
             },
             required: []
           }
-        }
+        },
         {
           name: 'dock_run_in_shell',
           description:
