@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-dock": {
+      "command": "node",
+      "args": [
+        ".claude/claude-dock-mcp.js"
+      ]
+    }
+  }
+}
