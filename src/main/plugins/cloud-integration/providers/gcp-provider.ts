@@ -242,6 +242,33 @@ export class GcpProvider implements CloudProvider {
     return this.projectId
   }
 
+  /**
+   * Configure kubectl for a cluster — tries direct credentials first,
+   * falls back to Connect Gateway for private/authorized-networks clusters.
+   */
+  private async configureKubectl(clusterName: string, location: string, projectId: string): Promise<void> {
+    // Try direct credentials
+    await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
+
+    // Quick connectivity test with a short timeout
+    try {
+      await kubectl('cluster-info')
+      svcLog(`configureKubectl: direct access works for "${clusterName}"`)
+      return
+    } catch (e: any) {
+      svcLog(`configureKubectl: direct access failed for "${clusterName}", trying Connect Gateway...`)
+    }
+
+    // Fall back to Connect Gateway (works for private/authorized-networks clusters)
+    try {
+      await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
+      svcLog(`configureKubectl: Connect Gateway configured for "${clusterName}"`)
+    } catch (e: any) {
+      svcLogError(`configureKubectl: Connect Gateway also failed for "${clusterName}":`, e.message)
+      // Proceed anyway — the caller will get the kubectl error
+    }
+  }
+
   async getKubernetesSummary(): Promise<CloudKubernetesSummary> {
     svcLog('getKubernetesSummary: fetching...')
     try {
@@ -249,12 +276,12 @@ export class GcpProvider implements CloudProvider {
       const healthy = clusters.filter((c) => c.status === 'RUNNING').length
       const totalNodes = clusters.reduce((sum, c) => sum + c.nodeCount, 0)
 
-      // Best-effort pod count — configure kubectl for each cluster and sum pods
+      // Best-effort pod count
       let totalPods = 0
+      const pid = await this.getProjectId()
       for (const cluster of clusters) {
         try {
-          const pid = await this.getProjectId()
-          await gcloud('container', 'clusters', 'get-credentials', cluster.name, `--location=${cluster.location}`, `--project=${pid}`)
+          await this.configureKubectl(cluster.name, cluster.location, pid)
           const raw = await kubectl('get', 'pods', '--all-namespaces', '--no-headers')
           const count = raw.split('\n').filter((l) => l.trim()).length
           totalPods += count
@@ -305,12 +332,11 @@ export class GcpProvider implements CloudProvider {
     const c = clusters[0]
     const location = c.location || c.zone || ''
 
-    // Get credentials for this cluster so kubectl works
+    // Configure kubectl (with Connect Gateway fallback for private clusters)
     try {
-      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
-      svcLog(`getClusterDetail: kubectl configured for "${clusterName}"`)
+      await this.configureKubectl(clusterName, location, projectId)
     } catch (e: any) {
-      svcLog(`getClusterDetail: get-credentials skipped for "${clusterName}" (may already be configured):`, e.message)
+      svcLog(`getClusterDetail: kubectl config failed for "${clusterName}" (proceeding anyway):`, e.message)
     }
 
     let nodes: CloudNode[] = []
@@ -407,7 +433,6 @@ export class GcpProvider implements CloudProvider {
     // Get credentials for the specified cluster
     let loc = clusterLocation
     if (!loc) {
-      // Location not provided — look it up (only happens for direct single-cluster calls)
       const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
       if (clusters.length === 0) {
         svcLogError(`getWorkloads: cluster "${clusterName}" not found in gcloud clusters list`)
@@ -417,11 +442,25 @@ export class GcpProvider implements CloudProvider {
     }
 
     svcLog(`getWorkloads: configuring kubectl for "${clusterName}" in ${loc}`)
-    await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
+    await this.configureKubectl(clusterName, loc, projectId)
 
+    const result = await this.fetchWorkloadsViaKubectl(clusterName, projectId)
+
+    if (result.allFailed) {
+      throw new Error(`kubectl cannot connect to cluster "${clusterName}": ${result.firstError}`)
+    }
+
+    svcLog(`getWorkloads: ${result.workloads.length} total workload(s) for "${clusterName}"`)
+    return result.workloads
+  }
+
+  /** Fetch all workload types via kubectl in parallel. Returns workloads + error info. */
+  private async fetchWorkloadsViaKubectl(
+    clusterName: string,
+    projectId: string
+  ): Promise<{ workloads: CloudWorkload[]; allFailed: boolean; firstError: string }> {
     const workloads: CloudWorkload[] = []
 
-    // Fetch all workload types in parallel to avoid sequential 30s timeouts
     const [depsResult, stsResult, dsResult, jobsResult] = await Promise.allSettled([
       kubectlJson<any>('get', 'deployments', '--all-namespaces'),
       kubectlJson<any>('get', 'statefulsets', '--all-namespaces'),
@@ -430,52 +469,30 @@ export class GcpProvider implements CloudProvider {
     ])
 
     let failures = 0
+    let firstError = ''
 
-    if (depsResult.status === 'fulfilled') {
-      for (const d of depsResult.value.items || []) workloads.push(this.mapDeployment(d, clusterName, projectId))
-      svcLog(`getWorkloads: ${depsResult.value.items?.length || 0} deployment(s) in "${clusterName}"`)
-    } else {
-      failures++
-      // Propagate setup errors (missing plugin, expired auth)
-      if ((depsResult.reason as any)?.gkePluginMissing || (depsResult.reason as any)?.authExpired) throw depsResult.reason
-      svcLogError(`getWorkloads: kubectl get deployments failed for "${clusterName}":`, depsResult.reason?.message)
+    const results = [
+      { result: depsResult, kind: 'deployments', mapper: (d: any) => this.mapDeployment(d, clusterName, projectId) },
+      { result: stsResult, kind: 'statefulsets', mapper: (s: any) => this.mapStatefulSet(s, clusterName, projectId) },
+      { result: dsResult, kind: 'daemonsets', mapper: (d: any) => this.mapDaemonSet(d, clusterName, projectId) },
+      { result: jobsResult, kind: 'jobs', mapper: (j: any) => this.mapJob(j, clusterName, projectId) }
+    ]
+
+    for (const { result, kind, mapper } of results) {
+      if (result.status === 'fulfilled') {
+        const items = result.value.items || []
+        for (const item of items) workloads.push(mapper(item))
+        if (items.length > 0) svcLog(`getWorkloads: ${items.length} ${kind} in "${clusterName}"`)
+      } else {
+        failures++
+        if (!firstError) firstError = result.reason?.message || `kubectl get ${kind} failed`
+        // Propagate setup errors immediately
+        if ((result.reason as any)?.gkePluginMissing || (result.reason as any)?.authExpired) throw result.reason
+        svcLogError(`getWorkloads: kubectl get ${kind} failed for "${clusterName}":`, result.reason?.message)
+      }
     }
 
-    if (stsResult.status === 'fulfilled') {
-      for (const s of stsResult.value.items || []) workloads.push(this.mapStatefulSet(s, clusterName, projectId))
-      if (stsResult.value.items?.length > 0) svcLog(`getWorkloads: ${stsResult.value.items.length} statefulset(s) in "${clusterName}"`)
-    } else {
-      failures++
-      if ((stsResult.reason as any)?.gkePluginMissing || (stsResult.reason as any)?.authExpired) throw stsResult.reason
-      svcLogError(`getWorkloads: kubectl get statefulsets failed for "${clusterName}":`, stsResult.reason?.message)
-    }
-
-    if (dsResult.status === 'fulfilled') {
-      for (const d of dsResult.value.items || []) workloads.push(this.mapDaemonSet(d, clusterName, projectId))
-      if (dsResult.value.items?.length > 0) svcLog(`getWorkloads: ${dsResult.value.items.length} daemonset(s) in "${clusterName}"`)
-    } else {
-      failures++
-      if ((dsResult.reason as any)?.gkePluginMissing || (dsResult.reason as any)?.authExpired) throw dsResult.reason
-      svcLogError(`getWorkloads: kubectl get daemonsets failed for "${clusterName}":`, dsResult.reason?.message)
-    }
-
-    if (jobsResult.status === 'fulfilled') {
-      for (const j of jobsResult.value.items || []) workloads.push(this.mapJob(j, clusterName, projectId))
-      if (jobsResult.value.items?.length > 0) svcLog(`getWorkloads: ${jobsResult.value.items.length} job(s) in "${clusterName}"`)
-    } else {
-      failures++
-      if ((jobsResult.reason as any)?.gkePluginMissing || (jobsResult.reason as any)?.authExpired) throw jobsResult.reason
-      svcLogError(`getWorkloads: kubectl get jobs failed for "${clusterName}":`, jobsResult.reason?.message)
-    }
-
-    // If ALL kubectl calls failed, surface the error instead of returning empty
-    if (failures === 4) {
-      const firstError = (depsResult as PromiseRejectedResult).reason
-      throw new Error(`kubectl cannot connect to cluster "${clusterName}": ${firstError?.message || 'all requests failed'}`)
-    }
-
-    svcLog(`getWorkloads: ${workloads.length} total workload(s) for "${clusterName}"`)
-    return workloads
+    return { workloads, allFailed: failures === 4, firstError }
   }
 
   async getWorkloadDetail(
@@ -487,14 +504,14 @@ export class GcpProvider implements CloudProvider {
     svcLog(`getWorkloadDetail: ${kind}/${workloadName} in ${namespace} on "${clusterName}"`)
     const projectId = await this.getProjectId()
 
-    // Ensure we have credentials
+    // Configure kubectl (with Connect Gateway fallback for private clusters)
     const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
     if (clusters.length > 0) {
       const loc = clusters[0].location || clusters[0].zone
       try {
-        await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${loc}`, `--project=${projectId}`)
+        await this.configureKubectl(clusterName, loc, projectId)
       } catch (e: any) {
-        svcLog(`getWorkloadDetail: get-credentials skipped (may already be configured):`, e.message)
+        svcLog(`getWorkloadDetail: kubectl config failed (proceeding anyway):`, e.message)
       }
     }
 

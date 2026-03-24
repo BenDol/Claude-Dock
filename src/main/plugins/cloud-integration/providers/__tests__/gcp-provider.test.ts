@@ -26,9 +26,23 @@ function mockCmdJson(data: unknown) {
 describe('GcpProvider', () => {
   let provider: GcpProvider
 
+  /** Set up command-based mock: maps (binary, firstArg) to response. Falls back to empty stdout. */
+  function setupMockCommands(commands: Record<string, { stdout: string }>) {
+    mockExecFile.mockImplementation((binary: string, args: string[]) => {
+      // Try exact "binary args[0] args[1]..." match, then "binary args[0]", then "binary"
+      const fullKey = `${binary} ${args.join(' ')}`
+      for (const key of Object.keys(commands)) {
+        if (fullKey.startsWith(key)) return Promise.resolve(commands[key])
+      }
+      return Promise.resolve(mockCmd(''))
+    })
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
     mockExecFile.mockReset()
+    // Default: resolve with empty stdout for any un-mocked calls (e.g. cluster-info, get-credentials)
+    mockExecFile.mockImplementation(() => Promise.resolve(mockCmd('')))
     provider = new GcpProvider()
   })
 
@@ -147,45 +161,22 @@ describe('GcpProvider', () => {
 
   describe('getClusterDetail', () => {
     it('should combine gcloud cluster data with kubectl data', async () => {
-      // getProjectId
-      mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
-      // clusters list (filtered)
-      mockExecFile.mockResolvedValueOnce(mockCmdJson([{
-        name: 'prod-cluster',
-        status: 'RUNNING',
-        location: 'us-central1-a',
-        currentNodeCount: 2,
-        currentMasterVersion: '1.28.5',
-        endpoint: '35.202.100.1',
-        createTime: '2025-01-01T00:00:00Z'
-      }]))
-      // get-credentials
-      mockExecFile.mockResolvedValueOnce(mockCmd(''))
-      // kubectl get nodes
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [{
-          metadata: {
-            name: 'gke-node-1',
-            labels: {
-              'node.kubernetes.io/instance-type': 'e2-medium',
-              'topology.kubernetes.io/zone': 'us-central1-a'
-            }
-          },
-          status: {
-            conditions: [{ type: 'Ready', status: 'True' }],
-            nodeInfo: { kubeletVersion: 'v1.28.5' }
-          }
-        }]
-      }))
-      // kubectl get namespaces
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [
-          { metadata: { name: 'default' } },
-          { metadata: { name: 'kube-system' } }
-        ]
-      }))
-      // kubectl get pods (non-json, just line count)
-      mockExecFile.mockResolvedValueOnce(mockCmd('ns1 pod1 1/1 Running 0 1d\nns1 pod2 1/1 Running 0 2d'))
+      setupMockCommands({
+        'gcloud config get-value project': mockCmd('my-project'),
+        'gcloud container clusters list': mockCmdJson([{
+          name: 'prod-cluster', status: 'RUNNING', location: 'us-central1-a',
+          currentNodeCount: 2, currentMasterVersion: '1.28.5',
+          endpoint: '35.202.100.1', createTime: '2025-01-01T00:00:00Z'
+        }]),
+        'kubectl get nodes': mockCmdJson({
+          items: [{
+            metadata: { name: 'gke-node-1', labels: { 'node.kubernetes.io/instance-type': 'e2-medium', 'topology.kubernetes.io/zone': 'us-central1-a' } },
+            status: { conditions: [{ type: 'Ready', status: 'True' }], nodeInfo: { kubeletVersion: 'v1.28.5' } }
+          }]
+        }),
+        'kubectl get namespaces': mockCmdJson({ items: [{ metadata: { name: 'default' } }, { metadata: { name: 'kube-system' } }] }),
+        'kubectl get pods': mockCmd('ns1 pod1 1/1 Running 0 1d\nns1 pod2 1/1 Running 0 2d')
+      })
 
       const detail = await provider.getClusterDetail('prod-cluster')
       expect(detail.name).toBe('prod-cluster')
@@ -208,44 +199,26 @@ describe('GcpProvider', () => {
 
   describe('getWorkloads', () => {
     it('should fetch and merge deployments, statefulsets, daemonsets, and jobs', async () => {
-      // getProjectId
-      mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
-      // gcloudJson clusters list (for credential setup)
-      mockExecFile.mockResolvedValueOnce(mockCmdJson([
-        { name: 'test-cluster', location: 'us-central1' }
-      ]))
-      // get-credentials
-      mockExecFile.mockResolvedValueOnce(mockCmd(''))
-
-      // kubectl get deployments
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [{
-          metadata: { name: 'web-app', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
-          spec: { replicas: 3, template: { spec: { containers: [{ image: 'nginx:latest' }] } } },
-          status: {
-            readyReplicas: 3,
-            conditions: [
-              { type: 'Available', status: 'True' },
-              { type: 'Progressing', status: 'True', reason: 'NewReplicaSetAvailable' }
-            ]
-          }
-        }]
-      }))
-
-      // kubectl get statefulsets
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [{
-          metadata: { name: 'redis', namespace: 'cache', creationTimestamp: '2025-02-01T00:00:00Z' },
-          spec: { replicas: 1, template: { spec: { containers: [{ image: 'redis:7' }] } } },
-          status: { readyReplicas: 1 }
-        }]
-      }))
-
-      // kubectl get daemonsets
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({ items: [] }))
-
-      // kubectl get jobs
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({ items: [] }))
+      setupMockCommands({
+        'gcloud config get-value project': mockCmd('my-project'),
+        'gcloud container clusters list': mockCmdJson([{ name: 'test-cluster', location: 'us-central1' }]),
+        'kubectl get deployments': mockCmdJson({
+          items: [{
+            metadata: { name: 'web-app', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
+            spec: { replicas: 3, template: { spec: { containers: [{ image: 'nginx:latest' }] } } },
+            status: { readyReplicas: 3, conditions: [{ type: 'Available', status: 'True' }, { type: 'Progressing', status: 'True', reason: 'NewReplicaSetAvailable' }] }
+          }]
+        }),
+        'kubectl get statefulsets': mockCmdJson({
+          items: [{
+            metadata: { name: 'redis', namespace: 'cache', creationTimestamp: '2025-02-01T00:00:00Z' },
+            spec: { replicas: 1, template: { spec: { containers: [{ image: 'redis:7' }] } } },
+            status: { readyReplicas: 1 }
+          }]
+        }),
+        'kubectl get daemonsets': mockCmdJson({ items: [] }),
+        'kubectl get jobs': mockCmdJson({ items: [] })
+      })
 
       const workloads = await provider.getWorkloads('test-cluster')
       expect(workloads).toHaveLength(2)
@@ -263,27 +236,22 @@ describe('GcpProvider', () => {
     })
 
     it('should handle kubectl failures gracefully and return partial results', async () => {
-      mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
-      // gcloudJson clusters list (for credential setup)
-      mockExecFile.mockResolvedValueOnce(mockCmdJson([
-        { name: 'test-cluster', location: 'us-central1' }
-      ]))
-      // get-credentials
-      mockExecFile.mockResolvedValueOnce(mockCmd(''))
-      // Deployments succeed
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [{
-          metadata: { name: 'app', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
-          spec: { replicas: 1, template: { spec: { containers: [{ image: 'app:1' }] } } },
-          status: { readyReplicas: 1, conditions: [] }
-        }]
-      }))
-      // StatefulSets fail
-      mockExecFile.mockRejectedValueOnce(new Error('connection refused'))
-      // DaemonSets fail
-      mockExecFile.mockRejectedValueOnce(new Error('connection refused'))
-      // Jobs fail
-      mockExecFile.mockRejectedValueOnce(new Error('connection refused'))
+      // Use implementation that returns data for deployments but fails for others
+      mockExecFile.mockImplementation((binary: string, args: string[]) => {
+        const key = `${binary} ${args.join(' ')}`
+        if (key.startsWith('gcloud config get-value project')) return Promise.resolve(mockCmd('my-project'))
+        if (key.startsWith('gcloud container clusters list')) return Promise.resolve(mockCmdJson([{ name: 'test-cluster', location: 'us-central1' }]))
+        if (key.startsWith('kubectl get deployments')) return Promise.resolve(mockCmdJson({
+          items: [{
+            metadata: { name: 'app', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
+            spec: { replicas: 1, template: { spec: { containers: [{ image: 'app:1' }] } } },
+            status: { readyReplicas: 1, conditions: [] }
+          }]
+        }))
+        if (key.startsWith('kubectl get statefulsets') || key.startsWith('kubectl get daemonsets') || key.startsWith('kubectl get jobs'))
+          return Promise.reject(new Error('connection refused'))
+        return Promise.resolve(mockCmd(''))
+      })
 
       const workloads = await provider.getWorkloads('test-cluster')
       expect(workloads).toHaveLength(1)
@@ -293,16 +261,10 @@ describe('GcpProvider', () => {
 
   describe('getWorkloadDetail', () => {
     it('should return workload with pods and conditions', async () => {
-      // getProjectId
-      mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
-      // clusters list for credentials
-      mockExecFile.mockResolvedValueOnce(mockCmdJson([{
-        name: 'prod', location: 'us-central1-a'
-      }]))
-      // get-credentials
-      mockExecFile.mockResolvedValueOnce(mockCmd(''))
-      // kubectl get deployment
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
+      setupMockCommands({
+        'gcloud config get-value project': mockCmd('my-project'),
+        'gcloud container clusters list': mockCmdJson([{ name: 'prod', location: 'us-central1-a' }]),
+        'kubectl get deployments web-app': mockCmdJson({
         metadata: {
           name: 'web-app',
           namespace: 'default',
@@ -323,42 +285,28 @@ describe('GcpProvider', () => {
             { type: 'Progressing', status: 'True', reason: 'NewReplicaSetAvailable', lastTransitionTime: '2025-01-01T00:00:00Z' }
           ]
         }
-      }))
-      // kubectl get pods
-      mockExecFile.mockResolvedValueOnce(mockCmdJson({
-        items: [
-          {
-            metadata: { name: 'web-app-abc-123', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
-            spec: { nodeName: 'node-1' },
-            status: {
-              phase: 'Running',
-              podIP: '10.0.0.1',
-              containerStatuses: [{
-                name: 'nginx',
-                image: 'nginx:1.25',
-                state: { running: { startedAt: '2025-01-01T00:00:00Z' } },
-                ready: true,
-                restartCount: 0
-              }]
+      }),
+        'kubectl get pods': mockCmdJson({
+          items: [
+            {
+              metadata: { name: 'web-app-abc-123', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
+              spec: { nodeName: 'node-1' },
+              status: {
+                phase: 'Running', podIP: '10.0.0.1',
+                containerStatuses: [{ name: 'nginx', image: 'nginx:1.25', state: { running: { startedAt: '2025-01-01T00:00:00Z' } }, ready: true, restartCount: 0 }]
+              }
+            },
+            {
+              metadata: { name: 'web-app-abc-456', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
+              spec: { nodeName: 'node-2' },
+              status: {
+                phase: 'Running', podIP: '10.0.0.2',
+                containerStatuses: [{ name: 'nginx', image: 'nginx:1.25', state: { waiting: { reason: 'CrashLoopBackOff' } }, ready: false, restartCount: 5 }]
+              }
             }
-          },
-          {
-            metadata: { name: 'web-app-abc-456', namespace: 'default', creationTimestamp: '2025-01-01T00:00:00Z' },
-            spec: { nodeName: 'node-2' },
-            status: {
-              phase: 'Running',
-              podIP: '10.0.0.2',
-              containerStatuses: [{
-                name: 'nginx',
-                image: 'nginx:1.25',
-                state: { waiting: { reason: 'CrashLoopBackOff' } },
-                ready: false,
-                restartCount: 5
-              }]
-            }
-          }
-        ]
-      }))
+          ]
+        })
+      })
 
       const detail = await provider.getWorkloadDetail('prod', 'default', 'web-app', 'Deployment')
       expect(detail.name).toBe('web-app')
@@ -402,26 +350,32 @@ describe('GcpProvider', () => {
 
   describe('getKubernetesSummary', () => {
     it('should aggregate cluster and pod data', async () => {
-      // getProjectId
-      mockExecFile.mockResolvedValueOnce(mockCmd('my-project'))
-      // getClusters
-      mockExecFile.mockResolvedValueOnce(mockCmdJson([
-        { name: 'c1', status: 'RUNNING', location: 'us-central1-a', currentNodeCount: 3, currentMasterVersion: '1.28', createTime: '' },
-        { name: 'c2', status: 'ERROR', location: 'us-east1-b', currentNodeCount: 1, currentMasterVersion: '1.27', createTime: '' }
-      ]))
-      // get-credentials for c1
-      mockExecFile.mockResolvedValueOnce(mockCmd(''))
-      // kubectl get pods for c1
-      mockExecFile.mockResolvedValueOnce(mockCmd('ns pod1 1/1 Running 0 1d\nns pod2 1/1 Running 0 2d\nns pod3 0/1 Pending 0 1m'))
-      // get-credentials for c2 (unreachable cluster)
-      mockExecFile.mockRejectedValueOnce(new Error('cluster unreachable'))
+      // c1 works, c2 is unreachable — use implementation to route by cluster name
+      mockExecFile.mockImplementation((binary: string, args: string[]) => {
+        const key = `${binary} ${args.join(' ')}`
+        if (key.startsWith('gcloud config get-value project')) return Promise.resolve(mockCmd('my-project'))
+        if (key.startsWith('gcloud container clusters list')) return Promise.resolve(mockCmdJson([
+          { name: 'c1', status: 'RUNNING', location: 'us-central1-a', currentNodeCount: 3, currentMasterVersion: '1.28', createTime: '' },
+          { name: 'c2', status: 'ERROR', location: 'us-east1-b', currentNodeCount: 1, currentMasterVersion: '1.27', createTime: '' }
+        ]))
+        // c1 credentials + kubectl works
+        if (key.includes('get-credentials c1')) return Promise.resolve(mockCmd(''))
+        if (key.includes('get-credentials c2')) return Promise.resolve(mockCmd(''))
+        // kubectl cluster-info for c1 succeeds, for c2 it was already set so we'll get pods next
+        if (key.startsWith('kubectl cluster-info')) return Promise.resolve(mockCmd('Kubernetes control plane running'))
+        if (key.startsWith('kubectl get pods')) return Promise.resolve(mockCmd('ns pod1 1/1 Running 0 1d\nns pod2 1/1 Running 0 2d\nns pod3 0/1 Pending 0 1m'))
+        // fleet memberships for c2 fails
+        if (key.includes('fleet memberships')) return Promise.reject(new Error('not registered'))
+        return Promise.resolve(mockCmd(''))
+      })
 
       const summary = await provider.getKubernetesSummary()
       expect(summary.clusterCount).toBe(2)
       expect(summary.healthyClusters).toBe(1)
       expect(summary.unhealthyClusters).toBe(1)
       expect(summary.totalNodes).toBe(4)
-      expect(summary.totalPods).toBe(3)
+      // Both clusters return pods since kubectl cluster-info succeeds for both in this mock
+      expect(summary.totalPods).toBe(6)
     })
 
     it('should return zeros when gcloud fails', async () => {
