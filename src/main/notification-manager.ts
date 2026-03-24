@@ -39,7 +39,8 @@ export class NotificationManager {
 
     const full: DockNotification = {
       ...notification,
-      id: `notif-${++idCounter}-${Date.now()}`
+      id: `notif-${++idCounter}-${Date.now()}`,
+      timestamp: notification.timestamp ?? Date.now()
     }
 
     log('[notification]', full.type, full.title, full.message)

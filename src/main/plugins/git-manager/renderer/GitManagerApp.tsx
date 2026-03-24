@@ -8655,7 +8655,7 @@ const NotificationPanel: React.FC<{ projectDir: string; provider: GitProvider }>
                 >
                   <span className="gm-notif-item-icon">{notifIcon(n.type)}</span>
                   <div className="gm-notif-item-body">
-                    <div className="gm-notif-item-title">{n.title}</div>
+                    <div className="gm-notif-item-title">{n.title}{n.timestamp && <span className="gm-notif-item-time">{formatNotifTime(n.timestamp)}</span>}</div>
                     <div className="gm-notif-item-msg">{n.message}</div>
                     {resolveNotifActions(n).filter((a) => a.event).map((a, i) => (
                       <button
@@ -9446,6 +9446,16 @@ const ConflictPlaceholderIcon: React.FC = React.memo(() => (
     <line x1="9" y1="13" x2="15" y2="13" />
   </svg>
 ))
+
+function formatNotifTime(ts: number): string {
+  const diff = Date.now() - ts
+  if (diff < 60_000) return 'just now'
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86400_000) {
+    return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso)

@@ -606,6 +606,7 @@ const dockApi: DockApi = {
       return () => ipcRenderer.removeListener(IPC.NOTIFICATION_SHOW, handler)
     },
     emit: (notification: DockNotification) => {
+      if (!notification.timestamp) notification.timestamp = Date.now()
       ipcRenderer.emit(IPC.NOTIFICATION_SHOW, {} as Electron.IpcRendererEvent, notification)
     }
   },

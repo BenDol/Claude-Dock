@@ -75,6 +75,8 @@ export interface DockNotification {
   title: string
   message: string
   type: NotificationType
+  /** Unix timestamp (ms) when the notification was created */
+  timestamp?: number
   timeout?: number
   action?: NotificationAction
   actions?: NotificationAction[]
