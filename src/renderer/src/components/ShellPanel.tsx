@@ -38,16 +38,29 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
   )
 
   // Write initial command after shell is ready — wait for first data (prompt)
-  // before sending, to avoid the command being swallowed by a slow shell startup
+  // before sending, to avoid the command being swallowed by a slow shell startup.
+  // Track which command was sent so new commands (from MCP bridge) still fire.
+  const lastSentCommandRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!initialCommand || commandSentRef.current) return
+    if (!initialCommand || lastSentCommandRef.current === initialCommand) return
     const api = getDockApi()
     const payload = submitCommand ? initialCommand + '\n' : initialCommand
+
+    // If the shell is already running (we already received data before),
+    // send immediately — no need to wait for first data.
+    if (commandSentRef.current) {
+      lastSentCommandRef.current = initialCommand
+      api.shell.write(shellId, payload)
+      return
+    }
+
+    // First time: wait for the shell to produce output (prompt ready)
     let sent = false
     const cleanup = api.shell.onData((id, _data) => {
       if (id !== shellId || sent) return
       sent = true
       commandSentRef.current = true
+      lastSentCommandRef.current = initialCommand
       setTimeout(() => {
         api.shell.write(shellId, payload)
       }, 100)
@@ -57,6 +70,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
       if (!sent) {
         sent = true
         commandSentRef.current = true
+        lastSentCommandRef.current = initialCommand
         api.shell.write(shellId, payload)
       }
     }, 3000)

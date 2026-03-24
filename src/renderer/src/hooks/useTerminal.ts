@@ -237,6 +237,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const [searchOpen, setSearchOpen] = useState(false)
 
   const settings = useSettingsStore((s) => s.settings)
+  // Granular selectors for the settings effect to avoid re-fitting on unrelated changes
+  const termFontFamily = useSettingsStore((s) => s.settings.terminal.fontFamily)
+  const termFontSize = useSettingsStore((s) => s.settings.terminal.fontSize)
+  const termLineHeight = useSettingsStore((s) => s.settings.terminal.lineHeight)
+  const termCursorStyle = useSettingsStore((s) => s.settings.terminal.cursorStyle)
+  const termCursorBlink = useSettingsStore((s) => s.settings.terminal.cursorBlink)
+  const themeMode = useSettingsStore((s) => s.settings.theme.mode)
+  const themeAccent = useSettingsStore((s) => s.settings.theme.accentColor)
+  const termStyle = useSettingsStore((s) => s.settings.theme.terminalStyle)
 
   // Spawn PTY immediately on mount (before terminal is created)
   useEffect(() => {
@@ -272,13 +281,12 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             }
           }
           // If the shell panel is enabled, tell Claude about it.
-          // When MCP is installed, Claude discovers dock_run_in_shell automatically
-          // and can send commands directly. Without MCP, the system prompt still
-          // tells Claude about the escape sequence mechanism as a fallback.
+          // When MCP is installed, Claude discovers dock_run_in_shell automatically.
+          // Without MCP, tell Claude about the escape sequence mechanism.
           const shellPanel = useSettingsStore.getState().settings.shellPanel
           if (shellPanel?.enabled !== false) {
             const shellPrompt = 'You are running inside Claude Dock which has an embedded shell panel. To run a shell command (tests, builds, git, etc.) without interrupting this conversation, use the Bash tool to output this exact escape sequence: printf \'\\033]dock;shell;YOUR_COMMAND_HERE\\007\' Replace YOUR_COMMAND_HERE with the actual command. The dock will intercept it, open the shell panel if needed, and execute the command there. To type a command without submitting, use: printf \'\\033]dock;typeshell;COMMAND\\007\' Prefer this over running long commands directly when you want to keep the conversation responsive.'
-            parts.push('--append-system-prompt "' + shellPrompt.replace(/"/g, '\\"') + '"')
+            parts.push(`--append-system-prompt "${shellPrompt.replace(/"/g, '\\"')}"`)
           }
           flags = parts.length > 0 ? parts.join(' ') : undefined
           // Store default flags so the terminal header can display them
@@ -595,11 +603,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     if (!termRef.current) return
     const tc = getEffectiveTerminalColors(settings)
     termRef.current.options.theme = { ...tc }
-    termRef.current.options.fontFamily = settings.terminal.fontFamily
-    termRef.current.options.fontSize = settings.terminal.fontSize
-    termRef.current.options.lineHeight = settings.terminal.lineHeight
-    termRef.current.options.cursorStyle = settings.terminal.cursorStyle
-    termRef.current.options.cursorBlink = settings.terminal.cursorBlink
+    termRef.current.options.fontFamily = termFontFamily
+    termRef.current.options.fontSize = termFontSize
+    termRef.current.options.lineHeight = termLineHeight
+    termRef.current.options.cursorStyle = termCursorStyle
+    termRef.current.options.cursorBlink = termCursorBlink
 
     // Re-fit after font changes so xterm recalculates layout
     setTimeout(() => {
@@ -609,7 +617,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         } catch { /* ignore */ }
       }
     }, 50)
-  }, [settings, terminalId])
+  }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId])
 
   // Re-fit after grid reposition — only scroll to bottom if user wasn't scrolled up
   useEffect(() => {
