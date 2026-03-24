@@ -71,17 +71,48 @@ function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
   // Check if workflow_dispatch is a trigger
   if (!/workflow_dispatch/i.test(yaml)) return null
 
-  // Find the workflow_dispatch block and its inputs section
-  const wdMatch = yaml.match(/workflow_dispatch\s*:\s*\n([\s\S]*?)(?=\n\S|\n\s*[a-z_]+:(?!\s*\n\s+)|\Z)/)
-  if (!wdMatch) return [] // has workflow_dispatch but no inputs
+  // Extract the indented block under workflow_dispatch using indentation-aware parsing
+  const lines = yaml.split('\n')
+  let wdLineIdx = -1
+  let wdIndent = -1
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s*)workflow_dispatch\s*:/)
+    if (m) { wdLineIdx = i; wdIndent = m[1].length; break }
+  }
+  if (wdLineIdx < 0) return []
 
-  const wdBlock = wdMatch[1]
-  const inputsMatch = wdBlock.match(/inputs\s*:\s*\n([\s\S]*?)(?=\n\s{0,3}\S|$)/)
-  if (!inputsMatch) return [] // workflow_dispatch without inputs
+  // Collect all lines indented deeper than workflow_dispatch
+  const wdLines: string[] = []
+  for (let i = wdLineIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '' || line.match(/^\s*#/)) { wdLines.push(line); continue }
+    const indent = line.match(/^(\s*)/)?.[1]?.length ?? 0
+    if (indent <= wdIndent) break
+    wdLines.push(line)
+  }
+  const wdBlock = wdLines.join('\n')
+  if (!wdBlock.includes('inputs')) return []
 
-  const inputsBlock = inputsMatch[1]
-  getServices().log(`[ci-github] parseInputs: wdBlock=${JSON.stringify(wdBlock.slice(0, 300))}`)
-  getServices().log(`[ci-github] parseInputs: inputsBlock=${JSON.stringify(inputsBlock.slice(0, 300))}`)
+  // Find inputs section within the workflow_dispatch block
+  let inputsLineIdx = -1
+  let inputsIndent = -1
+  for (let i = 0; i < wdLines.length; i++) {
+    const m = wdLines[i].match(/^(\s*)inputs\s*:/)
+    if (m) { inputsLineIdx = i; inputsIndent = m[1].length; break }
+  }
+  if (inputsLineIdx < 0) return []
+
+  // Collect all lines indented deeper than inputs
+  const inputLines: string[] = []
+  for (let i = inputsLineIdx + 1; i < wdLines.length; i++) {
+    const line = wdLines[i]
+    if (line.trim() === '' || line.match(/^\s*#/)) { inputLines.push(line); continue }
+    const indent = line.match(/^(\s*)/)?.[1]?.length ?? 0
+    if (indent <= inputsIndent) break
+    inputLines.push(line)
+  }
+  const inputsBlock = inputLines.join('\n')
+  getServices().log(`[ci-github] parseInputs: inputsBlock=${JSON.stringify(inputsBlock.slice(0, 500))}`)
   const inputs: CiWorkflowInput[] = []
 
   // Match each input name (indented at input level)
@@ -121,7 +152,7 @@ function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
     if (type === 'string' && (defaultVal === 'true' || defaultVal === 'false')) {
       type = 'boolean'
     }
-    getServices().log(`[ci-github] parseInput: name=${pos.name} type=${type} default=${defaultVal} block=${JSON.stringify(block.slice(0, 200))}`)
+    getServices().log(`[ci-github] parseInput: name=${pos.name} type=${type} default=${defaultVal}`)
 
     inputs.push({
       name: pos.name,
