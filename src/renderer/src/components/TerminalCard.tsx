@@ -227,11 +227,16 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     })
   }, [])
 
-  // When a pending shell command arrives and this is the focused terminal, open shell and run it
+  // When a pending shell command arrives, route it to the targeted terminal
+  // (or the focused terminal if no target is specified)
   const [shellSubmitCommand, setShellSubmitCommand] = useState(true)
   useEffect(() => {
-    if (!pendingShellCommand || !isFocused) return
-    const { command: cmd, submit } = pendingShellCommand
+    if (!pendingShellCommand) return
+    const { command: cmd, submit, targetTerminalId } = pendingShellCommand
+    // If a specific terminal is targeted, only that terminal handles it
+    // Otherwise fall back to the focused terminal
+    const isTarget = targetTerminalId ? targetTerminalId === terminalId : isFocused
+    if (!isTarget) return
     setPendingShellCommand(null)
 
     if (shellAreaOpen) {

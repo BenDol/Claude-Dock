@@ -266,6 +266,10 @@ function handleMessage(msg) {
                 type: 'string',
                 description: 'Absolute path to the project directory. Used to route the command to the correct dock window.'
               },
+              session_id: {
+                type: 'string',
+                description: 'Your session ID. Routes the command to the shell panel of the specific terminal running this session.'
+              },
               submit: {
                 type: 'boolean',
                 description: 'Whether to press Enter after typing the command. Default: true.'
@@ -346,11 +350,18 @@ function handleMessage(msg) {
         }
 
         case 'dock_run_in_shell': {
-          const { command, project_dir, submit } = args
+          const { command, project_dir, session_id, submit } = args
           if (!command) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: command.' }]
             })
+          }
+
+          // Resolve projectDir from session_id if not provided
+          let resolvedProjectDir = project_dir || null
+          if (!resolvedProjectDir && session_id) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedProjectDir = term.projectDir
           }
 
           try {
@@ -358,7 +369,8 @@ function handleMessage(msg) {
             const entry = {
               id: crypto.randomUUID(),
               command,
-              projectDir: project_dir || null,
+              projectDir: resolvedProjectDir,
+              sessionId: session_id || null,
               submit: submit !== false, // default true
               timestamp: Date.now()
             }

@@ -345,6 +345,15 @@ export class PtyManager {
     return this.ptys.get(terminalId)?.sessionId ?? null
   }
 
+  /** Find the terminal ID for a given session ID (exact or prefix match) */
+  findTerminalBySessionId(sessionId: string): string | null {
+    for (const [id, pty] of this.ptys) {
+      if (id.startsWith('shell:')) continue // skip shell panel PTYs
+      if (pty.sessionId === sessionId || pty.sessionId.startsWith(sessionId)) return id
+    }
+    return null
+  }
+
   write(terminalId: string, data: string): void {
     if (this.ptys.has(terminalId)) {
       // On first user write, mark as interacted and persist session

@@ -253,19 +253,24 @@ export class DockWindow {
           if (!cmd.id || !cmd.command || cmd.timestamp < cutoff) continue
           if (this.processedCommandIds.has(cmd.id)) continue
 
-          // Match by projectDir if specified, otherwise send to all docks
-          if (cmd.projectDir) {
-            const normCmd = cmd.projectDir.replace(/\\/g, '/').toLowerCase()
-            if (normCmd !== normProjectDir && !normProjectDir.startsWith(normCmd + '/')) continue
-          }
+          // Always require projectDir match — commands without a projectDir
+          // are skipped to prevent routing to the wrong workspace.
+          if (!cmd.projectDir) continue
+          const normCmd = cmd.projectDir.replace(/\\/g, '/').toLowerCase()
+          if (normCmd !== normProjectDir && !normProjectDir.startsWith(normCmd + '/')) continue
 
           this.processedCommandIds.add(cmd.id)
           changed = true
 
           if (!this.window.isDestroyed()) {
             const submit = cmd.submit ?? true
-            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit})`)
-            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit)
+            // Resolve sessionId to terminalId so the renderer routes to the right terminal
+            let targetTerminalId: string | null = null
+            if (cmd.sessionId) {
+              targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
+            }
+            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'})`)
+            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId)
           }
         }
 

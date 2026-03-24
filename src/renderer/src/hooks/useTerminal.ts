@@ -575,13 +575,18 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     [terminalId]
   )
 
-  // Fit on resize — xterm handles scroll position internally during reflow
+  // Fit on resize — only sends resize IPC if dimensions actually changed
+  // to avoid ConPTY repainting the terminal (which disrupts scroll position)
+  const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 })
   const fit = useCallback(() => {
     if (fitAddonRef.current && termRef.current) {
       try {
         fitAddonRef.current.fit()
         const { cols, rows } = termRef.current
-        getDockApi().terminal.resize(terminalId, cols, rows)
+        if (cols !== lastDimsRef.current.cols || rows !== lastDimsRef.current.rows) {
+          lastDimsRef.current = { cols, rows }
+          getDockApi().terminal.resize(terminalId, cols, rows)
+        }
       } catch {
         // Ignore fit errors
       }
