@@ -80,6 +80,8 @@ function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
   if (!inputsMatch) return [] // workflow_dispatch without inputs
 
   const inputsBlock = inputsMatch[1]
+  getServices().log(`[ci-github] parseInputs: wdBlock=${JSON.stringify(wdBlock.slice(0, 300))}`)
+  getServices().log(`[ci-github] parseInputs: inputsBlock=${JSON.stringify(inputsBlock.slice(0, 300))}`)
   const inputs: CiWorkflowInput[] = []
 
   // Match each input name (indented at input level)
