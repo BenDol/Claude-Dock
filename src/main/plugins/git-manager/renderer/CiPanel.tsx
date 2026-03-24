@@ -1855,15 +1855,20 @@ function DispatchWorkflowModal({ workflows, currentBranch, projectDir, onClose, 
               <div className="ci-dispatch-divider" />
               <div className="ci-dispatch-inputs-title">Inputs</div>
               {wfInputs.map(input => (
-                <label key={input.name} className="ci-dispatch-field">
-                  <span>{input.name}{input.required ? ' *' : ''}</span>
+                <label key={input.name} className={`ci-dispatch-field${input.type === 'boolean' ? ' ci-dispatch-field-checkbox' : ''}`}>
                   {input.type === 'boolean' ? (
-                    <input
-                      type="checkbox"
-                      checked={inputs[input.name] === 'true'}
-                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.checked ? 'true' : 'false' }))}
-                    />
-                  ) : input.type === 'choice' && input.options ? (
+                    <>
+                      <input
+                        type="checkbox"
+                        checked={inputs[input.name] === 'true'}
+                        onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.checked ? 'true' : 'false' }))}
+                      />
+                      <span>{input.name}{input.required ? ' *' : ''}</span>
+                    </>
+                  ) : (
+                    <span>{input.name}{input.required ? ' *' : ''}</span>
+                  )}
+                  {input.type === 'choice' && input.options ? (
                     <select
                       value={inputs[input.name] || ''}
                       onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}

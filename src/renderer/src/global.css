@@ -3573,13 +3573,26 @@ label:hover .setting-scope-btn,
   border-color: var(--accent-color);
 }
 
+.ci-dispatch-field-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.ci-dispatch-field-checkbox > span {
+  font-weight: 400 !important;
+  font-size: 12px !important;
+  color: var(--text-primary) !important;
+}
+
 .ci-dispatch-field input[type="checkbox"] {
   width: 14px;
   height: 14px;
-  margin: 4px 0;
+  margin: 0;
   accent-color: var(--accent-color);
   cursor: pointer;
-  align-self: flex-start;
+  flex-shrink: 0;
 }
 
 .ci-dispatch-hint {
