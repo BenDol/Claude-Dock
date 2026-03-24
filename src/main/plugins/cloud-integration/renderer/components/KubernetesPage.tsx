@@ -67,34 +67,49 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
     setLoading(true)
     setError(null)
     setSetupIssue(null)
-    const errors: string[] = []
-    const api = getDockApi().cloudIntegration
+    try {
+      const errors: string[] = []
+      const api = getDockApi().cloudIntegration
 
-    // Load clusters and workloads independently so one failure doesn't block the other
-    const [clustersResult, workloadsResult] = await Promise.allSettled([
-      api.getClusters(projectDir),
-      api.getWorkloads(projectDir)
-    ])
+      // Load clusters and workloads independently so one failure doesn't block the other
+      const [clustersResult, workloadsResult] = await Promise.allSettled([
+        api.getClusters(projectDir),
+        api.getWorkloads(projectDir)
+      ])
 
-    if (clustersResult.status === 'fulfilled') {
-      setClusters(clustersResult.value)
-    } else {
-      errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
+      // Unwrap result — handles both formats:
+      // - New preload: throws on error, fulfilled value is plain array
+      // - Old preload: returns { data, error? } wrapper object
+      const unwrap = (val: unknown): any[] => Array.isArray(val) ? val : ((val as any)?.data || [])
+      const unwrapError = (val: unknown): string | null => Array.isArray(val) ? null : ((val as any)?.error || null)
+
+      if (clustersResult.status === 'fulfilled') {
+        const err = unwrapError(clustersResult.value)
+        if (err) errors.push('Clusters: ' + err)
+        else setClusters(unwrap(clustersResult.value))
+      } else {
+        errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
+      }
+
+      if (workloadsResult.status === 'fulfilled') {
+        const err = unwrapError(workloadsResult.value)
+        if (err) errors.push('Workloads: ' + err)
+        else setWorkloads(unwrap(workloadsResult.value))
+      } else {
+        errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
+      }
+
+      if (errors.length > 0) {
+        const joined = errors.join('\n')
+        setError(joined)
+        const issue = detectSetupIssue(joined)
+        if (issue) setSetupIssue(issue)
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load Kubernetes data')
+    } finally {
+      setLoading(false)
     }
-
-    if (workloadsResult.status === 'fulfilled') {
-      setWorkloads(workloadsResult.value)
-    } else {
-      errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
-    }
-
-    if (errors.length > 0) {
-      const joined = errors.join('\n')
-      setError(joined)
-      const issue = detectSetupIssue(joined)
-      if (issue) setSetupIssue(issue)
-    }
-    setLoading(false)
   }, [projectDir])
 
   const handleFixSetup = useCallback(async () => {
