@@ -259,7 +259,17 @@ export class GcpProvider implements CloudProvider {
       svcLog(`configureKubectl: direct access failed for "${clusterName}", trying Connect Gateway...`)
     }
 
-    // Fall back to Connect Gateway (works for private/authorized-networks clusters)
+    // Enable Connect Gateway APIs if not already enabled (gcloud prompts interactively without --quiet)
+    try {
+      svcLog('configureKubectl: ensuring Connect Gateway APIs are enabled...')
+      await gcloud('services', 'enable', 'connectgateway.googleapis.com', 'gkeconnect.googleapis.com', `--project=${projectId}`)
+      svcLog('configureKubectl: Connect Gateway APIs enabled')
+    } catch (e: any) {
+      svcLogError('configureKubectl: failed to enable Connect Gateway APIs:', e.message)
+      // Continue anyway — the APIs might already be enabled
+    }
+
+    // Try Connect Gateway (works for private/authorized-networks clusters)
     try {
       await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
       svcLog(`configureKubectl: Connect Gateway configured for "${clusterName}"`)
