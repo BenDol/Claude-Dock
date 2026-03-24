@@ -558,34 +558,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     [terminalId]
   )
 
-  // Fit on resize — preserves scroll position when user is scrolled up
+  // Fit on resize — xterm handles scroll position internally during reflow
   const fit = useCallback(() => {
     if (fitAddonRef.current && termRef.current) {
       try {
-        const term = termRef.current
-        const viewport = containerRef.current?.querySelector('.xterm-viewport') as HTMLElement | null
-
-        // Save scroll state before fit
-        const wasScrolledUp = scrolledUpRef.current
-        const savedScrollTop = viewport?.scrollTop ?? 0
-        // Calculate how far from top (in lines) the user was viewing
-        const savedViewLine = wasScrolledUp && viewport
-          ? Math.round(savedScrollTop / (viewport.scrollHeight / Math.max(1, term.buffer.active.length)))
-          : -1
-
         fitAddonRef.current.fit()
-        const { cols, rows } = term
+        const { cols, rows } = termRef.current
         getDockApi().terminal.resize(terminalId, cols, rows)
-
-        // Restore scroll position if user was scrolled up
-        if (wasScrolledUp && viewport && savedViewLine >= 0) {
-          requestAnimationFrame(() => {
-            const lineHeight = viewport.scrollHeight / Math.max(1, term.buffer.active.length)
-            programmaticScrollRef.current = true
-            viewport.scrollTop = savedViewLine * lineHeight
-            requestAnimationFrame(() => { programmaticScrollRef.current = false })
-          })
-        }
       } catch {
         // Ignore fit errors
       }
