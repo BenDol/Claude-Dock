@@ -187,11 +187,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     if (!loading) {
       const timer = setTimeout(() => {
         fit()
-        scrollToBottom()
+        // Only auto-scroll on initial load, not if user already scrolled up
+        if (!scrolledUp) scrollToBottom()
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [loading, fit, scrollToBottom])
+  }, [loading, fit, scrollToBottom, scrolledUp])
 
   // Focus terminal when it becomes the active one — but only if focus is in the grid
   const focusRegion = useDockStore((s) => s.focusRegion)

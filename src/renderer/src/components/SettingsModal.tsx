@@ -111,6 +111,78 @@ const SettingsAccordion: React.FC<{
   )
 }
 
+/**
+ * Scope indicator for individual settings.
+ * Shows a small dot indicating if the setting is overridden at project/local level.
+ * Clicking opens a popover to change scope or reset to global.
+ *
+ * Usage: <SettingScope keyPath="terminal.fontSize" value={settings.terminal.fontSize} section="terminal" sectionKey="fontSize" />
+ */
+const SettingScope: React.FC<{
+  keyPath: string
+  value: unknown
+  section: string
+  sectionKey: string
+}> = ({ keyPath, value, section, sectionKey }) => {
+  const origins = useSettingsStore((s) => s.origins)
+  const updateProject = useSettingsStore((s) => s.updateProject)
+  const resetProjectKey = useSettingsStore((s) => s.resetProjectKey)
+  const [open, setOpen] = useState(false)
+
+  const origin = origins[keyPath] as string | undefined // 'project' | 'local' | undefined (global)
+  const isOverridden = origin === 'project' || origin === 'local'
+
+  const saveToProject = async () => {
+    setOpen(false)
+    await updateProject({ [section]: { [sectionKey]: value } } as any, 'project')
+  }
+
+  const saveToLocal = async () => {
+    setOpen(false)
+    await updateProject({ [section]: { [sectionKey]: value } } as any, 'local')
+  }
+
+  const resetToGlobal = async () => {
+    setOpen(false)
+    if (origin === 'local') await resetProjectKey(keyPath, 'local')
+    if (origin === 'project') await resetProjectKey(keyPath, 'project')
+  }
+
+  return (
+    <span className="setting-scope-wrap">
+      <button
+        className={`setting-scope-btn${isOverridden ? ' setting-scope-overridden' : ''}`}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        title={isOverridden ? `Overridden at ${origin} level — click to change` : 'Click to save at project level'}
+      >
+        {isOverridden ? (origin === 'project' ? 'P' : 'L') : '\u2302'}
+      </button>
+      {open && (
+        <>
+          <div className="setting-scope-backdrop" onClick={() => setOpen(false)} />
+          <div className="setting-scope-popover">
+            <button className="setting-scope-option" onClick={saveToProject}>
+              <span className="setting-scope-dot setting-scope-dot-project" />
+              Save for project
+              <span className="setting-scope-hint">dock.json</span>
+            </button>
+            <button className="setting-scope-option" onClick={saveToLocal}>
+              <span className="setting-scope-dot setting-scope-dot-local" />
+              Save locally
+              <span className="setting-scope-hint">dock.local.json</span>
+            </button>
+            {isOverridden && (
+              <button className="setting-scope-option setting-scope-reset" onClick={resetToGlobal}>
+                Reset to global
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 /** Editor for terminal.additionalDirs with scope selector (global/project/local) */
 const AdditionalDirsEditor: React.FC = () => {
   const dirs = useSettingsStore((s) => s.settings.terminal?.additionalDirs ?? [])
@@ -364,6 +436,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
               <div className="settings-group">
                 <label>
                   Theme Mode
+                  <SettingScope keyPath="theme.mode" value={settings.theme.mode} section="theme" sectionKey="mode" />
                   <select
                     value={settings.theme.mode}
                     onChange={(e) => updateTheme({ mode: e.target.value as Settings['theme']['mode'] })}
@@ -429,6 +502,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </label>
                 <label>
                   Font Size
+                  <SettingScope keyPath="terminal.fontSize" value={settings.terminal.fontSize} section="terminal" sectionKey="fontSize" />
                   <input
                     type="number"
                     min={8}
@@ -495,6 +569,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </div>
                 <label>
                   Permission Mode
+                  <SettingScope keyPath="terminal.defaultPermissionMode" value={settings.terminal.defaultPermissionMode} section="terminal" sectionKey="defaultPermissionMode" />
                   <select
                     value={settings.terminal.defaultPermissionMode ?? 'default'}
                     onChange={(e) => updateTerminal({ defaultPermissionMode: e.target.value as Settings['terminal']['defaultPermissionMode'] })}
@@ -542,6 +617,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
               <div className="settings-group">
                 <label>
                   Max Columns
+                  <SettingScope keyPath="grid.maxColumns" value={settings.grid.maxColumns} section="grid" sectionKey="maxColumns" />
                   <input
                     type="number"
                     min={1}

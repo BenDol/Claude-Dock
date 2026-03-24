@@ -2001,6 +2001,114 @@ body {
   outline: none;
 }
 
+/* Setting scope indicator — project/local override button */
+.setting-scope-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.setting-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: none;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.1s;
+}
+
+/* Show on hover of the parent label/row */
+label:hover .setting-scope-btn,
+.settings-inline-row:hover .setting-scope-btn,
+.setting-scope-btn:focus,
+.setting-scope-btn.setting-scope-overridden {
+  opacity: 1;
+}
+
+.setting-scope-btn:hover {
+  background: var(--hover-color);
+  color: var(--text-primary);
+}
+
+.setting-scope-overridden {
+  color: var(--accent-color);
+}
+
+.setting-scope-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+.setting-scope-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 170px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  z-index: 1000;
+  padding: 4px 0;
+}
+
+.setting-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.setting-scope-option:hover {
+  background: var(--hover-color);
+}
+
+.setting-scope-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.setting-scope-dot-project { background: #60a5fa; }
+.setting-scope-dot-local { background: #34d399; }
+
+.setting-scope-hint {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.setting-scope-reset {
+  border-top: 1px solid var(--border-color);
+  margin-top: 2px;
+  padding-top: 6px;
+  color: var(--text-secondary);
+}
+
+.setting-scope-reset:hover {
+  color: #f87171;
+}
+
 /* Additional Directories editor */
 .settings-add-dirs-list {
   display: flex;
