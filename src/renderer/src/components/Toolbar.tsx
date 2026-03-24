@@ -497,6 +497,8 @@ const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => 
   return (
     <div className="ws-dropdown" ref={ref}>
       <button
+        data-toolbar-btn
+        tabIndex={-1}
         className={`toolbar-project ws-dropdown-trigger${open ? ' ws-dropdown-trigger-open' : ''}`}
         onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }}
         title={projectDir}
@@ -781,6 +783,8 @@ const NotificationDropdown: React.FC = () => {
   return (
     <div className="tb-notif-dropdown" ref={ref}>
       <button
+        data-toolbar-btn
+        tabIndex={-1}
         className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap"
         onMouseDown={(e) => { e.stopPropagation(); setOpen(!open) }}
         title="Notifications"
@@ -918,6 +922,8 @@ const ClaudeUsageButton: React.FC = () => {
 
   return (
     <button
+      data-toolbar-btn
+      tabIndex={-1}
       className="toolbar-btn toolbar-btn-icon claude-usage-btn"
       onClick={() => api.app.openExternal('https://console.anthropic.com')}
       title={tooltipText}
