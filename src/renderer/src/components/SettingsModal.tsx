@@ -148,6 +148,29 @@ const SettingScope: React.FC<{
     if (origin === 'project') await resetProjectKey(keyPath, 'project')
   }
 
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) }
+    }
+    document.addEventListener('keydown', handler, true)
+    return () => document.removeEventListener('keydown', handler, true)
+  }, [open])
+
+  // Close on any mousedown outside the popover
+  const popoverRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
+  }, [open])
+
   return (
     <span className="setting-scope-wrap">
       <button
@@ -158,9 +181,7 @@ const SettingScope: React.FC<{
         {isOverridden ? (origin === 'project' ? 'P' : 'L') : '\u2302'}
       </button>
       {open && (
-        <>
-          <div className="setting-scope-backdrop" onClick={() => setOpen(false)} />
-          <div className="setting-scope-popover">
+        <div className="setting-scope-popover" ref={popoverRef}>
             <button className="setting-scope-option" onClick={saveToProject}>
               <span className="setting-scope-dot setting-scope-dot-project" />
               Save for project
@@ -177,7 +198,6 @@ const SettingScope: React.FC<{
               </button>
             )}
           </div>
-        </>
       )}
     </span>
   )
