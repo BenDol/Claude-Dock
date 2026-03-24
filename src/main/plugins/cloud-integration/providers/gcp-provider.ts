@@ -106,6 +106,17 @@ export class GkePluginMissingError extends Error {
   }
 }
 
+/** Tagged error for cluster access issues with a resolution command */
+export class ClusterAccessError extends Error {
+  readonly clusterAccess = true
+  readonly resolution: string
+  constructor(message: string, resolution: string) {
+    super(message)
+    this.name = 'ClusterAccessError'
+    this.resolution = resolution
+  }
+}
+
 async function kubectl(...args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync('kubectl', [...args, '--request-timeout=10s'], {
@@ -248,16 +259,18 @@ export class GcpProvider implements CloudProvider {
    * Configure kubectl for a cluster — tries direct credentials first,
    * falls back to Connect Gateway for private/authorized-networks clusters.
    * Results are cached per cluster to avoid repeating the slow fallback chain.
+   * Throws ClusterAccessError with a resolution command if all methods fail.
    */
   private async configureKubectl(clusterName: string, location: string, projectId: string): Promise<void> {
-    const cached = this.kubectlConfigured.get(clusterName)
-    if (cached) {
-      svcLog(`configureKubectl: using cached result "${cached}" for "${clusterName}"`)
-      if (cached === 'ok') {
-        // Re-set credentials (fast, just writes kubeconfig)
-        await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
-      }
+    const cacheKey = `${clusterName}:${projectId}`
+    const cached = this.kubectlConfigured.get(cacheKey)
+    if (cached === 'ok') {
+      await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
       return
+    }
+    if (cached === 'failed') {
+      // Re-throw the same resolution error so the UI can show the fix
+      throw await this.buildClusterAccessError(clusterName, location, projectId)
     }
 
     // Try direct credentials
@@ -267,36 +280,77 @@ export class GcpProvider implements CloudProvider {
     try {
       await execFileAsync('kubectl', ['cluster-info', '--request-timeout=5s'], { timeout: 8000, windowsHide: true })
       svcLog(`configureKubectl: direct access works for "${clusterName}"`)
-      this.kubectlConfigured.set(clusterName, 'ok')
+      this.kubectlConfigured.set(cacheKey, 'ok')
       return
     } catch (e: any) {
       svcLog(`configureKubectl: direct access failed for "${clusterName}", trying Connect Gateway...`)
     }
 
-    // Enable Connect Gateway APIs if not already enabled
+    // Try Connect Gateway (enable APIs + get fleet credentials)
+    let gatewayWorked = false
     try {
-      svcLog('configureKubectl: ensuring Connect Gateway APIs are enabled...')
       await gcloud('services', 'enable', 'connectgateway.googleapis.com', 'gkeconnect.googleapis.com', `--project=${projectId}`)
       svcLog('configureKubectl: Connect Gateway APIs enabled')
     } catch (e: any) {
-      const msg = e.message || ''
-      if (msg.includes('Permission denied') || msg.includes('AUTH_PERMISSION_DENIED')) {
-        svcLogError('configureKubectl: no permission to enable APIs, skipping Connect Gateway')
-        this.kubectlConfigured.set(clusterName, 'failed')
-        return
-      }
       svcLogError('configureKubectl: failed to enable Connect Gateway APIs:', e.message)
     }
 
-    // Try Connect Gateway (works for private/authorized-networks clusters)
-    try {
-      await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`, '--quiet')
-      svcLog(`configureKubectl: Connect Gateway configured for "${clusterName}"`)
-      this.kubectlConfigured.set(clusterName, 'ok')
-    } catch (e: any) {
-      svcLogError(`configureKubectl: Connect Gateway also failed for "${clusterName}":`, e.message)
-      this.kubectlConfigured.set(clusterName, 'failed')
+    if (!gatewayWorked) {
+      try {
+        await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`, '--quiet')
+        svcLog(`configureKubectl: Connect Gateway configured for "${clusterName}"`)
+        this.kubectlConfigured.set(cacheKey, 'ok')
+        gatewayWorked = true
+      } catch (e: any) {
+        svcLogError(`configureKubectl: Connect Gateway also failed for "${clusterName}":`, e.message)
+      }
     }
+
+    if (!gatewayWorked) {
+      this.kubectlConfigured.set(cacheKey, 'failed')
+      throw await this.buildClusterAccessError(clusterName, location, projectId)
+    }
+  }
+
+  /** Build a ClusterAccessError with the appropriate resolution command for the cluster */
+  private async buildClusterAccessError(clusterName: string, location: string, projectId: string): Promise<ClusterAccessError> {
+    // Check if cluster uses authorized networks
+    let isAuthorizedNetworks = false
+    let isPrivateEndpoint = false
+    let existingCidrs: string[] = []
+    try {
+      const clusters = await gcloudJson<any[]>('container', 'clusters', 'list', `--filter=name=${clusterName}`)
+      if (clusters.length > 0) {
+        const c = clusters[0]
+        isAuthorizedNetworks = !!c.masterAuthorizedNetworksConfig?.enabled
+        isPrivateEndpoint = !!c.privateClusterConfig?.enablePrivateEndpoint
+        existingCidrs = (c.masterAuthorizedNetworksConfig?.cidrBlocks || []).map((b: any) => b.cidrBlock)
+        svcLog(`buildClusterAccessError: cluster "${clusterName}" authorizedNetworks=${isAuthorizedNetworks} privateEndpoint=${isPrivateEndpoint} existingCidrs=${existingCidrs.join(',')}`)
+      }
+    } catch { /* best effort */ }
+
+    if (isPrivateEndpoint) {
+      return new ClusterAccessError(
+        `Cluster "${clusterName}" uses a private endpoint — kubectl cannot connect from outside the VPC. Use a VPN or bastion host, or enable the Connect Gateway API.`,
+        ''
+      )
+    }
+
+    if (isAuthorizedNetworks) {
+      // Build command to add user's IP to authorized networks
+      const allCidrs = [...existingCidrs]
+      const cidrList = allCidrs.length > 0 ? allCidrs.join(',') + ',' : ''
+      const cmd = `gcloud container clusters update ${clusterName} --location=${location} --project=${projectId} --enable-master-authorized-networks --master-authorized-networks="${cidrList}$(curl -s ifconfig.me)/32"`
+      return new ClusterAccessError(
+        `Cluster "${clusterName}" has authorized networks enabled. Your IP is not in the allowed list.`,
+        cmd
+      )
+    }
+
+    return new ClusterAccessError(
+      `Cannot reach cluster "${clusterName}" API server. The endpoint may be unreachable from this network.`,
+      ''
+    )
   }
 
   async getKubernetesSummary(): Promise<CloudKubernetesSummary> {
@@ -444,8 +498,8 @@ export class GcpProvider implements CloudProvider {
           const w = await this.getWorkloads(cluster.name, cluster.location)
           allWorkloads.push(...w)
         } catch (e: any) {
-          // Propagate setup errors (missing plugin, auth) so the UI can show resolution
-          if ((e as any).gkePluginMissing || (e as any).authExpired) throw e
+          // Propagate setup/access errors so the UI can show resolution
+          if ((e as any).gkePluginMissing || (e as any).authExpired || (e as any).clusterAccess) throw e
           svcLogError(`getWorkloads: failed for cluster "${cluster.name}":`, e.message)
           clusterErrors.push(`${cluster.name}: ${e.message}`)
         }
@@ -517,7 +571,7 @@ export class GcpProvider implements CloudProvider {
         failures++
         if (!firstError) firstError = result.reason?.message || `kubectl get ${kind} failed`
         // Propagate setup errors immediately
-        if ((result.reason as any)?.gkePluginMissing || (result.reason as any)?.authExpired) throw result.reason
+        if ((result.reason as any)?.gkePluginMissing || (result.reason as any)?.authExpired || (result.reason as any)?.clusterAccess) throw result.reason
         svcLogError(`getWorkloads: kubectl get ${kind} failed for "${clusterName}":`, result.reason?.message)
       }
     }

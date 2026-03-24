@@ -79,13 +79,16 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
 
       // Unwrap result — handles both formats:
       // - New preload: throws on error, fulfilled value is plain array
-      // - Old preload: returns { data, error? } wrapper object
+      // - Old preload: returns { data, error?, resolution? } wrapper object
       const unwrap = (val: unknown): any[] => Array.isArray(val) ? val : ((val as any)?.data || [])
       const unwrapError = (val: unknown): string | null => Array.isArray(val) ? null : ((val as any)?.error || null)
+      const unwrapResolution = (val: unknown): string | null => Array.isArray(val) ? null : ((val as any)?.resolution || null)
+
+      let resolution: string | null = null
 
       if (clustersResult.status === 'fulfilled') {
         const err = unwrapError(clustersResult.value)
-        if (err) errors.push('Clusters: ' + err)
+        if (err) { errors.push('Clusters: ' + err); resolution = resolution || unwrapResolution(clustersResult.value) }
         else setClusters(unwrap(clustersResult.value))
       } else {
         errors.push('Clusters: ' + (clustersResult.reason?.message || 'Failed to fetch'))
@@ -93,7 +96,7 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
 
       if (workloadsResult.status === 'fulfilled') {
         const err = unwrapError(workloadsResult.value)
-        if (err) errors.push('Workloads: ' + err)
+        if (err) { errors.push('Workloads: ' + err); resolution = resolution || unwrapResolution(workloadsResult.value) }
         else setWorkloads(unwrap(workloadsResult.value))
       } else {
         errors.push('Workloads: ' + (workloadsResult.reason?.message || 'Failed to fetch'))
@@ -102,8 +105,13 @@ export default function KubernetesPage({ projectDir, tab, onNavigate, onOpenCons
       if (errors.length > 0) {
         const joined = errors.join('\n')
         setError(joined)
-        const issue = detectSetupIssue(joined)
-        if (issue) setSetupIssue(issue)
+        // Use resolution from IPC if available (e.g. authorized networks command)
+        if (resolution) {
+          setSetupIssue({ type: 'connection-failed' as any, message: joined, actionLabel: 'Fix Access', command: resolution })
+        } else {
+          const issue = detectSetupIssue(joined)
+          if (issue) setSetupIssue(issue)
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load Kubernetes data')

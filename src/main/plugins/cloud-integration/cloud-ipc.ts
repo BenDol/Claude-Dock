@@ -109,7 +109,7 @@ export function registerCloudIpc(): void {
       return { data: await provider.getWorkloads(clusterName) }
     } catch (err: any) {
       svc().logError('[cloud-integration] getWorkloads failed', err)
-      return { data: [], error: err.message || 'Failed to fetch workloads', authExpired: !!err.authExpired }
+      return { data: [], error: err.message || 'Failed to fetch workloads', authExpired: !!err.authExpired, resolution: err.resolution || undefined }
     }
   })
 
