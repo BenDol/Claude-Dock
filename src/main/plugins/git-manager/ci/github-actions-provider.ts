@@ -113,13 +113,19 @@ function parseWorkflowDispatchInputs(yaml: string): CiWorkflowInput[] | null {
         .filter(Boolean)
     }
 
-    const type = (typeMatch?.[1] || 'string') as CiWorkflowInput['type']
+    let type = (typeMatch?.[1] || 'string') as CiWorkflowInput['type']
+    // Infer boolean if type not explicit but default is true/false
+    const defaultVal = defMatch?.[1]?.trim()
+    if (type === 'string' && (defaultVal === 'true' || defaultVal === 'false')) {
+      type = 'boolean'
+    }
+    getServices().log(`[ci-github] parseInput: name=${pos.name} type=${type} default=${defaultVal} typeMatch=${typeMatch?.[1]}`)
 
     inputs.push({
       name: pos.name,
       description: descMatch?.[1]?.trim() || '',
       required: reqMatch?.[1] === 'true',
-      default: defMatch?.[1]?.trim(),
+      default: defaultVal,
       type: type === 'number' as string ? 'string' : type,
       options
     })
