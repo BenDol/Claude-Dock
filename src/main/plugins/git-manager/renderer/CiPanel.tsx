@@ -1855,39 +1855,50 @@ function DispatchWorkflowModal({ workflows, currentBranch, projectDir, onClose, 
               <div className="ci-dispatch-divider" />
               <div className="ci-dispatch-inputs-title">Inputs</div>
               {wfInputs.map(input => (
-                <label key={input.name} className={`ci-dispatch-field${input.type === 'boolean' ? ' ci-dispatch-field-checkbox' : ''}`}>
-                  {input.type === 'boolean' ? (
-                    <>
-                      <input
-                        type="checkbox"
-                        checked={inputs[input.name] === 'true'}
-                        onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.checked ? 'true' : 'false' }))}
-                      />
-                      <span>{input.name}{input.required ? ' *' : ''}</span>
-                    </>
-                  ) : (
-                    <span>{input.name}{input.required ? ' *' : ''}</span>
-                  )}
-                  {input.type === 'choice' && input.options ? (
-                    <select
-                      value={inputs[input.name] || ''}
-                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
-                    >
-                      {input.options.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
+                input.type === 'boolean' ? (
+                  <label key={input.name} className="ci-dispatch-field ci-dispatch-field-checkbox">
                     <input
-                      type="text"
-                      value={inputs[input.name] || ''}
-                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
-                      placeholder={input.default || ''}
-                      spellCheck={false}
+                      type="checkbox"
+                      checked={inputs[input.name] === 'true'}
+                      onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.checked ? 'true' : 'false' }))}
                     />
-                  )}
-                  {input.description && <span className="ci-dispatch-hint">{input.description}</span>}
-                </label>
+                    <span>{input.name}{input.required ? ' *' : ''}</span>
+                    {input.description && (
+                      <span className="ci-dispatch-info" title={input.description}>
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm.93 12.28h-1.9V6.6h1.9v5.68zm-.95-6.46a1.05 1.05 0 110-2.1 1.05 1.05 0 010 2.1z"/></svg>
+                      </span>
+                    )}
+                  </label>
+                ) : (
+                  <label key={input.name} className="ci-dispatch-field">
+                    <div className="ci-dispatch-field-header">
+                      <span>{input.name}{input.required ? ' *' : ''}</span>
+                      {input.description && (
+                        <span className="ci-dispatch-info" title={input.description}>
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm.93 12.28h-1.9V6.6h1.9v5.68zm-.95-6.46a1.05 1.05 0 110-2.1 1.05 1.05 0 010 2.1z"/></svg>
+                        </span>
+                      )}
+                    </div>
+                    {input.type === 'choice' && input.options ? (
+                      <select
+                        value={inputs[input.name] || ''}
+                        onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
+                      >
+                        {input.options.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={inputs[input.name] || ''}
+                        onChange={(e) => setInputs(prev => ({ ...prev, [input.name]: e.target.value }))}
+                        placeholder={input.default || ''}
+                        spellCheck={false}
+                      />
+                    )}
+                  </label>
+                )
               ))}
             </>
           )}

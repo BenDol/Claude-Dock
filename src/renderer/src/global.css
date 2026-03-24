@@ -3551,7 +3551,13 @@ label:hover .setting-scope-btn,
   font-size: 12px;
 }
 
-.ci-dispatch-field > span:first-child {
+.ci-dispatch-field-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ci-dispatch-field-header > span:first-child {
   color: var(--text-secondary);
   font-weight: 600;
   font-size: 11px;
@@ -3581,9 +3587,9 @@ label:hover .setting-scope-btn,
 }
 
 .ci-dispatch-field-checkbox > span {
-  font-weight: 400 !important;
-  font-size: 12px !important;
-  color: var(--text-primary) !important;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
 .ci-dispatch-field input[type="checkbox"] {
@@ -3595,11 +3601,18 @@ label:hover .setting-scope-btn,
   flex-shrink: 0;
 }
 
-.ci-dispatch-hint {
-  font-size: 10px;
+.ci-dispatch-info {
   color: var(--text-secondary);
-  opacity: 0.7;
+  opacity: 0.5;
+  cursor: help;
+  display: inline-flex;
+  flex-shrink: 0;
 }
+
+.ci-dispatch-info:hover {
+  opacity: 0.9;
+}
+
 
 .ci-dispatch-divider {
   border-top: 1px solid var(--border-color);
