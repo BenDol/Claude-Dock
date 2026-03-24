@@ -190,6 +190,8 @@ export class GcpProvider implements CloudProvider {
   readonly consoleBaseUrl = 'https://console.cloud.google.com'
 
   private projectId: string | null = null
+  /** Cache kubectl config results per cluster to avoid retrying the slow fallback chain */
+  private kubectlConfigured = new Map<string, 'ok' | 'failed'>()
 
   getIcon(): string {
     return GCP_ICON
@@ -245,37 +247,55 @@ export class GcpProvider implements CloudProvider {
   /**
    * Configure kubectl for a cluster — tries direct credentials first,
    * falls back to Connect Gateway for private/authorized-networks clusters.
+   * Results are cached per cluster to avoid repeating the slow fallback chain.
    */
   private async configureKubectl(clusterName: string, location: string, projectId: string): Promise<void> {
+    const cached = this.kubectlConfigured.get(clusterName)
+    if (cached) {
+      svcLog(`configureKubectl: using cached result "${cached}" for "${clusterName}"`)
+      if (cached === 'ok') {
+        // Re-set credentials (fast, just writes kubeconfig)
+        await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
+      }
+      return
+    }
+
     // Try direct credentials
     await gcloud('container', 'clusters', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
 
-    // Quick connectivity test with a short timeout
+    // Quick connectivity test
     try {
-      await kubectl('cluster-info')
+      await execFileAsync('kubectl', ['cluster-info', '--request-timeout=5s'], { timeout: 8000, windowsHide: true })
       svcLog(`configureKubectl: direct access works for "${clusterName}"`)
+      this.kubectlConfigured.set(clusterName, 'ok')
       return
     } catch (e: any) {
       svcLog(`configureKubectl: direct access failed for "${clusterName}", trying Connect Gateway...`)
     }
 
-    // Enable Connect Gateway APIs if not already enabled (gcloud prompts interactively without --quiet)
+    // Enable Connect Gateway APIs if not already enabled
     try {
       svcLog('configureKubectl: ensuring Connect Gateway APIs are enabled...')
       await gcloud('services', 'enable', 'connectgateway.googleapis.com', 'gkeconnect.googleapis.com', `--project=${projectId}`)
       svcLog('configureKubectl: Connect Gateway APIs enabled')
     } catch (e: any) {
+      const msg = e.message || ''
+      if (msg.includes('Permission denied') || msg.includes('AUTH_PERMISSION_DENIED')) {
+        svcLogError('configureKubectl: no permission to enable APIs, skipping Connect Gateway')
+        this.kubectlConfigured.set(clusterName, 'failed')
+        return
+      }
       svcLogError('configureKubectl: failed to enable Connect Gateway APIs:', e.message)
-      // Continue anyway — the APIs might already be enabled
     }
 
     // Try Connect Gateway (works for private/authorized-networks clusters)
     try {
-      await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`)
+      await gcloud('container', 'fleet', 'memberships', 'get-credentials', clusterName, `--location=${location}`, `--project=${projectId}`, '--quiet')
       svcLog(`configureKubectl: Connect Gateway configured for "${clusterName}"`)
+      this.kubectlConfigured.set(clusterName, 'ok')
     } catch (e: any) {
       svcLogError(`configureKubectl: Connect Gateway also failed for "${clusterName}":`, e.message)
-      // Proceed anyway — the caller will get the kubectl error
+      this.kubectlConfigured.set(clusterName, 'failed')
     }
   }
 
