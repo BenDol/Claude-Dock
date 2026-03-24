@@ -1,6 +1,27 @@
 export type TerminalStyle = 'default' | 'standard' | 'claude-code'
 export type BarSize = 'small' | 'medium' | 'large'
 
+/** Deep partial type — every nested key is optional */
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P]
+}
+
+/** Project-level settings — a partial overlay on top of the global Settings */
+export type ProjectSettings = DeepPartial<Settings>
+
+/** Settings sections that only make sense at the app-global level */
+export const GLOBAL_ONLY_SECTIONS: (keyof Settings)[] = [
+  'updater', 'launcher', 'advanced'
+]
+
+/** Dot-path keys where arrays are concatenated across tiers instead of replaced */
+export const CONCATENATED_ARRAY_PATHS: string[] = [
+  'terminal.additionalDirs'
+]
+
+/** Origin of a setting value in the merge chain */
+export type SettingsOrigin = 'default' | 'global' | 'project' | 'local'
+
 export interface Settings {
   theme: {
     mode: 'dark' | 'light' | 'system'
@@ -20,6 +41,8 @@ export interface Settings {
     scrollToBottom: boolean
     defaultAllowedTools: string[]
     defaultPermissionMode: 'default' | 'acceptEdits' | 'bypassPermissions'
+    /** Directories passed as --add-dir to Claude CLI (concatenated across settings tiers) */
+    additionalDirs: string[]
   }
   grid: {
     maxColumns: number
@@ -222,7 +245,8 @@ export const DEFAULT_SETTINGS: Settings = {
     scrollback: 5000,
     scrollToBottom: true,
     defaultAllowedTools: [],
-    defaultPermissionMode: 'default'
+    defaultPermissionMode: 'default',
+    additionalDirs: []
   },
   grid: {
     maxColumns: 4,

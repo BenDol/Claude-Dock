@@ -7,30 +7,27 @@ const MAX_LINK_LINES = 100
 const MAX_LINK_CHARS = 8000
 
 interface ShellPanelProps {
+  shellId: string
   terminalId: string
-  height: number
-  onHeightChange: (h: number) => void
   onClose: () => void
+  onSplitRight?: () => void
+  onStackBelow?: () => void
   initialCommand?: string | null
+  label?: string
 }
 
-const MIN_HEIGHT = 80
-const MAX_RATIO = 0.8 // max 80% of parent
-
-const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightChange, onClose, initialCommand }) => {
-  const shellId = `shell:${terminalId}`
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, label }) => {
   const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId })
   const commandSentRef = useRef(false)
-  const panelRef = useRef<HTMLDivElement>(null)
   const resizeRef = useResizeObserver(fit, 100)
   const [linked, setLinked] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
 
   const terminalRef = useCallback(
     (el: HTMLDivElement | null) => {
       resizeRef(el)
       if (el) {
         initTerminal(el)
-        // Focus the shell terminal after a short delay
         setTimeout(focus, 100)
       }
     },
@@ -41,48 +38,26 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
   useEffect(() => {
     if (!initialCommand || commandSentRef.current) return
     commandSentRef.current = true
-    // Give the shell a moment to start before writing the command
     const timer = setTimeout(() => {
       getDockApi().shell.write(shellId, initialCommand + '\n')
     }, 500)
     return () => clearTimeout(timer)
   }, [initialCommand, shellId])
 
-  // Re-fit when height changes
+  // Re-fit when layout changes (other shells added/removed or area resized)
   useEffect(() => {
-    const timer = setTimeout(fit, 50)
-    return () => clearTimeout(timer)
-  }, [height, fit])
+    const handler = () => setTimeout(fit, 30)
+    window.addEventListener('shell-layout-changed', handler)
+    return () => window.removeEventListener('shell-layout-changed', handler)
+  }, [fit])
 
-  // Drag-to-resize handle
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = height
-    // Walk up to the flex column container (terminal-card-split) for max height,
-    // not the immediate wrapper div which has no explicit height
-    const splitContainer = panelRef.current?.closest('.terminal-card-split') as HTMLElement | null
-    const maxHeight = splitContainer ? splitContainer.clientHeight * MAX_RATIO : 600
-
-    const onMove = (ev: MouseEvent) => {
-      const delta = startY - ev.clientY // dragging up increases height
-      const newHeight = Math.round(Math.min(maxHeight, Math.max(MIN_HEIGHT, startHeight + delta)))
-      onHeightChange(newHeight)
-    }
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      fit()
-    }
-
-    document.body.style.cursor = 'row-resize'
-    document.body.style.userSelect = 'none'
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }, [height, onHeightChange, fit])
+  // Close add dropdown on outside click
+  useEffect(() => {
+    if (!addOpen) return
+    const handler = () => setAddOpen(false)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [addOpen])
 
   // Read shell terminal content and paste it into the Claude terminal as context
   const handleLinkToClaude = useCallback(() => {
@@ -91,11 +66,9 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
 
     let content: string
 
-    // Prefer selected text if any
     if (term.hasSelection()) {
       content = term.getSelection()
     } else {
-      // Read last N lines from the terminal buffer
       const buf = term.buffer.active
       const totalRows = buf.length
       const startRow = Math.max(0, totalRows - MAX_LINK_LINES)
@@ -104,14 +77,12 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
         const line = buf.getLine(i)
         if (line) lines.push(line.translateToString(true))
       }
-      // Trim trailing empty lines
       while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop()
       content = lines.join('\n')
     }
 
     if (!content.trim()) return
 
-    // Cap content
     if (content.length > MAX_LINK_CHARS) {
       content = content.slice(-MAX_LINK_CHARS)
       const firstNewline = content.indexOf('\n')
@@ -119,24 +90,56 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
       content = '...(truncated)\n' + content
     }
 
-    // Write to the Claude terminal as a user message with shell output context
     const wrapped = `Here is the output from my shell terminal:\n\`\`\`\n${content}\n\`\`\`\n`
     getDockApi().terminal.write(terminalId, wrapped)
 
-    // Flash the linked indicator briefly
     setLinked(true)
     setTimeout(() => setLinked(false), 1500)
   }, [termRef, terminalId])
 
+  const canAdd = onSplitRight || onStackBelow
+
   return (
-    <div className="shell-panel" ref={panelRef} style={{ height }}>
-      <div className="shell-panel-handle" onMouseDown={handleDragStart}>
-        <div className="shell-panel-grip" />
-        <span className="shell-panel-label">Shell</span>
+    <div className="shell-panel">
+      <div className="shell-panel-handle">
+        <span className="shell-panel-label">{label || 'Shell'}</span>
+        {canAdd && (
+          <div className="shell-add-wrapper" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              className="shell-panel-action"
+              onClick={(e) => { e.stopPropagation(); setAddOpen(!addOpen) }}
+              title="Add shell panel"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <line x1="5" y1="2" x2="5" y2="8" /><line x1="2" y1="5" x2="8" y2="5" />
+              </svg>
+            </button>
+            {addOpen && (
+              <div className="shell-add-dropdown">
+                {onStackBelow && (
+                  <button className="shell-add-item" onClick={() => { onStackBelow(); setAddOpen(false) }}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                      <rect x="1" y="1" width="10" height="4" rx="1" /><rect x="1" y="7" width="10" height="4" rx="1" />
+                    </svg>
+                    Stack Below
+                  </button>
+                )}
+                {onSplitRight && (
+                  <button className="shell-add-item" onClick={() => { onSplitRight(); setAddOpen(false) }}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+                      <rect x="1" y="1" width="4" height="10" rx="1" /><rect x="7" y="1" width="4" height="10" rx="1" />
+                    </svg>
+                    Split Right
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <button
           className={`shell-panel-action${linked ? ' shell-panel-action-linked' : ''}`}
           onClick={(e) => { e.stopPropagation(); handleLinkToClaude() }}
-          title="Link shell output to Claude (sends selected text or last 100 lines as context)"
+          title="Link shell output to Claude"
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -154,7 +157,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ terminalId, height, onHeightCha
         className="shell-panel-terminal"
         ref={terminalRef}
         onClick={(e) => {
-          e.stopPropagation() // don't change focused Claude terminal
+          e.stopPropagation()
           focus()
         }}
       />

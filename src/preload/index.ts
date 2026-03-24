@@ -99,6 +99,9 @@ export interface DockApi {
   settings: {
     get: () => Promise<Settings>
     set: (settings: Partial<Settings>) => Promise<void>
+    setProject: (partial: Partial<Settings>, tier: 'project' | 'local') => Promise<void>
+    getOrigins: () => Promise<Record<string, string>>
+    resetProjectKey: (keyPath: string, tier: 'project' | 'local') => Promise<void>
     onChange: (callback: (settings: Settings) => void) => () => void
   }
   app: {
@@ -387,6 +390,9 @@ const dockApi: DockApi = {
   settings: {
     get: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
     set: (settings) => ipcRenderer.invoke(IPC.SETTINGS_SET, settings),
+    setProject: (partial, tier) => ipcRenderer.invoke(IPC.SETTINGS_SET_PROJECT, partial, tier),
+    getOrigins: () => ipcRenderer.invoke(IPC.SETTINGS_GET_ORIGINS),
+    resetProjectKey: (keyPath, tier) => ipcRenderer.invoke(IPC.SETTINGS_RESET_PROJECT_KEY, keyPath, tier),
     onChange: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, settings: Settings) => {
         callback(settings)

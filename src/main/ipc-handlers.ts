@@ -5,6 +5,7 @@ import * as path from 'path'
 import { IPC } from '../shared/ipc-channels'
 import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
+import { getProjectMergedSettings, writeProjectSettings, writeLocalProjectSettings, getSettingsOrigins, removeProjectKey } from './project-settings'
 import { getRecentPaths, removeRecentPath } from './recent-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
@@ -241,7 +242,12 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle(IPC.SETTINGS_GET, () => {
+  ipcMain.handle(IPC.SETTINGS_GET, (event) => {
+    // Return project-merged settings when called from a dock window
+    const dock = getDockForEvent(event)
+    if (dock) {
+      return getProjectMergedSettings(dock.projectDir)
+    }
     return getSettings()
   })
 
@@ -250,13 +256,41 @@ export function registerIpcHandlers(): void {
     // Toggle debug logging if changed
     const current = getSettings()
     setDebug(current.advanced?.debugLogging ?? false)
-    // Broadcast to all dock windows
+    // Broadcast project-merged settings to each dock window
     for (const dock of manager.getAllDocks()) {
       if (!dock.window.isDestroyed()) {
-        dock.window.webContents.send(IPC.SETTINGS_CHANGED, current)
+        const merged = getProjectMergedSettings(dock.projectDir)
+        dock.window.webContents.send(IPC.SETTINGS_CHANGED, merged)
       }
     }
     pluginManager.emitSettingsChanged(current)
+  })
+
+  ipcMain.handle(IPC.SETTINGS_SET_PROJECT, (event, partial: any, tier: 'project' | 'local') => {
+    const dock = getDockForEvent(event)
+    if (!dock) return
+    if (tier === 'project') {
+      writeProjectSettings(dock.projectDir, partial)
+    } else {
+      writeLocalProjectSettings(dock.projectDir, partial)
+    }
+    // Re-broadcast merged settings to this dock
+    const merged = getProjectMergedSettings(dock.projectDir)
+    dock.window.webContents.send(IPC.SETTINGS_CHANGED, merged)
+  })
+
+  ipcMain.handle(IPC.SETTINGS_GET_ORIGINS, (event) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return {}
+    return getSettingsOrigins(dock.projectDir)
+  })
+
+  ipcMain.handle(IPC.SETTINGS_RESET_PROJECT_KEY, (event, keyPath: string, tier: 'project' | 'local') => {
+    const dock = getDockForEvent(event)
+    if (!dock) return
+    removeProjectKey(dock.projectDir, keyPath, tier)
+    const merged = getProjectMergedSettings(dock.projectDir)
+    dock.window.webContents.send(IPC.SETTINGS_CHANGED, merged)
   })
 
   ipcMain.handle(IPC.APP_NEW_DOCK, async () => {

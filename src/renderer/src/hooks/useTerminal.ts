@@ -226,11 +226,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const gotDataRef = useRef(false)
   const undoRef = useRef(new InputUndoManager())
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [scrolledUp, setScrolledUp] = useState(false)
-  const [autoScroll, setAutoScroll] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
+  // Scroll state uses refs to avoid re-renders during active output.
+  // Only scrollBtnVisible triggers re-renders (debounced) for the UI button.
+  const scrolledUpRef = useRef(false)
   const autoScrollRef = useRef(false)
   const programmaticScrollRef = useRef(false)
+  const [scrollBtnVisible, setScrollBtnVisible] = useState(false)
+  const [autoScrollActive, setAutoScrollActive] = useState(false)
+  const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -254,13 +258,18 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         let flags = taskFlags
         if (!flags) {
           // No task flags — apply default permission flags from settings
-          const { defaultAllowedTools, defaultPermissionMode } = useSettingsStore.getState().settings.terminal
+          const { defaultAllowedTools, defaultPermissionMode, additionalDirs } = useSettingsStore.getState().settings.terminal
           const parts: string[] = []
           if (defaultAllowedTools && defaultAllowedTools.length > 0) {
             parts.push(`--allowedTools ${defaultAllowedTools.join(',')}`)
           }
           if (defaultPermissionMode && defaultPermissionMode !== 'default') {
             parts.push(`--permission-mode ${defaultPermissionMode}`)
+          }
+          if (additionalDirs && additionalDirs.length > 0) {
+            for (const dir of additionalDirs) {
+              parts.push(`--add-dir "${dir}"`)
+            }
           }
           flags = parts.length > 0 ? parts.join(' ') : undefined
           // Store default flags so the terminal header can display them
@@ -288,11 +297,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         gotDataRef.current = true
       }
 
-      // Track activity: mark active on data, inactive after 3s idle
-      setTerminalActive(terminalId, true)
-      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      // Track activity: mark active on data, inactive after 3s idle.
+      // Only call setTerminalActive(true) once per active burst to avoid store churn.
+      if (!activityTimerRef.current) {
+        setTerminalActive(terminalId, true)
+      } else {
+        clearTimeout(activityTimerRef.current)
+      }
       activityTimerRef.current = setTimeout(() => {
         setTerminalActive(terminalId, false)
+        activityTimerRef.current = null
       }, 3000)
 
       if (termRef.current) {
@@ -377,19 +391,29 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       termRef.current = term
       fitAddonRef.current = fitAddon
 
-      // Scroll detection via xterm viewport
+      // Scroll detection via xterm viewport — uses refs to avoid re-renders
       const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
       if (viewport) {
         const SCROLL_THRESHOLD = 80
         viewport.addEventListener('scroll', () => {
+          if (programmaticScrollRef.current) return
           const gap = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
           const isAtBottom = gap < SCROLL_THRESHOLD
-          setScrolledUp(!isAtBottom)
+          const wasScrolledUp = scrolledUpRef.current
+          scrolledUpRef.current = !isAtBottom
 
           // If user scrolls away from bottom while auto-scroll is on, disable it
-          if (!isAtBottom && autoScrollRef.current && !programmaticScrollRef.current) {
+          if (!isAtBottom && autoScrollRef.current) {
             autoScrollRef.current = false
-            setAutoScroll(false)
+            setAutoScrollActive(false)
+          }
+
+          // Debounce the button visibility update to avoid re-renders during rapid scrolling
+          if (wasScrolledUp !== scrolledUpRef.current) {
+            if (scrollBtnTimerRef.current) clearTimeout(scrollBtnTimerRef.current)
+            scrollBtnTimerRef.current = setTimeout(() => {
+              setScrollBtnVisible(scrolledUpRef.current)
+            }, 150)
           }
         })
       }
@@ -578,12 +602,14 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }, 50)
   }, [settings, terminalId])
 
-  // Scroll to bottom after grid reposition
+  // Re-fit after grid reposition — only scroll to bottom if user wasn't scrolled up
   useEffect(() => {
     const handler = () => {
       if (termRef.current) {
-        termRef.current.scrollToBottom()
         fit()
+        if (!scrolledUpRef.current) {
+          termRef.current.scrollToBottom()
+        }
       }
     }
     window.addEventListener('terminals-repositioned', handler)
@@ -601,21 +627,22 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     if (termRef.current) {
       programmaticScrollRef.current = true
       termRef.current.scrollToBottom()
-      setScrolledUp(false)
+      scrolledUpRef.current = false
+      setScrollBtnVisible(false)
       requestAnimationFrame(() => { programmaticScrollRef.current = false })
     }
   }, [])
 
   const enableAutoScroll = useCallback(() => {
     autoScrollRef.current = true
-    setAutoScroll(true)
+    setAutoScrollActive(true)
     scrollToBottom()
   }, [scrollToBottom])
 
   const disableAutoScroll = useCallback(() => {
     autoScrollRef.current = false
-    setAutoScroll(false)
+    setAutoScrollActive(false)
   }, [])
 
-  return { initTerminal, fit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, autoScroll, scrollToBottom, enableAutoScroll, disableAutoScroll }
+  return { initTerminal, fit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
 }

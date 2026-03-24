@@ -6,6 +6,7 @@ import { getSessions, saveSessions, clearSessions } from './session-store'
 import { saveBuffer, loadBuffer, clearBuffer } from './buffer-store'
 import { getWindowState, saveWindowState, WindowState } from './window-state-store'
 import { getSettings, setSetting } from './settings-store'
+import { ProjectSettingsWatcher } from './project-settings'
 import { ActivityTracker } from './activity-tracker'
 import { IdleNotifier } from './idle-notifier'
 import { log } from './logger'
@@ -22,6 +23,7 @@ export class DockWindow {
   readonly window: BrowserWindow
   readonly ptyManager: PtyManager
   private readonly idleNotifier: IdleNotifier
+  private readonly projectSettingsWatcher: ProjectSettingsWatcher
   private savedResumeIds: string[]
   private outputBuffers = new Map<string, string>()
 
@@ -64,6 +66,14 @@ export class DockWindow {
     log(`DockWindow: BrowserWindow created`)
     this.trackWindowState()
     this.idleNotifier = new IdleNotifier(this.window)
+
+    // Watch .claude/dock.json and dock.local.json for external edits
+    this.projectSettingsWatcher = new ProjectSettingsWatcher(projectDir, (merged) => {
+      if (!this.window.isDestroyed()) {
+        this.window.webContents.send(IPC.SETTINGS_CHANGED, merged)
+      }
+    })
+    this.projectSettingsWatcher.start()
 
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
@@ -185,6 +195,7 @@ export class DockWindow {
 
     this.window.on('closed', () => {
       this.ptyManager.killAll()
+      this.projectSettingsWatcher.stop()
       try { ActivityTracker.getInstance().removeDock(this.id) } catch (e) { log(`ActivityTracker.removeDock error: ${e}`) }
       try { this.idleNotifier.dispose() } catch (e) { log(`IdleNotifier.dispose error: ${e}`) }
     })

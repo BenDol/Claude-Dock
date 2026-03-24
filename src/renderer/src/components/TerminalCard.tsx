@@ -6,7 +6,7 @@ import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 
-const ShellPanel = lazy(() => import('./ShellPanel'))
+const ShellArea = lazy(() => import('./ShellArea'))
 
 interface TerminalCardProps {
   terminalId: string
@@ -138,9 +138,8 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const defaultShellHeight = useSettingsStore((s) => s.settings.shellPanel?.defaultHeight ?? 200)
   const pendingShellCommand = useDockStore((s) => s.pendingShellCommand)
   const setPendingShellCommand = useDockStore((s) => s.setPendingShellCommand)
-  const [shellOpen, setShellOpen] = useState(false)
-  const [shellHeight, setShellHeight] = useState(defaultShellHeight)
-  const [shellMounted, setShellMounted] = useState(false)
+  const [shellAreaOpen, setShellAreaOpen] = useState(false)
+  const [shellAreaMounted, setShellAreaMounted] = useState(false)
   const [shellInitialCommand, setShellInitialCommand] = useState<string | null>(null)
   const worktreePath = useDockStore((s) => s.terminalWorktrees.get(terminalId))
   const projectDir = useDockStore((s) => s.projectDir)
@@ -222,8 +221,8 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   }, [addTerminal, setTerminalWorktree])
 
   const toggleShell = useCallback(() => {
-    setShellOpen((prev) => {
-      if (!prev) setShellMounted(true) // mount on first open, keep mounted after
+    setShellAreaOpen((prev) => {
+      if (!prev) setShellAreaMounted(true)
       return !prev
     })
   }, [])
@@ -234,16 +233,16 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     const cmd = pendingShellCommand
     setPendingShellCommand(null)
 
-    if (shellOpen) {
-      // Shell already open — write the command directly
-      getDockApi().shell.write(`shell:${terminalId}`, cmd + '\n')
+    if (shellAreaOpen) {
+      // Shell already open — write the command to the first shell
+      getDockApi().shell.write(`shell:${terminalId}:0`, cmd + '\n')
     } else {
-      // Open shell with the command as initialCommand (ShellPanel will write it after spawn)
+      // Open shell area with the command as initialCommand
       setShellInitialCommand(cmd)
-      setShellMounted(true)
-      setShellOpen(true)
+      setShellAreaMounted(true)
+      setShellAreaOpen(true)
     }
-  }, [pendingShellCommand, isFocused, shellOpen, terminalId, setPendingShellCommand])
+  }, [pendingShellCommand, isFocused, shellAreaOpen, terminalId, setPendingShellCommand])
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()
@@ -309,9 +308,9 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           <div className={`terminal-actions-panel ${actionsOpen ? 'open' : ''}`}>
             {shellEnabled && (
               <button
-                className={`terminal-action-btn${shellOpen ? ' terminal-action-active' : ''}`}
+                className={`terminal-action-btn${shellAreaOpen ? ' terminal-action-active' : ''}`}
                 onClick={toggleShell}
-                title={shellOpen ? 'Close shell panel' : 'Open shell panel'}
+                title={shellAreaOpen ? 'Close shell panel' : 'Open shell panel'}
               >
                 <ShellIcon />
               </button>
@@ -354,7 +353,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         <div className="terminal-card-split" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
             <TerminalView terminalId={terminalId} isFocused={isFocused} />
-            {shellEnabled && !shellOpen && (
+            {shellEnabled && !shellAreaOpen && (
               <button className="shell-toggle-bottom" onClick={toggleShell} title="Open shell panel">
                 <ShellIcon />
               </button>
@@ -363,15 +362,14 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               <WorktreeIcon />
             </button>
           </div>
-          {shellEnabled && shellMounted && (
+          {shellEnabled && shellAreaMounted && (
             <Suspense fallback={null}>
-              <div style={shellOpen ? undefined : { height: 0, overflow: 'hidden' }}>
-                <ShellPanel
+              <div style={shellAreaOpen ? undefined : { height: 0, overflow: 'hidden' }}>
+                <ShellArea
                   terminalId={terminalId}
-                  height={shellHeight}
-                  onHeightChange={setShellHeight}
-                  onClose={toggleShell}
+                  defaultHeight={defaultShellHeight}
                   initialCommand={shellInitialCommand}
+                  onAllClosed={() => setShellAreaOpen(false)}
                 />
               </div>
             </Suspense>

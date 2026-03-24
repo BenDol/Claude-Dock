@@ -1400,12 +1400,68 @@ body {
 }
 
 /* Shell Panel */
-.shell-panel {
+/* Shell Area (multi-shell container) */
+.shell-area {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-color);
+}
+
+.shell-area-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 6px;
+  cursor: row-resize;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.shell-area-handle:hover {
+  background: var(--hover-color);
+}
+
+.shell-area-grip {
+  width: 32px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border-color);
+}
+
+.shell-area-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.shell-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shell-column-divider {
+  width: 1px;
+  background: var(--border-color);
+  flex-shrink: 0;
+}
+
+/* Shell Panel (individual shell within area) */
+.shell-panel {
+  flex: 1;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
   background: var(--bg-primary);
+}
+
+.shell-panel:first-child {
+  border-top: none;
 }
 
 .shell-panel-handle {
@@ -1413,7 +1469,6 @@ body {
   align-items: center;
   height: 20px;
   padding: 0 6px;
-  cursor: row-resize;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   user-select: none;
@@ -1470,6 +1525,48 @@ body {
 @keyframes shell-link-flash {
   0% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* Shell add dropdown */
+.shell-add-wrapper {
+  position: relative;
+}
+
+.shell-add-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 50;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 2px;
+  min-width: 120px;
+}
+
+.shell-add-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  text-align: left;
+}
+
+.shell-add-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.shell-add-item svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .shell-panel-close {
@@ -1902,6 +1999,99 @@ body {
 
 .settings-tab:focus:not(:focus-visible) {
   outline: none;
+}
+
+/* Additional Directories editor */
+.settings-add-dirs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.settings-add-dirs-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.settings-add-dirs-path {
+  flex: 1;
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-add-dirs-remove {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.settings-add-dirs-remove:hover {
+  color: #f87171;
+}
+
+.settings-add-dirs-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.settings-add-dirs-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.settings-add-dirs-input:focus {
+  border-color: var(--accent-color);
+}
+
+.settings-add-dirs-browse,
+.settings-add-dirs-add {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-add-dirs-browse:hover,
+.settings-add-dirs-add:hover {
+  background: var(--hover-color);
+}
+
+.settings-add-dirs-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.settings-add-dirs-scope {
+  padding: 4px 4px;
+  font-size: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
 }
 
 .settings-group {

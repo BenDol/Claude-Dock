@@ -6255,8 +6255,8 @@ const LocalBranchNode: React.FC<{
         onClick={() => setCollapsed((p) => !p)}
       >
         <span className="gm-branch-group-header">
-          <span className={`gm-collapse-arrow${collapsed ? '' : ' gm-collapse-arrow-open'}`}>&#9656;</span>
           <span className="gm-branch-name">{node.name}</span>
+          <span className={`gm-collapse-arrow${collapsed ? '' : ' gm-collapse-arrow-open'}`}>&#9656;</span>
         </span>
         <span className="gm-sidebar-header-count">{childCount}</span>
       </div>

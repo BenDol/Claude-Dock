@@ -111,6 +111,77 @@ const SettingsAccordion: React.FC<{
   )
 }
 
+/** Editor for terminal.additionalDirs with scope selector (global/project/local) */
+const AdditionalDirsEditor: React.FC = () => {
+  const dirs = useSettingsStore((s) => s.settings.terminal?.additionalDirs ?? [])
+  const [newDir, setNewDir] = useState('')
+  const [scope, setScope] = useState<'global' | 'project' | 'local'>('project')
+
+  const addDir = async () => {
+    const dir = newDir.trim()
+    if (!dir || dirs.includes(dir)) return
+    const updated = [...dirs, dir]
+    if (scope === 'global') {
+      await getDockApi().settings.set({ terminal: { ...useSettingsStore.getState().settings.terminal, additionalDirs: updated } } as any)
+    } else {
+      await getDockApi().settings.setProject({ terminal: { additionalDirs: [dir] } }, scope)
+    }
+    setNewDir('')
+  }
+
+  const removeDir = async (dir: string) => {
+    // Remove from global
+    const globalDirs = useSettingsStore.getState().settings.terminal?.additionalDirs ?? []
+    const filtered = globalDirs.filter((d: string) => d !== dir)
+    await getDockApi().settings.set({ terminal: { ...useSettingsStore.getState().settings.terminal, additionalDirs: filtered } } as any)
+    // Also try removing from project tiers
+    try { await getDockApi().settings.resetProjectKey('terminal.additionalDirs', 'project') } catch {}
+    try { await getDockApi().settings.resetProjectKey('terminal.additionalDirs', 'local') } catch {}
+  }
+
+  const browse = async () => {
+    const dir = await getDockApi().app.pickDirectory()
+    if (dir) setNewDir(dir)
+  }
+
+  return (
+    <div className="settings-add-dirs">
+      {dirs.length > 0 && (
+        <div className="settings-add-dirs-list">
+          {dirs.map((dir) => (
+            <div key={dir} className="settings-add-dirs-item">
+              <code className="settings-add-dirs-path">{dir}</code>
+              <button className="settings-add-dirs-remove" onClick={() => removeDir(dir)} title="Remove">&times;</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="settings-add-dirs-row">
+        <input
+          type="text"
+          className="settings-add-dirs-input"
+          value={newDir}
+          onChange={(e) => setNewDir(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') addDir() }}
+          placeholder="Path to directory..."
+        />
+        <button className="settings-add-dirs-browse" onClick={browse} title="Browse...">...</button>
+        <select
+          className="settings-add-dirs-scope"
+          value={scope}
+          onChange={(e) => setScope(e.target.value as any)}
+          title="Save scope"
+        >
+          <option value="global">Global</option>
+          <option value="project">Project</option>
+          <option value="local">Local</option>
+        </select>
+        <button className="settings-add-dirs-add" onClick={addDir} disabled={!newDir.trim()}>Add</button>
+      </div>
+    </div>
+  )
+}
+
 interface SettingsModalProps {
   onClose: () => void
 }
@@ -458,6 +529,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     )
                   })}
                 </div>
+                <div className="settings-divider" />
+                <div className="settings-section-header">Additional Directories</div>
+                <div className="settings-description">
+                  Directories passed as <code>--add-dir</code> to Claude CLI. Useful for referencing shared libraries, protos, or documentation outside the project.
+                  These are concatenated across all settings tiers (global + project + local).
+                </div>
+                <AdditionalDirsEditor />
               </div>
             )}
             {tab === 'grid' && (
