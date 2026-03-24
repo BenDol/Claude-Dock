@@ -265,6 +265,10 @@ function handleMessage(msg) {
               project_dir: {
                 type: 'string',
                 description: 'Absolute path to the project directory. Used to route the command to the correct dock window.'
+              },
+              submit: {
+                type: 'boolean',
+                description: 'Whether to press Enter after typing the command. Default: true.'
               }
             },
             required: ['command']
@@ -342,7 +346,7 @@ function handleMessage(msg) {
         }
 
         case 'dock_run_in_shell': {
-          const { command, project_dir } = args
+          const { command, project_dir, submit } = args
           if (!command) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: command.' }]
@@ -355,6 +359,7 @@ function handleMessage(msg) {
               id: crypto.randomUUID(),
               command,
               projectDir: project_dir || null,
+              submit: submit !== false, // default true
               timestamp: Date.now()
             }
 

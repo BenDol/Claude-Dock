@@ -21,10 +21,11 @@ interface ShellAreaProps {
   terminalId: string
   defaultHeight: number
   initialCommand?: string | null
+  submitCommand?: boolean
   onAllClosed: () => void
 }
 
-const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initialCommand, onAllClosed }) => {
+const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initialCommand, submitCommand = true, onAllClosed }) => {
   const nextIdRef = useRef(1)
   const areaRef = useRef<HTMLDivElement>(null)
   const preferredShell = useSettingsStore((s) => s.settings.shellPanel?.preferredShell ?? 'default')
@@ -134,6 +135,7 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
                     onSplitRight={canAdd ? () => addShellRight(col.id) : undefined}
                     onStackBelow={canAdd ? () => addShellBelow(col.id) : undefined}
                     initialCommand={si === 0 && ci === 0 ? initialCommand : undefined}
+                    submitCommand={si === 0 && ci === 0 ? submitCommand : undefined}
                     label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
                   />
                 ))}

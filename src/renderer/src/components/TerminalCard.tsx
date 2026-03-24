@@ -228,17 +228,19 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   }, [])
 
   // When a pending shell command arrives and this is the focused terminal, open shell and run it
+  const [shellSubmitCommand, setShellSubmitCommand] = useState(true)
   useEffect(() => {
     if (!pendingShellCommand || !isFocused) return
-    const cmd = pendingShellCommand
+    const { command: cmd, submit } = pendingShellCommand
     setPendingShellCommand(null)
 
     if (shellAreaOpen) {
       // Shell already open — write the command to the first shell
-      getDockApi().shell.write(`shell:${terminalId}:0`, cmd + '\n')
+      getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\n' : cmd)
     } else {
       // Open shell area with the command as initialCommand
       setShellInitialCommand(cmd)
+      setShellSubmitCommand(submit)
       setShellAreaMounted(true)
       setShellAreaOpen(true)
     }
@@ -369,6 +371,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   terminalId={terminalId}
                   defaultHeight={defaultShellHeight}
                   initialCommand={shellInitialCommand}
+                  submitCommand={shellSubmitCommand}
                   onAllClosed={() => setShellAreaOpen(false)}
                 />
               </div>

@@ -13,10 +13,12 @@ interface ShellPanelProps {
   onSplitRight?: () => void
   onStackBelow?: () => void
   initialCommand?: string | null
+  /** If false, type the command without pressing Enter. Default: true */
+  submitCommand?: boolean
   label?: string
 }
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, label }) => {
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, submitCommand = true, label }) => {
   const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
@@ -35,15 +37,31 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
     [resizeRef, initTerminal, focus]
   )
 
-  // Write initial command after shell is ready
+  // Write initial command after shell is ready — wait for first data (prompt)
+  // before sending, to avoid the command being swallowed by a slow shell startup
   useEffect(() => {
     if (!initialCommand || commandSentRef.current) return
-    commandSentRef.current = true
+    const api = getDockApi()
+    const payload = submitCommand ? initialCommand + '\n' : initialCommand
+    let sent = false
+    const cleanup = api.shell.onData((id, _data) => {
+      if (id !== shellId || sent) return
+      sent = true
+      commandSentRef.current = true
+      setTimeout(() => {
+        api.shell.write(shellId, payload)
+      }, 100)
+    })
+    // Safety timeout — send after 3s regardless
     const timer = setTimeout(() => {
-      getDockApi().shell.write(shellId, initialCommand + '\n')
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [initialCommand, shellId])
+      if (!sent) {
+        sent = true
+        commandSentRef.current = true
+        api.shell.write(shellId, payload)
+      }
+    }, 3000)
+    return () => { cleanup(); clearTimeout(timer) }
+  }, [initialCommand, shellId, submitCommand])
 
   // Re-fit when layout changes (other shells added/removed or area resized)
   useEffect(() => {

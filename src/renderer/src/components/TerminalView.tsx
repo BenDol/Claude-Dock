@@ -181,18 +181,20 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, gotDataRef, isResumed])
 
-  // Re-fit when loading dismissed — single fit after layout settles to avoid
-  // hammering the PTY with multiple resize events during Claude's TUI init
+  // Re-fit once when loading dismissed — single fit after layout settles to avoid
+  // hammering the PTY with multiple resize events during Claude's TUI init.
+  // Uses a ref to run only on the loading→loaded transition, not on every render.
+  const loadingDismissedRef = useRef(false)
   useEffect(() => {
-    if (!loading) {
+    if (!loading && !loadingDismissedRef.current) {
+      loadingDismissedRef.current = true
       const timer = setTimeout(() => {
         fit()
-        // Only auto-scroll on initial load, not if user already scrolled up
-        if (!scrolledUp) scrollToBottom()
+        scrollToBottom()
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [loading, fit, scrollToBottom, scrolledUp])
+  }, [loading, fit, scrollToBottom])
 
   // Focus terminal when it becomes the active one — but only if focus is in the grid
   const focusRegion = useDockStore((s) => s.focusRegion)

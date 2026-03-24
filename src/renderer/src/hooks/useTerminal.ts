@@ -271,6 +271,23 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
               parts.push(`--add-dir "${dir}"`)
             }
           }
+          // If the shell panel is enabled, tell Claude it can send commands to it.
+          // When MCP is installed, Claude discovers dock_run_in_shell automatically.
+          // This append-system-prompt covers the non-MCP fallback via escape sequences.
+          const shellPanel = useSettingsStore.getState().settings.shellPanel
+          if (shellPanel?.enabled !== false) {
+            const shellPrompt = [
+              'You are running inside Claude Dock which has an embedded shell panel.',
+              'To run a shell command (tests, builds, git, etc.) without interrupting this conversation,',
+              'use the Bash tool to output this exact escape sequence:',
+              'printf \'\\033]dock;shell;YOUR_COMMAND_HERE\\007\'',
+              'Replace YOUR_COMMAND_HERE with the actual command. The dock will intercept it,',
+              'open the shell panel if needed, and execute the command there.',
+              'To type a command without submitting, use: printf \'\\033]dock;typeshell;COMMAND\\007\'',
+              'Prefer this over running long commands directly when you want to keep the conversation responsive.'
+            ].join(' ')
+            parts.push(`--append-system-prompt "${shellPrompt.replace(/"/g, '\\"')}"`)
+          }
           flags = parts.length > 0 ? parts.join(' ') : undefined
           // Store default flags so the terminal header can display them
           if (flags) {
