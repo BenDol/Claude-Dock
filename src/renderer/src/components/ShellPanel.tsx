@@ -44,7 +44,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
   useEffect(() => {
     if (!initialCommand || lastSentCommandRef.current === initialCommand) return
     const api = getDockApi()
-    const payload = submitCommand !== false ? initialCommand + '\n' : initialCommand
+    const payload = submitCommand !== false ? initialCommand + '\r' : initialCommand
 
     // If the shell is already running (we already received data before),
     // send immediately — no need to wait for first data.

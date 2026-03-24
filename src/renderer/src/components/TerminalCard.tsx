@@ -241,7 +241,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
 
     if (shellAreaOpen) {
       // Shell already open — write the command to the first shell
-      getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\n' : cmd)
+      getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\r' : cmd)
     } else {
       // Open shell area with the command as initialCommand
       setShellInitialCommand(cmd)
