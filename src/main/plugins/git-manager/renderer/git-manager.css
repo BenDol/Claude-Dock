@@ -1933,10 +1933,9 @@
   z-index: 1;
 }
 
-/* In the commit detail view, diff file headers stick below the files-changed panel
-   rather than at top:0 — prevents them from overlapping the sticky file list */
+/* In the commit detail view, diff file headers stick below the files-changed panel */
 .gm-detail-files .gm-diff-file-header {
-  position: static;
+  top: var(--sticky-h, 0px);
 }
 
 .gm-diff-file-path {

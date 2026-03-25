@@ -3651,7 +3651,18 @@ const CommitDetailPanel: React.FC<{
         <div className="gm-detail-subject">{detail.subject}</div>
         {detail.body && <div className="gm-detail-body">{detail.body}</div>}
       </div>
-      <div className="gm-detail-files">
+      <div className="gm-detail-files" ref={(el) => {
+        // Track sticky panel height so diff file headers can position below it
+        if (!el) return
+        const sticky = el.querySelector('.gm-detail-files-sticky') as HTMLElement | null
+        if (!sticky) return
+        const update = () => el.style.setProperty('--sticky-h', `${sticky.offsetHeight}px`)
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(sticky)
+        // Clean up on unmount via a MutationObserver-based trick isn't needed —
+        // React will re-run this ref callback if the element changes
+      }}>
         <div className="gm-detail-files-sticky">
           <div
             className={`gm-detail-files-header${fileListExpanded ? ' gm-detail-files-header-expanded' : ''}`}
