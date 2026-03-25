@@ -175,14 +175,16 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
         api.gitManager.getBranches(projectDir)
       ])
       setWorktrees(wts)
-      // Include all branches (local + remote) — worktrees can be created from any
-      // Strip remote prefix for display but keep the full name for checkout
-      const allBranches = brs.map((b: any) => ({
-        name: b.name as string,
-        displayName: b.remote ? (b.name as string).replace(/^[^/]+\//, '') : b.name as string,
-        current: b.current as boolean,
-        remote: b.remote as boolean
-      }))
+      // Include all branches (local + remote) — worktrees can be created from any.
+      // Filter out remote HEAD entries (e.g. "origin" without a branch path).
+      const allBranches = brs
+        .filter((b: any) => !b.remote || (b.name as string).includes('/'))
+        .map((b: any) => ({
+          name: b.name as string,
+          displayName: b.remote ? (b.name as string).replace(/^[^/]+\//, '') : b.name as string,
+          current: b.current as boolean,
+          remote: b.remote as boolean
+        }))
       // Deduplicate: if a local and remote branch have the same name, keep local
       const seen = new Set<string>()
       const deduped: typeof allBranches = []
@@ -220,10 +222,21 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
       if (result.success && result.path) {
         spawnWorktreeTerminal(result.path)
       } else if (result.error) {
-        console.error('[worktree] addWorktree failed:', result.error)
+        // If worktree already exists, try to use it directly
+        if (result.error.includes('already exists')) {
+          // Re-list worktrees to find the existing one for this branch
+          const wts = await api.gitManager.listWorktrees(projectDir)
+          const strippedBranch = branch.replace(/^[^/]+\//, '')
+          const existing = wts.find((w: any) => w.branch === strippedBranch || w.branch === branch)
+          if (existing) {
+            spawnWorktreeTerminal(existing.path)
+            return
+          }
+        }
+        alert(`Failed to create worktree: ${result.error}`)
       }
     } catch (e) {
-      console.error('[worktree] addWorktree error:', e)
+      alert(`Failed to create worktree: ${e instanceof Error ? e.message : String(e)}`)
     }
   }, [projectDir, spawnWorktreeTerminal])
 
