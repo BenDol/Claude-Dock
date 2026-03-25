@@ -2219,12 +2219,25 @@ export async function listWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
   }
 }
 
+/**
+ * Generate a short unique ID for a worktree directory.
+ * Uses a hash of the branch name + timestamp to avoid collisions when
+ * creating multiple worktrees from the same branch.
+ */
+function worktreeId(branch: string): string {
+  const crypto = require('crypto') as typeof import('crypto')
+  const hash = crypto.createHash('sha256')
+    .update(branch + ':' + Date.now() + ':' + Math.random())
+    .digest('hex')
+    .slice(0, 8)
+  const safeBranch = branch.replace(/^[^/]+\//, '').replace(/[/\\:*?"<>|]/g, '-').slice(0, 40)
+  return `${safeBranch}-${hash}`
+}
+
 export async function addWorktree(cwd: string, branch: string, targetPath?: string): Promise<string> {
-  // Default path: sibling directory named <project>-worktrees/<branch>
-  const projectName = path.basename(cwd)
-  const worktreeBase = path.join(path.dirname(cwd), `${projectName}-worktrees`)
-  const safeBranch = branch.replace(/[/\\]/g, '-')
-  const worktreePath = targetPath || path.join(worktreeBase, safeBranch)
+  // Store worktrees inside .claude/worktrees/ within the project directory
+  const worktreeBase = path.join(cwd, '.claude', 'worktrees')
+  const worktreePath = targetPath || path.join(worktreeBase, worktreeId(branch))
 
   getServices().log(`[git-manager] addWorktree: branch=${branch} path=${worktreePath} cwd=${cwd}`)
   fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
@@ -2234,10 +2247,8 @@ export async function addWorktree(cwd: string, branch: string, targetPath?: stri
 }
 
 export async function addWorktreeNewBranch(cwd: string, newBranch: string, startPoint?: string): Promise<string> {
-  const projectName = path.basename(cwd)
-  const worktreeBase = path.join(path.dirname(cwd), `${projectName}-worktrees`)
-  const safeBranch = newBranch.replace(/[/\\]/g, '-')
-  const worktreePath = path.join(worktreeBase, safeBranch)
+  const worktreeBase = path.join(cwd, '.claude', 'worktrees')
+  const worktreePath = path.join(worktreeBase, worktreeId(newBranch))
 
   getServices().log(`[git-manager] addWorktreeNewBranch: newBranch=${newBranch} startPoint=${startPoint || 'HEAD'} path=${worktreePath}`)
   fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
