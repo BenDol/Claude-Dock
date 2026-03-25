@@ -150,10 +150,11 @@ export class PtyManager {
       if (this.ptys.has(terminalId)) {
         this.sendToHost({ type: 'write', terminalId, data: cmd })
 
-        // For resumed sessions on Windows, force a resize poke after Claude has had
-        // time to start rendering. This fixes a ConPTY issue where the input area
-        // ends up mispositioned after resume due to dimension mismatches during TUI init.
-        if (resumeId && process.platform === 'win32') {
+        // On Windows, force resize pokes after Claude has had time to start
+        // rendering. This fixes a ConPTY issue where Claude's TUI renders at
+        // the wrong width because it reads terminal dimensions before the
+        // renderer's resize IPC has fully propagated through ConPTY.
+        if (process.platform === 'win32') {
           this.scheduleResizePoke(terminalId)
         }
       }
@@ -417,8 +418,9 @@ export class PtyManager {
       pokeCols(restoreDelay)
       setTimeout(() => pokeRows(restoreDelay), restoreDelay + 100)
     }
-    // Staggered pokes covering early render (1.5s), conversation restore (3s),
-    // and late settling for slow systems like Windows 10 (5s)
+    // Staggered pokes: early TUI init (800ms), conversation render (1.5s),
+    // conversation restore (3s), and late settling for slow systems (5s)
+    setTimeout(() => pokeBoth(), 800)
     setTimeout(() => pokeBoth(), 1500)
     setTimeout(() => pokeBoth(), 3000)
     setTimeout(() => pokeBoth(100), 5000)
