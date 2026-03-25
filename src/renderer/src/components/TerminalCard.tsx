@@ -300,6 +300,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   // (or the focused terminal if no target is specified)
   const [shellSubmitCommand, setShellSubmitCommand] = useState(true)
   const [shellTypeOverride, setShellTypeOverride] = useState<string | null>(null)
+  const [newShellCommand, setNewShellCommand] = useState<{ command: string; submit?: boolean; shellType?: string | null } | null>(null)
   useEffect(() => {
     if (!pendingShellCommand) return
     const { command: cmd, submit, targetTerminalId, shellType, targetShellId } = pendingShellCommand
@@ -309,10 +310,22 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     if (!isTarget) return
     setPendingShellCommand(null)
 
+    // "__first__" sentinel = reuse the default shell (shell:0), same as the old behavior.
+    // null/undefined = open a NEW shell panel.
+    const isFirstShellRequest = targetShellId === '__first__'
+    const effectiveShellId = isFirstShellRequest ? null : targetShellId
+
+    if (shellAreaOpen && !effectiveShellId) {
+      // No shell_id specified and shell area already open — open a NEW shell panel
+      // instead of clobbering the existing one.
+      setNewShellCommand({ command: cmd, submit, shellType })
+      return
+    }
+
     // Determine which shell ID to write to.
     // Ignore stale shell IDs from previous sessions that reference a different terminal.
     const defaultShellId = `shell:${terminalId}:0`
-    const writeShellId = (targetShellId && targetShellId.includes(terminalId)) ? targetShellId : defaultShellId
+    const writeShellId = (effectiveShellId && effectiveShellId.includes(terminalId)) ? effectiveShellId : defaultShellId
 
     if (shellAreaOpen) {
       // Shell already open — if the requested shell type matches (or none specified),
@@ -498,6 +511,8 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   initialCommand={shellInitialCommand}
                   submitCommand={shellSubmitCommand}
                   shellType={shellTypeOverride}
+                  newShellCommand={newShellCommand}
+                  onNewShellConsumed={() => setNewShellCommand(null)}
                   onAllClosed={() => setShellAreaOpen(false)}
                 />
               </div>

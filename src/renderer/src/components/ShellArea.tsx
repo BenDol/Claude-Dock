@@ -17,16 +17,25 @@ interface ShellColumn {
   shells: ShellInstance[]
 }
 
+interface NewShellCommand {
+  command: string
+  submit?: boolean
+  shellType?: string | null
+}
+
 interface ShellAreaProps {
   terminalId: string
   defaultHeight: number
   initialCommand?: string | null
   submitCommand?: boolean
   shellType?: string | null
+  /** When set, creates a new shell panel and runs the command in it. Reset after consumed. */
+  newShellCommand?: NewShellCommand | null
+  onNewShellConsumed?: () => void
   onAllClosed: () => void
 }
 
-const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initialCommand, submitCommand = true, shellType, onAllClosed }) => {
+const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initialCommand, submitCommand = true, shellType, newShellCommand, onNewShellConsumed, onAllClosed }) => {
   const nextIdRef = useRef(1)
   const areaRef = useRef<HTMLDivElement>(null)
   const preferredShell = useSettingsStore((s) => s.settings.shellPanel?.preferredShell ?? 'default')
@@ -81,6 +90,21 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     })
   }, [onAllClosed])
 
+  // When a new shell command is requested, create a new shell panel with the command
+  const [pendingNewShell, setPendingNewShell] = useState<NewShellCommand | null>(null)
+  useEffect(() => {
+    if (!newShellCommand || !canAdd) return
+    const shell = makeShell()
+    setPendingNewShell({ ...newShellCommand, _shellId: shell.shellId } as any)
+    setColumns(prev => {
+      const lastCol = prev[prev.length - 1]
+      return prev.map(col =>
+        col.id === lastCol.id ? { ...col, shells: [...col.shells, shell] } : col
+      )
+    })
+    onNewShellConsumed?.()
+  }, [newShellCommand])
+
   // Re-fit all shells after layout changes
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -127,20 +151,24 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
             <React.Fragment key={col.id}>
               {ci > 0 && <div className="shell-column-divider" />}
               <div className="shell-column">
-                {col.shells.map((shell, si) => (
-                  <ShellPanel
-                    key={shell.id}
-                    shellId={shell.shellId}
-                    terminalId={terminalId}
-                    onClose={() => removeShell(col.id, shell.id)}
-                    onSplitRight={canAdd ? () => addShellRight(col.id) : undefined}
-                    onStackBelow={canAdd ? () => addShellBelow(col.id) : undefined}
-                    initialCommand={si === 0 && ci === 0 ? initialCommand : undefined}
-                    submitCommand={si === 0 && ci === 0 ? submitCommand : undefined}
-                    shellType={si === 0 && ci === 0 ? shellType : undefined}
-                    label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
-                  />
-                ))}
+                {col.shells.map((shell, si) => {
+                  const isFirstShell = si === 0 && ci === 0
+                  const newCmd = pendingNewShell && (pendingNewShell as any)._shellId === shell.shellId ? pendingNewShell : null
+                  return (
+                    <ShellPanel
+                      key={shell.id}
+                      shellId={shell.shellId}
+                      terminalId={terminalId}
+                      onClose={() => removeShell(col.id, shell.id)}
+                      onSplitRight={canAdd ? () => addShellRight(col.id) : undefined}
+                      onStackBelow={canAdd ? () => addShellBelow(col.id) : undefined}
+                      initialCommand={newCmd ? newCmd.command : (isFirstShell ? initialCommand : undefined)}
+                      submitCommand={newCmd ? newCmd.submit : (isFirstShell ? submitCommand : undefined)}
+                      shellType={newCmd ? newCmd.shellType : (isFirstShell ? shellType : undefined)}
+                      label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
+                    />
+                  )
+                })}
               </div>
             </React.Fragment>
           ))}
