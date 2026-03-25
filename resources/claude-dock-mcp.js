@@ -8,6 +8,8 @@
  * Tools:
  *   dock_status          — View what other terminals are working on + unread messages
  *   dock_run_in_shell    — Run a command in the dock's shell panel (opens it if closed)
+ *   dock_read_shell      — Read recent output from a shell panel
+ *   dock_list_shells     — List all open shell panels for a session (or all sessions)
  *   dock_send_message    — Send a message to another terminal (requires messaging enabled)
  *   dock_check_messages  — Check for messages sent to this terminal (requires messaging enabled)
  *
@@ -28,6 +30,7 @@ const configFile = path.join(dataDir, 'dock-config.json')
 const messagesFile = path.join(dataDir, 'dock-messages.json')
 
 const shellCommandsFile = path.join(dataDir, 'dock-shell-commands.json')
+const shellOutputFile = path.join(dataDir, 'dock-shell-output.json')
 
 const MESSAGE_TTL = 3600000 // 1 hour
 
@@ -153,12 +156,21 @@ function markMessagesRead(sessionId) {
 
 // ---------- dock_status ----------
 
+function readShellOutput() {
+  try {
+    return JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
 function formatDockStatus(projectDir, sessionId) {
   const activity = readActivity()
   if (!activity || !activity.docks || Object.keys(activity.docks).length === 0) {
     return 'No active dock terminals found.'
   }
 
+  const shellData = readShellOutput()
   const filterDir = projectDir ? normalizePath(projectDir) : null
   const sections = []
 
@@ -183,6 +195,15 @@ function formatDockStatus(projectDir, sessionId) {
         sections.push('```')
       } else {
         sections.push('(no recent output)')
+      }
+
+      // Include shell panel info if available
+      const shellEntry = term.sessionId ? shellData[term.sessionId] : null
+      if (shellEntry && shellEntry.shells) {
+        const shellIds = Object.keys(shellEntry.shells)
+        if (shellIds.length > 0) {
+          sections.push(`**Shell panels (${shellIds.length}):** ${shellIds.join(', ')}`)
+        }
       }
       sections.push('')
     }
@@ -281,6 +302,44 @@ function handleMessage(msg) {
               }
             },
             required: ['command']
+          }
+        },
+        {
+          name: 'dock_read_shell',
+          description:
+            'Read the recent output from a Claude Dock shell panel. Use this after dock_run_in_shell ' +
+            'to see the command output (test results, build output, etc.). Returns the last 100 lines ' +
+            'of shell output for the specified session.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: {
+                type: 'string',
+                description: 'Your session ID. Reads the shell panel output associated with this terminal session.'
+              },
+              shell_id: {
+                type: 'string',
+                description: 'Specific shell panel ID to read (e.g. "shell:term-1-123:0"). If not provided, reads the first (default) shell panel.'
+              }
+            },
+            required: ['session_id']
+          }
+        },
+        {
+          name: 'dock_list_shells',
+          description:
+            'List all open shell panels for a session (or all sessions). Returns shell IDs, ' +
+            'line counts, and last update times. Use this to discover available shells before ' +
+            'reading their output with dock_read_shell.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: {
+                type: 'string',
+                description: 'Your session ID. If provided, only lists shells for this session. If omitted, lists all sessions and their shells.'
+              }
+            },
+            required: []
           }
         }
       ]
@@ -401,6 +460,117 @@ function handleMessage(msg) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `Failed to send command to dock shell: ${err.message || err}` }],
               isError: true
+            })
+          }
+        }
+
+        case 'dock_list_shells': {
+          const { session_id } = args
+          try {
+            const data = readShellOutput()
+            if (Object.keys(data).length === 0) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: 'No shell panels are currently open.' }]
+              })
+            }
+
+            const sections = []
+
+            for (const [sid, entry] of Object.entries(data)) {
+              // Filter by session_id if provided
+              if (session_id && sid !== session_id && !sid.startsWith(session_id)) continue
+
+              const shells = entry.shells || {}
+              const shellIds = Object.keys(shells)
+              if (shellIds.length === 0) continue
+
+              sections.push(`Session ${sid.slice(0, 8)} (${entry.projectDir ? path.basename(entry.projectDir) : 'unknown'}):`)
+              for (const shellId of shellIds.sort()) {
+                const shell = shells[shellId]
+                const lineCount = shell.lines ? shell.lines.length : 0
+                const age = Date.now() - (shell.lastUpdate || 0)
+                const ageStr = age < 5000 ? 'just now' : age < 60000 ? `${Math.round(age / 1000)}s ago` : `${Math.round(age / 60000)}m ago`
+                sections.push(`  - ${shellId} (${lineCount} lines, updated ${ageStr})`)
+              }
+              sections.push('')
+            }
+
+            if (sections.length === 0) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: session_id ? 'No shell panels open for this session.' : 'No shell panels are currently open.' }]
+              })
+            }
+
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: sections.join('\n') }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to list shells: ${err.message || err}` }]
+            })
+          }
+        }
+
+        case 'dock_read_shell': {
+          const { session_id, shell_id } = args
+          if (!session_id) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameter: session_id.' }]
+            })
+          }
+
+          try {
+            const data = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
+            // Find session by exact match or prefix match
+            let entry = data[session_id]
+            if (!entry) {
+              for (const key of Object.keys(data)) {
+                if (key.startsWith(session_id)) { entry = data[key]; break }
+              }
+            }
+
+            if (!entry || !entry.shells || Object.keys(entry.shells).length === 0) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: 'No shell output available. The shell panel may not have been opened yet, or no commands have been run.' }]
+              })
+            }
+
+            // If shell_id is specified, read that specific shell; otherwise read the first one
+            let shellEntry
+            let resolvedShellId
+            if (shell_id) {
+              shellEntry = entry.shells[shell_id]
+              resolvedShellId = shell_id
+              if (!shellEntry) {
+                // Try partial match
+                for (const sid of Object.keys(entry.shells)) {
+                  if (sid.includes(shell_id)) { shellEntry = entry.shells[sid]; resolvedShellId = sid; break }
+                }
+              }
+            } else {
+              // Default to first shell (typically shell:term-X:0)
+              const shellIds = Object.keys(entry.shells).sort()
+              resolvedShellId = shellIds[0]
+              shellEntry = entry.shells[resolvedShellId]
+            }
+
+            if (!shellEntry || !shellEntry.lines || shellEntry.lines.length === 0) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: `No output from shell ${resolvedShellId || '(unknown)'}. The shell may still be starting or the command hasn't produced output yet.` }]
+              })
+            }
+
+            const age = Date.now() - (shellEntry.lastUpdate || 0)
+            const ageStr = age < 5000 ? 'just now' : age < 60000 ? `${Math.round(age / 1000)}s ago` : `${Math.round(age / 60000)}m ago`
+            const shellCount = Object.keys(entry.shells).length
+            const header = `Shell output from ${resolvedShellId} (${shellEntry.lines.length} lines, updated ${ageStr})${shellCount > 1 ? ` [${shellCount} shells available]` : ''}:`
+            const output = shellEntry.lines.join('\n')
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `${header}\n\n${output}` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `No shell output available: ${err.message || err}` }]
             })
           }
         }

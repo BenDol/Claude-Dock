@@ -154,7 +154,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
   return (
     <div className="shell-panel">
       <div className="shell-panel-handle">
-        <span className="shell-panel-label">{label || 'Shell'}</span>
+        <span className="shell-panel-label">{label || 'Shell'}{shellType && shellType !== 'default' ? <span className="shell-panel-type">{shellType}</span> : null}</span>
         {canAdd && (
           <div className="shell-add-wrapper" onMouseDown={(e) => e.stopPropagation()}>
             <button

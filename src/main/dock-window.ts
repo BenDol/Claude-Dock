@@ -29,6 +29,9 @@ export class DockWindow {
   private processedCommandIds = new Set<string>()
   private savedResumeIds: string[]
   private outputBuffers = new Map<string, string>()
+  /** Buffered shell panel output per shell ID, written to shared file for MCP access */
+  private shellOutputBuffers = new Map<string, string>()
+  private shellOutputSaveTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(id: string, projectDir: string) {
     this.id = id
@@ -87,6 +90,8 @@ export class DockWindow {
         // Route shell panel PTY data to the SHELL_DATA channel
         if (terminalId.startsWith('shell:')) {
           this.window.webContents.send(IPC.SHELL_DATA, terminalId, data)
+          // Buffer shell output for MCP readback
+          this.trackShellOutput(terminalId, data)
           return
         }
 
@@ -270,6 +275,85 @@ export class DockWindow {
         // File read/parse errors are expected (race with MCP writer)
       }
     }, 500) // Poll every 500ms
+  }
+
+  // Max shell output to keep per shell (~50KB)
+  private static readonly MAX_SHELL_OUTPUT = 50 * 1024
+  // Strip ANSI escape sequences for clean text output
+  private static stripAnsi(s: string): string {
+    return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+  }
+
+  private trackShellOutput(shellId: string, data: string): void {
+    const clean = DockWindow.stripAnsi(data)
+    const existing = this.shellOutputBuffers.get(shellId) || ''
+    const combined = existing + clean
+    this.shellOutputBuffers.set(
+      shellId,
+      combined.length > DockWindow.MAX_SHELL_OUTPUT
+        ? combined.slice(combined.length - DockWindow.MAX_SHELL_OUTPUT)
+        : combined
+    )
+    this.scheduleShellOutputSave()
+  }
+
+  private scheduleShellOutputSave(): void {
+    if (this.shellOutputSaveTimer) return
+    this.shellOutputSaveTimer = setTimeout(() => {
+      this.shellOutputSaveTimer = null
+      this.saveShellOutput()
+    }, 500)
+  }
+
+  private saveShellOutput(): void {
+    try {
+      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+      let existing: Record<string, any> = {}
+      try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { /* new file */ }
+
+      // Build entries keyed by the parent terminal's session ID,
+      // with each shell's output stored separately by shell ID
+      for (const [shellId, content] of this.shellOutputBuffers) {
+        // shellId format: "shell:term-1-123456:0" — extract the parent terminal ID
+        const parts = shellId.split(':')
+        const parentTerminalId = parts.length >= 3 ? parts.slice(1, -1).join(':') : parts[1]
+        const sessionId = this.ptyManager.getSessionId(parentTerminalId)
+        if (!sessionId) continue
+
+        const lines = content.split(/\r?\n/).filter((l) => l.trim())
+        const recentLines = lines.slice(-100)
+
+        if (!existing[sessionId]) {
+          existing[sessionId] = {
+            sessionId,
+            parentTerminalId,
+            projectDir: this.projectDir,
+            shells: {},
+            lastUpdate: Date.now()
+          }
+        }
+        existing[sessionId].shells[shellId] = {
+          lines: recentLines,
+          lastUpdate: Date.now()
+        }
+        existing[sessionId].lastUpdate = Date.now()
+      }
+
+      // Prune entries older than 5 minutes from other docks
+      const cutoff = Date.now() - 5 * 60 * 1000
+      for (const key of Object.keys(existing)) {
+        if (existing[key].lastUpdate < cutoff) {
+          const hasActiveShell = Object.keys(existing[key].shells || {}).some(
+            (sid) => this.shellOutputBuffers.has(sid)
+          )
+          if (!hasActiveShell) delete existing[key]
+        }
+      }
+
+      fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
+    } catch (err) {
+      log(`[shell-output] save failed: ${err instanceof Error ? err.message : err}`)
+    }
   }
 
   private trackWindowState(): void {
