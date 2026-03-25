@@ -240,24 +240,24 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     if (!isTarget) return
     setPendingShellCommand(null)
 
-    if (shellAreaOpen && !shellType) {
-      // Shell already open with default type — write the command directly
-      getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\r' : cmd)
-    } else if (shellAreaOpen && shellType) {
-      // Shell is open but a different shell type was requested — kill the old one,
-      // reopen with the new type. This handles the case where Claude needs bash
-      // but cmd.exe was open.
-      getDockApi().shell.kill(`shell:${terminalId}:0`)
-      setShellAreaOpen(false)
-      setShellAreaMounted(false)
-      // Small delay for cleanup, then reopen
-      setTimeout(() => {
-        setShellInitialCommand(cmd)
-        setShellSubmitCommand(submit)
-        setShellTypeOverride(shellType)
-        setShellAreaMounted(true)
-        setShellAreaOpen(true)
-      }, 200)
+    if (shellAreaOpen) {
+      // Shell already open — if the requested shell type matches (or none specified),
+      // write the command directly. Only kill+reopen if the type is explicitly different.
+      const needsRespawn = shellType && shellTypeOverride !== shellType && shellType !== 'default'
+      if (needsRespawn) {
+        getDockApi().shell.kill(`shell:${terminalId}:0`)
+        setShellAreaOpen(false)
+        setShellAreaMounted(false)
+        setTimeout(() => {
+          setShellInitialCommand(cmd)
+          setShellSubmitCommand(submit)
+          setShellTypeOverride(shellType)
+          setShellAreaMounted(true)
+          setShellAreaOpen(true)
+        }, 200)
+      } else {
+        getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\r' : cmd)
+      }
     } else {
       // Shell not open — open with the requested type
       setShellInitialCommand(cmd)
