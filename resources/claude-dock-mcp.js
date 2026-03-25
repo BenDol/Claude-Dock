@@ -462,24 +462,22 @@ function handleMessage(msg) {
 
             fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
 
-            // Only return shell ID and log path if they already exist — don't predict.
-            // Stale data from previous sessions caused shell commands to silently fail.
-            let resolvedShellId = null
+            // Resolve the shell ID and log file path for the response.
+            // Check if the shell exists and is still active (updated recently).
+            let resolvedShellId = shell_id || null
             let logFile = null
+            let shellActive = false
             if (session_id) {
               try {
                 const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
                 const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
                 if (sessionEntry && sessionEntry.shells) {
                   const shellIds = Object.keys(sessionEntry.shells).sort()
-                  const targetId = shell_id || shellIds[0] || null
-                  if (targetId && sessionEntry.shells[targetId]) {
-                    // Verify the shell ID references a terminal from the current session
-                    const ageMs = Date.now() - (sessionEntry.shells[targetId].lastUpdate || 0)
-                    if (ageMs < 5 * 60 * 1000) { // only if updated within last 5 minutes
-                      resolvedShellId = targetId
-                      logFile = sessionEntry.shells[targetId].logFile || null
-                    }
+                  if (!resolvedShellId) resolvedShellId = shellIds[0] || null
+                  if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
+                    logFile = sessionEntry.shells[resolvedShellId].logFile || null
+                    const ageMs = Date.now() - (sessionEntry.shells[resolvedShellId].lastUpdate || 0)
+                    shellActive = ageMs < 5 * 60 * 1000
                   }
                 }
               } catch { /* shell output file may not exist yet */ }
@@ -488,6 +486,7 @@ function handleMessage(msg) {
             const parts = [`Command sent to dock shell: ${command}`]
             if (resolvedShellId) {
               parts.push(`Shell ID: ${resolvedShellId}`)
+              parts.push(`Shell status: ${shellActive ? 'active' : 'stale (may reopen)'}`)
             }
             if (logFile) {
               parts.push(`Output log: ${logFile}`)
