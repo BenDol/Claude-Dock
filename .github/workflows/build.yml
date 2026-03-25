@@ -232,6 +232,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Retry wrapper for gh commands that hit transient API errors (e.g. 502)
+          gh_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if [ $attempt -lt 3 ]; then
+                echo "::warning::Attempt $attempt failed, retrying in $((attempt * 10))s..."
+                sleep $((attempt * 10))
+              fi
+            done
+            echo "::error::Failed after 3 attempts: $*"
+            return 1
+          }
+
           # Ensure the release exists
           gh release view bleeding-edge &>/dev/null || \
             gh release create bleeding-edge --prerelease \
@@ -243,17 +257,17 @@ jobs:
 
           # Upload main artifacts first, then plugin archives, then SHA files last
           for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
-            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+            [ -f "$f" ] && gh_retry gh release upload bleeding-edge "$f" --clobber
           done
           for f in dist/plugins.zip dist/plugins.update; do
-            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+            [ -f "$f" ] && gh_retry gh release upload bleeding-edge "$f" --clobber
           done
           for f in dist/*-sha.txt; do
-            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+            [ -f "$f" ] && gh_retry gh release upload bleeding-edge "$f" --clobber
           done
 
           # Update release notes
-          gh release edit bleeding-edge --prerelease \
+          gh_retry gh release edit bleeding-edge --prerelease \
             --notes "$(cat <<'EOF'
           Automated build from the latest commit on \`main\`.
 
@@ -307,6 +321,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Retry wrapper for gh commands that hit transient API errors (e.g. 502)
+          gh_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if [ $attempt -lt 3 ]; then
+                echo "::warning::Attempt $attempt failed, retrying in $((attempt * 10))s..."
+                sleep $((attempt * 10))
+              fi
+            done
+            echo "::error::Failed after 3 attempts: $*"
+            return 1
+          }
+
           # Ensure the release exists
           gh release view bleeding-edge &>/dev/null || \
             gh release create bleeding-edge --prerelease \
@@ -315,7 +343,7 @@ jobs:
 
           # Upload only plugin archives — do NOT touch exe or SHA files
           for f in dist/plugins.zip dist/plugins.update; do
-            [ -f "$f" ] && gh release upload bleeding-edge "$f" --clobber
+            [ -f "$f" ] && gh_retry gh release upload bleeding-edge "$f" --clobber
           done
 
           echo "Plugins-only publish complete. App binaries and SHA files unchanged."
