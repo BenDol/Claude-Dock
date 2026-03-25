@@ -198,27 +198,34 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     setWtLoading(false)
   }, [projectDir])
 
+  const spawnWorktreeTerminal = useCallback((wtPath: string) => {
+    const nextId = `term-${Date.now()}-wt`
+    // Set worktree path BEFORE adding terminal so the spawn useEffect picks it up
+    setTerminalWorktree(nextId, wtPath)
+    // Use setTimeout to ensure the store update from setTerminalWorktree is committed
+    // before addTerminal triggers the new TerminalCard mount + spawn useEffect
+    setTimeout(() => addTerminal(nextId), 0)
+  }, [addTerminal, setTerminalWorktree])
+
   const handleCreateWorktree = useCallback(async (branch: string) => {
     setWorktreePopover(false)
     const api = getDockApi()
     try {
       const result = await api.gitManager.addWorktree(projectDir, branch)
       if (result.success && result.path) {
-        // Spawn a new terminal in the worktree
-        const nextId = `term-${Date.now()}-wt`
-        addTerminal(nextId)
-        setTerminalWorktree(nextId, result.path)
+        spawnWorktreeTerminal(result.path)
+      } else if (result.error) {
+        console.error('[worktree] addWorktree failed:', result.error)
       }
-    } catch { /* ignore */ }
-  }, [projectDir, addTerminal, setTerminalWorktree])
+    } catch (e) {
+      console.error('[worktree] addWorktree error:', e)
+    }
+  }, [projectDir, spawnWorktreeTerminal])
 
   const handleSelectWorktree = useCallback((wtPath: string) => {
     setWorktreePopover(false)
-    // Spawn a new terminal in the existing worktree
-    const nextId = `term-${Date.now()}-wt`
-    addTerminal(nextId)
-    setTerminalWorktree(nextId, wtPath)
-  }, [addTerminal, setTerminalWorktree])
+    spawnWorktreeTerminal(wtPath)
+  }, [spawnWorktreeTerminal])
 
   const toggleShell = useCallback(() => {
     setShellAreaOpen((prev) => {
