@@ -1467,7 +1467,7 @@ body {
 .shell-panel-handle {
   display: flex;
   align-items: center;
-  height: 14px;
+  height: 6px;
   padding: 0 6px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -1503,6 +1503,8 @@ body {
   border-radius: 3px;
   margin-left: 5px;
   vertical-align: middle;
+  position: relative;
+  top: -1px;
 }
 
 .shell-panel-action {
