@@ -181,18 +181,19 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, gotDataRef, isResumed])
 
-  // Re-fit once when loading dismissed — single fit after layout settles to avoid
-  // hammering the PTY with multiple resize events during Claude's TUI init.
-  // Uses a ref to run only on the loading→loaded transition, not on every render.
+  // Re-fit after loading dismissed — staggered fits to catch Claude's TUI init
+  // which happens at variable timing after the shell prompt appears.
   const loadingDismissedRef = useRef(false)
   useEffect(() => {
     if (!loading && !loadingDismissedRef.current) {
       loadingDismissedRef.current = true
-      const timer = setTimeout(() => {
-        forceFit()
-        scrollToBottom()
-      }, 150)
-      return () => clearTimeout(timer)
+      const timers = [150, 500, 1500, 3000, 5000].map((ms) =>
+        setTimeout(() => {
+          forceFit()
+          scrollToBottom()
+        }, ms)
+      )
+      return () => timers.forEach(clearTimeout)
     }
   }, [loading, forceFit, scrollToBottom])
 
