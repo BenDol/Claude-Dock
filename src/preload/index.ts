@@ -245,6 +245,7 @@ export interface DockApi {
     listWorktrees: (projectDir: string) => Promise<{ path: string; branch: string; head: string; isMain: boolean }[]>
     addWorktree: (projectDir: string, branch: string, targetPath?: string) => Promise<{ success: boolean; path?: string; error?: string }>
     removeWorktree: (projectDir: string, worktreePath: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
+    resolveWorktree: (projectDir: string, worktreePath: string, commitMessage: string, targetBranch?: string) => Promise<{ success: boolean; commitHash?: string; merged?: boolean; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -556,6 +557,7 @@ const dockApi: DockApi = {
     listWorktrees: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_LIST_WORKTREES, projectDir),
     addWorktree: (projectDir, branch, targetPath) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_WORKTREE, projectDir, branch, targetPath),
     removeWorktree: (projectDir, worktreePath, force) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_WORKTREE, projectDir, worktreePath, force),
+    resolveWorktree: (projectDir, worktreePath, commitMessage, targetBranch) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WORKTREE, projectDir, worktreePath, commitMessage, targetBranch),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

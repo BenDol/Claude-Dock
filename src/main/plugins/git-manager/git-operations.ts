@@ -26,7 +26,7 @@ import type {
 } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 
-function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
+function gitExecRaw(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
@@ -47,6 +47,32 @@ function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout
       }
     })
   })
+}
+
+/**
+ * Run a git command with automatic retry on index.lock errors.
+ * If the first attempt fails because another git process holds the lock,
+ * wait briefly for it to finish, then remove the stale lock and retry once.
+ */
+async function gitExec(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await gitExecRaw(cwd, args, timeout)
+  } catch (err: any) {
+    const msg = err.message || ''
+    if (msg.includes('index.lock') || msg.includes('Unable to create') && msg.includes('.lock')) {
+      // Wait for the other process to finish (it may be our own parallel command)
+      await new Promise((r) => setTimeout(r, 500))
+      // Remove the lock if it's still there (stale from a crashed process)
+      try {
+        const lockPath = require('path').join(cwd, '.git', 'index.lock')
+        require('fs').unlinkSync(lockPath)
+        getServices().log(`[git-manager] removed stale index.lock in ${cwd}`)
+      } catch { /* lock may have been released naturally */ }
+      // Retry once
+      return gitExecRaw(cwd, args, timeout)
+    }
+    throw err
+  }
 }
 
 function gitExecStdin(cwd: string, args: string[], stdin: string, timeout = 30000): Promise<{ stdout: string; stderr: string }> {
@@ -2228,6 +2254,71 @@ export async function removeWorktree(cwd: string, worktreePath: string, force?: 
   if (force) args.push('--force')
   await gitExec(cwd, args, 15000)
   getServices().log(`[git-manager] removeWorktree: removed ${worktreePath}`)
+}
+
+/**
+ * Resolve a worktree: stage all changes, commit, optionally merge into a target branch, then remove the worktree.
+ * If no targetBranch, the commit stays on the worktree's branch (headless or named).
+ */
+export async function resolveWorktree(
+  mainCwd: string,
+  worktreePath: string,
+  commitMessage: string,
+  targetBranch?: string
+): Promise<{ success: boolean; commitHash?: string; merged?: boolean; error?: string }> {
+  getServices().log(`[git-manager] resolveWorktree: path=${worktreePath} target=${targetBranch || 'none'} cwd=${mainCwd}`)
+
+  try {
+    // 1. Check for changes in the worktree
+    const status = await getStatus(worktreePath)
+    const hasChanges = status.files.length > 0
+
+    let commitHash = ''
+
+    if (hasChanges) {
+      // 2. Stage all changes
+      await gitExec(worktreePath, ['add', '-A'], 15000)
+      getServices().log(`[git-manager] resolveWorktree: staged ${status.files.length} file(s)`)
+
+      // 3. Commit
+      const result = await gitExec(worktreePath, ['commit', '-m', commitMessage], 30000)
+      const hashMatch = result.stdout.match(/\[[\w/.-]+\s+([a-f0-9]+)\]/)
+      commitHash = hashMatch?.[1] || ''
+      getServices().log(`[git-manager] resolveWorktree: committed ${commitHash}`)
+    } else {
+      // Get the current HEAD hash
+      const { stdout } = await gitExec(worktreePath, ['rev-parse', '--short', 'HEAD'], 5000)
+      commitHash = stdout.trim()
+      getServices().log(`[git-manager] resolveWorktree: no changes to commit, HEAD=${commitHash}`)
+    }
+
+    // 4. If a target branch was specified, merge the worktree's branch into it
+    let merged = false
+    if (targetBranch) {
+      // Get the worktree's current branch
+      const { stdout: wtBranch } = await gitExec(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+      const sourceBranch = wtBranch.trim()
+      getServices().log(`[git-manager] resolveWorktree: merging "${sourceBranch}" into "${targetBranch}" from main repo`)
+
+      // Merge from the main repo (which has access to all branches)
+      await gitExec(mainCwd, ['checkout', targetBranch], 15000)
+      await gitExec(mainCwd, ['merge', sourceBranch, '--no-ff', '-m', `Merge worktree: ${commitMessage}`], 30000)
+      merged = true
+      getServices().log(`[git-manager] resolveWorktree: merged successfully`)
+    }
+
+    // 5. Remove the worktree
+    try {
+      await removeWorktree(mainCwd, worktreePath, true)
+    } catch (e: any) {
+      getServices().logError('[git-manager] resolveWorktree: failed to remove worktree (non-fatal):', e.message)
+    }
+
+    return { success: true, commitHash, merged }
+  } catch (err: any) {
+    getServices().logError('[git-manager] resolveWorktree failed:', err)
+    return { success: false, error: err instanceof Error ? err.message : 'Resolve failed' }
+  }
 }
 
 // --- Search ---

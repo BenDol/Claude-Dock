@@ -1467,12 +1467,13 @@ body {
 .shell-panel-handle {
   display: flex;
   align-items: center;
-  height: 12px;
+  height: 16px;
   padding: 0 6px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   user-select: none;
   flex-shrink: 0;
+  cursor: row-resize;
 }
 
 .shell-panel-grip {
@@ -1485,6 +1486,7 @@ body {
 
 .shell-panel-label {
   font-size: 10px;
+  line-height: 16px;
   color: var(--text-secondary);
   flex: 1;
   text-transform: uppercase;
@@ -1503,8 +1505,6 @@ body {
   border-radius: 3px;
   margin-left: 5px;
   vertical-align: middle;
-  position: relative;
-  top: -1px;
 }
 
 .shell-panel-action {
@@ -1766,6 +1766,92 @@ body {
   padding: 8px 10px;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.worktree-resolve-btn {
+  color: var(--accent-color) !important;
+  gap: 6px;
+}
+
+.worktree-resolve-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+
+.worktree-resolve-input,
+.worktree-resolve-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.worktree-resolve-input:focus,
+.worktree-resolve-select:focus {
+  border-color: var(--accent-color);
+}
+
+.worktree-resolve-error {
+  font-size: 11px;
+  color: #f87171;
+}
+
+.worktree-resolve-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.worktree-resolve-cancel,
+.worktree-resolve-confirm,
+.worktree-discard-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.worktree-resolve-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.worktree-resolve-cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.worktree-resolve-confirm {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.worktree-resolve-confirm:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.worktree-resolve-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.worktree-discard-btn {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.worktree-discard-btn:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.25);
 }
 
 /* Active indicator on header toggle when shell is open */

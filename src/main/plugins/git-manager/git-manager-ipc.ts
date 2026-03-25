@@ -671,6 +671,10 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_RESOLVE_WORKTREE, async (_event, projectDir: string, worktreePath: string, commitMessage: string, targetBranch?: string) => {
+    return gitOps.resolveWorktree(projectDir, worktreePath, commitMessage, targetBranch)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {
     const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
       type: 'merge-resolve',

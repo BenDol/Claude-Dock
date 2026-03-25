@@ -150,6 +150,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean }[]>([])
   const [branches, setBranches] = useState<{ name: string; current: boolean }[]>([])
   const [wtLoading, setWtLoading] = useState(false)
+  const [resolveMode, setResolveMode] = useState(false)
+  const [resolveCommitMsg, setResolveCommitMsg] = useState('')
+  const [resolveTarget, setResolveTarget] = useState<string>('')
+  const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState<string | null>(null)
   const wtBtnRef = useRef<HTMLButtonElement>(null)
 
   // Recalculate popover position when it opens
@@ -226,6 +231,50 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     setWorktreePopover(false)
     spawnWorktreeTerminal(wtPath)
   }, [spawnWorktreeTerminal])
+
+  const handleResolveWorktree = useCallback(async () => {
+    if (!worktreePath || !resolveCommitMsg.trim()) return
+    setResolving(true)
+    setResolveError(null)
+    try {
+      const result = await getDockApi().gitManager.resolveWorktree(
+        projectDir,
+        worktreePath,
+        resolveCommitMsg.trim(),
+        resolveTarget || undefined
+      )
+      if (result.success) {
+        setWorktreePopover(false)
+        setResolveMode(false)
+        setTerminalWorktree(terminalId, null)
+        // Close this terminal since the worktree is gone
+        getDockApi().terminal.kill(terminalId)
+        removeTerminal(terminalId)
+      } else {
+        setResolveError(result.error || 'Resolve failed')
+      }
+    } catch (e: any) {
+      setResolveError(e.message || 'Resolve failed')
+    }
+    setResolving(false)
+  }, [worktreePath, resolveCommitMsg, resolveTarget, projectDir, terminalId, setTerminalWorktree, removeTerminal])
+
+  const handleDiscardWorktree = useCallback(async () => {
+    if (!worktreePath) return
+    if (!window.confirm('Discard all changes and remove this worktree? This cannot be undone.')) return
+    setResolving(true)
+    try {
+      await getDockApi().gitManager.removeWorktree(projectDir, worktreePath, true)
+      setWorktreePopover(false)
+      setResolveMode(false)
+      setTerminalWorktree(terminalId, null)
+      getDockApi().terminal.kill(terminalId)
+      removeTerminal(terminalId)
+    } catch (e: any) {
+      setResolveError(e.message || 'Failed to remove worktree')
+    }
+    setResolving(false)
+  }, [worktreePath, projectDir, terminalId, setTerminalWorktree, removeTerminal])
 
   const toggleShell = useCallback(() => {
     setShellAreaOpen((prev) => {
@@ -453,14 +502,73 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
             </div>
             {wtLoading ? (
               <div className="worktree-popover-loading">Loading...</div>
+            ) : resolveMode && worktreePath ? (
+              <div className="worktree-popover-body">
+                <div className="worktree-popover-label">Resolve Worktree</div>
+                <div className="worktree-resolve-form">
+                  <input
+                    type="text"
+                    className="worktree-resolve-input"
+                    placeholder="Commit message"
+                    value={resolveCommitMsg}
+                    onChange={(e) => setResolveCommitMsg(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && resolveCommitMsg.trim()) handleResolveWorktree() }}
+                    spellCheck={false}
+                    autoFocus
+                  />
+                  <select
+                    className="worktree-resolve-select"
+                    value={resolveTarget}
+                    onChange={(e) => setResolveTarget(e.target.value)}
+                  >
+                    <option value="">Commit only (no merge)</option>
+                    {branches.map(b => (
+                      <option key={b.name} value={b.name}>{b.name.replace(/^[^/]+\//, '')}{b.current ? ' (current)' : ''}</option>
+                    ))}
+                  </select>
+                  {resolveError && <div className="worktree-resolve-error">{resolveError}</div>}
+                  <div className="worktree-resolve-actions">
+                    <button className="worktree-resolve-cancel" onClick={() => setResolveMode(false)} disabled={resolving}>Cancel</button>
+                    <button
+                      className="worktree-resolve-confirm"
+                      onClick={handleResolveWorktree}
+                      disabled={resolving || !resolveCommitMsg.trim()}
+                    >
+                      {resolving ? 'Resolving...' : resolveTarget ? 'Commit & Merge' : 'Commit & Remove'}
+                    </button>
+                  </div>
+                  <button className="worktree-discard-btn" onClick={handleDiscardWorktree} disabled={resolving}>
+                    Discard & Remove Worktree
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="worktree-popover-body">
+                {worktreePath && (
+                  <>
+                    <div className="worktree-popover-label">Current Worktree</div>
+                    <button className="worktree-popover-item worktree-resolve-btn" onClick={() => { setResolveMode(true); setResolveCommitMsg(''); setResolveTarget(''); setResolveError(null) }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      <span className="worktree-popover-branch">Resolve Worktree</span>
+                    </button>
+                    <button className="worktree-popover-item" onClick={handleDiscardWorktree} style={{ color: '#f87171' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                      <span className="worktree-popover-branch">Discard & Remove</span>
+                    </button>
+                    <div className="worktree-popover-divider" />
+                  </>
+                )}
                 {worktrees.filter(wt => !wt.isMain).length > 0 && (
                   <>
                     <div className="worktree-popover-label">Existing Worktrees</div>
                     {worktrees.filter(wt => !wt.isMain).map(wt => (
                       <button key={wt.path} className="worktree-popover-item" onClick={() => handleSelectWorktree(wt.path)} title={wt.path}>
                         <span className="worktree-popover-branch">{wt.branch || wt.head}</span>
+                        {wt.path === worktreePath && <span style={{ fontSize: 9, color: 'var(--accent-color)', marginLeft: 4 }}>active</span>}
                       </button>
                     ))}
                     <div className="worktree-popover-divider" />

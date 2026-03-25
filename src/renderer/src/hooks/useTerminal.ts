@@ -402,6 +402,28 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       // {0,0} so the first ResizeObserver callback triggers a proper fit.
       lastDimsRef.current = { cols, rows }
 
+      // Schedule corrective re-fits after grid layout settles.
+      // The container may not have its final size yet when initTerminal runs
+      // (grid animation, flex recalculation). These staggered re-fits ensure
+      // the PTY gets the correct dimensions once layout is stable.
+      const correctiveFit = () => {
+        if (!fitAddonRef.current || !termRef.current || !containerRef.current) return
+        const cw = containerRef.current.clientWidth
+        const ch = containerRef.current.clientHeight
+        if (cw < 10 || ch < 10) return // container not ready yet
+        fitAddonRef.current.fit()
+        const newCols = termRef.current.cols
+        const newRows = termRef.current.rows
+        if (newCols !== lastDimsRef.current.cols || newRows !== lastDimsRef.current.rows) {
+          lastDimsRef.current = { cols: newCols, rows: newRows }
+          lastContainerSizeRef.current = { w: cw, h: ch }
+          getDockApi().terminal.resize(terminalId, newCols, newRows)
+        }
+      }
+      setTimeout(correctiveFit, 200)
+      setTimeout(correctiveFit, 500)
+      setTimeout(correctiveFit, 1000)
+
       termRef.current = term
       fitAddonRef.current = fitAddon
 

@@ -1139,6 +1139,12 @@ const GitManagerApp: React.FC = () => {
     setSearchOpen(false)
   }, [])
 
+  // After pull/fetch, refresh data and switch to the Commit Log tab to show new commits
+  const refreshAndShowLog = useCallback(() => {
+    refresh()
+    setActiveTab('log')
+  }, [refresh])
+
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
   const repoProvider = useMemo<GitProvider>(() => {
@@ -1474,7 +1480,7 @@ const GitManagerApp: React.FC = () => {
             activeDir={activeDir}
             behindCount={currentBranch?.behind ?? 0}
             onError={handleSmartError}
-            onRefresh={refresh}
+            onRefresh={refreshAndShowLog}
             onOpenDialog={handleOpenPullDialog}
           />
           {currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
@@ -2019,7 +2025,7 @@ const GitManagerApp: React.FC = () => {
           remoteBranches={remoteBranches}
           onClose={() => setPullDialogOpen(false)}
           onError={handleSmartError}
-          onRefresh={refresh}
+          onRefresh={refreshAndShowLog}
         />
       )}
     </div>
