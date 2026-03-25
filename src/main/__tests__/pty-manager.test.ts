@@ -301,6 +301,8 @@ describe('PtyManager', () => {
       manager.killAll()
 
       expect(mockHostPostMessage).toHaveBeenCalledWith({ type: 'killAll' })
+      // host.kill() is deferred by 200ms to let kill messages be processed
+      vi.advanceTimersByTime(200)
       expect(mockHostKill).toHaveBeenCalled()
       expect(manager.size).toBe(0)
     })
