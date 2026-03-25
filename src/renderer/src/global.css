@@ -3616,6 +3616,7 @@ label:hover .setting-scope-btn,
 }
 
 .ci-dispatch-info {
+  position: relative;
   color: var(--text-secondary);
   opacity: 0.5;
   cursor: help;
@@ -3625,6 +3626,32 @@ label:hover .setting-scope-btn,
 
 .ci-dispatch-info:hover {
   opacity: 0.9;
+}
+
+.ci-dispatch-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-tertiary, #1e1e2e);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.ci-dispatch-info:hover .ci-dispatch-tooltip {
+  display: block;
 }
 
 

@@ -877,7 +877,7 @@ const GitManagerApp: React.FC = () => {
     setLoading(true)
     try {
       const isRepo = await api.gitManager.isRepo(activeDir)
-      if (gen !== refreshGenRef.current) return // stale
+      if (gen !== refreshGenRef.current) { setLoading(false); return } // stale
       if (!isRepo) {
         setNotGitRepo(true)
         setLoading(false)
@@ -893,7 +893,7 @@ const GitManagerApp: React.FC = () => {
         api.gitManager.getCommitCount(activeDir),
         api.gitManager.getTags(activeDir)
       ])
-      if (gen !== refreshGenRef.current) return // stale
+      if (gen !== refreshGenRef.current) { setLoading(false); return } // stale
       setCommits(logData)
       setTotalCommitCount(commitCount)
       setBranches(branchData)
@@ -925,7 +925,7 @@ const GitManagerApp: React.FC = () => {
       }
       lastRefreshRef.current = Date.now()
     } catch (err) {
-      if (gen !== refreshGenRef.current) return // stale
+      if (gen !== refreshGenRef.current) { setLoading(false); return } // stale
       setError(err instanceof Error ? err.message : 'Failed to load git data')
     }
     setLoading(false)
