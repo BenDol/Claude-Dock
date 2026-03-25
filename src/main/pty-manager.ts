@@ -454,13 +454,24 @@ export class PtyManager {
       this.flushTimer = null
     }
     this.pendingData.clear()
+    const count = this.ptys.size
+    if (count > 0) {
+      log(`pty.killAll: killing ${count} PTY(s)`)
+    }
+    // Kill each PTY individually to ensure shell processes are terminated
+    // even if the host process dies before processing the killAll message
+    for (const [id] of this.ptys) {
+      this.sendToHost({ type: 'kill', terminalId: id })
+    }
     this.sendToHost({ type: 'killAll' })
     this.ptys.clear()
-    // Terminate the host process before unsuppressing to prevent
-    // late exit events from clearing persisted sessions
+    // Terminate the host process — give it a brief moment to process kills
     if (this.host) {
-      this.host.kill()
+      const host = this.host
       this.host = null
+      setTimeout(() => {
+        try { host.kill() } catch { /* already dead */ }
+      }, 200)
     }
     this.suppressSessionChanges = false
   }

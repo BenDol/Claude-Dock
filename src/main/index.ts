@@ -16,6 +16,7 @@ import { enrichPathWithKnownDirs } from './claude-cli'
 import { loadPendingProject, cleanStaleLock } from './pending-project'
 import { refreshContextMenuIfNeeded, autoRegisterContextMenuOnce } from './context-menu-integration'
 import { TelemetryCollector, checkInstallerConsent } from './telemetry'
+import { CrashReporter } from './crash-reporter'
 
 // Set explicit AppUserModelId so Windows groups taskbar icons correctly
 // (must be called before app.whenReady and match electron-builder appId)
@@ -116,16 +117,22 @@ if (!gotLock) {
   app.on('child-process-gone', (_event, details) => {
     logError(`Child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`)
     try { TelemetryCollector.getInstance().recordCrash(`child-process-gone:${details.type}`) } catch { /* ok */ }
+    try { CrashReporter.getInstance().reportChildProcessGone(details) } catch { /* ok */ }
   })
 
   process.on('uncaughtException', (err) => {
     logError('Uncaught exception:', err)
     try { TelemetryCollector.getInstance().recordCrash('uncaughtException') } catch { /* ok */ }
+    try { CrashReporter.getInstance().report('uncaughtException', err) } catch { /* ok */ }
   })
 
   process.on('unhandledRejection', (reason) => {
     logError('Unhandled rejection:', reason)
     try { TelemetryCollector.getInstance().recordCrash('unhandledRejection') } catch { /* ok */ }
+    try {
+      const err = reason instanceof Error ? reason : new Error(String(reason))
+      CrashReporter.getInstance().report('unhandledRejection', err)
+    } catch { /* ok */ }
   })
 
   app.whenReady().then(async () => {
@@ -182,6 +189,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     try { TelemetryCollector.getInstance().flush() } catch (e) { log(`[telemetry] flush error: ${e}`) }
+    try { CrashReporter.getInstance().flush() } catch (e) { log(`[crash-reporter] flush error: ${e}`) }
     try { ActivityTracker.getInstance().shutdown() } catch (e) { log(`ActivityTracker.shutdown error: ${e}`) }
     try { PluginManager.getInstance().dispose() } catch (e) { log(`PluginManager.dispose error: ${e}`) }
     DockManager.getInstance().shutdownAll()

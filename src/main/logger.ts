@@ -42,6 +42,15 @@ export function isDebug(): boolean {
   return debugEnabled
 }
 
+// Lazy import to avoid circular dependency (crash-reporter imports logger)
+let _feedLogLine: ((line: string) => void) | null = null
+function feedCrashReporter(line: string): void {
+  if (!_feedLogLine) {
+    try { _feedLogLine = require('./crash-reporter').feedLogLine } catch { _feedLogLine = () => {} }
+  }
+  _feedLogLine!(line)
+}
+
 function write(level: string, args: unknown[]): void {
   const timestamp = new Date().toISOString()
   const parts = args.map((a) => {
@@ -51,6 +60,8 @@ function write(level: string, args: unknown[]): void {
   })
   const line = `[${timestamp}] [${level}] ${parts.join(' ')}\n`
   logStream?.write(line)
+  // Feed to crash reporter for recent-log context
+  feedCrashReporter(line.trimEnd())
   if (level === 'ERROR') {
     process.stderr.write(line)
   } else if (debugEnabled) {
