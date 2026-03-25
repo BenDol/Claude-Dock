@@ -672,6 +672,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const fit = useCallback(() => fitInner(false), [fitInner])
   // Force fit — always runs (for font/theme changes that need reflow at same size)
   const forceFit = useCallback(() => fitInner(true), [fitInner])
+  // Resize poke — temporarily shrink by 1 col then restore to force ConPTY SIGWINCH.
+  // Used after Claude's TUI starts to make it re-read terminal dimensions.
+  const resizePoke = useCallback(() => {
+    const { cols, rows } = lastDimsRef.current
+    if (cols <= 1 || !termRef.current) return
+    getDockApi().terminal.resize(terminalId, cols - 1, rows)
+    setTimeout(() => {
+      getDockApi().terminal.resize(terminalId, cols, rows)
+    }, 50)
+  }, [terminalId])
 
   // Cleanup
   useEffect(() => {
@@ -746,5 +756,5 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     setAutoScrollActive(false)
   }, [])
 
-  return { initTerminal, fit, forceFit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
+  return { initTerminal, fit, forceFit, resizePoke, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
 }

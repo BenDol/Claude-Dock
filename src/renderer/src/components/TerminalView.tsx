@@ -135,7 +135,7 @@ const TerminalSearchBar: React.FC<{
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, forceFit, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
+  const { initTerminal, fit, forceFit, resizePoke, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
@@ -181,21 +181,26 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     }
   }, [loading, gotDataRef, isResumed])
 
-  // Re-fit after loading dismissed — staggered fits to catch Claude's TUI init
-  // which happens at variable timing after the shell prompt appears.
+  // Re-fit after loading dismissed — staggered fits + resize pokes to catch
+  // Claude's TUI init which happens at variable timing after the shell prompt
+  // appears. The resize poke (shrink by 1 col, restore) forces ConPTY to
+  // deliver SIGWINCH so Claude re-reads the terminal dimensions and redraws.
   const loadingDismissedRef = useRef(false)
   useEffect(() => {
     if (!loading && !loadingDismissedRef.current) {
       loadingDismissedRef.current = true
-      const timers = [150, 500, 1500, 3000, 5000].map((ms) =>
-        setTimeout(() => {
-          forceFit()
-          scrollToBottom()
-        }, ms)
-      )
+      const timers = [
+        // Early: ensure xterm layout is correct
+        setTimeout(() => { forceFit(); scrollToBottom() }, 150),
+        // After Claude TUI starts drawing: poke ConPTY to deliver correct dims
+        setTimeout(resizePoke, 800),
+        setTimeout(resizePoke, 1500),
+        setTimeout(resizePoke, 3000),
+        setTimeout(resizePoke, 5000)
+      ]
       return () => timers.forEach(clearTimeout)
     }
-  }, [loading, forceFit, scrollToBottom])
+  }, [loading, forceFit, resizePoke, scrollToBottom])
 
   // Focus terminal when it becomes the active one — but only if focus is in the grid
   const focusRegion = useDockStore((s) => s.focusRegion)

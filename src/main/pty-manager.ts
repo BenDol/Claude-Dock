@@ -150,13 +150,9 @@ export class PtyManager {
       if (this.ptys.has(terminalId)) {
         this.sendToHost({ type: 'write', terminalId, data: cmd })
 
-        // On Windows, force resize pokes after Claude has had time to start
-        // rendering. This fixes a ConPTY issue where Claude's TUI renders at
-        // the wrong width because it reads terminal dimensions before the
-        // renderer's resize IPC has fully propagated through ConPTY.
-        if (process.platform === 'win32') {
-          this.scheduleResizePoke(terminalId)
-        }
+        // Resize pokes are now handled by the renderer (TerminalView) after
+        // the loading indicator dismisses — they're timed relative to when
+        // Claude's TUI actually starts drawing, not from command launch.
       }
     })
   }
