@@ -261,7 +261,36 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           setShellAreaOpen(true)
         }, 200)
       } else {
-        getDockApi().shell.write(writeShellId, submit ? cmd + '\r' : cmd)
+        // Send Ctrl+C twice to cancel any running process (double for confirmation prompts),
+        // wait for prompt to return, then send the command.
+        // Monitor shell output to verify the command was accepted.
+        const api = getDockApi()
+        api.shell.write(writeShellId, '\x03') // First Ctrl+C
+        setTimeout(() => {
+          api.shell.write(writeShellId, '\x03') // Second Ctrl+C (for confirmation prompts)
+          setTimeout(() => {
+            // Track output to detect if the command started
+            let gotOutput = false
+            const cleanup = api.shell.onData((id, _data) => {
+              if (id === writeShellId) gotOutput = true
+            })
+
+            api.shell.write(writeShellId, submit ? cmd + '\r' : cmd)
+
+            // After 5 seconds, if no output was received the command likely didn't start
+            setTimeout(() => {
+              cleanup()
+              if (!gotOutput && submit) {
+                // Command didn't produce any output — shell may still be busy.
+                // Send another Ctrl+C and retry once.
+                api.shell.write(writeShellId, '\x03')
+                setTimeout(() => {
+                  api.shell.write(writeShellId, submit ? cmd + '\r' : cmd)
+                }, 300)
+              }
+            }, 5000)
+          }, 300)
+        }, 200)
       }
     } else {
       // Shell not open — open with the requested type
