@@ -1838,6 +1838,14 @@
   width: 5px;
 }
 
+/* Sticky wrapper — keeps the "X files changed" header + expanded file list
+   pinned at the top of the scroll container while scrolling through diffs */
+.gm-detail-files-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .gm-detail-files-header {
   padding: 8px 12px;
   font-size: 11px;
@@ -1850,9 +1858,6 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
 }
 
 .gm-detail-files-header:hover {

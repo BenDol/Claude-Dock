@@ -3652,50 +3652,52 @@ const CommitDetailPanel: React.FC<{
         {detail.body && <div className="gm-detail-body">{detail.body}</div>}
       </div>
       <div className="gm-detail-files">
-        <div
-          className={`gm-detail-files-header${fileListExpanded ? ' gm-detail-files-header-expanded' : ''}`}
-          onClick={() => setFileListExpanded((v) => !v)}
-        >
-          <span className="gm-detail-files-toggle">{fileListExpanded ? '\u25BC' : '\u25B6'}</span>
-          {detail.files.length} file{detail.files.length !== 1 ? 's' : ''} changed
-        </div>
-        {fileListExpanded && (
-          <div className="gm-detail-file-list" onMouseLeave={() => setHoveredFileIdx(null)}>
-            {detail.files.map((f, fi) => {
-              let adds = 0, dels = 0
-              for (const h of f.hunks) for (const l of h.lines) {
-                if (l.type === 'add') adds++
-                else if (l.type === 'delete') dels++
-              }
-              const isFocused = focusedFileIdx === fi
-              return (
-                <div
-                  key={f.path}
-                  className={`gm-detail-file-list-item${isFocused ? ' gm-detail-file-list-item-focused' : ''}`}
-                  onMouseEnter={() => setHoveredFileIdx(fi)}
-                  onClick={(e) => {
-                    if (e.ctrlKey || e.metaKey) {
-                      // Ctrl+click: scroll to file without selecting
-                      setScrollToFileIdx(fi)
-                      setFileListExpanded(false)
-                    } else {
-                      // Normal click: toggle focus filter
-                      setFocusedFileIdx(isFocused ? null : fi)
-                    }
-                  }}
-                  onDoubleClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
-                >
-                  <FileStatusBadge status={f.status} />
-                  <EllipsisPath className="gm-detail-file-list-name" text={f.path} />
-                  <span className="gm-diff-file-stats">
-                    {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
-                    {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
-                  </span>
-                </div>
-              )
-            })}
+        <div className="gm-detail-files-sticky">
+          <div
+            className={`gm-detail-files-header${fileListExpanded ? ' gm-detail-files-header-expanded' : ''}`}
+            onClick={() => setFileListExpanded((v) => !v)}
+          >
+            <span className="gm-detail-files-toggle">{fileListExpanded ? '\u25BC' : '\u25B6'}</span>
+            {detail.files.length} file{detail.files.length !== 1 ? 's' : ''} changed
           </div>
-        )}
+          {fileListExpanded && (
+            <div className="gm-detail-file-list" onMouseLeave={() => setHoveredFileIdx(null)}>
+              {detail.files.map((f, fi) => {
+                let adds = 0, dels = 0
+                for (const h of f.hunks) for (const l of h.lines) {
+                  if (l.type === 'add') adds++
+                  else if (l.type === 'delete') dels++
+                }
+                const isFocused = focusedFileIdx === fi
+                return (
+                  <div
+                    key={f.path}
+                    className={`gm-detail-file-list-item${isFocused ? ' gm-detail-file-list-item-focused' : ''}`}
+                    onMouseEnter={() => setHoveredFileIdx(fi)}
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) {
+                        // Ctrl+click: scroll to file without selecting
+                        setScrollToFileIdx(fi)
+                        setFileListExpanded(false)
+                      } else {
+                        // Normal click: toggle focus filter
+                        setFocusedFileIdx(isFocused ? null : fi)
+                      }
+                    }}
+                    onDoubleClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
+                  >
+                    <FileStatusBadge status={f.status} />
+                    <EllipsisPath className="gm-detail-file-list-name" text={f.path} />
+                    <span className="gm-diff-file-stats">
+                      {adds > 0 && <span className="gm-diff-stat-add">+{adds}</span>}
+                      {dels > 0 && <span className="gm-diff-stat-del">-{dels}</span>}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
         {detail.files.map((f, fi) => (
           <LazyDiffFile
             key={f.path}
