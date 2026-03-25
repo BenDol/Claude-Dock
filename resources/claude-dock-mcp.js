@@ -308,8 +308,8 @@ function handleMessage(msg) {
           name: 'dock_read_shell',
           description:
             'Read the recent output from a Claude Dock shell panel. Use this after dock_run_in_shell ' +
-            'to see the command output (test results, build output, etc.). Returns the last 100 lines ' +
-            'of shell output for the specified session.',
+            'to see the command output (test results, build output, etc.). Returns the last N lines ' +
+            'of shell output for the specified session (default 200).',
           inputSchema: {
             type: 'object',
             properties: {
@@ -320,6 +320,10 @@ function handleMessage(msg) {
               shell_id: {
                 type: 'string',
                 description: 'Specific shell panel ID to read (e.g. "shell:term-1-123:0"). If not provided, reads the first (default) shell panel.'
+              },
+              lines: {
+                type: 'number',
+                description: 'Number of lines to return from the end of the output. Default: 200. Max: 500.'
               }
             },
             required: ['session_id']
@@ -512,7 +516,8 @@ function handleMessage(msg) {
         }
 
         case 'dock_read_shell': {
-          const { session_id, shell_id } = args
+          const { session_id, shell_id, lines: maxLines } = args
+          const lineCount = Math.min(Math.max(1, parseInt(maxLines) || 200), 500)
           if (!session_id) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: session_id.' }]
@@ -563,8 +568,11 @@ function handleMessage(msg) {
             const age = Date.now() - (shellEntry.lastUpdate || 0)
             const ageStr = age < 5000 ? 'just now' : age < 60000 ? `${Math.round(age / 1000)}s ago` : `${Math.round(age / 60000)}m ago`
             const shellCount = Object.keys(entry.shells).length
-            const header = `Shell output from ${resolvedShellId} (${shellEntry.lines.length} lines, updated ${ageStr})${shellCount > 1 ? ` [${shellCount} shells available]` : ''}:`
-            const output = shellEntry.lines.join('\n')
+            const totalLines = shellEntry.lines.length
+            const displayLines = shellEntry.lines.slice(-lineCount)
+            const truncated = totalLines > lineCount ? ` (showing last ${lineCount} of ${totalLines})` : ''
+            const header = `Shell output from ${resolvedShellId} (${displayLines.length} lines${truncated}, updated ${ageStr})${shellCount > 1 ? ` [${shellCount} shells available]` : ''}:`
+            const output = displayLines.join('\n')
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `${header}\n\n${output}` }]
             })

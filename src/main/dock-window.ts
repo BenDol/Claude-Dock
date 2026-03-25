@@ -321,7 +321,7 @@ export class DockWindow {
         if (!sessionId) continue
 
         const lines = content.split(/\r?\n/).filter((l) => l.trim())
-        const recentLines = lines.slice(-100)
+        const recentLines = lines.slice(-500)
 
         if (!existing[sessionId]) {
           existing[sessionId] = {
