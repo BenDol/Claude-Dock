@@ -252,8 +252,14 @@ jobs:
               --title "Bleeding Edge Build" \
               --notes "Automated build from the latest commit on \`main\`."
 
-          # Write platform SHA file
-          echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
+          # Write platform SHA file — when force deploy is active, append the run ID
+          # to ensure the SHA differs from the running app's __BUILD_SHA__, even if
+          # the commit hasn't changed. This forces the auto-updater to detect an update.
+          if [ "${{ inputs.force_full_build }}" = "true" ]; then
+            echo "${{ github.sha }}-force-${{ github.run_id }}" > "dist/${{ matrix.platform }}-sha.txt"
+          else
+            echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
+          fi
 
           # Upload main artifacts first, then plugin archives, then SHA files last
           for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/Claude-Dock-win-unpacked.zip; do
