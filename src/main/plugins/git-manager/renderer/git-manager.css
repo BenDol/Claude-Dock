@@ -1845,6 +1845,7 @@
   top: 0;
   z-index: 3;
   background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .gm-detail-files-header {
@@ -1874,7 +1875,6 @@
 .gm-detail-file-list {
   max-height: 300px;
   overflow-y: auto;
-  border-bottom: 1px solid var(--border-color);
   background: var(--bg-primary);
 }
 
