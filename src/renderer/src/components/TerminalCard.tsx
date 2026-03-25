@@ -240,8 +240,10 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     if (!isTarget) return
     setPendingShellCommand(null)
 
-    // Determine which shell ID to write to
-    const writeShellId = targetShellId || `shell:${terminalId}:0`
+    // Determine which shell ID to write to.
+    // Ignore stale shell IDs from previous sessions that reference a different terminal.
+    const defaultShellId = `shell:${terminalId}:0`
+    const writeShellId = (targetShellId && targetShellId.includes(terminalId)) ? targetShellId : defaultShellId
 
     if (shellAreaOpen) {
       // Shell already open — if the requested shell type matches (or none specified),

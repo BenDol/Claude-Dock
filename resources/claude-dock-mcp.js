@@ -462,8 +462,9 @@ function handleMessage(msg) {
 
             fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
 
-            // Resolve the shell ID and log file path for the response
-            let resolvedShellId = shell_id || null
+            // Only return shell ID and log path if they already exist — don't predict.
+            // Stale data from previous sessions caused shell commands to silently fail.
+            let resolvedShellId = null
             let logFile = null
             if (session_id) {
               try {
@@ -471,25 +472,29 @@ function handleMessage(msg) {
                 const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
                 if (sessionEntry && sessionEntry.shells) {
                   const shellIds = Object.keys(sessionEntry.shells).sort()
-                  if (!resolvedShellId) resolvedShellId = shellIds[0] || null
-                  if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
-                    logFile = sessionEntry.shells[resolvedShellId].logFile || null
+                  const targetId = shell_id || shellIds[0] || null
+                  if (targetId && sessionEntry.shells[targetId]) {
+                    // Verify the shell ID references a terminal from the current session
+                    const ageMs = Date.now() - (sessionEntry.shells[targetId].lastUpdate || 0)
+                    if (ageMs < 5 * 60 * 1000) { // only if updated within last 5 minutes
+                      resolvedShellId = targetId
+                      logFile = sessionEntry.shells[targetId].logFile || null
+                    }
                   }
                 }
               } catch { /* shell output file may not exist yet */ }
-
-              // Predict log file path if not found (shell hasn't been created yet)
-              if (!logFile) {
-                const shellIndex = resolvedShellId ? resolvedShellId.split(':').pop() || '0' : '0'
-                logFile = path.join(dataDir, `dock-shell-${session_id.slice(0, 8)}-${shellIndex}.log`)
-              }
             }
 
             const parts = [`Command sent to dock shell: ${command}`]
-            if (resolvedShellId) parts.push(`Shell ID: ${resolvedShellId}`)
-            else if (session_id) parts.push(`Shell will be created for session ${session_id.slice(0, 8)}`)
-            if (logFile) parts.push(`Output log: ${logFile}`)
-            parts.push('You can read the shell output using the Read tool on the log file path above, or use dock_read_shell with your session_id.')
+            if (resolvedShellId) {
+              parts.push(`Shell ID: ${resolvedShellId}`)
+            }
+            if (logFile) {
+              parts.push(`Output log: ${logFile}`)
+              parts.push('You can read the shell output using the Read tool on the log file path, or use dock_read_shell with your session_id.')
+            } else {
+              parts.push('The shell panel will open automatically. Use dock_read_shell with your session_id to read the output once the command completes.')
+            }
 
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: parts.join('\n') }]
