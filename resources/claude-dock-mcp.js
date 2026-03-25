@@ -299,6 +299,10 @@ function handleMessage(msg) {
                 type: 'string',
                 enum: ['default', 'bash', 'cmd', 'powershell', 'pwsh'],
                 description: 'Shell type to use. Use "bash" for bash/shell scripts, "cmd" for Windows batch, "powershell"/"pwsh" for PowerShell scripts. Default: uses the user\'s configured shell.'
+              },
+              shell_id: {
+                type: 'string',
+                description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). If not provided, commands go to the default (first) shell panel. Use dock_list_shells to discover available shell IDs.'
               }
             },
             required: ['command']
@@ -418,7 +422,7 @@ function handleMessage(msg) {
         }
 
         case 'dock_run_in_shell': {
-          const { command, project_dir, session_id, submit, shell } = args
+          const { command, project_dir, session_id, submit, shell, shell_id } = args
           if (!command) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: command.' }]
@@ -439,6 +443,7 @@ function handleMessage(msg) {
               command,
               projectDir: resolvedProjectDir,
               sessionId: session_id || null,
+              shellId: shell_id || null, // target specific shell panel, null = default (first)
               submit: submit !== false, // default true
               shell: shell || null, // null = use configured default
               timestamp: Date.now()
@@ -457,8 +462,25 @@ function handleMessage(msg) {
 
             fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
 
+            // Resolve the shell ID for the response — check existing shells or predict the default ID
+            let resolvedShellId = shell_id || null
+            if (!resolvedShellId && session_id) {
+              try {
+                const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
+                const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
+                if (sessionEntry && sessionEntry.shells) {
+                  const shellIds = Object.keys(sessionEntry.shells).sort()
+                  resolvedShellId = shellIds[0] || null
+                }
+              } catch { /* shell output file may not exist yet */ }
+            }
+
+            const parts = [`Command sent to dock shell: ${command}`]
+            if (resolvedShellId) parts.push(`Shell ID: ${resolvedShellId}`)
+            else if (session_id) parts.push(`Shell will be created for session ${session_id.slice(0, 8)}`)
+
             return jsonRpcResponse(id, {
-              content: [{ type: 'text', text: `Command sent to dock shell: ${command}` }]
+              content: [{ type: 'text', text: parts.join('\n') }]
             })
           } catch (err) {
             return jsonRpcResponse(id, {

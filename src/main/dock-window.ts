@@ -258,8 +258,9 @@ export class DockWindow {
               targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
             }
             const shellType = cmd.shell || null
-            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'}, shell=${shellType || 'default'})`)
-            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId, shellType)
+            const targetShellId = cmd.shellId || null
+            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'}, shell=${shellType || 'default'}, shellId=${targetShellId || 'default'})`)
+            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId, shellType, targetShellId)
           }
         }
 

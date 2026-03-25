@@ -233,19 +233,22 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [shellTypeOverride, setShellTypeOverride] = useState<string | null>(null)
   useEffect(() => {
     if (!pendingShellCommand) return
-    const { command: cmd, submit, targetTerminalId, shellType } = pendingShellCommand
+    const { command: cmd, submit, targetTerminalId, shellType, targetShellId } = pendingShellCommand
     // If a specific terminal is targeted, only that terminal handles it
     // Otherwise fall back to the focused terminal
     const isTarget = targetTerminalId ? targetTerminalId === terminalId : isFocused
     if (!isTarget) return
     setPendingShellCommand(null)
 
+    // Determine which shell ID to write to
+    const writeShellId = targetShellId || `shell:${terminalId}:0`
+
     if (shellAreaOpen) {
       // Shell already open — if the requested shell type matches (or none specified),
       // write the command directly. Only kill+reopen if the type is explicitly different.
       const needsRespawn = shellType && shellTypeOverride !== shellType && shellType !== 'default'
       if (needsRespawn) {
-        getDockApi().shell.kill(`shell:${terminalId}:0`)
+        getDockApi().shell.kill(writeShellId)
         setShellAreaOpen(false)
         setShellAreaMounted(false)
         setTimeout(() => {
@@ -256,7 +259,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           setShellAreaOpen(true)
         }, 200)
       } else {
-        getDockApi().shell.write(`shell:${terminalId}:0`, submit ? cmd + '\r' : cmd)
+        getDockApi().shell.write(writeShellId, submit ? cmd + '\r' : cmd)
       }
     } else {
       // Shell not open — open with the requested type
