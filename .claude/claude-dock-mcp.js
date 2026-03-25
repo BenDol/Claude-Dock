@@ -307,6 +307,11 @@ function handleMessage(msg) {
               shell_id: {
                 type: 'string',
                 description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). Special values: omit/null = open a NEW shell panel; "-1" = use the first existing shell (default/reuse). Use dock_list_shells to discover available shell IDs.'
+              },
+              shell_layout: {
+                type: 'string',
+                enum: ['split', 'stack'],
+                description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "stack".'
               }
             },
             required: ['command']
@@ -452,7 +457,7 @@ function handleMessage(msg) {
         }
 
         case 'dock_run_in_shell': {
-          const { command, project_dir, session_id, submit, shell, shell_id } = args
+          const { command, project_dir, session_id, submit, shell, shell_id, shell_layout } = args
           if (!command) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: command.' }]
@@ -482,6 +487,7 @@ function handleMessage(msg) {
               sessionId: session_id || null,
               // null = new panel (renderer creates one), "__first__" = use default shell:0
               shellId: useFirstShell ? '__first__' : (shell_id || null),
+              shellLayout: shell_layout || null, // 'split' or 'stack', null = default (stack)
               submit: submit !== false, // default true
               shell: shell || null, // null = use configured default
               timestamp: Date.now()

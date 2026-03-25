@@ -301,10 +301,10 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   // (or the focused terminal if no target is specified)
   const [shellSubmitCommand, setShellSubmitCommand] = useState(true)
   const [shellTypeOverride, setShellTypeOverride] = useState<string | null>(null)
-  const [newShellCommand, setNewShellCommand] = useState<{ command: string; submit?: boolean; shellType?: string | null } | null>(null)
+  const [newShellCommand, setNewShellCommand] = useState<{ command: string; submit?: boolean; shellType?: string | null; layout?: 'split' | 'stack' | null } | null>(null)
   useEffect(() => {
     if (!pendingShellCommand) return
-    const { command: cmd, submit, targetTerminalId, shellType, targetShellId } = pendingShellCommand
+    const { command: cmd, submit, targetTerminalId, shellType, targetShellId, shellLayout } = pendingShellCommand
     // If a specific terminal is targeted, only that terminal handles it
     // Otherwise fall back to the focused terminal
     const isTarget = targetTerminalId ? targetTerminalId === terminalId : isFocused
@@ -319,7 +319,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     if (shellAreaOpen && !effectiveShellId) {
       // No shell_id specified and shell area already open — open a NEW shell panel
       // instead of clobbering the existing one.
-      setNewShellCommand({ command: cmd, submit, shellType })
+      setNewShellCommand({ command: cmd, submit, shellType, layout: shellLayout })
       return
     }
 

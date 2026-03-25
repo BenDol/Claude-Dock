@@ -89,7 +89,7 @@ export interface DockApi {
     kill: (shellId: string) => Promise<void>
     onData: (callback: (shellId: string, data: string) => void) => () => void
     onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
-    onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null, shellType: string | null, targetShellId: string | null) => void) => () => void
+    onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null, shellType: string | null, targetShellId: string | null, shellLayout: 'split' | 'stack' | null) => void) => () => void
   }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
@@ -378,7 +378,7 @@ const dockApi: DockApi = {
       return () => ipcRenderer.removeListener(IPC.SHELL_EXIT, handler)
     },
     onRunCommand: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, command: string, submit?: boolean, targetTerminalId?: string | null, shellType?: string | null, targetShellId?: string | null) => callback(command, submit ?? true, targetTerminalId ?? null, shellType ?? null, targetShellId ?? null)
+      const handler = (_event: Electron.IpcRendererEvent, command: string, submit?: boolean, targetTerminalId?: string | null, shellType?: string | null, targetShellId?: string | null, shellLayout?: 'split' | 'stack' | null) => callback(command, submit ?? true, targetTerminalId ?? null, shellType ?? null, targetShellId ?? null, shellLayout ?? null)
       ipcRenderer.on(IPC.SHELL_RUN_COMMAND, handler)
       return () => ipcRenderer.removeListener(IPC.SHELL_RUN_COMMAND, handler)
     }

@@ -259,8 +259,9 @@ export class DockWindow {
             }
             const shellType = cmd.shell || null
             const targetShellId = cmd.shellId || null
-            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'}, shell=${shellType || 'default'}, shellId=${targetShellId || 'default'})`)
-            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId, shellType, targetShellId)
+            const shellLayout = cmd.shellLayout || null
+            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'}, shell=${shellType || 'default'}, shellId=${targetShellId || 'default'}, layout=${shellLayout || 'default'})`)
+            this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId, shellType, targetShellId, shellLayout)
           }
         }
 

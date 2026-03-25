@@ -12,6 +12,8 @@ interface ShellPanelProps {
   onClose: () => void
   onSplitRight?: () => void
   onStackBelow?: () => void
+  onMoveToSplit?: () => void
+  onMoveToStack?: () => void
   initialCommand?: string | null
   /** If false, type the command without pressing Enter. Default: true */
   submitCommand?: boolean
@@ -20,7 +22,7 @@ interface ShellPanelProps {
   label?: string
 }
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, initialCommand, submitCommand = true, shellType, label }) => {
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label }) => {
   const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
@@ -187,6 +189,28 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
               </div>
             )}
           </div>
+        )}
+        {onMoveToSplit && (
+          <button
+            className="shell-panel-action"
+            onClick={(e) => { e.stopPropagation(); onMoveToSplit() }}
+            title="Move to split (own column)"
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <rect x="1" y="1" width="4" height="10" rx="1" /><rect x="7" y="1" width="4" height="10" rx="1" />
+            </svg>
+          </button>
+        )}
+        {onMoveToStack && (
+          <button
+            className="shell-panel-action"
+            onClick={(e) => { e.stopPropagation(); onMoveToStack() }}
+            title="Move to stack (merge with neighbor)"
+          >
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <rect x="1" y="1" width="10" height="4" rx="1" /><rect x="1" y="7" width="10" height="4" rx="1" />
+            </svg>
+          </button>
         )}
         <button
           className={`shell-panel-action${linked ? ' shell-panel-action-linked' : ''}`}
