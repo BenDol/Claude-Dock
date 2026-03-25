@@ -1749,10 +1749,36 @@ body {
   background: var(--bg-tertiary);
 }
 
+.worktree-delete-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-radius: 2px;
+  transition: color 0.1s, opacity 0.1s;
+}
+
+.worktree-popover-item:hover .worktree-delete-btn {
+  opacity: 1;
+}
+
+.worktree-delete-btn:hover {
+  color: #f7768e;
+  background: rgba(247, 118, 142, 0.1);
+}
+
 .worktree-popover-branch {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  cursor: pointer;
 }
 
 .worktree-popover-divider {

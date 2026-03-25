@@ -595,10 +595,29 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   <>
                     <div className="worktree-popover-label">Existing Worktrees</div>
                     {worktrees.filter(wt => !wt.isMain).map(wt => (
-                      <button key={wt.path} className="worktree-popover-item" onClick={() => handleSelectWorktree(wt.path)} title={wt.path}>
-                        <span className="worktree-popover-branch">{wt.branch || wt.head}</span>
+                      <div key={wt.path} className="worktree-popover-item" title={wt.path}>
+                        <span className="worktree-popover-branch" onClick={() => handleSelectWorktree(wt.path)}>{wt.branch || wt.head}</span>
                         {wt.path === worktreePath && <span style={{ fontSize: 9, color: 'var(--accent-color)', marginLeft: 4 }}>active</span>}
-                      </button>
+                        <button
+                          className="worktree-delete-btn"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (!confirm(`Delete worktree "${wt.branch || wt.head}"?\n\nThis will remove the directory:\n${wt.path}`)) return
+                            const api = getDockApi()
+                            const r = await api.gitManager.removeWorktree(projectDir, wt.path, true)
+                            if (r.success) {
+                              setWorktrees(prev => prev.filter(w => w.path !== wt.path))
+                            } else {
+                              alert(`Failed to remove worktree: ${r.error || 'Unknown error'}`)
+                            }
+                          }}
+                          title="Delete worktree"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                            <line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" />
+                          </svg>
+                        </button>
+                      </div>
                     ))}
                     <div className="worktree-popover-divider" />
                   </>
