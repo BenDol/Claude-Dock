@@ -28,77 +28,61 @@ import * as path from 'path'
 // Concurrency & busy guard tests
 //
 // These tests verify that:
-// 1. Concurrent git operations on the same repo cause index.lock errors
+// 1. gitExec recovers from stale lock files automatically (retry logic)
 // 2. Sequential (serialized) operations complete without lock conflicts
 // 3. The busy guard pattern correctly blocks/allows operations
 // 4. Recovery from lock file errors works
 // ============================================================
 
-describe('concurrent git operations cause lock file errors', () => {
+describe('gitExec retries and recovers from stale lock files', () => {
   let repo: TestRepo
 
   beforeEach(() => { repo = createTestRepo() })
   afterEach(() => { repo.cleanup() })
 
-  it('parallel git write operations race on index.lock', async () => {
-    // Set up repo with files to stage
+  it('stageFiles succeeds despite stale lock file (gitExec removes and retries)', async () => {
     commitFile(repo.cwd, 'a.txt', 'a', 'add a')
-    commitFile(repo.cwd, 'b.txt', 'b', 'add b')
     writeFile(repo.cwd, 'a.txt', 'modified-a')
-    writeFile(repo.cwd, 'b.txt', 'modified-b')
 
-    // Create a lock file to simulate a concurrent git process holding the lock
+    // Create a stale lock file — gitExec should remove it and retry
     const lockPath = path.join(repo.cwd, '.git', 'index.lock')
     fs.writeFileSync(lockPath, '')
 
-    // Any git write operation should fail when lock exists
-    try {
-      await stageFiles(repo.cwd, ['a.txt'])
-      expect.unreachable('should have thrown due to lock file')
-    } catch (err: any) {
-      const msg = err.message || String(err)
-      expect(msg).toMatch(/index\.lock|another git process/i)
-    }
+    await stageFiles(repo.cwd, ['a.txt'])
 
-    // Cleanup lock so afterEach cleanup works
-    fs.unlinkSync(lockPath)
+    // Lock should be cleaned up and file staged
+    expect(fs.existsSync(lockPath)).toBe(false)
+    const status = await getStatus(repo.cwd)
+    expect(status.staged.map(f => f.path)).toContain('a.txt')
   })
 
-  it('stash fails when lock file exists (simulates race with refresh)', async () => {
+  it('stashSave succeeds despite stale lock file', async () => {
     commitFile(repo.cwd, 'file.txt', 'original', 'init')
     writeFile(repo.cwd, 'file.txt', 'dirty')
 
-    // Simulate a concurrent git process holding the lock (like refresh() running)
     const lockPath = path.join(repo.cwd, '.git', 'index.lock')
     fs.writeFileSync(lockPath, '')
 
-    try {
-      await stashSave(repo.cwd, 'should-fail')
-      expect.unreachable('should have thrown due to lock file')
-    } catch (err: any) {
-      const msg = err.message || String(err)
-      expect(msg).toMatch(/index\.lock|another git process/i)
-    }
+    await stashSave(repo.cwd, 'recovered')
 
-    fs.unlinkSync(lockPath)
+    expect(fs.existsSync(lockPath)).toBe(false)
+    const list = await getStashList(repo.cwd)
+    expect(list.length).toBe(1)
+    expect(list[0].message).toContain('recovered')
   })
 
-  it('checkout fails when lock file exists', async () => {
+  it('checkoutBranch succeeds despite stale lock file', async () => {
     commitFile(repo.cwd, 'file.txt', 'content', 'init')
     run(repo.cwd, 'git', ['branch', 'feature'])
 
     const lockPath = path.join(repo.cwd, '.git', 'index.lock')
     fs.writeFileSync(lockPath, '')
 
-    try {
-      await checkoutBranch(repo.cwd, 'feature')
-      expect.unreachable('should have thrown due to lock file')
-    } catch (err: any) {
-      const msg = err.message || String(err)
-      expect(msg).toMatch(/index\.lock|another git process/i)
-    }
+    await checkoutBranch(repo.cwd, 'feature')
 
-    fs.unlinkSync(lockPath)
+    expect(fs.existsSync(lockPath)).toBe(false)
+    const status = await getStatus(repo.cwd)
+    expect(status.branch).toBe('feature')
   })
 })
 
@@ -146,28 +130,17 @@ describe('serialized operations complete without lock conflicts', () => {
     expect(stashes.length).toBe(1)
   })
 
-  it('remove lock then retry succeeds (recovery flow)', async () => {
+  it('stash with stale lock succeeds via gitExec retry (recovery flow)', async () => {
     commitFile(repo.cwd, 'file.txt', 'original', 'init')
     writeFile(repo.cwd, 'file.txt', 'dirty')
 
-    // Simulate stale lock from crashed process
+    // Simulate stale lock from crashed process — gitExec removes and retries
     const lockPath = path.join(repo.cwd, '.git', 'index.lock')
     fs.writeFileSync(lockPath, '')
 
-    // Stash fails
-    try {
-      await stashSave(repo.cwd, 'should-fail')
-      expect.unreachable('should have thrown')
-    } catch {
-      // expected
-    }
-
-    // Remove lock file then retry — simulates the resolution action
-    await removeLockFile(repo.cwd)
-    expect(fs.existsSync(lockPath)).toBe(false)
-
-    // Now stash succeeds
     await stashSave(repo.cwd, 'recovered')
+
+    expect(fs.existsSync(lockPath)).toBe(false)
     const list = await getStashList(repo.cwd)
     expect(list.length).toBe(1)
     expect(list[0].message).toContain('recovered')

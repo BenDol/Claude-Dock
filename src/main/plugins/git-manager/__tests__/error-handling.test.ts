@@ -620,25 +620,18 @@ describe('lock file recovery', () => {
     await removeLockFile(repo.cwd)
   })
 
-  it('git operations fail when lock file exists', async () => {
+  it('git operations recover from stale lock file via gitExec retry', async () => {
     commitFile(repo.cwd, 'file.txt', 'content', 'init')
     writeFile(repo.cwd, 'file.txt', 'changed')
 
-    // Create a stale lock file
+    // Create a stale lock file — gitExec should remove it and retry
     const lockPath = path.join(repo.cwd, '.git', 'index.lock')
     fs.writeFileSync(lockPath, '')
 
-    try {
-      await stageFiles(repo.cwd, ['file.txt'])
-      expect.unreachable('should have thrown')
-    } catch (err: any) {
-      const msg = err.message || String(err)
-      expect(msg).toMatch(/index\.lock|another git process/i)
-    }
-
-    // Remove lock and retry should work
-    await removeLockFile(repo.cwd)
     await stageFiles(repo.cwd, ['file.txt'])
+
+    // Lock should be cleaned up and file staged
+    expect(fs.existsSync(lockPath)).toBe(false)
     const status = await getStatus(repo.cwd)
     expect(status.staged.map(f => f.path)).toContain('file.txt')
   })
