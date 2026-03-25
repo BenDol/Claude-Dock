@@ -349,6 +349,32 @@ function handleMessage(msg) {
             },
             required: []
           }
+        },
+        {
+          name: 'dock_check_shell_events',
+          description:
+            'Check for structured events emitted by scripts running in the Dock shell panel. ' +
+            'Events are embedded as ##DOCK_EVENT:type:payload## markers in the shell output. ' +
+            'Use this to detect compile errors, hot swap results, server start/stop events, etc. ' +
+            'Returns only events, not the full shell output.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: {
+                type: 'string',
+                description: 'Your session ID to check events for.'
+              },
+              shell_id: {
+                type: 'string',
+                description: 'Target shell panel ID. If omitted, uses the default (first) shell.'
+              },
+              last_n: {
+                type: 'number',
+                description: 'Only scan the last N lines of output for events. Default: 50.'
+              }
+            },
+            required: ['session_id']
+          }
         }
       ]
 
@@ -620,6 +646,75 @@ function handleMessage(msg) {
           } catch (err) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `No shell output available: ${err.message || err}` }]
+            })
+          }
+        }
+
+        case 'dock_check_shell_events': {
+          const { session_id, shell_id, last_n } = args
+          if (!session_id) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameter: session_id.' }]
+            })
+          }
+
+          try {
+            const data = readShellOutput()
+            const sessionEntry = data[session_id] || data[Object.keys(data).find(k => k.startsWith(session_id)) || '']
+            if (!sessionEntry || !sessionEntry.shells) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: 'No shell output found for this session.' }]
+              })
+            }
+
+            // Resolve shell ID
+            const shellIds = Object.keys(sessionEntry.shells).sort()
+            const targetShellId = shell_id || shellIds[shellIds.length - 1] || null
+            if (!targetShellId || !sessionEntry.shells[targetShellId]) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: `Shell ${shell_id || '(default)'} not found. Available: ${shellIds.join(', ')}` }]
+              })
+            }
+
+            // Read log file for this shell
+            const logFile = sessionEntry.shells[targetShellId].logFile
+            if (!logFile) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: 'No log file available for this shell.' }]
+              })
+            }
+
+            const logContent = fs.readFileSync(logFile, 'utf8')
+            const lines = logContent.split('\n')
+            const scanLines = lines.slice(-(last_n || 50))
+
+            // Parse ##DOCK_EVENT:type:payload## markers
+            const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/
+            const events = []
+            for (const line of scanLines) {
+              const match = line.match(eventPattern)
+              if (match) {
+                try {
+                  events.push({ type: match[1], payload: JSON.parse(match[2]), raw: line.trim() })
+                } catch {
+                  events.push({ type: match[1], payload: match[2], raw: line.trim() })
+                }
+              }
+            }
+
+            if (events.length === 0) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: 'No events found in recent shell output.' }]
+              })
+            }
+
+            const formatted = events.map(e => `[${e.type}] ${JSON.stringify(e.payload)}`).join('\n')
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Found ${events.length} event(s):\n${formatted}` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to check shell events: ${err.message || err}` }]
             })
           }
         }
