@@ -176,9 +176,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
       ])
       setWorktrees(wts)
       // Include all branches (local + remote) — worktrees can be created from any.
-      // Filter out remote HEAD entries (e.g. "origin" without a branch path).
       const allBranches = brs
-        .filter((b: any) => !b.remote || (b.name as string).includes('/'))
         .map((b: any) => ({
           name: b.name as string,
           displayName: b.remote ? (b.name as string).replace(/^[^/]+\//, '') : b.name as string,
@@ -198,10 +196,13 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           deduped.push(b)
         }
       }
-      // Exclude branches that already have a worktree
-      const wtBranches = new Set(wts.map((w: any) => w.branch))
+      // Exclude branches that already have a non-main worktree (the main worktree
+      // is the project itself — its branch should still be available for new worktrees)
+      const wtBranches = new Set(wts.filter((w: any) => !w.isMain).map((w: any) => w.branch))
       setBranches(deduped.filter((b) => !wtBranches.has(b.displayName)).map((b) => ({ name: b.name, current: b.current })))
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[worktree] failed to load branches/worktrees:', err)
+    }
     setWtLoading(false)
   }, [projectDir])
 

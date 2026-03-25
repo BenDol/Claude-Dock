@@ -35,6 +35,18 @@ const DockGrid: React.FC = () => {
     return () => observer.disconnect()
   }, [setContainerSize])
 
+  // When terminals are added/removed, the grid layout changes — dispatch a refit
+  // event after the layout settles so all terminals (including new ones) resize properly.
+  const prevCountRef = useRef(terminals.length)
+  useEffect(() => {
+    if (terminals.length !== prevCountRef.current) {
+      prevCountRef.current = terminals.length
+      // Staggered re-fits: grid layout needs time to settle after adding/removing a cell
+      setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 200)
+      setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 600)
+    }
+  }, [terminals.length])
+
   const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
   const totalGap = gapSize * (rows - 1)
   const rowHeight = Math.floor((containerHeight - totalGap) / rows)

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 /**
- * claude-dock MCP Server
+ * claude-dock MCP Server — SOURCE OF TRUTH
+ *
+ * This is the canonical copy. The file at .claude/claude-dock-mcp.js is an
+ * exported copy that gets bundled into the Electron app's resources/ at build
+ * time and deployed alongside user projects. Keep both files in sync.
  *
  * Standalone MCP server (zero dependencies) that reads terminal activity
  * from Claude Dock's shared state file and exposes it via MCP tools.
@@ -302,7 +306,7 @@ function handleMessage(msg) {
               },
               shell_id: {
                 type: 'string',
-                description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). If not provided, commands go to the default (first) shell panel. Use dock_list_shells to discover available shell IDs.'
+                description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). Special values: omit/null = open a NEW shell panel; "-1" = use the first existing shell (default/reuse). Use dock_list_shells to discover available shell IDs.'
               }
             },
             required: ['command']
@@ -463,13 +467,21 @@ function handleMessage(msg) {
           }
 
           try {
+            // shell_id behavior:
+            //   null/omitted = open a NEW shell panel
+            //   "-1"         = reuse the first existing shell (default panel)
+            //   "<id>"       = target a specific shell panel by ID
+            const useFirstShell = shell_id === '-1'
+            const resolvedCommandShellId = useFirstShell ? null : (shell_id || null)
+
             // Write command to the shared file for the dock to pick up
             const entry = {
               id: crypto.randomUUID(),
               command,
               projectDir: resolvedProjectDir,
               sessionId: session_id || null,
-              shellId: shell_id || null, // target specific shell panel, null = default (first)
+              // null = new panel (renderer creates one), "__first__" = use default shell:0
+              shellId: useFirstShell ? '__first__' : (shell_id || null),
               submit: submit !== false, // default true
               shell: shell || null, // null = use configured default
               timestamp: Date.now()
@@ -490,16 +502,18 @@ function handleMessage(msg) {
 
             // Resolve the shell ID and log file path for the response.
             // Check if the shell exists and is still active (updated recently).
-            let resolvedShellId = shell_id || null
+            let resolvedShellId = resolvedCommandShellId
             let logFile = null
             let shellActive = false
+            const creatingNewShell = !shell_id
             if (session_id) {
               try {
                 const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
                 const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
                 if (sessionEntry && sessionEntry.shells) {
                   const shellIds = Object.keys(sessionEntry.shells).sort()
-                  if (!resolvedShellId) resolvedShellId = shellIds[0] || null
+                  // For -1 (first shell), resolve to the first known shell
+                  if (useFirstShell && !resolvedShellId) resolvedShellId = shellIds[0] || null
                   if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
                     logFile = sessionEntry.shells[resolvedShellId].logFile || null
                     const ageMs = Date.now() - (sessionEntry.shells[resolvedShellId].lastUpdate || 0)
@@ -513,12 +527,14 @@ function handleMessage(msg) {
             if (resolvedShellId) {
               parts.push(`Shell ID: ${resolvedShellId}`)
               parts.push(`Shell status: ${shellActive ? 'active' : 'stale (may reopen)'}`)
+            } else if (creatingNewShell) {
+              parts.push('Opening new shell panel (no shell_id specified).')
             }
             if (logFile) {
               parts.push(`Output log: ${logFile}`)
               parts.push('You can read the shell output using the Read tool on the log file path, or use dock_read_shell with your session_id.')
             } else {
-              parts.push('The shell panel will open automatically. Use dock_read_shell with your session_id to read the output once the command completes.')
+              parts.push('The shell panel will open automatically. Use dock_list_shells to discover the new shell ID, then dock_read_shell to read its output.')
             }
 
             return jsonRpcResponse(id, {
