@@ -1605,6 +1605,8 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  /* Match xterm's background so the gap below the last row is invisible */
+  background: var(--term-bg, #1a1b26);
 }
 
 /* Bottom-left toggle button to open shell panel */
