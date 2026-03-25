@@ -1843,7 +1843,7 @@
 .gm-detail-files-sticky {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 3;
   background: var(--bg-primary);
 }
 
@@ -1930,7 +1930,7 @@
   font-family: var(--term-font-family);
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 1;
 }
 
 .gm-diff-file-path {
