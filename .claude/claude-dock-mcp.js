@@ -462,22 +462,34 @@ function handleMessage(msg) {
 
             fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
 
-            // Resolve the shell ID for the response — check existing shells or predict the default ID
+            // Resolve the shell ID and log file path for the response
             let resolvedShellId = shell_id || null
-            if (!resolvedShellId && session_id) {
+            let logFile = null
+            if (session_id) {
               try {
                 const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
                 const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
                 if (sessionEntry && sessionEntry.shells) {
                   const shellIds = Object.keys(sessionEntry.shells).sort()
-                  resolvedShellId = shellIds[0] || null
+                  if (!resolvedShellId) resolvedShellId = shellIds[0] || null
+                  if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
+                    logFile = sessionEntry.shells[resolvedShellId].logFile || null
+                  }
                 }
               } catch { /* shell output file may not exist yet */ }
+
+              // Predict log file path if not found (shell hasn't been created yet)
+              if (!logFile) {
+                const shellIndex = resolvedShellId ? resolvedShellId.split(':').pop() || '0' : '0'
+                logFile = path.join(dataDir, `dock-shell-${session_id.slice(0, 8)}-${shellIndex}.log`)
+              }
             }
 
             const parts = [`Command sent to dock shell: ${command}`]
             if (resolvedShellId) parts.push(`Shell ID: ${resolvedShellId}`)
             else if (session_id) parts.push(`Shell will be created for session ${session_id.slice(0, 8)}`)
+            if (logFile) parts.push(`Output log: ${logFile}`)
+            parts.push('You can read the shell output using the Read tool on the log file path above, or use dock_read_shell with your session_id.')
 
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: parts.join('\n') }]
@@ -516,7 +528,8 @@ function handleMessage(msg) {
                 const lineCount = shell.lines ? shell.lines.length : 0
                 const age = Date.now() - (shell.lastUpdate || 0)
                 const ageStr = age < 5000 ? 'just now' : age < 60000 ? `${Math.round(age / 1000)}s ago` : `${Math.round(age / 60000)}m ago`
-                sections.push(`  - ${shellId} (${lineCount} lines, updated ${ageStr})`)
+                const logPath = shell.logFile ? `  Log: ${shell.logFile}` : ''
+                sections.push(`  - ${shellId} (${lineCount} lines, updated ${ageStr})${logPath}`)
               }
               sections.push('')
             }
@@ -593,10 +606,12 @@ function handleMessage(msg) {
             const totalLines = shellEntry.lines.length
             const displayLines = shellEntry.lines.slice(-lineCount)
             const truncated = totalLines > lineCount ? ` (showing last ${lineCount} of ${totalLines})` : ''
+            const logFilePath = shellEntry.logFile || null
             const header = `Shell output from ${resolvedShellId} (${displayLines.length} lines${truncated}, updated ${ageStr})${shellCount > 1 ? ` [${shellCount} shells available]` : ''}:`
+            const logHint = logFilePath ? `\nLog file: ${logFilePath}` : ''
             const output = displayLines.join('\n')
             return jsonRpcResponse(id, {
-              content: [{ type: 'text', text: `${header}\n\n${output}` }]
+              content: [{ type: 'text', text: `${header}${logHint}\n\n${output}` }]
             })
           } catch (err) {
             return jsonRpcResponse(id, {

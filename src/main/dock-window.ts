@@ -333,8 +333,18 @@ export class DockWindow {
             lastUpdate: Date.now()
           }
         }
+
+        // Write individual log file per shell for direct file reading by Claude
+        const shellIndex = shellId.split(':').pop() || '0'
+        const logFileName = `dock-shell-${sessionId.slice(0, 8)}-${shellIndex}.log`
+        const logFilePath = path.join(app.getPath('userData'), logFileName)
+        try {
+          fs.writeFileSync(logFilePath, recentLines.join('\n') + '\n')
+        } catch { /* ignore write errors */ }
+
         existing[sessionId].shells[shellId] = {
           lines: recentLines,
+          logFile: logFilePath,
           lastUpdate: Date.now()
         }
         existing[sessionId].lastUpdate = Date.now()
