@@ -135,7 +135,7 @@ const TerminalSearchBar: React.FC<{
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
+  const { initTerminal, fit, forceFit, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
@@ -189,12 +189,12 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
     if (!loading && !loadingDismissedRef.current) {
       loadingDismissedRef.current = true
       const timer = setTimeout(() => {
-        fit()
+        forceFit()
         scrollToBottom()
       }, 150)
       return () => clearTimeout(timer)
     }
-  }, [loading, fit, scrollToBottom])
+  }, [loading, forceFit, scrollToBottom])
 
   // Focus terminal when it becomes the active one — but only if focus is in the grid
   const focusRegion = useDockStore((s) => s.focusRegion)

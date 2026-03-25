@@ -397,9 +397,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       const { cols, rows } = term
       getDockApi().terminal.resize(terminalId, cols, rows)
 
-      // Seed the dimension/size refs so subsequent fit() calls can detect changes
+      // Seed dims ref but NOT container size ref — the container may not have its
+      // final size yet (grid layout still settling). Leave lastContainerSizeRef at
+      // {0,0} so the first ResizeObserver callback triggers a proper fit.
       lastDimsRef.current = { cols, rows }
-      lastContainerSizeRef.current = { w: container.clientWidth, h: container.clientHeight }
 
       termRef.current = term
       fitAddonRef.current = fitAddon
@@ -681,11 +682,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }, 50)
   }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId, forceFit])
 
-  // Re-fit after grid reposition — only scroll to bottom if user wasn't scrolled up
+  // Re-fit after grid reposition — force fit since container size always changes
   useEffect(() => {
     const handler = () => {
       if (termRef.current) {
-        fit()
+        forceFit()
         if (!scrolledUpRef.current) {
           termRef.current.scrollToBottom()
         }
@@ -693,7 +694,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }
     window.addEventListener('terminals-repositioned', handler)
     return () => window.removeEventListener('terminals-repositioned', handler)
-  }, [fit])
+  }, [forceFit])
 
   const focus = useCallback(() => {
     if (termRef.current) {
@@ -723,5 +724,5 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     setAutoScrollActive(false)
   }, [])
 
-  return { initTerminal, fit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
+  return { initTerminal, fit, forceFit, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
 }
