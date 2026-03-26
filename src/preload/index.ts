@@ -81,6 +81,7 @@ export interface DockApi {
     syncOrder: (terminalIds: string[]) => Promise<void>
     respawn: (terminalId: string, sessionId: string) => Promise<boolean>
     listSessions: (count?: number) => Promise<{ sessionId: string; timestamp: number; summary: string }[]>
+    popClosedSession: () => Promise<string | null>
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
   }
@@ -353,6 +354,7 @@ const dockApi: DockApi = {
     syncOrder: (terminalIds) => ipcRenderer.invoke(IPC.TERMINAL_SYNC_ORDER, terminalIds),
     respawn: (terminalId, sessionId) => ipcRenderer.invoke(IPC.TERMINAL_RESPAWN, terminalId, sessionId),
     listSessions: (count) => ipcRenderer.invoke(IPC.TERMINAL_LIST_SESSIONS, count),
+    popClosedSession: () => ipcRenderer.invoke(IPC.TERMINAL_POP_CLOSED_SESSION),
     onData: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, terminalId: string, data: string) => {
         callback(terminalId, data)

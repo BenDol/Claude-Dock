@@ -811,11 +811,11 @@ function DockApp() {
     addTerminal(id)
   }, [addTerminal])
 
-  const handleAddTerminalWithSessionId = useCallback(() => {
-    const sessionId = window.prompt('Enter a Claude session ID to resume:')
-    if (!sessionId || !sessionId.trim()) return
+  const handleRestoreLastClosed = useCallback(async () => {
+    const sessionId = await getDockApi().terminal.popClosedSession()
+    if (!sessionId) return
     const id = `term-${nextTermId++}-${Date.now()}`
-    useDockStore.getState().setManualResumeId(id, sessionId.trim())
+    useDockStore.getState().setManualResumeId(id, sessionId)
     addTerminal(id)
   }, [addTerminal])
 
@@ -848,7 +848,7 @@ function DockApp() {
       <Toolbar
         projectDir={projectDir}
         onAddTerminal={handleAddTerminal}
-        onAddTerminalWithSessionId={handleAddTerminalWithSessionId}
+        onRestoreLastClosed={handleRestoreLastClosed}
         onAddTerminalWithSession={handleAddTerminalWithSession}
         onOpenSettings={() => setShowSettings(true)}
       />

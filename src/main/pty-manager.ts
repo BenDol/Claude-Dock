@@ -26,6 +26,7 @@ export class PtyManager {
   private launchQueue: (() => void)[] = []
   private launching = false
   private suppressSessionChanges = false
+  private closedSessionStack: string[] = []
   // Data batching to reduce IPC overhead
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
@@ -346,6 +347,10 @@ export class PtyManager {
     return Array.from(this.ptys.values())
   }
 
+  popClosedSession(): string | null {
+    return this.closedSessionStack.pop() ?? null
+  }
+
   /** Find the terminal ID for a given session ID (exact or prefix match) */
   findTerminalBySessionId(sessionId: string): string | null {
     for (const [id, pty] of this.ptys) {
@@ -428,6 +433,11 @@ export class PtyManager {
 
   kill(terminalId: string): void {
     if (this.ptys.has(terminalId)) {
+      const instance = this.ptys.get(terminalId)!
+      // Push to closed-session stack if it was a real, interacted session
+      if (!terminalId.startsWith('shell:') && !this.ephemeralIds.has(terminalId) && this.interactedIds.has(terminalId)) {
+        this.closedSessionStack.push(instance.sessionId)
+      }
       const watcher = this.resumeWatchers.get(terminalId)
       if (watcher) {
         clearTimeout(watcher.timer)

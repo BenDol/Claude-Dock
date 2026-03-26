@@ -14,7 +14,7 @@ import { sanitizeSvg } from '../lib/svg-sanitize'
 interface ToolbarProps {
   projectDir: string
   onAddTerminal: () => void
-  onAddTerminalWithSessionId: () => void
+  onRestoreLastClosed: () => void
   onAddTerminalWithSession: (sessionId: string) => void
   onOpenSettings: () => void
 }
@@ -105,7 +105,7 @@ const FolderIcon: React.FC = () => (
 )
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddTerminalWithSessionId, onAddTerminalWithSession, onOpenSettings }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreLastClosed, onAddTerminalWithSession, onOpenSettings }) => {
   const toolbarRef = useRef<HTMLDivElement>(null)
   useToolbarNavigation(toolbarRef)
 
@@ -406,7 +406,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddTermi
       <div className="toolbar-center" />
       <div className="toolbar-right">
         <div className="toolbar-add-group">
-          <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-resume" onClick={onAddTerminalWithSessionId} title="Resume a session by ID">
+          <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-resume" onClick={onRestoreLastClosed} title="Restore last closed terminal">
             <ResumeIcon />
           </button>
           <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">

@@ -9,6 +9,7 @@ export const IPC = {
   TERMINAL_SYNC_ORDER: 'terminal:syncOrder',
   TERMINAL_RESPAWN: 'terminal:respawn',
   TERMINAL_LIST_SESSIONS: 'terminal:listSessions',
+  TERMINAL_POP_CLOSED_SESSION: 'terminal:popClosedSession',
   // Shell panel PTY (embedded non-Claude shell per terminal)
   SHELL_SPAWN: 'shell:spawn',
   SHELL_WRITE: 'shell:write',

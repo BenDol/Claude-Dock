@@ -86,6 +86,11 @@ export function registerIpcHandlers(): void {
     return dock?.ptyManager.getSessionId(terminalId) ?? null
   })
 
+  ipcMain.handle(IPC.TERMINAL_POP_CLOSED_SESSION, (event) => {
+    const dock = getDockForEvent(event)
+    return dock?.ptyManager.popClosedSession() ?? null
+  })
+
   // Respawn a terminal with a different session (kill old PTY, spawn new one with resumeId)
   ipcMain.handle(IPC.TERMINAL_RESPAWN, (event, terminalId: string, sessionId: string) => {
     const dock = getDockForEvent(event)
