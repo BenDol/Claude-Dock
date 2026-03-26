@@ -511,6 +511,10 @@ body {
   padding-left: 0;
   padding-right: 0;
   transform: scale(0.9);
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: max-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
 }
 .toolbar-add-resume svg {
