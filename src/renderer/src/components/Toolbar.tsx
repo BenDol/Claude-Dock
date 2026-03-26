@@ -409,20 +409,20 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
           <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-resume" onClick={onRestoreLastClosed} title="Restore last closed terminal">
             <ResumeIcon />
           </button>
+          <button
+            ref={sessionBtnRef}
+            data-toolbar-btn
+            tabIndex={-1}
+            className="toolbar-btn toolbar-btn-icon toolbar-add-resume"
+            onClick={openSessionBrowser}
+            title="Browse recent sessions"
+          >
+            <HistoryIcon />
+          </button>
           <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
             <PlusIcon />
           </button>
         </div>
-        <button
-          ref={sessionBtnRef}
-          data-toolbar-btn
-          tabIndex={-1}
-          className="toolbar-btn toolbar-btn-icon"
-          onClick={openSessionBrowser}
-          title="Browse recent sessions"
-        >
-          <HistoryIcon />
-        </button>
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
             data-toolbar-btn
