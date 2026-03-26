@@ -37,7 +37,7 @@ const shellCommandsFile = path.join(dataDir, 'dock-shell-commands.json')
 const shellOutputFile = path.join(dataDir, 'dock-shell-output.json')
 
 const MESSAGE_TTL = 3600000 // 1 hour
-const pendingEventsFile = path.join(dockDataDir, 'dock-pending-events.json')
+const pendingEventsFile = path.join(dataDir, 'dock-pending-events.json')
 
 // JSON-RPC helpers
 
