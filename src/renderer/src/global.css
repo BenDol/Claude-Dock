@@ -510,7 +510,12 @@ body {
   opacity: 0;
   padding-left: 0;
   padding-right: 0;
+  transform: scale(0.9);
   transition: max-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+}
+.toolbar-add-resume svg {
+  width: calc(var(--toolbar-icon-size) * 0.9);
+  height: calc(var(--toolbar-icon-size) * 0.9);
 }
 .toolbar-add-group:hover .toolbar-add-resume,
 .toolbar-add-group:focus-within .toolbar-add-resume {
