@@ -12,6 +12,7 @@ import type {
   GitFileDiff,
   GitStashEntry,
   GitSubmoduleInfo,
+  GitWorktreeInfo,
   GitMergeState,
   GitConflictFileContent,
   GitConflictChunk,
@@ -551,6 +552,8 @@ const GitManagerApp: React.FC = () => {
   const [status, setStatus] = useState<GitStatusResult | null>(null)
   const [submodules, setSubmodules] = useState<GitSubmoduleInfo[]>([])
   const [submodulesLoading, setSubmodulesLoading] = useState(false)
+  const [worktrees, setWorktrees] = useState<GitWorktreeInfo[]>([])
+  const [worktreesLoading, setWorktreesLoading] = useState(false)
   const [stashes, setStashes] = useState<GitStashEntry[]>([])
   const [tags, setTags] = useState<{ name: string; hash: string; date: string }[]>([])
   const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
@@ -866,6 +869,7 @@ const GitManagerApp: React.FC = () => {
   const refreshGenRef = useRef(0)
   const initialLoadRef = useRef(true)
   const submoduleGenRef = useRef(0)
+  const worktreeGenRef = useRef(0)
   const lastRefreshRef = useRef(0)
   const lastFetchRef = useRef(0)
   const refresh = useCallback(async () => {
@@ -911,6 +915,17 @@ const GitManagerApp: React.FC = () => {
         }
       }).catch(() => {
         if (subGen === submoduleGenRef.current) setSubmodulesLoading(false)
+      })
+      // Worktrees — also non-blocking, load after main data
+      const wtGen = ++worktreeGenRef.current
+      setWorktreesLoading(true)
+      api.gitManager.listWorktrees(activeDir).then((data: GitWorktreeInfo[]) => {
+        if (wtGen === worktreeGenRef.current) {
+          setWorktrees(data.filter(wt => !wt.isMain && !wt.isPrunable))
+          setWorktreesLoading(false)
+        }
+      }).catch(() => {
+        if (wtGen === worktreeGenRef.current) setWorktreesLoading(false)
       })
       // Auto-switch to conflicts tab if merge is in progress with conflicts
       if (mergeData.inProgress && mergeData.conflicts.length > 0) {
@@ -1288,6 +1303,8 @@ const GitManagerApp: React.FC = () => {
     setStatus(null)
     setSubmodules([])
     setSubmodulesLoading(false)
+    setWorktrees([])
+    setWorktreesLoading(false)
     setStashes([])
     setTags([])
     setSelectedCommit(null)
@@ -1397,6 +1414,13 @@ const GitManagerApp: React.FC = () => {
     wcBusyRef.current = false
     resetRepoState()
     setActiveDir(activeDir + '/' + sub.path)
+  }, [activeDir, resetRepoState])
+
+  const navigateToWorktree = useCallback((wt: GitWorktreeInfo) => {
+    setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    wcBusyRef.current = false
+    resetRepoState()
+    setActiveDir(wt.path)
   }, [activeDir, resetRepoState])
 
   const navigateBack = useCallback(() => {
@@ -1647,6 +1671,25 @@ const GitManagerApp: React.FC = () => {
               onRefresh={refresh}
             />
           </CollapsibleSection>
+          {(worktrees.length > 0 || worktreesLoading) && (
+            <CollapsibleSection title="Worktrees" count={worktrees.length} loading={worktreesLoading}>
+              {worktrees.map(wt => (
+                <WorktreeSidebarItem key={wt.path} worktree={wt} onNavigate={navigateToWorktree} onRemove={(wtPath) => {
+                  setConfirmModal({
+                    title: 'Remove worktree',
+                    message: (<p>Remove worktree <strong>{wt.branch || wtPath}</strong>?<br /><span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{wtPath}</span></p>),
+                    confirmLabel: 'Remove',
+                    danger: true,
+                    onConfirm: async () => {
+                      const r = await getDockApi().gitManager.removeWorktree(activeDir, wtPath, true)
+                      if (!r.success) setError(r.error || 'Remove worktree failed')
+                      refresh()
+                    }
+                  })
+                }} />
+              ))}
+            </CollapsibleSection>
+          )}
           <CollapsibleSection title="Tags" count={tags.length} defaultCollapsed>
             <VirtualSidebarList itemCount={tags.length}>
               {(startIdx, endIdx) => tags.slice(startIdx, endIdx).map((t) => (
@@ -8945,6 +8988,98 @@ const SubmoduleTreeNodeView: React.FC<{
         <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} depth={depth + 1} parentPath={folderPath} />
       ))}
     </>
+  )
+}
+
+// --- Worktree sidebar item ---
+
+const WorktreeIcon: React.FC = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: 6 }}>
+    <line x1="12" y1="22" x2="12" y2="10" />
+    <polyline points="6 4 12 10 18 4" />
+    <line x1="12" y1="10" x2="12" y2="2" />
+  </svg>
+)
+
+const WorktreeSidebarItem: React.FC<{
+  worktree: GitWorktreeInfo
+  onNavigate: (wt: GitWorktreeInfo) => void
+  onRemove: (path: string) => void
+}> = ({ worktree, onNavigate, onRemove }) => {
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const dirName = worktree.path.split(/[/\\]/).pop() || worktree.path
+  const tooltip = [
+    worktree.branch ? `Branch: ${worktree.branch}` : `HEAD: ${worktree.head}`,
+    worktree.path,
+    worktree.hasDirtyWorkTree ? 'Has uncommitted changes' : null,
+    'Double-click to open worktree'
+  ].filter(Boolean).join('\n')
+
+  return (
+    <>
+      <div
+        className="gm-sidebar-item gm-sidebar-item-worktree"
+        onDoubleClick={() => onNavigate(worktree)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          const zoom = parseFloat(document.documentElement.style.zoom) || 1
+          setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
+        }}
+        title={tooltip}
+        style={{ paddingLeft: 22 }}
+      >
+        <WorktreeIcon />
+        <span className="gm-branch-name">
+          {worktree.branch || dirName}
+          {worktree.branch && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({dirName})</span>}
+        </span>
+        <span className="gm-submodule-indicators">
+          {worktree.changeCount != null && worktree.changeCount > 0 && (
+            <span className="gm-badge gm-badge-submodule-changes" title={`${worktree.changeCount} working change${worktree.changeCount > 1 ? 's' : ''}`}>
+              {worktree.changeCount}
+            </span>
+          )}
+          {worktree.hasDirtyWorkTree && (
+            <span className="gm-submodule-dirty" title="Has uncommitted changes">
+              <SubmoduleDirtyIcon />
+            </span>
+          )}
+        </span>
+      </div>
+      {ctxMenu && (
+        <WorktreeContextMenu x={ctxMenu.x} y={ctxMenu.y} worktree={worktree} onNavigate={onNavigate} onRemove={onRemove} onClose={() => setCtxMenu(null)} />
+      )}
+    </>
+  )
+}
+
+const WorktreeContextMenu: React.FC<{
+  x: number; y: number
+  worktree: GitWorktreeInfo
+  onNavigate: (wt: GitWorktreeInfo) => void
+  onRemove: (path: string) => void
+  onClose: () => void
+}> = ({ x, y, worktree, onNavigate, onRemove, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div className="gm-ctx-item" onClick={() => { onNavigate(worktree); onClose() }}>
+        Open worktree
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item gm-ctx-item-danger" onClick={() => { onRemove(worktree.path); onClose() }}>
+        Remove worktree
+      </div>
+    </div>
   )
 }
 

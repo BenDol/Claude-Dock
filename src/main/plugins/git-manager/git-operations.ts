@@ -22,7 +22,8 @@ import type {
   GitSearchOptions,
   GitSearchResponse,
   GitSearchResult,
-  SearchResultSource
+  SearchResultSource,
+  GitWorktreeInfo
 } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 
@@ -2257,13 +2258,7 @@ export async function continueMerge(cwd: string): Promise<void> {
 
 // --- Git Worktrees ---
 
-export interface GitWorktreeInfo {
-  path: string
-  branch: string
-  head: string
-  isMain: boolean
-  isBare: boolean
-}
+// GitWorktreeInfo is imported from shared/git-manager-types
 
 export async function listWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
   try {
@@ -2282,6 +2277,8 @@ export async function listWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
         current.branch = line.slice(7).trim().replace(/^refs\/heads\//, '')
       } else if (line === 'bare') {
         current.isBare = true
+      } else if (line.trim() === 'prunable') {
+        current.isPrunable = true
       } else if (line === '') {
         // Empty line separates entries
       }
@@ -2290,6 +2287,19 @@ export async function listWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
 
     // First worktree is always the main one
     if (worktrees.length > 0) worktrees[0].isMain = true
+
+    // Enrich non-main, non-prunable worktrees with status info
+    const enrichable = worktrees.filter(wt => !wt.isMain && !wt.isPrunable && !wt.isBare)
+    await Promise.all(enrichable.map(async (wt) => {
+      try {
+        const { stdout: statusOut } = await gitExec(wt.path, ['status', '--porcelain'], 5000)
+        const lines = statusOut.split('\n').filter(l => l.trim())
+        wt.changeCount = lines.length
+        wt.hasDirtyWorkTree = lines.length > 0
+      } catch {
+        // Worktree may be broken/locked — skip status
+      }
+    }))
 
     getServices().log(`[git-manager] listWorktrees: found ${worktrees.length} worktree(s) for ${cwd}`)
     return worktrees

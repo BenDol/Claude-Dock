@@ -94,6 +94,18 @@ export interface GitSubmoduleInfo {
   trackingBranch?: string // branch configured in .gitmodules
 }
 
+/** Worktree info */
+export interface GitWorktreeInfo {
+  path: string
+  branch: string
+  head: string
+  isMain: boolean
+  isBare: boolean
+  isPrunable?: boolean
+  changeCount?: number
+  hasDirtyWorkTree?: boolean
+}
+
 /** Conflicted file entry */
 export interface GitConflictEntry {
   path: string
