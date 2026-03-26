@@ -81,6 +81,49 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
         // Falls back to DOM renderer
       }
 
+      // Clickable URL links — click to open in browser
+      const urlRe = /https?:\/\/[^\s"'<>[\]{}|\\^`]+/g
+      term.registerLinkProvider({
+        provideLinks(lineNumber, callback) {
+          const line = term.buffer.active.getLine(lineNumber - 1)
+          if (!line) { callback(undefined); return }
+          const text = line.translateToString(true)
+          urlRe.lastIndex = 0
+          const links: { startIndex: number; url: string }[] = []
+          let match: RegExpExecArray | null
+          while ((match = urlRe.exec(text)) !== null) {
+            let url = match[0]
+            while (url.length > 0 && /[),.:;!?]$/.test(url)) url = url.slice(0, -1)
+            links.push({ startIndex: match.index, url })
+          }
+          if (links.length === 0) { callback(undefined); return }
+          callback(links.map((l) => ({
+            range: {
+              start: { x: l.startIndex + 1, y: lineNumber },
+              end: { x: l.startIndex + l.url.length + 1, y: lineNumber }
+            },
+            text: l.url,
+            decorations: { pointerCursor: true, underline: true },
+            activate() {
+              getDockApi().app.openExternal(l.url)
+            }
+          })))
+        }
+      })
+
+      // Track Ctrl key for link cursor styling
+      const termElement = term.element
+      if (termElement) {
+        const updateCtrl = (e: KeyboardEvent) => {
+          if (e.key === 'Control' || e.key === 'Meta') {
+            termElement.classList.toggle('ctrl-held', e.type === 'keydown')
+          }
+        }
+        window.addEventListener('keydown', updateCtrl)
+        window.addEventListener('keyup', updateCtrl)
+        window.addEventListener('blur', () => termElement.classList.remove('ctrl-held'))
+      }
+
       fitAddon.fit()
       const { cols, rows } = term
       getDockApi().shell.resize(shellId, cols, rows)
