@@ -95,6 +95,7 @@ export const IPC = {
   GIT_MGR_PULL: 'gitMgr:pull',
   GIT_MGR_PUSH: 'gitMgr:push',
   GIT_MGR_PUSH_FORCE_WITH_LEASE: 'gitMgr:pushForceWithLease',
+  GIT_MGR_CANCEL_PUSH: 'gitMgr:cancelPush',
   GIT_MGR_FETCH: 'gitMgr:fetch',
   GIT_MGR_STASH_LIST: 'gitMgr:stashList',
   GIT_MGR_STASH_SAVE: 'gitMgr:stashSave',

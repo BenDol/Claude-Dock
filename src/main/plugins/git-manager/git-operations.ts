@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, spawn, type ChildProcess } from 'child_process'
 import * as http from 'http'
 import * as https from 'https'
 import * as fs from 'fs'
@@ -1064,7 +1064,90 @@ export async function pullAdvanced(
 // Push/pull timeout: 5 minutes — LFS uploads of large files can take a while
 const REMOTE_OP_TIMEOUT = 300000
 
-export async function push(cwd: string): Promise<string> {
+export interface PushProgress {
+  phase: string      // e.g. 'Enumerating objects', 'Writing objects'
+  percent: number    // 0-100
+  detail: string     // full line from git
+}
+
+/** Active push process — stored so it can be cancelled */
+let activePushProcess: ChildProcess | null = null
+
+/**
+ * Spawn git with streaming stderr for progress.
+ * Returns a promise that resolves with combined output on success.
+ */
+function gitPushStreaming(
+  cwd: string,
+  args: string[],
+  onProgress?: (progress: PushProgress) => void,
+  timeout = REMOTE_OP_TIMEOUT
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('git', args, { cwd, timeout: timeout as any })
+    activePushProcess = proc
+    let stdout = ''
+    let stderr = ''
+    let killed = false
+
+    proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stderr += text
+
+      if (!onProgress) return
+      // Parse git progress lines (they use \r for in-place updates)
+      for (const line of text.split(/[\r\n]+/)) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        // Match: "Phase: NN% (X/Y), ..." or "Phase: NN%"
+        const match = trimmed.match(/^(.+?):\s+(\d+)%/)
+        if (match) {
+          onProgress({
+            phase: match[1].trim(),
+            percent: parseInt(match[2], 10),
+            detail: trimmed
+          })
+        }
+      }
+    })
+
+    const timer = setTimeout(() => {
+      killed = true
+      proc.kill()
+      reject(new Error(`git push timed out after ${timeout / 1000}s`))
+    }, timeout)
+
+    proc.on('close', (code) => {
+      clearTimeout(timer)
+      activePushProcess = null
+      if (killed) return
+      if (code === 0) {
+        resolve((stdout + stderr).trim())
+      } else {
+        const err = new Error(`Command failed: git ${args.join(' ')}\n${stderr.trim()}`)
+        reject(err)
+      }
+    })
+
+    proc.on('error', (err) => {
+      clearTimeout(timer)
+      activePushProcess = null
+      reject(err)
+    })
+  })
+}
+
+export function cancelPush(): boolean {
+  if (activePushProcess) {
+    activePushProcess.kill()
+    activePushProcess = null
+    return true
+  }
+  return false
+}
+
+export async function push(cwd: string, onProgress?: (progress: PushProgress) => void): Promise<string> {
   // If the current branch has no upstream, push with --set-upstream to origin
   try {
     const { stdout: trackOut } = await gitExec(cwd, [
@@ -1076,17 +1159,14 @@ export async function push(cwd: string): Promise<string> {
     const { stdout: branchOut } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
     const branch = branchOut.trim()
     if (branch && branch !== 'HEAD') {
-      const { stdout, stderr } = await gitExec(cwd, ['push', '--set-upstream', 'origin', branch], REMOTE_OP_TIMEOUT)
-      return (stdout + stderr).trim()
+      return gitPushStreaming(cwd, ['push', '--progress', '--set-upstream', 'origin', branch], onProgress)
     }
   }
-  const { stdout, stderr } = await gitExec(cwd, ['push'], REMOTE_OP_TIMEOUT)
-  return (stdout + stderr).trim()
+  return gitPushStreaming(cwd, ['push', '--progress'], onProgress)
 }
 
-export async function pushForceWithLease(cwd: string): Promise<string> {
-  const { stdout, stderr } = await gitExec(cwd, ['push', '--force-with-lease'], REMOTE_OP_TIMEOUT)
-  return (stdout + stderr).trim()
+export async function pushForceWithLease(cwd: string, onProgress?: (progress: PushProgress) => void): Promise<string> {
+  return gitPushStreaming(cwd, ['push', '--progress', '--force-with-lease'], onProgress)
 }
 
 export async function fetch(cwd: string): Promise<string> {

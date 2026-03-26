@@ -191,9 +191,14 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_PUSH, async (_event, projectDir: string) => {
+  ipcMain.handle(IPC.GIT_MGR_PUSH, async (event, projectDir: string) => {
     try {
-      const output = await gitOps.push(projectDir)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const output = await gitOps.push(projectDir, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('git-manager:push-progress', progress)
+        }
+      })
       return { success: true, output }
     } catch (err) {
       getServices().logError('[git-manager] push failed:', err)
@@ -201,14 +206,23 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, async (_event, projectDir: string) => {
+  ipcMain.handle(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, async (event, projectDir: string) => {
     try {
-      const output = await gitOps.pushForceWithLease(projectDir)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const output = await gitOps.pushForceWithLease(projectDir, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('git-manager:push-progress', progress)
+        }
+      })
       return { success: true, output }
     } catch (err) {
       getServices().logError('[git-manager] push --force-with-lease failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Force push failed' }
     }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CANCEL_PUSH, () => {
+    return { cancelled: gitOps.cancelPush() }
   })
 
   ipcMain.handle(IPC.GIT_MGR_FETCH, async (_event, projectDir: string) => {

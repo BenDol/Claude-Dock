@@ -1152,12 +1152,21 @@ const GitManagerApp: React.FC = () => {
     return origin ? detectProvider(origin.fetchUrl) : 'generic'
   }, [remotes])
   const [pushing, setPushing] = useState(false)
+  const [pushProgress, setPushProgress] = useState<{ phase: string; percent: number; detail: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [checkingOutBranch, setCheckingOutBranch] = useState<string | null>(null)
+
+  // Listen for push progress from the main process
+  useEffect(() => {
+    return getDockApi().gitManager.onPushProgress((progress) => {
+      setPushProgress(progress)
+    })
+  }, [])
 
   const handlePush = useCallback(async () => {
     if (pushing) return
     setPushing(true)
+    setPushProgress(null)
     try {
       const api = getDockApi()
       const result = await api.gitManager.push(activeDir)
@@ -1174,8 +1183,13 @@ const GitManagerApp: React.FC = () => {
       refresh()
     } finally {
       setPushing(false)
+      setPushProgress(null)
     }
   }, [activeDir, refresh, pushing, showActionError])
+
+  const handleCancelPush = useCallback(() => {
+    getDockApi().gitManager.cancelPush()
+  }, [])
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
@@ -1484,9 +1498,28 @@ const GitManagerApp: React.FC = () => {
             onOpenDialog={handleOpenPullDialog}
           />
           {currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
-            <button className="gm-toolbar-btn" onClick={handlePush} title={!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`} disabled={pushing}>
-              {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />} {!currentBranch.tracking ? 'Publish' : 'Push'}{currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}{currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
-            </button>
+            <div className="gm-push-btn-wrap">
+              <button
+                className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
+                onClick={pushing ? handleCancelPush : handlePush}
+                title={pushing
+                  ? (pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
+                  : (!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
+              >
+                {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
+                {pushing ? 'Cancel' : (!currentBranch.tracking ? 'Publish' : 'Push')}
+                {!pushing && currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
+                {!pushing && currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
+              </button>
+              {pushing && (
+                <div className="gm-push-progress-bar-wrap">
+                  <div
+                    className="gm-push-progress-bar-fill"
+                    style={{ width: pushProgress ? `${pushProgress.percent}%` : undefined }}
+                  />
+                </div>
+              )}
+            </div>
           ) : (
             <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
               <ChangesIcon /> Changes{countStageableChanges(status) > 0 ? <span className="gm-toolbar-count gm-toolbar-count-changes">{countStageableChanges(status)}</span> : null}
@@ -1507,7 +1540,6 @@ const GitManagerApp: React.FC = () => {
             <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
           </div>
         </div>
-        {pushing && <div className="gm-push-progress"><div className="gm-push-progress-bar" /></div>}
       </div>
 
       {error && (
