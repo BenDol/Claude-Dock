@@ -142,9 +142,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [shellAreaMounted, setShellAreaMounted] = useState(false)
   const [shellInitialCommand, setShellInitialCommand] = useState<string | null>(null)
   const worktreePath = useDockStore((s) => s.terminalWorktrees.get(terminalId))
+  const pendingWorktreeBranch = useDockStore((s) => s.pendingWorktrees.get(terminalId))
   const projectDir = useDockStore((s) => s.projectDir)
   const addTerminal = useDockStore((s) => s.addTerminal)
   const setTerminalWorktree = useDockStore((s) => s.setTerminalWorktree)
+  const setPendingWorktree = useDockStore((s) => s.setPendingWorktree)
   const [worktreePopover, setWorktreePopover] = useState(false)
   const [worktreePos, setWorktreePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean }[]>([])
@@ -217,29 +219,41 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
 
   const handleCreateWorktree = useCallback(async (branch: string) => {
     setWorktreePopover(false)
+
+    // Immediately create a terminal card with a loading indicator.
+    // The PTY spawn is deferred until pendingWorktrees is cleared.
+    const nextId = `term-${Date.now()}-wt`
+    setPendingWorktree(nextId, branch)
+    addTerminal(nextId)
+
     const api = getDockApi()
     try {
       const result = await api.gitManager.addWorktree(projectDir, branch)
       if (result.success && result.path) {
-        spawnWorktreeTerminal(result.path)
+        // Worktree ready — set the real path and clear pending so spawn proceeds
+        setTerminalWorktree(nextId, result.path)
+        setPendingWorktree(nextId, null)
       } else if (result.error) {
         // If worktree already exists, try to use it directly
         if (result.error.includes('already exists')) {
-          // Re-list worktrees to find the existing one for this branch
           const wts = await api.gitManager.listWorktrees(projectDir)
           const strippedBranch = branch.replace(/^[^/]+\//, '')
           const existing = wts.find((w: any) => w.branch === strippedBranch || w.branch === branch)
           if (existing) {
-            spawnWorktreeTerminal(existing.path)
+            setTerminalWorktree(nextId, existing.path)
+            setPendingWorktree(nextId, null)
             return
           }
         }
+        // Failed — remove the placeholder terminal
+        useDockStore.getState().removeTerminal(nextId)
         alert(`Failed to create worktree: ${result.error}`)
       }
     } catch (e) {
+      useDockStore.getState().removeTerminal(nextId)
       alert(`Failed to create worktree: ${e instanceof Error ? e.message : String(e)}`)
     }
-  }, [projectDir, spawnWorktreeTerminal])
+  }, [projectDir, addTerminal, setTerminalWorktree, setPendingWorktree])
 
   const handleSelectWorktree = useCallback((wtPath: string) => {
     setWorktreePopover(false)
@@ -499,7 +513,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                 <ShellIcon />
               </button>
             )}
-            <button ref={wtBtnRef} className={`worktree-toggle-bottom${worktreePath ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : 'Start a git worktree'}>
+            <button ref={wtBtnRef} className={`worktree-toggle-bottom${worktreePath || pendingWorktreeBranch ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : pendingWorktreeBranch ? `Creating worktree (${pendingWorktreeBranch.replace(/^[^/]+\//, '')})...` : 'Start a git worktree'}>
               <WorktreeIcon />
             </button>
           </div>

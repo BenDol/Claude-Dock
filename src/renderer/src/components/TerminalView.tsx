@@ -140,6 +140,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
   const isResumed = useDockStore((s) => s.resumedTerminals.has(terminalId))
+  const pendingWorktreeBranch = useDockStore((s) => s.pendingWorktrees.get(terminalId))
   const showScrollBtn = useSettingsStore((s) => s.settings.terminal.scrollToBottom)
 
   // Sync loading state to store
@@ -234,10 +235,10 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
 
   return (
     <div className="terminal-view-wrapper">
-      {loading && (
+      {(loading || pendingWorktreeBranch) && (
         <div className="terminal-loading">
           <div className="terminal-spinner" />
-          <span>{isResumed ? 'Resuming session...' : 'Starting claude...'}</span>
+          <span>{pendingWorktreeBranch ? `Creating worktree (${pendingWorktreeBranch.replace(/^[^/]+\//, '')})...` : isResumed ? 'Resuming session...' : 'Starting claude...'}</span>
         </div>
       )}
       {searchOpen && (
@@ -249,7 +250,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
       )}
       <div
         className="terminal-view"
-        style={loading ? { opacity: 0, pointerEvents: 'none' } : undefined}
+        style={loading || pendingWorktreeBranch ? { opacity: 0, pointerEvents: 'none' } : undefined}
         ref={terminalRef}
         onClick={() => {
           useDockStore.getState().setFocusedTerminal(terminalId)

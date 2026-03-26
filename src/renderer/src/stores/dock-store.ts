@@ -28,6 +28,8 @@ interface DockState {
   pendingShellCommand: { command: string; submit: boolean; targetTerminalId: string | null; shellType: string | null; targetShellId: string | null; shellLayout: 'split' | 'stack' | null } | null
   /** Maps terminal ID → git worktree path (terminals working from a worktree) */
   terminalWorktrees: Map<string, string>
+  /** Maps terminal ID → branch name for terminals waiting on worktree creation */
+  pendingWorktrees: Map<string, string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -50,6 +52,7 @@ interface DockState {
   markTerminalResumed: (id: string) => void
   setPendingShellCommand: (command: { command: string; submit: boolean; targetTerminalId: string | null; shellType: string | null; targetShellId: string | null; shellLayout: 'split' | 'stack' | null } | null) => void
   setTerminalWorktree: (id: string, worktreePath: string | null) => void
+  setPendingWorktree: (id: string, branch: string | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -70,6 +73,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   resumedTerminals: new Set<string>(),
   pendingShellCommand: null,
   terminalWorktrees: new Map<string, string>(),
+  pendingWorktrees: new Map<string, string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -104,7 +108,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       claudeTaskFlags.delete(id)
       const claudePersistentTaskTerminals = new Set(state.claudePersistentTaskTerminals)
       claudePersistentTaskTerminals.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals }
+      const pendingWorktrees = new Map(state.pendingWorktrees)
+      pendingWorktrees.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -213,5 +219,15 @@ export const useDockStore = create<DockState>((set, get) => ({
       terminalWorktrees.delete(id)
     }
     return { terminalWorktrees }
+  }),
+
+  setPendingWorktree: (id, branch) => set((state) => {
+    const pendingWorktrees = new Map(state.pendingWorktrees)
+    if (branch) {
+      pendingWorktrees.set(id, branch)
+    } else {
+      pendingWorktrees.delete(id)
+    }
+    return { pendingWorktrees }
   })
 }))

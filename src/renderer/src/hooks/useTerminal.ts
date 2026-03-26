@@ -247,52 +247,76 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const themeAccent = useSettingsStore((s) => s.settings.theme.accentColor)
   const termStyle = useSettingsStore((s) => s.settings.theme.terminalStyle)
 
-  // Spawn PTY immediately on mount (before terminal is created)
-  useEffect(() => {
-    if (!spawnedRef.current) {
-      spawnedRef.current = true
-      const state = useDockStore.getState()
-      const isTask = state.claudeTaskTerminals.has(terminalId)
-      const ephemeral = isTask && !state.claudePersistentTaskTerminals.has(terminalId)
-      const taskFlags = state.claudeTaskFlags.get(terminalId)
+  // Helper to spawn the PTY for this terminal
+  const doSpawn = useCallback(() => {
+    const state = useDockStore.getState()
+    const isTask = state.claudeTaskTerminals.has(terminalId)
+    const ephemeral = isTask && !state.claudePersistentTaskTerminals.has(terminalId)
+    const taskFlags = state.claudeTaskFlags.get(terminalId)
 
-      // Check if this terminal has a worktree assigned
-      const worktreeCwd = state.terminalWorktrees.get(terminalId)
+    // Check if this terminal has a worktree assigned
+    const worktreeCwd = state.terminalWorktrees.get(terminalId)
 
-      if (ephemeral) {
-        // Ephemeral task terminal — task flags only, no session persistence
-        getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags, cwd: worktreeCwd })
-      } else {
-        // Persistent terminal (regular or task) — merge task flags with defaults
-        let flags = taskFlags
-        if (!flags) {
-          // No task flags — apply default permission flags from settings
-          const { defaultAllowedTools, defaultPermissionMode, additionalDirs } = useSettingsStore.getState().settings.terminal
-          const parts: string[] = []
-          if (defaultAllowedTools && defaultAllowedTools.length > 0) {
-            parts.push(`--allowedTools ${defaultAllowedTools.join(',')}`)
-          }
-          if (defaultPermissionMode && defaultPermissionMode !== 'default') {
-            parts.push(`--permission-mode ${defaultPermissionMode}`)
-          }
-          if (additionalDirs && additionalDirs.length > 0) {
-            for (const dir of additionalDirs) {
-              parts.push(`--add-dir "${dir}"`)
-            }
-          }
-          flags = parts.length > 0 ? parts.join(' ') : undefined
-          // Store default flags so the terminal header can display them
-          if (flags) {
-            useDockStore.getState().setTerminalClaudeFlags(terminalId, flags)
+    if (ephemeral) {
+      // Ephemeral task terminal — task flags only, no session persistence
+      getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags, cwd: worktreeCwd })
+    } else {
+      // Persistent terminal (regular or task) — merge task flags with defaults
+      let flags = taskFlags
+      if (!flags) {
+        // No task flags — apply default permission flags from settings
+        const { defaultAllowedTools, defaultPermissionMode, additionalDirs } = useSettingsStore.getState().settings.terminal
+        const parts: string[] = []
+        if (defaultAllowedTools && defaultAllowedTools.length > 0) {
+          parts.push(`--allowedTools ${defaultAllowedTools.join(',')}`)
+        }
+        if (defaultPermissionMode && defaultPermissionMode !== 'default') {
+          parts.push(`--permission-mode ${defaultPermissionMode}`)
+        }
+        if (additionalDirs && additionalDirs.length > 0) {
+          for (const dir of additionalDirs) {
+            parts.push(`--add-dir "${dir}"`)
           }
         }
-        const spawnOpts: { claudeFlags?: string; cwd?: string } = {}
-        if (flags) spawnOpts.claudeFlags = flags
-        if (worktreeCwd) spawnOpts.cwd = worktreeCwd
-        getDockApi().terminal.spawn(terminalId, Object.keys(spawnOpts).length > 0 ? spawnOpts : undefined)
+        flags = parts.length > 0 ? parts.join(' ') : undefined
+        // Store default flags so the terminal header can display them
+        if (flags) {
+          useDockStore.getState().setTerminalClaudeFlags(terminalId, flags)
+        }
       }
+      const spawnOpts: { claudeFlags?: string; cwd?: string } = {}
+      if (flags) spawnOpts.claudeFlags = flags
+      if (worktreeCwd) spawnOpts.cwd = worktreeCwd
+      getDockApi().terminal.spawn(terminalId, Object.keys(spawnOpts).length > 0 ? spawnOpts : undefined)
     }
   }, [terminalId])
+
+  // Spawn PTY immediately on mount (before terminal is created),
+  // unless this terminal is waiting for a worktree to be created.
+  useEffect(() => {
+    if (!spawnedRef.current) {
+      const state = useDockStore.getState()
+      if (state.pendingWorktrees.has(terminalId)) return // wait for worktree
+      spawnedRef.current = true
+      doSpawn()
+    }
+  }, [terminalId, doSpawn])
+
+  // When a pending worktree finishes, spawn the PTY
+  useEffect(() => {
+    if (spawnedRef.current) return
+    const unsub = useDockStore.subscribe((state, prev) => {
+      if (spawnedRef.current) { unsub(); return }
+      const wasPending = prev.pendingWorktrees.has(terminalId)
+      const isPending = state.pendingWorktrees.has(terminalId)
+      if (wasPending && !isPending) {
+        spawnedRef.current = true
+        doSpawn()
+        unsub()
+      }
+    })
+    return unsub
+  }, [terminalId, doSpawn])
 
   // Buffer data from PTY - works even before terminal is mounted
   useEffect(() => {
