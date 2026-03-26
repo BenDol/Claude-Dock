@@ -162,6 +162,7 @@ export class DockWindow {
         // Remembered choice — skip dialog
         if (closeAction === 'close') {
           if (ENABLE_BUFFER_STORAGE) this.saveOutputBuffers()
+          this.persistCurrentSessions()
           this.ptyManager.killAll()
           return // allow close
         }
@@ -192,6 +193,7 @@ export class DockWindow {
                 setSetting('behavior', { ...getSettings().behavior, closeAction: 'close' })
               }
               if (ENABLE_BUFFER_STORAGE) this.saveOutputBuffers()
+              this.persistCurrentSessions()
               this.ptyManager.killAll()
               this.window.destroy()
             } else if (response === 1) {
@@ -455,9 +457,16 @@ export class DockWindow {
   private persistCurrentSessions(): void {
     const ids = this.ptyManager.getSessionIds()
     if (ids.length > 0) {
+      log(`DockWindow: persisting ${ids.length} session(s)`)
       saveSessions(this.projectDir, ids)
-    } else {
+    } else if (this.ptyManager.size > 0) {
+      // Only clear sessions when terminals exist but none are interacted.
+      // When size is 0 (killAll was called), skip clearing to preserve
+      // sessions that were saved earlier in the shutdown sequence.
+      log(`DockWindow: clearing sessions (${this.ptyManager.size} terminals, none interacted)`)
       clearSessions(this.projectDir)
+    } else {
+      log(`DockWindow: skipping session persist (no live terminals)`)
     }
   }
 
@@ -529,6 +538,7 @@ export class DockWindow {
 
   close(): void {
     if (ENABLE_BUFFER_STORAGE) this.saveOutputBuffers()
+    this.persistCurrentSessions()
     this.ptyManager.killAll()
     if (!this.window.isDestroyed()) {
       this.window.close()
