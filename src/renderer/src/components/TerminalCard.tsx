@@ -684,15 +684,9 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                   <>
                     <div className="worktree-popover-label">Current Worktree</div>
                     <button className="worktree-popover-item worktree-resolve-btn" onClick={() => { setResolveMode(true); setResolveCommitMsg(''); setResolveTarget(''); setResolveError(null) }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
                       <span className="worktree-popover-branch">Resolve Worktree</span>
                     </button>
                     <button className="worktree-popover-item" onClick={handleDiscardWorktree} style={{ color: '#f87171' }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                      </svg>
                       <span className="worktree-popover-branch">Discard & Remove</span>
                     </button>
                     <div className="worktree-popover-divider" />
