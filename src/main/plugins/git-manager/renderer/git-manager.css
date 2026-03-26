@@ -39,7 +39,7 @@
   position: relative;
 }
 
-/* Push button wrapper with inline progress bar */
+/* Push button wrapper */
 .gm-push-btn-wrap {
   position: relative;
   display: flex;
@@ -49,6 +49,9 @@
 .gm-toolbar-btn-pushing {
   color: #e0af68 !important;
   border-color: rgba(224, 175, 104, 0.3) !important;
+  position: relative;
+  overflow: hidden;
+  z-index: 0;
 }
 
 .gm-toolbar-btn-pushing:hover {
@@ -56,35 +59,46 @@
   border-color: rgba(247, 118, 142, 0.3) !important;
 }
 
-.gm-push-progress-bar-wrap {
+/* Background fill that sweeps across the button to show progress */
+.gm-push-btn-fill {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 0 0 3px 3px;
-  overflow: hidden;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: rgba(224, 175, 104, 0.15);
+  transition: width 0.4s ease;
+  /* Indeterminate: pulsing glow when no width is set */
+  width: 100%;
+  animation: gm-push-pulse 1.6s ease-in-out infinite;
 }
 
-.gm-push-progress-bar-fill {
-  height: 100%;
-  background: var(--accent-color);
-  border-radius: 1px;
-  transition: width 0.3s ease;
-  /* Default: indeterminate animation when no inline width is set */
-  width: 30%;
-  animation: gm-push-slide 1.2s ease-in-out infinite;
-}
-
-/* When inline style sets width, disable the indeterminate animation */
-.gm-push-progress-bar-fill[style] {
+/* When inline style sets a width, disable the pulse and show determinate fill */
+.gm-push-btn-fill[style] {
   animation: none;
+  background: rgba(224, 175, 104, 0.18);
 }
 
-@keyframes gm-push-slide {
-  0%   { margin-left: -30%; }
-  100% { margin-left: 100%; }
+@keyframes gm-push-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1; }
+}
+
+/* Phase text inside the pushing button */
+.gm-push-phase {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Small cancel hint icon */
+.gm-push-cancel-hint {
+  opacity: 0.4;
+  font-size: 10px;
+  margin-left: 2px;
+  transition: opacity 0.15s;
+}
+.gm-toolbar-btn-pushing:hover .gm-push-cancel-hint {
+  opacity: 1;
+  color: #f7768e;
 }
 
 .gm-titlebar-left,

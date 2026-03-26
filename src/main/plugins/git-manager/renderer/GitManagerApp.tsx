@@ -1531,18 +1531,15 @@ const GitManagerApp: React.FC = () => {
                   : (!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
               >
                 {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
-                {pushing ? 'Cancel' : (!currentBranch.tracking ? 'Publish' : 'Push')}
+                {pushing
+                  ? (pushProgress
+                    ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
+                    : 'Pushing…')
+                  : (!currentBranch.tracking ? 'Publish' : 'Push')}
                 {!pushing && currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
                 {!pushing && currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
+                {pushing && <div className="gm-push-btn-fill" style={pushProgress ? { width: `${pushProgress.percent}%` } : undefined} />}
               </button>
-              {pushing && (
-                <div className="gm-push-progress-bar-wrap">
-                  <div
-                    className="gm-push-progress-bar-fill"
-                    style={{ width: pushProgress ? `${pushProgress.percent}%` : undefined }}
-                  />
-                </div>
-              )}
             </div>
           ) : (
             <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
