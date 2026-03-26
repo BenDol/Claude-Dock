@@ -37,14 +37,64 @@ const shellCommandsFile = path.join(dataDir, 'dock-shell-commands.json')
 const shellOutputFile = path.join(dataDir, 'dock-shell-output.json')
 
 const MESSAGE_TTL = 3600000 // 1 hour
+const pendingEventsFile = path.join(dockDataDir, 'dock-pending-events.json')
 
 // JSON-RPC helpers
+
+/**
+ * Build a JSON-RPC response, automatically appending any pending shell events.
+ * Events are consumed (cleared) after being included in a response, so they
+ * only appear once. This piggybacks on normal tool calls so Claude sees events
+ * without needing to poll.
+ */
 function jsonRpcResponse(id, result) {
+  // Append pending events to the response text
+  const eventsSuffix = consumePendingEvents()
+  if (eventsSuffix && result && result.content && result.content.length > 0) {
+    const last = result.content[result.content.length - 1]
+    if (last.type === 'text') {
+      last.text += eventsSuffix
+    }
+  }
   return JSON.stringify({ jsonrpc: '2.0', id, result })
 }
 
 function jsonRpcError(id, code, message) {
   return JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })
+}
+
+// ---------- Pending shell events ----------
+
+function readPendingEvents() {
+  try {
+    const data = JSON.parse(fs.readFileSync(pendingEventsFile, 'utf-8'))
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
+function clearPendingEvents() {
+  try { fs.writeFileSync(pendingEventsFile, '[]') } catch { /* ignore */ }
+}
+
+/**
+ * Read and clear all pending events. Returns a formatted string to append
+ * to tool responses, or empty string if no events.
+ */
+function consumePendingEvents() {
+  const events = readPendingEvents()
+  if (events.length === 0) return ''
+  clearPendingEvents()
+
+  const lines = [`\n\n## Shell Events (${events.length} new)\n`]
+  for (const e of events) {
+    const shellShort = e.shellId ? e.shellId.split(':').pop() : '?'
+    const time = new Date(e.timestamp).toLocaleTimeString()
+    lines.push(`[${time}] [shell:${shellShort}] **${e.type}**: ${typeof e.payload === 'object' ? JSON.stringify(e.payload) : e.payload}`)
+  }
+  lines.push('')
+  return lines.join('\n')
 }
 
 // Read files

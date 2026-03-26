@@ -32,6 +32,8 @@ export class DockWindow {
   /** Buffered shell panel output per shell ID, written to shared file for MCP access */
   private shellOutputBuffers = new Map<string, string>()
   private shellOutputSaveTimer: ReturnType<typeof setTimeout> | null = null
+  /** Tracks the last scanned line index per shell for event detection */
+  private shellEventScanOffsets = new Map<string, number>()
 
   constructor(id: string, projectDir: string) {
     this.id = id
@@ -363,9 +365,64 @@ export class DockWindow {
       }
 
       fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
+
+      // Scan for new ##DOCK_EVENT:...## markers and write them to the pending events file
+      this.detectAndWritePendingEvents(existing)
     } catch (err) {
       log(`[shell-output] save failed: ${err instanceof Error ? err.message : err}`)
     }
+  }
+
+  /**
+   * Scan shell output lines for new ##DOCK_EVENT:type:payload## markers since last scan.
+   * Appends any new events to dock-pending-events.json for the MCP server to pick up.
+   */
+  private detectAndWritePendingEvents(shellData: Record<string, any>): void {
+    const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/
+    const newEvents: Array<{ sessionId: string; shellId: string; type: string; payload: any; timestamp: number }> = []
+
+    for (const [sessionId, entry] of Object.entries(shellData)) {
+      if (!entry.shells) continue
+      for (const [shellId, shell] of Object.entries(entry.shells) as [string, any][]) {
+        const lines: string[] = shell.lines || []
+        const lastOffset = this.shellEventScanOffsets.get(shellId) || 0
+
+        // Only scan new lines since last check
+        for (let i = lastOffset; i < lines.length; i++) {
+          const match = lines[i].match(eventPattern)
+          if (match) {
+            let payload: any = match[2]
+            try { payload = JSON.parse(match[2]) } catch { /* keep raw string */ }
+            newEvents.push({
+              sessionId,
+              shellId,
+              type: match[1],
+              payload,
+              timestamp: Date.now()
+            })
+          }
+        }
+        this.shellEventScanOffsets.set(shellId, lines.length)
+      }
+    }
+
+    if (newEvents.length === 0) return
+
+    // Append to pending events file (MCP server reads and clears this)
+    const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
+    let pending: any[] = []
+    try {
+      pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8'))
+      if (!Array.isArray(pending)) pending = []
+    } catch { /* new file */ }
+
+    pending.push(...newEvents)
+
+    // Cap at 100 pending events to prevent unbounded growth
+    if (pending.length > 100) pending = pending.slice(-100)
+
+    fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
+    log(`[shell-events] ${newEvents.length} new event(s) written to pending file`)
   }
 
   private trackWindowState(): void {
