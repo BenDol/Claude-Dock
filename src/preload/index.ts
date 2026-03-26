@@ -72,13 +72,15 @@ export interface GitInstallResult {
 
 export interface DockApi {
   terminal: {
-    spawn: (terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string }) => Promise<boolean>
+    spawn: (terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string; resumeId?: string }) => Promise<boolean>
     write: (terminalId: string, data: string) => Promise<void>
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>
     getSessionId: (terminalId: string) => Promise<string | null>
     resumeInNative: (terminalId: string, claudeFlags?: string) => Promise<{ success: boolean; resumeCmd?: string; error?: string }>
     syncOrder: (terminalIds: string[]) => Promise<void>
+    respawn: (terminalId: string, sessionId: string) => Promise<boolean>
+    listSessions: (count?: number) => Promise<{ sessionId: string; timestamp: number; summary: string }[]>
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
   }
@@ -349,6 +351,8 @@ const dockApi: DockApi = {
     getSessionId: (terminalId) => ipcRenderer.invoke(IPC.TERMINAL_GET_SESSION_ID, terminalId),
     resumeInNative: (terminalId, claudeFlags) => ipcRenderer.invoke(IPC.TERMINAL_RESUME_IN_NATIVE, terminalId, claudeFlags),
     syncOrder: (terminalIds) => ipcRenderer.invoke(IPC.TERMINAL_SYNC_ORDER, terminalIds),
+    respawn: (terminalId, sessionId) => ipcRenderer.invoke(IPC.TERMINAL_RESPAWN, terminalId, sessionId),
+    listSessions: (count) => ipcRenderer.invoke(IPC.TERMINAL_LIST_SESSIONS, count),
     onData: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, terminalId: string, data: string) => {
         callback(terminalId, data)

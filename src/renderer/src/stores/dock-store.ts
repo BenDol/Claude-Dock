@@ -30,6 +30,8 @@ interface DockState {
   terminalWorktrees: Map<string, string>
   /** Maps terminal ID → branch name for terminals waiting on worktree creation */
   pendingWorktrees: Map<string, string>
+  /** Maps terminal ID → session ID for manual resume (user-provided session ID) */
+  manualResumeIds: Map<string, string>
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -53,6 +55,7 @@ interface DockState {
   setPendingShellCommand: (command: { command: string; submit: boolean; targetTerminalId: string | null; shellType: string | null; targetShellId: string | null; shellLayout: 'split' | 'stack' | null } | null) => void
   setTerminalWorktree: (id: string, worktreePath: string | null) => void
   setPendingWorktree: (id: string, branch: string | null) => void
+  setManualResumeId: (id: string, sessionId: string | null) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -74,6 +77,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   pendingShellCommand: null,
   terminalWorktrees: new Map<string, string>(),
   pendingWorktrees: new Map<string, string>(),
+  manualResumeIds: new Map<string, string>(),
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -110,7 +114,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       claudePersistentTaskTerminals.delete(id)
       const pendingWorktrees = new Map(state.pendingWorktrees)
       pendingWorktrees.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees }
+      const manualResumeIds = new Map(state.manualResumeIds)
+      manualResumeIds.delete(id)
+      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -229,5 +235,15 @@ export const useDockStore = create<DockState>((set, get) => ({
       pendingWorktrees.delete(id)
     }
     return { pendingWorktrees }
+  }),
+
+  setManualResumeId: (id, sessionId) => set((state) => {
+    const manualResumeIds = new Map(state.manualResumeIds)
+    if (sessionId) {
+      manualResumeIds.set(id, sessionId)
+    } else {
+      manualResumeIds.delete(id)
+    }
+    return { manualResumeIds }
   })
 }))

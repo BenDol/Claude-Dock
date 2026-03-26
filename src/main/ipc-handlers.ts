@@ -29,15 +29,15 @@ declare const __DEV__: boolean
 export function registerIpcHandlers(): void {
   const manager = DockManager.getInstance()
 
-  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string }) => {
+  ipcMain.handle(IPC.TERMINAL_SPAWN, (event, terminalId: string, options?: { ephemeral?: boolean; claudeFlags?: string; cwd?: string; resumeId?: string }) => {
     const dock = getDockForEvent(event)
     if (dock) {
       const ephemeral = options?.ephemeral ?? false
       const claudeFlags = options?.claudeFlags
       const spawnCwd = options?.cwd || dock.projectDir
-      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}${ephemeral ? ' (ephemeral)' : ''}${claudeFlags ? ` flags="${claudeFlags}"` : ''}${options?.cwd ? ` cwd=${options.cwd}` : ''}`)
+      log(`TERMINAL_SPAWN: ${terminalId} in dock ${dock.id}${ephemeral ? ' (ephemeral)' : ''}${claudeFlags ? ` flags="${claudeFlags}"` : ''}${options?.cwd ? ` cwd=${options.cwd}` : ''}${options?.resumeId ? ` resumeId=${options.resumeId}` : ''}`)
       pluginManager.emitTerminalPreSpawn(dock.projectDir, terminalId)
-      const resumeId = ephemeral ? undefined : dock.getNextResumeId()
+      const resumeId = options?.resumeId ?? (ephemeral ? undefined : dock.getNextResumeId())
       // Restore saved terminal buffer before PTY starts (for resumed sessions)
       if (resumeId) {
         dock.restoreBuffer(terminalId, resumeId)
@@ -84,6 +84,93 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.TERMINAL_GET_SESSION_ID, (event, terminalId: string) => {
     const dock = getDockForEvent(event)
     return dock?.ptyManager.getSessionId(terminalId) ?? null
+  })
+
+  // Respawn a terminal with a different session (kill old PTY, spawn new one with resumeId)
+  ipcMain.handle(IPC.TERMINAL_RESPAWN, (event, terminalId: string, sessionId: string) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return false
+    log(`TERMINAL_RESPAWN: ${terminalId} with session ${sessionId}`)
+    // Kill existing PTY
+    dock.ptyManager.kill(terminalId)
+    // Spawn new PTY using the session as a resume ID
+    dock.ptyManager.spawn(terminalId, dock.projectDir, sessionId)
+    const newSessionId = dock.ptyManager.getSessionId(terminalId) || ''
+    try {
+      ActivityTracker.getInstance().addTerminal(dock.id, terminalId, 'Terminal', newSessionId, dock.projectDir)
+    } catch (e) { log(`ActivityTracker.addTerminal error: ${e}`) }
+    log(`TERMINAL_RESPAWN: ${terminalId} respawned`)
+    return true
+  })
+
+  // List recent Claude sessions for the current project (excludes sessions with open terminals)
+  ipcMain.handle(IPC.TERMINAL_LIST_SESSIONS, async (event, count?: number) => {
+    const dock = getDockForEvent(event)
+    if (!dock) return []
+    const limit = count ?? 10
+    try {
+      const homeDir = app.getPath('home')
+      // Encode project path the way Claude does: replace : and path separators with -
+      const encoded = dock.projectDir.replace(/[:\/\\]/g, '-')
+      const sessionsDir = path.join(homeDir, '.claude', 'projects', encoded)
+      if (!fs.existsSync(sessionsDir)) return []
+
+      // Collect all session IDs currently active in open terminals
+      const activeSessionIds = new Set<string>()
+      for (const pty of dock.ptyManager.getAllInstances()) {
+        if (!pty.id.startsWith('shell:')) {
+          activeSessionIds.add(pty.sessionId)
+        }
+      }
+
+      // Find .jsonl files, exclude active sessions, sort by modification time (newest first)
+      const files = fs.readdirSync(sessionsDir)
+        .filter((f: string) => {
+          if (!f.endsWith('.jsonl')) return false
+          const sessionId = f.replace('.jsonl', '')
+          return !activeSessionIds.has(sessionId)
+        })
+        .map((f: string) => {
+          const fullPath = path.join(sessionsDir, f)
+          const stat = fs.statSync(fullPath)
+          return { file: f, path: fullPath, mtime: stat.mtimeMs }
+        })
+        .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime)
+        .slice(0, limit)
+
+      // Read first user message from each session as summary
+      const results: { sessionId: string; timestamp: number; summary: string }[] = []
+      for (const entry of files) {
+        const sessionId = entry.file.replace('.jsonl', '')
+        let summary = ''
+        try {
+          const fd = fs.openSync(entry.path, 'r')
+          const buf = Buffer.alloc(16384)
+          fs.readSync(fd, buf, 0, buf.length, 0)
+          fs.closeSync(fd)
+          const chunk = buf.toString('utf-8')
+          // Find first user message line
+          for (const line of chunk.split('\n')) {
+            if (line.includes('"type":"user"')) {
+              const parsed = JSON.parse(line)
+              const content = parsed?.message?.content
+              if (typeof content === 'string') {
+                summary = content.slice(0, 120)
+              } else if (Array.isArray(content)) {
+                const textBlock = content.find((b: any) => b.type === 'text')
+                if (textBlock) summary = textBlock.text.slice(0, 120)
+              }
+              break
+            }
+          }
+        } catch { /* skip unreadable files */ }
+        results.push({ sessionId, timestamp: entry.mtime, summary })
+      }
+      return results
+    } catch (e) {
+      log(`TERMINAL_LIST_SESSIONS error: ${e}`)
+      return []
+    }
   })
 
   ipcMain.handle(IPC.TERMINAL_RESUME_IN_NATIVE, async (event, terminalId: string, claudeFlags?: string) => {

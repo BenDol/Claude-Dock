@@ -811,6 +811,20 @@ function DockApp() {
     addTerminal(id)
   }, [addTerminal])
 
+  const handleAddTerminalWithSessionId = useCallback(() => {
+    const sessionId = window.prompt('Enter a Claude session ID to resume:')
+    if (!sessionId || !sessionId.trim()) return
+    const id = `term-${nextTermId++}-${Date.now()}`
+    useDockStore.getState().setManualResumeId(id, sessionId.trim())
+    addTerminal(id)
+  }, [addTerminal])
+
+  const handleAddTerminalWithSession = useCallback((sessionId: string) => {
+    const id = `term-${nextTermId++}-${Date.now()}`
+    useDockStore.getState().setManualResumeId(id, sessionId)
+    addTerminal(id)
+  }, [addTerminal])
+
   const handleCloseFocused = useCallback(() => {
     const state = useDockStore.getState()
     if (!state.focusedTerminalId) return
@@ -834,6 +848,8 @@ function DockApp() {
       <Toolbar
         projectDir={projectDir}
         onAddTerminal={handleAddTerminal}
+        onAddTerminalWithSessionId={handleAddTerminalWithSessionId}
+        onAddTerminalWithSession={handleAddTerminalWithSession}
         onOpenSettings={() => setShowSettings(true)}
       />
       {terminals.length === 0 ? (

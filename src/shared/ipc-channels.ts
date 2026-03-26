@@ -7,6 +7,8 @@ export const IPC = {
   TERMINAL_GET_SESSION_ID: 'terminal:getSessionId',
   TERMINAL_RESUME_IN_NATIVE: 'terminal:resumeInNative', // args: terminalId, claudeFlags?
   TERMINAL_SYNC_ORDER: 'terminal:syncOrder',
+  TERMINAL_RESPAWN: 'terminal:respawn',
+  TERMINAL_LIST_SESSIONS: 'terminal:listSessions',
   // Shell panel PTY (embedded non-Claude shell per terminal)
   SHELL_SPAWN: 'shell:spawn',
   SHELL_WRITE: 'shell:write',

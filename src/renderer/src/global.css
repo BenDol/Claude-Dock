@@ -498,6 +498,28 @@ body {
   height: var(--toolbar-icon-size);
 }
 
+/* Hover-reveal group: resume button slides out to the left of "+" on hover */
+.toolbar-add-group {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.toolbar-add-resume {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  transition: max-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
+}
+.toolbar-add-group:hover .toolbar-add-resume,
+.toolbar-add-group:focus-within .toolbar-add-resume {
+  max-width: 28px;
+  opacity: 1;
+  padding-left: var(--toolbar-btn-pad-h);
+  padding-right: var(--toolbar-btn-pad-h);
+}
+
 .toolbar-btn-active {
   color: #9ece6a;
   border-color: rgba(158, 206, 106, 0.3);
@@ -1878,6 +1900,56 @@ body {
 
 .worktree-discard-btn:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.25);
+}
+
+/* Session picker popover */
+.session-popover {
+  position: fixed;
+  z-index: 200;
+  width: 320px;
+  max-height: 360px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.session-popover-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.session-popover-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-popover-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 /* Active indicator on header toggle when shell is open */

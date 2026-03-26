@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
@@ -13,6 +14,8 @@ import { sanitizeSvg } from '../lib/svg-sanitize'
 interface ToolbarProps {
   projectDir: string
   onAddTerminal: () => void
+  onAddTerminalWithSessionId: () => void
+  onAddTerminalWithSession: (sessionId: string) => void
   onOpenSettings: () => void
 }
 
@@ -54,6 +57,31 @@ const PlusIcon: React.FC = () => (
   </svg>
 )
 
+const ResumeIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+  </svg>
+)
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+const HistoryIcon: React.FC = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+)
+
 const SettingsIcon: React.FC = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -77,7 +105,7 @@ const FolderIcon: React.FC = () => (
 )
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSettings }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddTerminalWithSessionId, onAddTerminalWithSession, onOpenSettings }) => {
   const toolbarRef = useRef<HTMLDivElement>(null)
   useToolbarNavigation(toolbarRef)
 
@@ -94,6 +122,36 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string> | null>(null)
   const [openPluginWindows, setOpenPluginWindows] = useState<Set<string>>(new Set())
   const [hasPluginUpdates, setHasPluginUpdates] = useState(false)
+
+  // Session browser popup state
+  const [sessionPopoverOpen, setSessionPopoverOpen] = useState(false)
+  const [sessionList, setSessionList] = useState<{ sessionId: string; timestamp: number; summary: string }[]>([])
+  const [sessionListLoading, setSessionListLoading] = useState(false)
+  const sessionBtnRef = useRef<HTMLButtonElement>(null)
+  const [sessionPopoverPos, setSessionPopoverPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  useEffect(() => {
+    if (!sessionPopoverOpen || !sessionBtnRef.current) return
+    const rect = sessionBtnRef.current.getBoundingClientRect()
+    setSessionPopoverPos({ x: rect.left, y: rect.bottom + 4 })
+  }, [sessionPopoverOpen])
+
+  const openSessionBrowser = useCallback(async () => {
+    setSessionPopoverOpen(true)
+    setSessionListLoading(true)
+    try {
+      const list = await getDockApi().terminal.listSessions(10)
+      setSessionList(list)
+    } catch (e) {
+      console.error('[toolbar] failed to load sessions:', e)
+    }
+    setSessionListLoading(false)
+  }, [])
+
+  const handlePickSession = useCallback((sessionId: string) => {
+    setSessionPopoverOpen(false)
+    onAddTerminalWithSession(sessionId)
+  }, [onAddTerminalWithSession])
 
   // Fetch plugin enabled states, re-fetch when toggled via settings
   useEffect(() => {
@@ -347,8 +405,23 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
       </div>
       <div className="toolbar-center" />
       <div className="toolbar-right">
-        <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
-          <PlusIcon />
+        <div className="toolbar-add-group">
+          <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-resume" onClick={onAddTerminalWithSessionId} title="Resume a session by ID">
+            <ResumeIcon />
+          </button>
+          <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
+            <PlusIcon />
+          </button>
+        </div>
+        <button
+          ref={sessionBtnRef}
+          data-toolbar-btn
+          tabIndex={-1}
+          className="toolbar-btn toolbar-btn-icon"
+          onClick={openSessionBrowser}
+          title="Browse recent sessions"
+        >
+          <HistoryIcon />
         </button>
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
@@ -408,6 +481,38 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onOpenSett
           &#10005;
         </button>
       </div>
+      {sessionPopoverOpen && createPortal(
+        <>
+          <div className="worktree-popover-backdrop" onClick={() => setSessionPopoverOpen(false)} />
+          <div className="session-popover" style={{ top: sessionPopoverPos.y, left: Math.max(8, sessionPopoverPos.x) }}>
+            <div className="worktree-popover-header">
+              <span>Recent Sessions</span>
+              <button className="worktree-popover-close" onClick={() => setSessionPopoverOpen(false)}>&times;</button>
+            </div>
+            {sessionListLoading ? (
+              <div className="worktree-popover-loading">Loading...</div>
+            ) : (
+              <div className="worktree-popover-body">
+                {sessionList.length === 0 && (
+                  <div className="worktree-popover-empty">No sessions found</div>
+                )}
+                {sessionList.map((s) => (
+                  <button
+                    key={s.sessionId}
+                    className="session-popover-item"
+                    onClick={() => handlePickSession(s.sessionId)}
+                    title={`${s.sessionId}\n${new Date(s.timestamp).toLocaleString()}`}
+                  >
+                    <span className="session-popover-summary">{s.summary || '(no message)'}</span>
+                    <span className="session-popover-time">{formatRelativeTime(s.timestamp)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
     </div>
   )
 }

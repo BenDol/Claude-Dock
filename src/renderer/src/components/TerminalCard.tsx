@@ -78,6 +78,17 @@ const CopyIdIcon: React.FC<{ copied?: boolean }> = ({ copied }) => (
   </svg>
 )
 
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 /** Parse a flags string like "--allowedTools Bash,Read --permission-mode acceptEdits" into a tooltip + label */
 function parsePermissionIndicator(flags: string | undefined): { label: string; tooltip: string } | null {
   if (!flags) return null
@@ -124,6 +135,13 @@ const ExternalTerminalIcon: React.FC = () => (
     <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
     <polyline points="15 3 21 3 21 9" />
     <line x1="10" y1="14" x2="21" y2="3" />
+  </svg>
+)
+
+const SessionPickerIcon: React.FC = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="1 4 1 10 7 10" />
+    <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
   </svg>
 )
 
@@ -447,6 +465,41 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
 
   const [actionsOpen, setActionsOpen] = useState(false)
 
+  // Session picker popup state
+  const [sessionPopover, setSessionPopover] = useState(false)
+  const [sessionPos, setSessionPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const [sessions, setSessions] = useState<{ sessionId: string; timestamp: number; summary: string }[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const sessionBtnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!sessionPopover || !sessionBtnRef.current) return
+    const rect = sessionBtnRef.current.getBoundingClientRect()
+    setSessionPos({ x: rect.right - 320, y: rect.top - 4 })
+  }, [sessionPopover])
+
+  const openSessionPicker = useCallback(async () => {
+    setSessionPopover(true)
+    setSessionsLoading(true)
+    try {
+      const list = await getDockApi().terminal.listSessions(10)
+      setSessions(list)
+    } catch (e) {
+      console.error('[session-picker] failed to load sessions:', e)
+    }
+    setSessionsLoading(false)
+  }, [])
+
+  const handleSelectSession = useCallback(async (sessionId: string) => {
+    setSessionPopover(false)
+    try {
+      await getDockApi().terminal.respawn(terminalId, sessionId)
+      useDockStore.getState().setTerminalAlive(terminalId, true)
+    } catch (e) {
+      console.error('[session-picker] respawn failed:', e)
+    }
+  }, [terminalId])
+
   return (
     <div className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`}>
       <div className="terminal-card-header">
@@ -483,6 +536,14 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               title="Resume in native terminal"
             >
               <ExternalTerminalIcon />
+            </button>
+            <button
+              ref={sessionBtnRef}
+              className="terminal-action-btn"
+              onClick={openSessionPicker}
+              title="Switch to a recent session"
+            >
+              <SessionPickerIcon />
             </button>
           </div>
           <button
@@ -535,6 +596,38 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
           )}
         </div>
       </div>
+      {sessionPopover && createPortal(
+        <>
+          <div className="worktree-popover-backdrop" onClick={() => setSessionPopover(false)} />
+          <div className="session-popover" style={{ top: Math.max(8, sessionPos.y - 360), left: Math.max(8, sessionPos.x) }}>
+            <div className="worktree-popover-header">
+              <span>Recent Sessions</span>
+              <button className="worktree-popover-close" onClick={() => setSessionPopover(false)}>&times;</button>
+            </div>
+            {sessionsLoading ? (
+              <div className="worktree-popover-loading">Loading...</div>
+            ) : (
+              <div className="worktree-popover-body">
+                {sessions.length === 0 && (
+                  <div className="worktree-popover-empty">No sessions found</div>
+                )}
+                {sessions.map((s) => (
+                  <button
+                    key={s.sessionId}
+                    className="session-popover-item"
+                    onClick={() => handleSelectSession(s.sessionId)}
+                    title={`${s.sessionId}\n${new Date(s.timestamp).toLocaleString()}`}
+                  >
+                    <span className="session-popover-summary">{s.summary || '(no message)'}</span>
+                    <span className="session-popover-time">{formatRelativeTime(s.timestamp)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>,
+        document.body
+      )}
       {worktreePopover && createPortal(
         <>
           <div className="worktree-popover-backdrop" onClick={() => setWorktreePopover(false)} />

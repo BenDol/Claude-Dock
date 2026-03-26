@@ -257,6 +257,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     // Check if this terminal has a worktree assigned
     const worktreeCwd = state.terminalWorktrees.get(terminalId)
 
+    // Check if this terminal has a manual resume session ID
+    const manualResumeId = state.manualResumeIds.get(terminalId)
+
     if (ephemeral) {
       // Ephemeral task terminal — task flags only, no session persistence
       getDockApi().terminal.spawn(terminalId, { ephemeral: true, claudeFlags: taskFlags, cwd: worktreeCwd })
@@ -284,9 +287,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           useDockStore.getState().setTerminalClaudeFlags(terminalId, flags)
         }
       }
-      const spawnOpts: { claudeFlags?: string; cwd?: string } = {}
+      const spawnOpts: { claudeFlags?: string; cwd?: string; resumeId?: string } = {}
       if (flags) spawnOpts.claudeFlags = flags
       if (worktreeCwd) spawnOpts.cwd = worktreeCwd
+      if (manualResumeId) spawnOpts.resumeId = manualResumeId
       getDockApi().terminal.spawn(terminalId, Object.keys(spawnOpts).length > 0 ? spawnOpts : undefined)
     }
   }, [terminalId])

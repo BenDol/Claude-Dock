@@ -342,6 +342,10 @@ export class PtyManager {
     return this.ptys.get(terminalId)?.sessionId ?? null
   }
 
+  getAllInstances(): PtyInstance[] {
+    return Array.from(this.ptys.values())
+  }
+
   /** Find the terminal ID for a given session ID (exact or prefix match) */
   findTerminalBySessionId(sessionId: string): string | null {
     for (const [id, pty] of this.ptys) {
