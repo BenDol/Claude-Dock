@@ -2707,6 +2707,11 @@
   gap: 4px;
 }
 
+/* Push hover action buttons to the right edge of the file entry */
+.gm-file-path-wrap .gm-file-hover-btn:first-of-type {
+  margin-left: auto;
+}
+
 .gm-file-path {
   overflow: hidden;
   text-overflow: ellipsis;
