@@ -2372,14 +2372,15 @@ export async function resolveWorktree(
   try {
     // 1. Check for changes in the worktree
     const status = await getStatus(worktreePath)
-    const hasChanges = status.files.length > 0
+    const changedCount = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicts.length
+    const hasChanges = changedCount > 0
 
     let commitHash = ''
 
     if (hasChanges) {
       // 2. Stage all changes
       await gitExec(worktreePath, ['add', '-A'], 15000)
-      getServices().log(`[git-manager] resolveWorktree: staged ${status.files.length} file(s)`)
+      getServices().log(`[git-manager] resolveWorktree: staged ${changedCount} file(s)`)
 
       // 3. Commit
       const result = await gitExec(worktreePath, ['commit', '-m', commitMessage], 30000)
