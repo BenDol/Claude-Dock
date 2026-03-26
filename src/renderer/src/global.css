@@ -508,13 +508,8 @@ body {
   max-width: 0;
   overflow: hidden;
   opacity: 0;
-  padding-left: 0;
-  padding-right: 0;
-  transform: scale(0.9);
-  align-self: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 0;
+  height: calc(var(--toolbar-icon-size) * 0.9 + var(--toolbar-btn-pad-v) * 2);
   transition: max-width 0.15s ease, opacity 0.15s ease, padding 0.15s ease;
 }
 .toolbar-add-resume svg {
