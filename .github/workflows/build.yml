@@ -9,6 +9,7 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
+      - 'resources/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig*.json'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'src/**'
       - 'scripts/**'
+      - 'resources/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig*.json'
