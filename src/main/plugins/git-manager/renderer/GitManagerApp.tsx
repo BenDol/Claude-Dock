@@ -1521,7 +1521,7 @@ const GitManagerApp: React.FC = () => {
             onRefresh={refreshAndShowLog}
             onOpenDialog={handleOpenPullDialog}
           />
-          {currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
+          {currentBranch && (pushing || currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
             <div className="gm-push-btn-wrap">
               <button
                 className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
