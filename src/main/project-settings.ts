@@ -34,11 +34,28 @@ export function readLocalProjectSettings(projectDir: string): ProjectSettings {
 }
 
 export function writeProjectSettings(projectDir: string, settings: ProjectSettings): void {
-  writeJson(path.join(claudeDir(projectDir), DOCK_JSON), settings)
+  const filePath = path.join(claudeDir(projectDir), DOCK_JSON)
+  const existing = readJsonSafe(filePath)
+  writeJson(filePath, mergePartialIntoTier(existing, settings))
 }
 
 export function writeLocalProjectSettings(projectDir: string, settings: ProjectSettings): void {
-  writeJson(path.join(claudeDir(projectDir), DOCK_LOCAL_JSON), settings)
+  const filePath = path.join(claudeDir(projectDir), DOCK_LOCAL_JSON)
+  const existing = readJsonSafe(filePath)
+  writeJson(filePath, mergePartialIntoTier(existing, settings))
+}
+
+/** Deep-merge a partial into existing tier data, concatenating arrays for CONCATENATED_ARRAY_PATHS */
+function mergePartialIntoTier(existing: ProjectSettings, partial: ProjectSettings): ProjectSettings {
+  const merged = deepMergeOverlay(existing as any, partial as any)
+  for (const dotPath of CONCATENATED_ARRAY_PATHS) {
+    const existingArr = getNestedValue(existing, dotPath)
+    const newArr = getNestedValue(partial, dotPath)
+    if (Array.isArray(existingArr) && Array.isArray(newArr)) {
+      setNestedValue(merged, dotPath, [...new Set([...existingArr, ...newArr])])
+    }
+  }
+  return merged as ProjectSettings
 }
 
 function readJsonSafe(filePath: string): ProjectSettings {
