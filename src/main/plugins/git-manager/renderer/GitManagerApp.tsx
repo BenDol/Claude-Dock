@@ -1651,11 +1651,28 @@ const GitManagerApp: React.FC = () => {
               {mergeState.conflicts.length > 0 && ` — ${mergeState.conflicts.length} conflict${mergeState.conflicts.length > 1 ? 's' : ''}`}
             </span>
           </div>
-          {mergeState.conflicts.length > 0 && (
-            <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
-              Resolve Conflicts
+          <div className="gm-merge-bar-actions">
+            <button className="gm-merge-bar-btn gm-merge-bar-abort" onClick={async () => {
+              const r = await api.gitManager.abortMerge(activeDir)
+              if (!r.success) handleSmartError(`Abort failed: ${r.error || 'Unknown error'}`)
+              refresh()
+            }}>
+              Abort
             </button>
-          )}
+            {mergeState.conflicts.length > 0 ? (
+              <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
+                Resolve Conflicts
+              </button>
+            ) : (
+              <button className="gm-merge-bar-btn gm-merge-bar-continue" onClick={async () => {
+                const r = await api.gitManager.continueMerge(activeDir)
+                if (!r.success) handleSmartError(`Continue failed: ${r.error || 'Unknown error'}`)
+                refresh()
+              }}>
+                Continue {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
+              </button>
+            )}
+          </div>
         </div>
       )}
 

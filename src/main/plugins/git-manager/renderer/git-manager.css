@@ -3925,6 +3925,28 @@
   opacity: 0.9;
 }
 
+.gm-merge-bar-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.gm-merge-bar-abort {
+  background: transparent;
+  color: #f7768e;
+  border: 1px solid #f7768e55;
+}
+
+.gm-merge-bar-abort:hover {
+  background: #f7768e22;
+  opacity: 1;
+}
+
+.gm-merge-bar-continue {
+  background: #9ece6a;
+  color: #1a1b26;
+}
+
 .gm-tab-badge-warn {
   background: #e0af68;
   color: #1a1b26;

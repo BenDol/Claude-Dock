@@ -2369,11 +2369,22 @@ export async function mergeBranch(cwd: string, branchName: string): Promise<void
 export async function continueMerge(cwd: string): Promise<void> {
   const state = await getMergeState(cwd)
   if (state.type === 'rebase') {
-    await gitExec(cwd, ['rebase', '--continue'], 30000)
+    // Suppress editor with -c core.editor=true (no-op) — git rebase --continue
+    // may try to open an editor for reword/edit steps; we can't do interactive
+    // editing here so we accept the default message.
+    await gitExecNoEditor(cwd, ['rebase', '--continue'], 30000)
   } else {
-    // merge/cherry-pick/revert: commit to continue
-    await gitExec(cwd, ['commit', '--no-edit'], 30000)
+    // merge/cherry-pick/revert: commit with the pre-filled merge message
+    await gitExecNoEditor(cwd, ['commit', '--no-edit'], 30000)
   }
+}
+
+/**
+ * Run a git command with the editor suppressed (core.editor=true).
+ * Prevents git from trying to open vi/nano/notepad in a non-interactive context.
+ */
+function gitExecNoEditor(cwd: string, args: string[], timeout = 30000): Promise<{ stdout: string; stderr: string }> {
+  return gitExec(cwd, ['-c', 'core.editor=true', ...args], timeout)
 }
 
 // --- Git Worktrees ---
