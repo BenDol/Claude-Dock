@@ -65,6 +65,9 @@ export function hasRecentPaths(): boolean {
 /** Update the Windows taskbar jump list with recent projects */
 export function updateJumpList(): void {
   if (process.platform !== 'win32') return
+  // Skip in dev mode — process.execPath is the Electron binary, not Claude Dock.exe,
+  // so clicking entries would try to launch the directory as an Electron app.
+  if (!app.isPackaged) return
   try {
     const entries = safeRead(() => getStore().get('paths', [])) ?? []
     // Use type 'tasks' — 'custom' categories require a registered file type handler
