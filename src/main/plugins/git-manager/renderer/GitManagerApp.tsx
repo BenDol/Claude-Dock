@@ -2077,6 +2077,7 @@ const GitManagerApp: React.FC = () => {
           branchName={sidebarBranchCtx.branchName}
           isRemote={sidebarBranchCtx.isRemote}
           projectDir={activeDir}
+          currentBranch={currentBranch?.name}
           onClose={() => setSidebarBranchCtx(null)}
           onAction={refresh}
           onError={(msg) => setError(msg)}
@@ -2861,6 +2862,7 @@ const CommitLog: React.FC<{
           branchName={branchCtxMenu.branchName}
           isRemote={branchCtxMenu.isRemote}
           projectDir={projectDir}
+          currentBranch={currentBranch}
           onClose={() => setBranchCtxMenu(null)}
           onAction={onAction}
           onError={onError}
@@ -7279,11 +7281,12 @@ const BranchRefContextMenu: React.FC<{
   branchName: string
   isRemote: boolean
   projectDir: string
+  currentBranch?: string
   onClose: () => void
   onAction: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
   onCheckout?: (name: string) => void
-}> = ({ x, y, branchName, isRemote, projectDir, onClose, onAction, onError, onCheckout }) => {
+}> = ({ x, y, branchName, isRemote, projectDir, currentBranch, onClose, onAction, onError, onCheckout }) => {
   const ref = useRef<HTMLDivElement>(null)
   const [showDelete, setShowDelete] = useState(false)
   const [deleteRemote, setDeleteRemote] = useState(isRemote)
@@ -7324,6 +7327,19 @@ const BranchRefContextMenu: React.FC<{
       if (!r.success) onError(`Checkout failed: ${r.error || 'Unknown error'}`)
       onAction()
     })
+  }
+
+  const doMerge = async () => {
+    onClose()
+    const r = await api.gitManager.mergeBranch(projectDir, branchName)
+    if (!r.success) {
+      onError(`Merge failed: ${r.error || 'Unknown error'}`, async () => {
+        const r2 = await api.gitManager.mergeBranch(projectDir, branchName)
+        if (!r2.success) throw new Error(r2.error || 'Merge still failed')
+      })
+    } else {
+      onAction()
+    }
   }
 
   const doDelete = async () => {
@@ -7438,6 +7454,14 @@ const BranchRefContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(branchName); onClose() }}>
         Copy branch name
       </div>
+      {currentBranch && branchName !== currentBranch && (
+        <>
+          <div className="gm-ctx-separator" />
+          <div className="gm-ctx-item" onClick={doMerge}>
+            Merge into {currentBranch}
+          </div>
+        </>
+      )}
       {!isRemote && (
         <>
           <div className="gm-ctx-separator" />
@@ -7804,6 +7828,8 @@ const MergeConflictsPanel: React.FC<{
 
   const conflictChunks = conflictContent?.chunks.filter((c) => c.type === 'conflict') || []
   const hasConflicts = conflictChunks.length > 0
+  const selectedConflictEntry = selectedFile ? mergeState.conflicts.find(c => c.path === selectedFile) : undefined
+  const isSubmoduleConflict = !!(selectedConflictEntry?.isSubmodule || conflictContent?.submodule)
 
   return (
     <div className="gm-conflicts">
@@ -7822,6 +7848,7 @@ const MergeConflictsPanel: React.FC<{
             >
               <ConflictFileIcon />
               <span className="gm-file-path">{c.path}</span>
+              {c.isSubmodule && <span className="gm-conflicts-submodule-tag">submodule</span>}
             </div>
           ))}
           {mergeState.conflicts.length === 0 && (
@@ -7854,6 +7881,63 @@ const MergeConflictsPanel: React.FC<{
           </div>
         ) : loadingContent ? (
           <div className="gm-loading">Loading conflict...</div>
+        ) : conflictContent && isSubmoduleConflict && conflictContent.submodule ? (
+          <div className="gm-conflicts-content">
+            <div className="gm-conflicts-content-header">
+              <span className="gm-conflicts-content-path">{selectedFile} <span className="gm-conflicts-submodule-tag">submodule</span></span>
+              <div className="gm-conflicts-content-actions">
+                <button
+                  className="gm-small-btn gm-conflicts-mark-btn"
+                  onClick={handleMarkResolved}
+                  disabled={busy}
+                  title="Mark submodule conflict as resolved"
+                >
+                  Mark as Resolved
+                </button>
+              </div>
+            </div>
+            <div className="gm-conflicts-submodule">
+              <div className="gm-conflicts-submodule-intro">
+                Both sides of the merge changed which commit this submodule points to. Choose which version to keep.
+              </div>
+              {conflictContent.submodule.baseHash && (
+                <div className="gm-conflicts-submodule-row gm-conflicts-submodule-base">
+                  <span className="gm-conflicts-submodule-label">Base</span>
+                  <code className="gm-conflicts-submodule-hash">{conflictContent.submodule.baseHash.slice(0, 10)}</code>
+                </div>
+              )}
+              <div className="gm-conflict-block">
+                <div className="gm-conflict-section gm-conflict-ours">
+                  <div className="gm-conflict-section-header">
+                    <span className="gm-conflict-section-label">Ours</span>
+                    <button className="gm-conflict-accept-btn gm-conflict-accept-ours" onClick={() => handleResolveAll('ours')} disabled={busy}>
+                      Accept Ours
+                    </button>
+                  </div>
+                  <div className="gm-conflicts-submodule-detail">
+                    <code className="gm-conflicts-submodule-hash">{conflictContent.submodule.oursHash.slice(0, 10)}</code>
+                    {conflictContent.submodule.oursMessage && (
+                      <span className="gm-conflicts-submodule-msg">{conflictContent.submodule.oursMessage}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="gm-conflict-section gm-conflict-theirs">
+                  <div className="gm-conflict-section-header">
+                    <span className="gm-conflict-section-label">Theirs</span>
+                    <button className="gm-conflict-accept-btn gm-conflict-accept-theirs" onClick={() => handleResolveAll('theirs')} disabled={busy}>
+                      Accept Theirs
+                    </button>
+                  </div>
+                  <div className="gm-conflicts-submodule-detail">
+                    <code className="gm-conflicts-submodule-hash">{conflictContent.submodule.theirsHash.slice(0, 10)}</code>
+                    {conflictContent.submodule.theirsMessage && (
+                      <span className="gm-conflicts-submodule-msg">{conflictContent.submodule.theirsMessage}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : conflictContent ? (
           <div className="gm-conflicts-content">
             <div className="gm-conflicts-content-header">

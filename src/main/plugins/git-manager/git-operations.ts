@@ -361,12 +361,24 @@ export async function getStatus(cwd: string, fast?: boolean): Promise<GitStatusR
         // Unmerged entry: u XY sub m1 m2 m3 mW h1 h2 h3 path
         const parts = entry.split(' ')
         const xy = parts[1]
+        const sub = parts[2]
+        const h1 = parts[7]  // base (common ancestor)
+        const h2 = parts[8]  // ours
+        const h3 = parts[9]  // theirs
         const filePath = parts.slice(10).join(' ')
-        result.conflicts.push({
+        const isSubmodule = sub.startsWith('S')
+        const conflictEntry: GitConflictEntry = {
           path: filePath,
           oursStatus: xy[0],
           theirsStatus: xy[1]
-        })
+        }
+        if (isSubmodule) {
+          conflictEntry.isSubmodule = true
+          conflictEntry.baseHash = h1
+          conflictEntry.oursHash = h2
+          conflictEntry.theirsHash = h3
+        }
+        result.conflicts.push(conflictEntry)
       } else if (entry.startsWith('? ')) {
         const filePath = entry.slice(2)
         const isNestedRepo = filePath.endsWith('/') && fs.existsSync(path.join(cwd, filePath, '.git'))
@@ -2159,6 +2171,50 @@ export async function getMergeState(cwd: string): Promise<GitMergeState> {
 
 export async function getConflictFileContent(cwd: string, filePath: string): Promise<GitConflictFileContent> {
   const absPath = path.resolve(cwd, filePath)
+
+  // Check if path is a directory (submodule conflict)
+  let isDir = false
+  try { isDir = fs.statSync(absPath).isDirectory() } catch { /* path may not exist */ }
+
+  if (isDir) {
+    // Submodule conflict — get conflicting commit hashes from the index stages
+    const { stdout } = await gitExec(cwd, ['ls-files', '-u', '-z', '--', filePath], 5000)
+    const stages: Record<number, string> = {}
+    for (const entry of stdout.split('\0').filter(Boolean)) {
+      const match = entry.match(/^(\d+)\s+([0-9a-f]+)\s+(\d)\s+/)
+      if (match) stages[parseInt(match[3])] = match[2]
+    }
+
+    // Try to get commit messages from the submodule directory
+    let oursMessage: string | undefined
+    let theirsMessage: string | undefined
+    if (stages[2]) {
+      try {
+        const { stdout: msg } = await gitExec(absPath, ['log', '--format=%s', '-1', stages[2]], 3000)
+        oursMessage = msg.trim() || undefined
+      } catch { /* commit may not be fetched locally */ }
+    }
+    if (stages[3]) {
+      try {
+        const { stdout: msg } = await gitExec(absPath, ['log', '--format=%s', '-1', stages[3]], 3000)
+        theirsMessage = msg.trim() || undefined
+      } catch { /* commit may not be fetched locally */ }
+    }
+
+    return {
+      path: filePath,
+      chunks: [],
+      raw: '',
+      submodule: {
+        baseHash: stages[1] || '',
+        oursHash: stages[2] || '',
+        theirsHash: stages[3] || '',
+        oursMessage,
+        theirsMessage,
+      }
+    }
+  }
+
   const raw = fs.readFileSync(absPath, 'utf-8')
   const chunks = parseConflictMarkers(raw)
   return { path: filePath, chunks, raw }
@@ -2220,6 +2276,17 @@ export async function resolveConflictFile(
   cwd: string, filePath: string, resolution: 'ours' | 'theirs' | 'both', chunkIndex?: number
 ): Promise<void> {
   const absPath = path.resolve(cwd, filePath)
+
+  // Submodule conflict — resolve via git checkout --ours/--theirs + git add
+  let isDir = false
+  try { isDir = fs.statSync(absPath).isDirectory() } catch { /* path may not exist */ }
+  if (isDir) {
+    if (resolution === 'both') throw new Error('Submodule conflicts cannot use "accept both" — choose ours or theirs')
+    await gitExec(cwd, ['checkout', `--${resolution}`, '--', filePath], 5000)
+    await gitExec(cwd, ['add', filePath], 5000)
+    return
+  }
+
   const raw = fs.readFileSync(absPath, 'utf-8')
   const lineEnding = raw.includes('\r\n') ? '\r\n' : '\n'
   const chunks = parseConflictMarkers(raw)

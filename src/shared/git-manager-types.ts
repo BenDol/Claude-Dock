@@ -111,6 +111,10 @@ export interface GitConflictEntry {
   path: string
   oursStatus: string   // what our side did (A/U/D)
   theirsStatus: string // what their side did (A/U/D)
+  isSubmodule?: boolean
+  baseHash?: string    // submodule commit hash for common ancestor
+  oursHash?: string    // submodule commit hash for ours
+  theirsHash?: string  // submodule commit hash for theirs
 }
 
 /** Parsed conflict chunk within a file */
@@ -123,11 +127,21 @@ export interface GitConflictChunk {
   endLine: number
 }
 
+/** Submodule conflict info (conflicting commit hashes) */
+export interface SubmoduleConflictInfo {
+  baseHash: string
+  oursHash: string
+  theirsHash: string
+  oursMessage?: string
+  theirsMessage?: string
+}
+
 /** File content with parsed conflict markers */
 export interface GitConflictFileContent {
   path: string
   chunks: GitConflictChunk[]
   raw: string
+  submodule?: SubmoduleConflictInfo
 }
 
 /** Overall merge/rebase/cherry-pick state */
