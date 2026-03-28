@@ -314,6 +314,37 @@ function parseGitError(action: string, errorMsg: string, context: {
     }
   }
 
+  // Submodule without a commit checked out
+  if (/does not have a commit checked out/i.test(msg)) {
+    // Extract the submodule path from the error
+    const subMatch = msg.match(/'([^']+)'.*does not have a commit checked out/i)
+    const subPath = subMatch?.[1] || ''
+    resolutions.push({
+      label: 'Initialize submodule & retry',
+      description: 'Run git submodule update --init, then retry the operation',
+      action: async () => {
+        await api.gitManager.updateSubmodules(context.projectDir, subPath ? [subPath] : undefined, true)
+        if (context.retry) await context.retry()
+        else context.refresh()
+      }
+    })
+    resolutions.push({
+      label: 'Open Git Bash',
+      description: 'Open a terminal to resolve the submodule state manually',
+      keepOpen: true,
+      action: async () => {
+        await api.gitManager.openBash(context.projectDir)
+      }
+    })
+    return {
+      title: 'Submodule not initialized',
+      message: subPath
+        ? `The submodule at '${subPath}' does not have a commit checked out. It may need to be initialized or updated.`
+        : 'A submodule does not have a commit checked out. It may need to be initialized or updated.',
+      resolutions
+    }
+  }
+
   // Remote rejected — branch name rules, protected branch, pre-receive hooks, etc.
   // Must come BEFORE the behind-remote check since both can contain "failed to push"
   if (action.toLowerCase() === 'push' && /remote rejected/i.test(msg)) {
