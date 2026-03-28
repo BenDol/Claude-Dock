@@ -8230,6 +8230,12 @@ const MergeConflictsPanel: React.FC<{
 
 // --- Conflict Editor (manual edit with syntax highlighting) ---
 
+interface EditorSnapshot {
+  content: string
+  selStart: number
+  selEnd: number
+}
+
 const ConflictEditor: React.FC<{
   content: string
   filePath: string
@@ -8239,6 +8245,37 @@ const ConflictEditor: React.FC<{
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
+
+  // Undo/redo stacks
+  const undoRef = useRef<EditorSnapshot[]>([])
+  const redoRef = useRef<EditorSnapshot[]>([])
+  const lastContentRef = useRef(content)
+
+  // Reset stacks when file changes (content set from outside)
+  const prevContentIdRef = useRef(content)
+  useEffect(() => {
+    if (content !== lastContentRef.current) {
+      // Content changed from outside (file switch / reload) — reset stacks
+      undoRef.current = []
+      redoRef.current = []
+      lastContentRef.current = content
+      prevContentIdRef.current = content
+    }
+  }, [content])
+
+  // Push current state to undo stack and apply new content
+  const pushChange = useCallback((newVal: string, selStart?: number, selEnd?: number) => {
+    const ta = textareaRef.current
+    undoRef.current.push({
+      content: lastContentRef.current,
+      selStart: selStart ?? ta?.selectionStart ?? 0,
+      selEnd: selEnd ?? ta?.selectionEnd ?? 0
+    })
+    redoRef.current = []
+    if (undoRef.current.length > 300) undoRef.current.shift()
+    lastContentRef.current = newVal
+    onChange(newVal)
+  }, [onChange])
 
   const highlighted = useMemo(() => highlightCode(filePath, content), [filePath, content])
   const lines = content.split('\n')
@@ -8256,16 +8293,45 @@ const ConflictEditor: React.FC<{
     }
   }, [])
 
-  // Handle tab key for indentation
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget
+
+    // Ctrl+S — save
     if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       onSave()
       return
     }
+
+    // Ctrl+Z — undo
+    if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+      e.preventDefault()
+      const snap = undoRef.current.pop()
+      if (snap) {
+        redoRef.current.push({ content: lastContentRef.current, selStart: ta.selectionStart, selEnd: ta.selectionEnd })
+        lastContentRef.current = snap.content
+        onChange(snap.content)
+        requestAnimationFrame(() => { ta.selectionStart = snap.selStart; ta.selectionEnd = snap.selEnd })
+      }
+      return
+    }
+
+    // Ctrl+Y or Ctrl+Shift+Z — redo
+    if ((e.key === 'y' && (e.ctrlKey || e.metaKey)) || (e.key === 'Z' && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+      e.preventDefault()
+      const snap = redoRef.current.pop()
+      if (snap) {
+        undoRef.current.push({ content: lastContentRef.current, selStart: ta.selectionStart, selEnd: ta.selectionEnd })
+        lastContentRef.current = snap.content
+        onChange(snap.content)
+        requestAnimationFrame(() => { ta.selectionStart = snap.selStart; ta.selectionEnd = snap.selEnd })
+      }
+      return
+    }
+
+    // Tab / Shift+Tab — indentation
     if (e.key === 'Tab') {
       e.preventDefault()
-      const ta = e.currentTarget
       const start = ta.selectionStart
       const end = ta.selectionEnd
       const val = ta.value
@@ -8277,7 +8343,7 @@ const ConflictEditor: React.FC<{
         const selected = val.slice(lineStart, end)
         const dedented = selected.split('\n').map(l => l.startsWith('  ') ? l.slice(2) : l.startsWith('\t') ? l.slice(1) : l).join('\n')
         const newVal = val.slice(0, lineStart) + dedented + val.slice(end)
-        onChange(newVal)
+        pushChange(newVal, start, end)
         requestAnimationFrame(() => {
           ta.selectionStart = start - (selected.split('\n')[0].length - dedented.split('\n')[0].length)
           ta.selectionEnd = lineStart + dedented.length
@@ -8285,7 +8351,7 @@ const ConflictEditor: React.FC<{
       } else if (start === end) {
         // No selection — insert 2 spaces
         const newVal = val.slice(0, start) + '  ' + val.slice(end)
-        onChange(newVal)
+        pushChange(newVal, start, end)
         requestAnimationFrame(() => { ta.selectionStart = ta.selectionEnd = start + 2 })
       } else {
         // Selection — indent all selected lines
@@ -8294,14 +8360,14 @@ const ConflictEditor: React.FC<{
         const selected = val.slice(lineStart, end)
         const indented = selected.split('\n').map(l => '  ' + l).join('\n')
         const newVal = val.slice(0, lineStart) + indented + val.slice(end)
-        onChange(newVal)
+        pushChange(newVal, start, end)
         requestAnimationFrame(() => {
           ta.selectionStart = start + 2
           ta.selectionEnd = lineStart + indented.length
         })
       }
     }
-  }, [onChange, onSave])
+  }, [onChange, onSave, pushChange])
 
   return (
     <div className="gm-conflict-editor">
@@ -8323,7 +8389,7 @@ const ConflictEditor: React.FC<{
           ref={textareaRef}
           className="gm-conflict-editor-textarea"
           value={content}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => pushChange(e.target.value)}
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
           spellCheck={false}
