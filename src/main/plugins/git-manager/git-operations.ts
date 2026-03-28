@@ -608,16 +608,25 @@ export async function getDiff(cwd: string, filePath?: string, staged?: boolean):
 
 export async function getCommitDetail(cwd: string, hash: string): Promise<GitCommitDetail | null> {
   try {
-    // Run metadata and numstat in parallel (numstat is fast even for large files)
-    const metaPromise = gitExec(cwd, [
+    // Get metadata first (fast) to determine parent structure
+    const { stdout: metaOut } = await gitExec(cwd, [
       'log', '-1', `--format=${LOG_FORMAT}%n%b`, hash
     ], 10000)
 
-    const numstatPromise = gitExec(cwd, [
-      'diff-tree', '--root', '--numstat', '-r', hash
-    ], 10000).catch(() => ({ stdout: '', stderr: '' }))
+    const lines = metaOut.split('\n')
+    if (lines.length < 7) return null
+    const parents = lines[6] ? lines[6].split(' ').filter(Boolean) : []
+    const isMerge = parents.length > 1
 
-    const [{ stdout: metaOut }, { stdout: numstatOut }] = await Promise.all([metaPromise, numstatPromise])
+    // For merge commits: diff against first parent to show all files the merge brought in.
+    // Default combined diff only shows files differing from ALL parents (just conflict resolutions).
+    // For regular commits: --root handles root commits (no parent → diff against empty tree).
+    const numstatArgs = isMerge
+      ? ['diff-tree', '--numstat', '-r', parents[0], hash]
+      : ['diff-tree', '--root', '--numstat', '-r', hash]
+
+    const { stdout: numstatOut } = await gitExec(cwd, numstatArgs, 10000)
+      .catch(() => ({ stdout: '', stderr: '' }))
 
     // Find files that are too large for a full diff (>10K lines of changes)
     const MAX_DIFF_LINES = 10000
@@ -636,7 +645,9 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
     }
 
     // Build diff command, excluding large files
-    const diffArgs = ['diff-tree', '--root', '-p', '--no-color', '--unified=5', '-r', hash]
+    const diffArgs = isMerge
+      ? ['diff-tree', '-p', '--no-color', '--unified=5', '-r', parents[0], hash]
+      : ['diff-tree', '--root', '-p', '--no-color', '--unified=5', '-r', hash]
     if (largeFiles.size > 0) {
       diffArgs.push('--')
       diffArgs.push('.')
@@ -663,9 +674,6 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
       diffOut += `\ndiff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -0,0 +0,0 @@\n File too large to display diff${label}\n`
     }
 
-    const lines = metaOut.split('\n')
-    if (lines.length < 7) return null
-
     const endIdx = lines.indexOf('---END---')
     const bodyLines = endIdx >= 0 ? lines.slice(endIdx + 1) : []
 
@@ -676,7 +684,7 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
       authorEmail: lines[3],
       date: lines[4],
       subject: lines[5],
-      parents: lines[6] ? lines[6].split(' ').filter(Boolean) : [],
+      parents,
       refs: lines[7] ? lines[7].split(',').map((r) => r.trim()).filter(Boolean) : [],
       body: bodyLines.join('\n').trim(),
       files: parseDiffOutput(diffOut)
