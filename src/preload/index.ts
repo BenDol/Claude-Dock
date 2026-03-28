@@ -224,6 +224,7 @@ export interface DockApi {
     removeSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; error?: string }>
     syncSubmodules: (projectDir: string, subPaths?: string[]) => Promise<{ success: boolean; output?: string; error?: string }>
     updateSubmodules: (projectDir: string, subPaths?: string[], init?: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
+    pullRebaseSubmodules: (projectDir: string, subPaths?: string[]) => Promise<{ results: { path: string; success: boolean; output?: string; error?: string }[] }>
     forceReinitSubmodule: (projectDir: string, subPath: string) => Promise<{ success: boolean; output?: string; error?: string }>
     checkSubmoduleAccess: (projectDir: string, subPath: string) => Promise<{ accessible: boolean; url: string | null; error: string | null }>
     getRemotes: (projectDir: string) => Promise<{ name: string; fetchUrl: string; pushUrl: string }[]>
@@ -545,6 +546,7 @@ const dockApi: DockApi = {
     removeSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_SUBMODULE, projectDir, subPath),
     syncSubmodules: (projectDir, subPaths?) => ipcRenderer.invoke(IPC.GIT_MGR_SYNC_SUBMODULES, projectDir, subPaths),
     updateSubmodules: (projectDir, subPaths?, init?) => ipcRenderer.invoke(IPC.GIT_MGR_UPDATE_SUBMODULES, projectDir, subPaths, init),
+    pullRebaseSubmodules: (projectDir, subPaths?) => ipcRenderer.invoke(IPC.GIT_MGR_PULL_REBASE_SUBMODULES, projectDir, subPaths),
     forceReinitSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_FORCE_REINIT_SUBMODULE, projectDir, subPath),
     checkSubmoduleAccess: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_CHECK_SUBMODULE_ACCESS, projectDir, subPath),
     getRemotes: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_REMOTES, projectDir),

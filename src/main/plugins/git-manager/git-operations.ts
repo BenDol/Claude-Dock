@@ -1889,6 +1889,33 @@ export async function syncSubmodules(cwd: string, subPaths?: string[]): Promise<
   return (stdout + stderr).trim()
 }
 
+export async function pullRebaseSubmodules(
+  cwd: string, subPaths?: string[]
+): Promise<{ results: { path: string; success: boolean; output?: string; error?: string }[] }> {
+  const svc = getServices()
+  // If no specific paths given, get all submodules
+  let paths = subPaths
+  if (!paths || paths.length === 0) {
+    const subs = await listSubmodules(cwd)
+    paths = subs.map((s) => s.path)
+  }
+  const results: { path: string; success: boolean; output?: string; error?: string }[] = []
+  for (const subPath of paths) {
+    const absPath = path.resolve(cwd, subPath)
+    try {
+      const output = await pull(absPath, 'rebase')
+      results.push({ path: subPath, success: true, output })
+      svc.log(`[git-manager] pullRebaseSubmodule ${subPath}: ${output || 'ok'}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      results.push({ path: subPath, success: false, error: msg })
+      svc.logError(`[git-manager] pullRebaseSubmodule ${subPath} failed:`, err)
+    }
+  }
+  invalidateSubmoduleCache(cwd)
+  return { results }
+}
+
 export async function updateSubmodules(cwd: string, subPaths?: string[], init?: boolean): Promise<string> {
   const svc = getServices()
 
@@ -2242,6 +2269,39 @@ export async function getConflictFileContent(cwd: string, filePath: string): Pro
     }
   }
 
+  // Detect delete conflicts (one side deleted the file, other modified it)
+  // Check which stages exist in the index — missing stage = that side deleted
+  if (!lsFilesOutput) {
+    try {
+      const { stdout: lsOut } = await gitExec(cwd, ['ls-files', '-u', '-z', '--', filePath], 3000)
+      lsFilesOutput = lsOut
+    } catch { /* ignore */ }
+  }
+  if (lsFilesOutput) {
+    const stageHashes: Record<number, string> = {}
+    for (const entry of lsFilesOutput.split('\0').filter(Boolean)) {
+      const match = entry.match(/^(\d+)\s+([0-9a-f]+)\s+(\d)\s+/)
+      if (match) stageHashes[parseInt(match[3])] = match[2]
+    }
+    const oursExists = !!stageHashes[2]
+    const theirsExists = !!stageHashes[3]
+
+    if (oursExists && !theirsExists) {
+      // They deleted the file, we modified it — file should exist on disk with our content
+      let content = ''
+      try { content = fs.readFileSync(absPath, 'utf-8') } catch {
+        try { const { stdout } = await gitExec(cwd, ['show', stageHashes[2]], 5000); content = stdout } catch { /* ignore */ }
+      }
+      return { path: filePath, chunks: [], raw: content, deleteConflict: { deletedBy: 'theirs', content } }
+    }
+    if (!oursExists && theirsExists) {
+      // We deleted the file, they modified it — file may not exist on disk
+      let content = ''
+      try { const { stdout } = await gitExec(cwd, ['show', stageHashes[3]], 5000); content = stdout } catch { /* ignore */ }
+      return { path: filePath, chunks: [], raw: content, deleteConflict: { deletedBy: 'ours', content } }
+    }
+  }
+
   const raw = fs.readFileSync(absPath, 'utf-8')
   const chunks = parseConflictMarkers(raw)
   return { path: filePath, chunks, raw }
@@ -2338,6 +2398,25 @@ export async function resolveConflictFile(
       try { await gitExec(cwd, ['submodule', 'update', '--init', '--', filePath], 15000) } catch { /* non-critical */ }
     }
     return
+  }
+
+  // Delete conflict — one side deleted the file, other modified it
+  {
+    const { stdout: lsOut } = await gitExec(cwd, ['ls-files', '-u', '-z', '--', filePath], 3000)
+    const hasStage2 = lsOut.split('\0').some((e) => /\s2\s/.test(e))
+    const hasStage3 = lsOut.split('\0').some((e) => /\s3\s/.test(e))
+    if (!hasStage2 || !hasStage3) {
+      if (resolution === 'both') throw new Error('Cannot accept both for delete conflicts — choose to keep or delete the file')
+      // Determine if the chosen resolution keeps or deletes the file
+      const keepFile = (resolution === 'ours' && hasStage2) || (resolution === 'theirs' && hasStage3)
+      if (keepFile) {
+        await gitExec(cwd, ['checkout', `--${resolution}`, '--', filePath], 5000)
+        await gitExec(cwd, ['add', '--', filePath], 5000)
+      } else {
+        await gitExec(cwd, ['rm', '--', filePath], 5000)
+      }
+      return
+    }
   }
 
   const raw = fs.readFileSync(absPath, 'utf-8')

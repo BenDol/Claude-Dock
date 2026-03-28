@@ -470,6 +470,15 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_PULL_REBASE_SUBMODULES, async (_event, projectDir: string, subPaths?: string[]) => {
+    try {
+      return await gitOps.pullRebaseSubmodules(projectDir, subPaths)
+    } catch (err) {
+      getServices().logError('[git-manager] pull rebase submodules failed:', err)
+      return { results: [{ path: '*', success: false, error: err instanceof Error ? err.message : 'Pull rebase failed' }] }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_CHECK_SUBMODULE_ACCESS, async (_event, projectDir: string, subPath: string) => {
     try {
       const url = await gitOps.getSubmoduleUrl(projectDir, subPath)

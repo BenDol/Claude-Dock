@@ -136,12 +136,19 @@ export interface SubmoduleConflictInfo {
   theirsMessage?: string
 }
 
+/** Delete conflict info (one side deleted, other modified) */
+export interface DeleteConflictInfo {
+  deletedBy: 'ours' | 'theirs'
+  content: string  // file content from the side that kept the file
+}
+
 /** File content with parsed conflict markers */
 export interface GitConflictFileContent {
   path: string
   chunks: GitConflictChunk[]
   raw: string
   submodule?: SubmoduleConflictInfo
+  deleteConflict?: DeleteConflictInfo
 }
 
 /** Overall merge/rebase/cherry-pick state */

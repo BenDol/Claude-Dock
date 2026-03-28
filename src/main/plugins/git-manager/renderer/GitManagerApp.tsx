@@ -634,6 +634,7 @@ const GitManagerApp: React.FC = () => {
   const [addSubmoduleBasePath, setAddSubmoduleBasePath] = useState('')
   const [switchBranchSubPath, setSwitchBranchSubPath] = useState<string | null>(null)
   const [selectedSubmodule, setSelectedSubmodule] = useState<string | null>(null)
+  const [submoduleHeaderCtx, setSubmoduleHeaderCtx] = useState<{ x: number; y: number } | null>(null)
   const [tagSidebarCtx, setTagSidebarCtx] = useState<{ x: number; y: number; tag: { name: string; hash: string; date: string } } | null>(null)
   const [scrollToHash, setScrollToHash] = useState<string | null>(null)
   const [confirmModal, setConfirmModal] = useState<{
@@ -1730,7 +1731,11 @@ const GitManagerApp: React.FC = () => {
               }}
             />
           </CollapsibleSection>
-          <CollapsibleSection title="Submodules" count={submodules.length} loading={submodulesLoading} onAdd={() => { setAddSubmoduleBasePath(''); setSidebarModal('addSubmodule') }} addTitle="Add submodule">
+          <CollapsibleSection title="Submodules" count={submodules.length} loading={submodulesLoading} onAdd={() => { setAddSubmoduleBasePath(''); setSidebarModal('addSubmodule') }} addTitle="Add submodule" onContextMenu={(e) => {
+            e.preventDefault()
+            const zoom = parseFloat(document.documentElement.style.zoom) || 1
+            setSubmoduleHeaderCtx({ x: e.clientX / zoom, y: e.clientY / zoom })
+          }}>
             <SubmoduleTree
               submodules={submodules}
               selectedPath={selectedSubmodule}
@@ -1753,8 +1758,37 @@ const GitManagerApp: React.FC = () => {
                 })
               }}
               onRefresh={refresh}
+              onPullRebase={async (subPaths) => {
+                setSubmodulesLoading(true)
+                const { results } = await getDockApi().gitManager.pullRebaseSubmodules(activeDir, subPaths)
+                const failed = results.filter((r) => !r.success)
+                if (failed.length > 0) {
+                  setError(`Pull rebase failed for: ${failed.map((f) => `${f.path} (${f.error})`).join(', ')}`)
+                }
+                refresh()
+                setSubmodulesLoading(false)
+              }}
             />
           </CollapsibleSection>
+          {submoduleHeaderCtx && (
+            <SubmoduleFolderContextMenu
+              x={submoduleHeaderCtx.x}
+              y={submoduleHeaderCtx.y}
+              folderName="all"
+              subPaths={submodules.map((s) => s.path)}
+              onPullRebase={async (subPaths) => {
+                setSubmodulesLoading(true)
+                const { results } = await getDockApi().gitManager.pullRebaseSubmodules(activeDir, subPaths)
+                const failed = results.filter((r) => !r.success)
+                if (failed.length > 0) {
+                  setError(`Pull rebase failed for: ${failed.map((f) => `${f.path} (${f.error})`).join(', ')}`)
+                }
+                refresh()
+                setSubmodulesLoading(false)
+              }}
+              onClose={() => setSubmoduleHeaderCtx(null)}
+            />
+          )}
           {(worktrees.length > 0 || worktreesLoading) && (
             <CollapsibleSection title="Worktrees" count={worktrees.length} loading={worktreesLoading}>
               {worktrees.map(wt => (
@@ -6210,6 +6244,28 @@ const VirtualSidebarList: React.FC<{
   )
 })
 
+// --- Persisted collapsed state hook ---
+
+function usePersistedCollapsed(key: string, defaultValue = false): [boolean, (val: boolean | ((prev: boolean) => boolean)) => void] {
+  const storageKey = `gm-collapsed:${key}`
+  const [collapsed, setCollapsedRaw] = useState(() => {
+    try {
+      const v = localStorage.getItem(storageKey)
+      return v !== null ? v === 'true' : defaultValue
+    } catch { return defaultValue }
+  })
+
+  const setCollapsed = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+    setCollapsedRaw((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val
+      try { localStorage.setItem(storageKey, String(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [storageKey])
+
+  return [collapsed, setCollapsed]
+}
+
 // --- Collapsible sidebar section ---
 
 const CollapsibleSection: React.FC<{
@@ -6219,13 +6275,14 @@ const CollapsibleSection: React.FC<{
   defaultCollapsed?: boolean
   onAdd?: () => void
   addTitle?: string
+  onContextMenu?: (e: React.MouseEvent) => void
   children: React.ReactNode
-}> = React.memo(({ title, count, loading, defaultCollapsed = false, onAdd, addTitle, children }) => {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+}> = React.memo(({ title, count, loading, defaultCollapsed = false, onAdd, addTitle, onContextMenu, children }) => {
+  const [collapsed, setCollapsed] = usePersistedCollapsed(`section:${title}`, defaultCollapsed)
 
   return (
     <div className="gm-sidebar-section">
-      <div className="gm-sidebar-header-wrap">
+      <div className="gm-sidebar-header-wrap" onContextMenu={onContextMenu}>
         <button className="gm-sidebar-header gm-sidebar-header-toggle" data-collapsible data-collapsed={collapsed} onClick={() => setCollapsed(!collapsed)}>
           <SectionChevron collapsed={collapsed} />
           <span>{title}</span>
@@ -6289,7 +6346,7 @@ const RemoteBranchGroup: React.FC<{
   branches: GitBranchInfo[]
   onRemoveRemote?: (remoteName: string, branchNames: string[]) => void
 }> = ({ remote, branches, onRemoveRemote }) => {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = usePersistedCollapsed(`remote:${remote}`)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const ctxRef = useRef<HTMLDivElement>(null)
 
@@ -6404,7 +6461,7 @@ const LocalBranchNode: React.FC<{
   onNavigate?: (branchName: string) => void
   onContextMenu?: (e: React.MouseEvent, branch: GitBranchInfo) => void
 }> = ({ node, depth, checkingOut, onCheckout, onNavigate, onContextMenu }) => {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = usePersistedCollapsed(`branch:${node.fullPath}`)
   const isLeaf = node.branch !== undefined && node.children.size === 0
   const isGroup = node.children.size > 0
 
@@ -7889,6 +7946,7 @@ const MergeConflictsPanel: React.FC<{
   const hasConflicts = conflictChunks.length > 0
   const selectedConflictEntry = selectedFile ? mergeState.conflicts.find(c => c.path === selectedFile) : undefined
   const isSubmoduleConflict = !!(selectedConflictEntry?.isSubmodule || conflictContent?.submodule)
+  const isDeleteConflict = !!conflictContent?.deleteConflict
 
   return (
     <div className="gm-conflicts">
@@ -7908,6 +7966,7 @@ const MergeConflictsPanel: React.FC<{
               <ConflictFileIcon />
               <span className="gm-file-path">{c.path}</span>
               {c.isSubmodule && <span className="gm-conflicts-submodule-tag">submodule</span>}
+              {(c.oursStatus === 'D' || c.theirsStatus === 'D') && <span className="gm-conflicts-delete-tag">deleted</span>}
             </div>
           ))}
           {mergeState.conflicts.length === 0 && (
@@ -7995,6 +8054,65 @@ const MergeConflictsPanel: React.FC<{
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : conflictContent && isDeleteConflict && conflictContent.deleteConflict ? (
+          <div className="gm-conflicts-content">
+            <div className="gm-conflicts-content-header">
+              <span className="gm-conflicts-content-path">{selectedFile} <span className="gm-conflicts-delete-tag">deleted</span></span>
+              <div className="gm-conflicts-content-actions">
+                <button
+                  className="gm-small-btn gm-conflicts-mark-btn"
+                  onClick={handleMarkResolved}
+                  disabled={busy}
+                  title="Mark delete conflict as resolved"
+                >
+                  Mark as Resolved
+                </button>
+              </div>
+            </div>
+            <div className="gm-conflicts-submodule">
+              <div className="gm-conflicts-submodule-intro">
+                {conflictContent.deleteConflict.deletedBy === 'theirs'
+                  ? 'The incoming changes deleted this file, but your side modified it. Choose whether to keep your version or accept the deletion.'
+                  : 'Your side deleted this file, but the incoming changes modified it. Choose whether to keep the incoming version or accept the deletion.'}
+              </div>
+              <div className="gm-conflict-block">
+                <div className="gm-conflict-section gm-conflict-ours">
+                  <div className="gm-conflict-section-header">
+                    <span className="gm-conflict-section-label">
+                      {conflictContent.deleteConflict.deletedBy === 'ours' ? 'Ours (deleted)' : 'Ours (modified)'}
+                    </span>
+                    <button
+                      className={`gm-conflict-accept-btn ${conflictContent.deleteConflict.deletedBy === 'ours' ? 'gm-conflict-accept-delete' : 'gm-conflict-accept-ours'}`}
+                      onClick={() => handleResolveAll('ours')}
+                      disabled={busy}
+                    >
+                      {conflictContent.deleteConflict.deletedBy === 'ours' ? 'Delete File' : 'Keep File'}
+                    </button>
+                  </div>
+                </div>
+                <div className="gm-conflict-section gm-conflict-theirs">
+                  <div className="gm-conflict-section-header">
+                    <span className="gm-conflict-section-label">
+                      {conflictContent.deleteConflict.deletedBy === 'theirs' ? 'Theirs (deleted)' : 'Theirs (modified)'}
+                    </span>
+                    <button
+                      className={`gm-conflict-accept-btn ${conflictContent.deleteConflict.deletedBy === 'theirs' ? 'gm-conflict-accept-delete' : 'gm-conflict-accept-theirs'}`}
+                      onClick={() => handleResolveAll('theirs')}
+                      disabled={busy}
+                    >
+                      {conflictContent.deleteConflict.deletedBy === 'theirs' ? 'Delete File' : 'Keep File'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {conflictContent.deleteConflict.content && (
+                <div className="gm-conflicts-delete-preview">
+                  <div className="gm-conflicts-delete-preview-header">File content ({conflictContent.deleteConflict.deletedBy === 'ours' ? 'theirs' : 'ours'})</div>
+                  <pre className="gm-conflicts-delete-preview-code">{conflictContent.deleteConflict.content.slice(0, 2000)}{conflictContent.deleteConflict.content.length > 2000 ? '\n...' : ''}</pre>
+                </div>
+              )}
             </div>
           </div>
         ) : conflictContent ? (
@@ -9121,6 +9239,14 @@ function buildSubmoduleTree(submodules: GitSubmoduleInfo[]): SubmoduleTreeNode[]
   return root.children
 }
 
+/** Collect all submodule paths under a tree node (recursively) */
+function collectSubmodulePaths(node: SubmoduleTreeNode): string[] {
+  const paths: string[] = []
+  if (node.submodule) paths.push(node.submodule.path)
+  for (const child of node.children) paths.push(...collectSubmodulePaths(child))
+  return paths
+}
+
 const SubmoduleTree: React.FC<{
   submodules: GitSubmoduleInfo[]
   selectedPath?: string | null
@@ -9131,9 +9257,10 @@ const SubmoduleTree: React.FC<{
   onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
   onRefresh?: () => void
-}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh }) => {
+  onPullRebase?: (subPaths: string[]) => void
+}> = ({ submodules, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh, onPullRebase }) => {
   const tree = useMemo(() => buildSubmoduleTree(submodules), [submodules])
-  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} depth={0} parentPath="" />)}</>
+  return <>{tree.map((node) => <SubmoduleTreeNodeView key={node.name} node={node} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} onPullRebase={onPullRebase} depth={0} parentPath="" />)}</>
 }
 
 const SubmoduleTreeNodeView: React.FC<{
@@ -9146,10 +9273,12 @@ const SubmoduleTreeNodeView: React.FC<{
   onSwitchBranch: (subPath: string) => void
   onRemove?: (subPath: string) => void
   onRefresh?: () => void
+  onPullRebase?: (subPaths: string[]) => void
   depth: number
   parentPath: string
-}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh, depth, parentPath }) => {
-  const [collapsed, setCollapsed] = useState(false)
+}> = ({ node, selectedPath, projectDir, onSelect, onNavigate, onAddInFolder, onSwitchBranch, onRemove, onRefresh, onPullRebase, depth, parentPath }) => {
+  const nodePath = parentPath ? `${parentPath}/${node.name}` : node.name
+  const [collapsed, setCollapsed] = usePersistedCollapsed(`subfolder:${nodePath}`)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
 
   if (node.submodule) {
@@ -9218,7 +9347,7 @@ const SubmoduleTreeNodeView: React.FC<{
   }
 
   // Directory node
-  const folderPath = parentPath ? `${parentPath}/${node.name}` : node.name
+  const folderPath = nodePath
   return (
     <>
       <div
@@ -9226,6 +9355,11 @@ const SubmoduleTreeNodeView: React.FC<{
         data-collapsible
         data-collapsed={collapsed}
         onClick={() => setCollapsed((p) => !p)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          const zoom = parseFloat(document.documentElement.style.zoom) || 1
+          setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
+        }}
         style={{ paddingLeft: 22 + depth * 14 }}
       >
         <FolderIcon />
@@ -9238,8 +9372,18 @@ const SubmoduleTreeNodeView: React.FC<{
           >+</button>
         )}
       </div>
+      {ctxMenu && onPullRebase && (
+        <SubmoduleFolderContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          folderName={node.name}
+          subPaths={collectSubmodulePaths(node)}
+          onPullRebase={onPullRebase}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
       {!collapsed && node.children.map((child) => (
-        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} depth={depth + 1} parentPath={folderPath} />
+        <SubmoduleTreeNodeView key={child.name} node={child} selectedPath={selectedPath} projectDir={projectDir} onSelect={onSelect} onNavigate={onNavigate} onAddInFolder={onAddInFolder} onSwitchBranch={onSwitchBranch} onRemove={onRemove} onRefresh={onRefresh} onPullRebase={onPullRebase} depth={depth + 1} parentPath={folderPath} />
       ))}
     </>
   )
@@ -9416,6 +9560,32 @@ const StashSidebarEntry: React.FC<{
         </div>
       )}
     </>
+  )
+}
+
+const SubmoduleFolderContextMenu: React.FC<{
+  x: number; y: number
+  folderName: string
+  subPaths: string[]
+  onPullRebase: (subPaths: string[]) => void
+  onClose: () => void
+}> = ({ x, y, folderName, subPaths, onPullRebase, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div className="gm-ctx-item" onClick={() => { onPullRebase(subPaths); onClose() }}>
+        Pull rebase all ({subPaths.length})
+      </div>
+    </div>
   )
 }
 

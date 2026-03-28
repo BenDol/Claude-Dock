@@ -127,6 +127,7 @@ export const IPC = {
   GIT_MGR_REMOVE_SUBMODULE: 'gitMgr:removeSubmodule',
   GIT_MGR_SYNC_SUBMODULES: 'gitMgr:syncSubmodules',
   GIT_MGR_UPDATE_SUBMODULES: 'gitMgr:updateSubmodules',
+  GIT_MGR_PULL_REBASE_SUBMODULES: 'gitMgr:pullRebaseSubmodules',
   GIT_MGR_FORCE_REINIT_SUBMODULE: 'gitMgr:forceReinitSubmodule',
   GIT_MGR_CHECK_SUBMODULE_ACCESS: 'gitMgr:checkSubmoduleAccess',
   GIT_MGR_GET_REMOTES: 'gitMgr:getRemotes',
