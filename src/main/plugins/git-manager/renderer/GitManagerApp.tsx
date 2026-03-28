@@ -7814,8 +7814,19 @@ const MergeConflictsPanel: React.FC<{
   const handleMarkResolved = useCallback(async () => {
     if (!selectedFile) return
     setBusy(true)
-    const r = await getDockApi().gitManager.stage(projectDir, [selectedFile])
-    if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`)
+    const api = getDockApi()
+    const r = await api.gitManager.stage(projectDir, [selectedFile])
+    if (!r.success) {
+      onError(`Stage failed: ${r.error || 'Unknown error'}`)
+      setBusy(false)
+      return
+    }
+    // Check if all conflicts are now resolved — if so, auto-continue the merge
+    const freshState = await api.gitManager.getMergeState(projectDir)
+    if (freshState.inProgress && freshState.conflicts.length === 0) {
+      const cr = await api.gitManager.continueMerge(projectDir)
+      if (!cr.success) onError(`Continue merge failed: ${cr.error || 'Unknown error'}`)
+    }
     onRefresh()
     setBusy(false)
   }, [selectedFile, projectDir, onRefresh, onError])
