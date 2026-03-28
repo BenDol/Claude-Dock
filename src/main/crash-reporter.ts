@@ -16,6 +16,7 @@ import { getSetting } from './settings-store'
 import { log, logError } from './logger'
 
 declare const __BUILD_SHA__: string
+declare const __DEV__: boolean
 
 const CRASH_ENDPOINT = 'https://claude-dock-telemetry.dolb90.workers.dev/crash'
 const MAX_PAYLOAD_SIZE = 8192
@@ -120,6 +121,8 @@ export class CrashReporter {
 
   /** Persist a crash report to disk, then attempt to show a dialog and send */
   report(type: string, error: Error | string, extraInfo: string = ''): void {
+    // Never send crash reports in dev mode
+    if (typeof __DEV__ !== 'undefined' && __DEV__) return
     // Guard against re-entrant calls
     if (this.reporting) return
     this.reporting = true

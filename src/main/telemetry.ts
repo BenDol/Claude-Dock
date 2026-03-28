@@ -17,6 +17,7 @@ import { getSetting, setSettings } from './settings-store'
 import { log } from './logger'
 
 declare const __BUILD_SHA__: string
+declare const __DEV__: boolean
 
 // The Worker URL — replace with your deployed Cloudflare Worker
 const TELEMETRY_ENDPOINT = 'https://claude-dock-telemetry.dolb90.workers.dev/telemetry'
@@ -89,6 +90,7 @@ export class TelemetryCollector {
   }
 
   isEnabled(): boolean {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) return false
     try {
       const t = getSetting('telemetry')
       return !!(t?.enabled && t?.consentGiven && t?.deviceId)

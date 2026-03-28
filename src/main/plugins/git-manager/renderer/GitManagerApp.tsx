@@ -952,13 +952,15 @@ const GitManagerApp: React.FC = () => {
     const gen = ++refreshGenRef.current
     const api = getDockApi()
     try {
-      const [logData, statusData, commitCount] = await Promise.all([
+      const [logData, branchData, statusData, commitCount] = await Promise.all([
         api.gitManager.getLog(activeDir, { maxCount: 200 }),
+        api.gitManager.getBranches(activeDir),
         api.gitManager.getStatus(activeDir),
         api.gitManager.getCommitCount(activeDir)
       ])
       if (gen !== refreshGenRef.current) return
       setCommits(logData)
+      setBranches(branchData)
       setStatus(statusData)
       setTotalCommitCount(commitCount)
       lastRefreshRef.current = Date.now()
@@ -1167,6 +1169,8 @@ const GitManagerApp: React.FC = () => {
     return origin ? detectProvider(origin.fetchUrl) : 'generic'
   }, [remotes])
   const [pushing, setPushing] = useState(false)
+  const [pushCancelling, setPushCancelling] = useState(false)
+  const pushCancelledRef = useRef(false)
   const [pushProgress, setPushProgress] = useState<{ phase: string; percent: number; detail: string } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [checkingOutBranch, setCheckingOutBranch] = useState<string | null>(null)
@@ -1182,10 +1186,12 @@ const GitManagerApp: React.FC = () => {
     if (pushing) return
     setPushing(true)
     setPushProgress(null)
+    pushCancelledRef.current = false
     try {
       const api = getDockApi()
       const result = await api.gitManager.push(activeDir)
       if (!result.success) {
+        if (pushCancelledRef.current) return // cancelled — no error
         showActionError('Push', result.error || 'Push failed', {
           retry: async () => {
             const r2 = await api.gitManager.push(activeDir)
@@ -1198,11 +1204,15 @@ const GitManagerApp: React.FC = () => {
       refresh()
     } finally {
       setPushing(false)
+      setPushCancelling(false)
       setPushProgress(null)
+      pushCancelledRef.current = false
     }
   }, [activeDir, refresh, pushing, showActionError])
 
   const handleCancelPush = useCallback(() => {
+    pushCancelledRef.current = true
+    setPushCancelling(true)
     getDockApi().gitManager.cancelPush()
   }, [])
 
@@ -1521,21 +1531,24 @@ const GitManagerApp: React.FC = () => {
             onRefresh={refreshAndShowLog}
             onOpenDialog={handleOpenPullDialog}
           />
-          {currentBranch && (pushing || currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking)) ? (
+          {pushing || (currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking))) ? (
             <div className="gm-push-btn-wrap">
               <button
                 className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
-                onClick={pushing ? handleCancelPush : handlePush}
+                onClick={pushing && !pushCancelling ? handleCancelPush : (!pushing ? handlePush : undefined)}
+                disabled={pushCancelling}
                 title={pushing
-                  ? (pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
-                  : (!currentBranch.tracking ? 'Publish branch to origin' : `Push${currentBranch.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
+                  ? (pushCancelling ? 'Cancelling push...' : pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
+                  : (!currentBranch?.tracking ? 'Publish branch to origin' : `Push${currentBranch?.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch?.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
               >
                 {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
                 {pushing
-                  ? (pushProgress
-                    ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
-                    : 'Pushing…')
-                  : (!currentBranch.tracking ? 'Publish' : 'Push')}
+                  ? (pushCancelling
+                    ? 'Cancelling…'
+                    : pushProgress
+                      ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
+                      : <><span>Pushing…</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>)
+                  : (!currentBranch?.tracking ? 'Publish' : 'Push')}
                 {!pushing && currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
                 {!pushing && currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
                 {pushing && <div className="gm-push-btn-fill" style={pushProgress ? { width: `${pushProgress.percent}%` } : undefined} />}
@@ -1964,6 +1977,8 @@ const GitManagerApp: React.FC = () => {
                 onCommitted={handleCommitted}
                 onStatusRefreshed={setStatus}
                 onBusyChange={handleBusyChange}
+                onPushStateChange={(p) => { setPushing(p); if (!p) { setPushCancelling(false); setPushProgress(null); pushCancelledRef.current = false } }}
+                pushCancelledRef={pushCancelledRef}
               />
             </div>
           )}
@@ -4224,7 +4239,9 @@ const WorkingChanges: React.FC<{
   onCommitted?: (hash: string) => void
   onStatusRefreshed?: (status: GitStatusResult) => void
   onBusyChange?: (busy: boolean) => void
-}> = React.memo(({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange }) => {
+  onPushStateChange?: (pushing: boolean) => void
+  pushCancelledRef?: React.RefObject<boolean>
+}> = React.memo(({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange, onPushStateChange, pushCancelledRef }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -4587,12 +4604,17 @@ const WorkingChanges: React.FC<{
     if (result.success) {
       setCommitMsg('')
       userEditedMsgRef.current = false
+      onPushStateChange?.(true)
       const pushResult = await api.gitManager.push(projectDir)
+      const wasCancelled = pushCancelledRef?.current
+      onPushStateChange?.(false)
       setBusy(false)
       setCommitting(null)
       if (!pushResult.success) {
-        // Commit succeeded but push failed — still navigate to the commit
+        // Commit succeeded but push failed — navigate to commit either way
         if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
+        // If user cancelled, don't show error
+        if (wasCancelled) return
         onError(`Push failed: ${pushResult.error || 'Unknown error'}`, async () => {
           const r = await api.gitManager.push(projectDir)
           if (!r.success) throw new Error(r.error || 'Push still failed')
