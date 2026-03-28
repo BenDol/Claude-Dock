@@ -10,6 +10,13 @@ const { mockStore, state } = vi.hoisted(() => {
   return { mockStore, state }
 })
 
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    setJumpList: vi.fn()
+  }
+}))
+
 vi.mock('electron-store', () => ({
   default: vi.fn().mockImplementation(() => mockStore)
 }))
