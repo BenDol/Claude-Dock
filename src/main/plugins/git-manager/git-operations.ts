@@ -2158,12 +2158,15 @@ export async function getMergeState(cwd: string): Promise<GitMergeState> {
 
   if (type === 'none') return { inProgress: false, type: 'none', conflicts: [] }
 
-  // Get conflicts from status — only report as in-progress if there are
-  // actual unmerged files. During a normal `git pull --rebase`, sentinel files
-  // exist transiently while git applies commits. Without real conflicts the
-  // rebase completes on its own and should not trigger the conflict UI.
   const status = await getStatus(cwd)
-  if (status.conflicts.length === 0) {
+
+  // For rebase: sentinel files exist transiently while git auto-applies
+  // commits. Without real conflicts the rebase completes on its own and
+  // should not trigger the merge UI.
+  // For merge/cherry-pick/revert: the user must explicitly commit even after
+  // resolving all conflicts, so always report as in-progress while the
+  // sentinel file exists.
+  if (type === 'rebase' && status.conflicts.length === 0) {
     return { inProgress: false, type: 'none', conflicts: [] }
   }
   return { inProgress: true, type, conflicts: status.conflicts, mergeHead }
