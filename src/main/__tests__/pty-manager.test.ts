@@ -137,31 +137,33 @@ describe('PtyManager', () => {
       const countWrites = () =>
         mockHostPostMessage.mock.calls.filter((c) => c[0].type === 'write').length
 
-      // First launch after 100ms initial delay
-      vi.advanceTimersByTime(100)
+      // First launch executes immediately (no delay for the first item)
       expect(countWrites()).toBe(1)
 
-      // processQueue uses nested setTimeout: 100ms (delay) -> next() -> setTimeout(processQueue, 1500)
-      // Second launch: 1500ms (gap) + 100ms (delay) = 1600ms after first
-      vi.advanceTimersByTime(1600)
+      // Second launch: 500ms gap + setTimeout(0) tick
+      vi.advanceTimersByTime(501)
       expect(countWrites()).toBe(2)
 
-      // Third launch: another 1500ms + 100ms
-      vi.advanceTimersByTime(1600)
+      // Third launch: another 500ms gap + setTimeout(0) tick
+      vi.advanceTimersByTime(501)
       expect(countWrites()).toBe(3)
     })
 
     it('does not write to killed terminal even if queued', () => {
+      // First spawn launches immediately; second is queued
       manager.spawn('term-1', '/project')
-      manager.kill('term-1')
+      manager.spawn('term-2', '/project')
+      manager.kill('term-2')
 
-      // Queue fires after 200ms but terminal no longer exists
-      vi.advanceTimersByTime(200)
+      // Let the queue process — term-2's write should be skipped
+      vi.advanceTimersByTime(600)
 
       const writeCalls = mockHostPostMessage.mock.calls.filter(
         (c) => c[0].type === 'write'
       )
-      expect(writeCalls.length).toBe(0)
+      // Only term-1's write should have fired
+      expect(writeCalls.length).toBe(1)
+      expect(writeCalls[0][0].terminalId).toBe('term-1')
     })
   })
 
