@@ -1668,6 +1668,7 @@ const GitManagerApp: React.FC = () => {
               <button className="gm-merge-bar-btn gm-merge-bar-continue" onClick={async () => {
                 const r = await api.gitManager.continueMerge(activeDir)
                 if (!r.success) handleSmartError(`Continue failed: ${r.error || 'Unknown error'}`)
+                else setActiveTab('log')
                 refresh()
               }}>
                 Continue {mergeState.type === 'merge' ? 'Merge' : mergeState.type === 'rebase' ? 'Rebase' : mergeState.type === 'cherry-pick' ? 'Cherry-pick' : 'Revert'}
@@ -2066,6 +2067,7 @@ const GitManagerApp: React.FC = () => {
               projectDir={activeDir}
               onRefresh={refresh}
               onError={handleSmartError}
+              onCompleted={() => setActiveTab('log')}
             />
           ) : activeTab === 'ci' ? null : activeTab === 'changes' ? null : null}
           {/* Working changes stays mounted so commit/push/generation survives tab switches */}
@@ -7792,7 +7794,8 @@ const MergeConflictsPanel: React.FC<{
   projectDir: string
   onRefresh: () => void
   onError: (msg: string) => void
-}> = React.memo(({ mergeState, projectDir, onRefresh, onError }) => {
+  onCompleted?: () => void
+}> = React.memo(({ mergeState, projectDir, onRefresh, onError, onCompleted }) => {
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [conflictContent, setConflictContent] = useState<GitConflictFileContent | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
@@ -7900,10 +7903,11 @@ const MergeConflictsPanel: React.FC<{
     if (freshState.inProgress && freshState.conflicts.length === 0) {
       const cr = await api.gitManager.continueMerge(projectDir)
       if (!cr.success) onError(`Continue merge failed: ${cr.error || 'Unknown error'}`)
+      else onCompleted?.()
     }
     onRefresh()
     setBusy(false)
-  }, [selectedFile, projectDir, onRefresh, onError])
+  }, [selectedFile, projectDir, onRefresh, onError, onCompleted])
 
   const handleAbort = useCallback(async () => {
     setBusy(true)
@@ -7917,9 +7921,10 @@ const MergeConflictsPanel: React.FC<{
     setBusy(true)
     const r = await getDockApi().gitManager.continueMerge(projectDir)
     if (!r.success) onError(`Continue merge failed: ${r.error || 'Unknown error'}`)
+    else onCompleted?.()
     onRefresh()
     setBusy(false)
-  }, [projectDir, onRefresh, onError])
+  }, [projectDir, onRefresh, onError, onCompleted])
 
   const handleSaveEdit = useCallback(async () => {
     if (!selectedFile) return
