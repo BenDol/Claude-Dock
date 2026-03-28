@@ -2,6 +2,7 @@ import Store from 'electron-store'
 import { app } from 'electron'
 import * as path from 'path'
 import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
+import { log, logError } from './logger'
 
 interface RecentEntry {
   path: string
@@ -66,10 +67,11 @@ export function updateJumpList(): void {
   if (process.platform !== 'win32') return
   try {
     const entries = safeRead(() => getStore().get('paths', [])) ?? []
-    app.setJumpList([
+    // Use type 'tasks' — 'custom' categories require a registered file type handler
+    // which Claude Dock doesn't have, causing Windows to silently block the category.
+    const result = app.setJumpList([
       {
-        type: 'custom',
-        name: 'Recent Projects',
+        type: 'tasks',
         items: entries.slice(0, 10).map((entry) => ({
           type: 'task' as const,
           title: entry.name,
@@ -81,7 +83,12 @@ export function updateJumpList(): void {
         }))
       }
     ])
-  } catch {
-    // Non-fatal — jump list is best-effort
+    if (result && result !== 'ok') {
+      logError(`[jump-list] setJumpList returned: ${result}`)
+    } else {
+      log(`[jump-list] updated with ${Math.min(entries.length, 10)} entries`)
+    }
+  } catch (err) {
+    logError('[jump-list] failed to update:', err)
   }
 }
