@@ -211,7 +211,7 @@ export interface DockApi {
     createTag: (projectDir: string, name: string, hash: string, message?: string) => Promise<{ success: boolean; error?: string }>
     deleteTag: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
     getTags: (projectDir: string) => Promise<{ name: string; hash: string; date: string }[]>
-    renameBranch: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
+    renameBranch: (projectDir: string, oldName: string, newName: string, renameRemote?: boolean) => Promise<{ success: boolean; error?: string }>
     discard: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     onDiscardProgress: (callback: (progress: { completed: number; total: number; path: string }) => void) => () => void
     restoreFileFromCommit: (projectDir: string, commitHash: string, filePath: string) => Promise<{ success: boolean; error?: string }>
@@ -528,7 +528,7 @@ const dockApi: DockApi = {
     createTag: (projectDir, name, hash, message) => ipcRenderer.invoke(IPC.GIT_MGR_CREATE_TAG, projectDir, name, hash, message),
     deleteTag: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_DELETE_TAG, projectDir, name),
     getTags: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_TAGS, projectDir),
-    renameBranch: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName),
+    renameBranch: (projectDir, oldName, newName, renameRemote) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_BRANCH, projectDir, oldName, newName, renameRemote),
     discard: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_DISCARD, projectDir, paths),
     onDiscardProgress: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: { completed: number; total: number; path: string }) => callback(progress)

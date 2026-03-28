@@ -351,9 +351,9 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_RENAME_BRANCH, async (_event, projectDir: string, oldName: string, newName: string) => {
+  ipcMain.handle(IPC.GIT_MGR_RENAME_BRANCH, async (_event, projectDir: string, oldName: string, newName: string, renameRemote?: boolean) => {
     try {
-      await gitOps.renameBranch(projectDir, oldName, newName)
+      await gitOps.renameBranch(projectDir, oldName, newName, renameRemote)
       return { success: true }
     } catch (err) {
       getServices().logError('[git-manager] rename branch failed:', err)

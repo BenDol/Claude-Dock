@@ -3606,6 +3606,17 @@
 .gm-ctx-danger-btn { background: #f7768e !important; color: #fff !important; }
 .gm-ctx-danger-btn:hover { filter: brightness(1.15); }
 .gm-ctx-danger-btn:disabled { opacity: 0.5; }
+.gm-ctx-primary-btn { background: var(--accent-color) !important; color: #fff !important; }
+.gm-ctx-primary-btn:hover { filter: brightness(1.15); }
+.gm-ctx-primary-btn:disabled { opacity: 0.5; }
+.gm-ctx-rename-input {
+  width: 100%; box-sizing: border-box; padding: 4px 6px;
+  font-size: 12px; font-family: var(--font-mono, monospace);
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border-color); border-radius: 3px; outline: none;
+}
+.gm-ctx-rename-input:focus { border-color: var(--accent-color); }
+.gm-ctx-error { font-size: 11px; color: #f7768e; }
 
 .gm-ctx-submenu-trigger {
   position: relative;

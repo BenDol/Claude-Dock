@@ -1006,8 +1006,19 @@ export async function getTags(cwd: string): Promise<GitTagInfo[]> {
   }
 }
 
-export async function renameBranch(cwd: string, oldName: string, newName: string): Promise<void> {
+export async function renameBranch(cwd: string, oldName: string, newName: string, renameRemote?: boolean): Promise<void> {
   await gitExec(cwd, ['branch', '-m', oldName, newName], 10000)
+  if (renameRemote) {
+    // Find the remote for the old branch's tracking ref
+    let remote = 'origin'
+    try {
+      const { stdout } = await gitExec(cwd, ['config', `branch.${oldName}.remote`], 5000)
+      if (stdout.trim()) remote = stdout.trim()
+    } catch { /* default to origin */ }
+    // Delete old remote branch, push new one with tracking
+    await gitExec(cwd, ['push', remote, '--delete', oldName], REMOTE_OP_TIMEOUT)
+    await gitExec(cwd, ['push', '--set-upstream', remote, newName], REMOTE_OP_TIMEOUT)
+  }
 }
 
 // --- Remote operations ---

@@ -329,8 +329,9 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     const cleanup = api.terminal.onData((id, data) => {
       if (id !== terminalId) return
       dataLenRef.current += data.length
-      // Only mark ready after enough data (skip shell prompt + claude command echo)
-      if (dataLenRef.current > 1500) {
+      // Mark ready when Claude's TUI enters alt screen (definitive signal) or
+      // after enough data to skip the shell prompt + command echo
+      if (!gotDataRef.current && (data.includes('\x1b[?1049h') || dataLenRef.current > 600)) {
         gotDataRef.current = true
       }
 

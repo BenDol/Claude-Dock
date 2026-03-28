@@ -25,6 +25,7 @@ export class PtyManager {
   // Serial launch queue to prevent claude config file race conditions
   private launchQueue: (() => void)[] = []
   private launching = false
+  private hasLaunchedOnce = false
   private suppressSessionChanges = false
   private closedSessionStack: string[] = []
   // Data batching to reduce IPC overhead
@@ -208,10 +209,19 @@ export class PtyManager {
     }
     this.launching = true
     const next = this.launchQueue.shift()!
-    setTimeout(() => {
+    // First item in the queue executes immediately — no artificial delay.
+    // Subsequent items are staggered by 500ms to avoid Claude config file
+    // race conditions when multiple terminals launch concurrently.
+    if (!this.hasLaunchedOnce) {
+      this.hasLaunchedOnce = true
       next()
-      setTimeout(() => this.processQueue(), 1500)
-    }, 100)
+      setTimeout(() => this.processQueue(), 500)
+    } else {
+      setTimeout(() => {
+        next()
+        setTimeout(() => this.processQueue(), 500)
+      }, 0)
+    }
   }
 
   private bufferData(terminalId: string, data: string): void {

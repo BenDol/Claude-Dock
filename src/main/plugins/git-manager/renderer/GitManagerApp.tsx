@@ -314,8 +314,34 @@ function parseGitError(action: string, errorMsg: string, context: {
     }
   }
 
-  // Better title/message for push rejection
-  if (action.toLowerCase() === 'push' && /non-fast-forward|rejected.*fetch first|failed to push|updates were rejected/i.test(msg)) {
+  // Remote rejected — branch name rules, protected branch, pre-receive hooks, etc.
+  // Must come BEFORE the behind-remote check since both can contain "failed to push"
+  if (action.toLowerCase() === 'push' && /remote rejected/i.test(msg)) {
+    // Extract the rejection reason from e.g. "! [remote rejected] main -> main (protected branch hook declined)"
+    const reasonMatch = msg.match(/remote rejected\].*?\((.+?)\)/i)
+    const reason = reasonMatch?.[1] || 'The remote rejected the push'
+    // Extract any "remote: error: ..." lines for additional detail
+    const remoteErrors = [...msg.matchAll(/^remote:\s*error:\s*(.+)$/gim)].map((m) => m[1].trim())
+    const detail = remoteErrors.length > 0
+      ? remoteErrors.join('\n')
+      : reason
+    resolutions.push({
+      label: 'Open Git Bash',
+      description: 'Open a terminal to resolve the issue manually',
+      keepOpen: true,
+      action: async () => {
+        await api.gitManager.openBash(context.projectDir)
+      }
+    })
+    return {
+      title: 'Push rejected by remote',
+      message: detail,
+      resolutions
+    }
+  }
+
+  // Non-fast-forward — branch is behind remote
+  if (action.toLowerCase() === 'push' && /non-fast-forward|rejected.*fetch first|updates were rejected because.*behind/i.test(msg)) {
     resolutions.push({
       label: 'Pull & Rebase',
       description: 'Pull the latest changes with rebase, then try pushing again',
@@ -7263,6 +7289,11 @@ const BranchRefContextMenu: React.FC<{
   const [deleteRemote, setDeleteRemote] = useState(isRemote)
   const [deleteLocal, setDeleteLocal] = useState(!isRemote)
   const [deleting, setDeleting] = useState(false)
+  const [showRename, setShowRename] = useState(false)
+  const [renameValue, setRenameValue] = useState(isRemote ? branchName.replace(/^[^/]+\//, '') : branchName)
+  const [renameRemote, setRenameRemote] = useState(true)
+  const [renaming, setRenaming] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -7280,7 +7311,7 @@ const BranchRefContextMenu: React.FC<{
     const vh = window.innerHeight / zoom
     if (parseFloat(el.style.left) + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
     if (parseFloat(el.style.top) + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
-  }, [showDelete])
+  }, [showDelete, showRename])
 
   const api = getDockApi()
 
@@ -7311,6 +7342,59 @@ const BranchRefContextMenu: React.FC<{
       onClose()
     }
     setDeleting(false)
+  }
+
+  const doRename = async () => {
+    const newName = renameValue.trim()
+    const oldName = isRemote ? branchName.replace(/^[^/]+\//, '') : branchName
+    if (!newName || newName === oldName) return
+    setRenaming(true)
+    setRenameError(null)
+    try {
+      const r = await api.gitManager.renameBranch(projectDir, oldName, newName, renameRemote)
+      if (!r.success) {
+        setRenameError(r.error || 'Rename failed')
+        setRenaming(false)
+        return
+      }
+      onClose()
+      onAction()
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : 'Rename failed')
+    }
+    setRenaming(false)
+  }
+
+  if (showRename) {
+    const oldName = isRemote ? branchName.replace(/^[^/]+\//, '') : branchName
+    return (
+      <div className="gm-ctx-menu gm-ctx-menu-wide" ref={ref} style={{ left: x, top: y }}>
+        <div className="gm-ctx-header">Rename branch</div>
+        <div className="gm-ctx-body">
+          <div className="gm-ctx-branch-name">{oldName}</div>
+          <input
+            type="text"
+            className="gm-ctx-rename-input"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') doRename() }}
+            placeholder="New branch name"
+            autoFocus
+          />
+          <label className="gm-ctx-checkbox">
+            <input type="checkbox" checked={renameRemote} onChange={(e) => setRenameRemote(e.target.checked)} />
+            Also rename remote branch
+          </label>
+          {renameError && <div className="gm-ctx-error">{renameError}</div>}
+        </div>
+        <div className="gm-ctx-footer">
+          <button className="gm-small-btn" onClick={() => setShowRename(false)}>Cancel</button>
+          <button className="gm-small-btn gm-ctx-primary-btn" onClick={doRename} disabled={renaming || !renameValue.trim() || renameValue.trim() === oldName}>
+            {renaming ? 'Renaming...' : 'Rename'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (showDelete) {
@@ -7354,6 +7438,14 @@ const BranchRefContextMenu: React.FC<{
       <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(branchName); onClose() }}>
         Copy branch name
       </div>
+      {!isRemote && (
+        <>
+          <div className="gm-ctx-separator" />
+          <div className="gm-ctx-item" onClick={() => setShowRename(true)}>
+            Rename branch...
+          </div>
+        </>
+      )}
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item gm-ctx-danger" onClick={() => setShowDelete(true)}>
         Delete branch...
