@@ -1240,20 +1240,25 @@ const GitManagerApp: React.FC = () => {
     })
   }, [])
 
-  const handlePush = useCallback(async () => {
+  const handlePush = useCallback(async (action?: PushAction) => {
     if (pushing) return
+    const mode = action || 'push'
     setPushing(true)
     setPushProgress(null)
     pushCancelledRef.current = false
     try {
       const api = getDockApi()
-      const result = await api.gitManager.push(activeDir)
+      const pushFn = mode === 'push-tags' ? api.gitManager.pushWithTags
+        : mode === 'push-force-lease' ? api.gitManager.pushForceWithLease
+        : api.gitManager.push
+      const result = await pushFn(activeDir)
       if (!result.success) {
         if (pushCancelledRef.current) return // cancelled — no error
-        showActionError('Push', result.error || 'Push failed', {
+        const actionLabel = PUSH_ACTION_LABELS[mode] || 'Push'
+        showActionError('Push', result.error || `${actionLabel} failed`, {
           retry: async () => {
-            const r2 = await api.gitManager.push(activeDir)
-            if (!r2.success) throw new Error(r2.error || 'Push still failed')
+            const r2 = await pushFn(activeDir)
+            if (!r2.success) throw new Error(r2.error || `${actionLabel} still failed`)
             refresh()
           }
         })
@@ -1590,28 +1595,15 @@ const GitManagerApp: React.FC = () => {
             onOpenDialog={handleOpenPullDialog}
           />
           {pushing || (currentBranch && (currentBranch.ahead || currentBranch.behind || (!currentBranch.remote && !currentBranch.tracking))) ? (
-            <div className="gm-push-btn-wrap">
-              <button
-                className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
-                onClick={pushing && !pushCancelling ? handleCancelPush : (!pushing ? handlePush : undefined)}
-                disabled={pushCancelling}
-                title={pushing
-                  ? (pushCancelling ? 'Cancelling push...' : pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
-                  : (!currentBranch?.tracking ? 'Publish branch to origin' : `Push${currentBranch?.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch?.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
-              >
-                {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
-                {pushing
-                  ? (pushCancelling
-                    ? 'Cancelling…'
-                    : pushProgress
-                      ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
-                      : <><span>Pushing…</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>)
-                  : (!currentBranch?.tracking ? 'Publish' : 'Push')}
-                {!pushing && currentBranch.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
-                {!pushing && currentBranch.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
-                {pushing && <div className="gm-push-btn-fill" style={pushProgress ? { width: `${pushProgress.percent}%` } : undefined} />}
-              </button>
-            </div>
+            <PushSplitButton
+              activeDir={activeDir}
+              currentBranch={currentBranch}
+              pushing={pushing}
+              pushCancelling={pushCancelling}
+              pushProgress={pushProgress}
+              onPush={handlePush}
+              onCancelPush={handleCancelPush}
+            />
           ) : (
             <button className="gm-toolbar-btn" onClick={() => { setActiveTab('changes'); if (Date.now() - lastRefreshRef.current > 2000) refresh() }} title="Working Changes">
               <ChangesIcon /> Changes{countStageableChanges(status) > 0 ? <span className="gm-toolbar-count gm-toolbar-count-changes">{countStageableChanges(status)}</span> : null}
@@ -6672,6 +6664,119 @@ const PullSplitButton: React.FC<{
   )
 })
 
+// --- Push split button ---
+
+type PushAction = 'push' | 'push-tags' | 'push-force-lease'
+
+const PUSH_ACTION_LABELS: Record<PushAction, string> = {
+  'push': 'Push',
+  'push-tags': 'Push with Tags',
+  'push-force-lease': 'Force Push (lease)'
+}
+
+const PUSH_DEFAULT_KEY = 'gm-default-push-action'
+
+const PushSplitButton: React.FC<{
+  activeDir: string
+  currentBranch?: { name: string; ahead?: number; behind?: number; remote?: string; tracking?: string } | null
+  pushing: boolean
+  pushCancelling: boolean
+  pushProgress: { phase: string; percent: number; detail: string } | null
+  onPush: (action: PushAction) => void
+  onCancelPush: () => void
+}> = React.memo(({ activeDir, currentBranch, pushing, pushCancelling, pushProgress, onPush, onCancelPush }) => {
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [defaultSub, setDefaultSub] = useState(false)
+
+  const [defaultAction, setDefaultAction] = useState<PushAction>(() => {
+    return (localStorage.getItem(PUSH_DEFAULT_KEY) as PushAction) || 'push'
+  })
+
+  useEffect(() => {
+    if (!dropdownOpen) setDefaultSub(false)
+  }, [dropdownOpen])
+
+  const setDefault = (action: PushAction) => {
+    setDefaultAction(action)
+    localStorage.setItem(PUSH_DEFAULT_KEY, action)
+    setDefaultSub(false)
+  }
+
+  const isPublish = !currentBranch?.tracking
+  const label = isPublish ? 'Publish' : PUSH_ACTION_LABELS[defaultAction]
+
+  return (
+    <div className="gm-pull-split" style={{ position: 'relative' }}>
+      <button
+        className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
+        onClick={pushing && !pushCancelling ? onCancelPush : (!pushing ? () => { setDropdownOpen(false); onPush(isPublish ? 'push' : defaultAction) } : undefined)}
+        disabled={pushCancelling}
+        title={pushing
+          ? (pushCancelling ? 'Cancelling push...' : pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
+          : (isPublish ? 'Publish branch to origin' : `${label}${currentBranch?.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch?.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
+      >
+        {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
+        {pushing
+          ? (pushCancelling
+            ? 'Cancelling…'
+            : pushProgress
+              ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
+              : <><span>Pushing…</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>)
+          : label}
+        {!pushing && currentBranch?.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
+        {!pushing && currentBranch?.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
+        {pushing && <div className="gm-push-btn-fill" style={pushProgress ? { width: `${pushProgress.percent}%` } : undefined} />}
+      </button>
+      {!pushing && (
+        <button className="gm-pull-split-arrow" onClick={() => setDropdownOpen((p) => !p)} title="Push options">
+          &#9662;
+        </button>
+      )}
+      {dropdownOpen && (
+        <>
+        <div className="gm-dropdown-backdrop" onClick={() => setDropdownOpen(false)} />
+        <div className="gm-pull-dropdown">
+          <div className="gm-pull-dropdown-item" onClick={() => { onPush('push'); setDropdownOpen(false) }}>
+            <PushIcon /> Push
+          </div>
+          <div className="gm-pull-dropdown-item" onClick={() => { onPush('push-tags'); setDropdownOpen(false) }}>
+            <PushIcon /> Push with Tags
+          </div>
+          <div className="gm-pull-dropdown-item" onClick={() => { onPush('push-force-lease'); setDropdownOpen(false) }}>
+            <PushIcon /> Force Push (with lease)
+          </div>
+          <div className="gm-pull-dropdown-separator" />
+          <div
+            className="gm-pull-dropdown-sub"
+            onMouseEnter={() => setDefaultSub(true)}
+            onMouseLeave={() => setDefaultSub(false)}
+          >
+            <div className="gm-pull-dropdown-sub-label">
+              Set default Push button action
+              <span className="gm-ctx-arrow">&#9656;</span>
+            </div>
+            {defaultSub && (
+              <div className="gm-pull-dropdown-sub-menu">
+                {(Object.entries(PUSH_ACTION_LABELS) as [PushAction, string][]).map(([key, lbl]) => (
+                  <div
+                    key={key}
+                    className={`gm-pull-dropdown-item${key === defaultAction ? ' gm-pull-dropdown-item-active' : ''}`}
+                    onClick={() => { setDefault(key); setDropdownOpen(false) }}
+                  >
+                    <span className="gm-pull-dropdown-check">{key === defaultAction ? '✓' : ''}</span>
+                    {lbl}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        </>
+      )}
+    </div>
+  )
+})
+
 // --- Pull dialog ---
 
 const PullDialog: React.FC<{
@@ -7361,10 +7466,27 @@ const TagContextMenu: React.FC<{
     }
   }
 
+  const doPushTag = async (force?: boolean) => {
+    onClose()
+    const r = await api.gitManager.pushTag(projectDir, tagName, force)
+    if (!r.success) onError(`Push tag failed: ${r.error || 'Unknown error'}`, async () => {
+      const r2 = await api.gitManager.pushTag(projectDir, tagName, force)
+      if (!r2.success) throw new Error(r2.error || 'Push tag still failed')
+    })
+    onAction()
+  }
+
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       <div className="gm-ctx-item" onClick={doCheckout}>
         Checkout tag
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => doPushTag()}>
+        Push tag to remote
+      </div>
+      <div className="gm-ctx-item" onClick={() => doPushTag(true)}>
+        Push tag to remote (force)
       </div>
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(tagName); onClose() }}>

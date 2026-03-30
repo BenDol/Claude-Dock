@@ -191,6 +191,8 @@ export interface DockApi {
     pullAdvanced: (projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
     push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     pushForceWithLease: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    pushWithTags: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    pushTag: (projectDir: string, tagName: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
     cancelPush: () => Promise<{ cancelled: boolean }>
     onPushProgress: (callback: (progress: { phase: string; percent: number; detail: string }) => void) => () => void
     fetch: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
@@ -505,6 +507,8 @@ const dockApi: DockApi = {
     pullAdvanced: (projectDir, remote, branch, rebase, autostash, tags, prune) => ipcRenderer.invoke(IPC.GIT_MGR_PULL_ADVANCED, projectDir, remote, branch, rebase, autostash, tags, prune),
     push: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH, projectDir),
     pushForceWithLease: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, projectDir),
+    pushWithTags: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH_WITH_TAGS, projectDir),
+    pushTag: (projectDir, tagName, force?) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH_TAG, projectDir, tagName, force),
     cancelPush: () => ipcRenderer.invoke(IPC.GIT_MGR_CANCEL_PUSH),
     onPushProgress: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: { phase: string; percent: number; detail: string }) => callback(progress)

@@ -1201,6 +1201,16 @@ export async function pushForceWithLease(cwd: string, onProgress?: (progress: Pu
   return gitPushStreaming(cwd, ['push', '--progress', '--force-with-lease'], onProgress)
 }
 
+export async function pushWithTags(cwd: string, onProgress?: (progress: PushProgress) => void): Promise<string> {
+  return gitPushStreaming(cwd, ['push', '--progress', '--follow-tags'], onProgress)
+}
+
+export async function pushTag(cwd: string, tagName: string, force?: boolean): Promise<void> {
+  const args = ['push', 'origin', `refs/tags/${tagName}`]
+  if (force) args.push('--force')
+  await gitExec(cwd, args, REMOTE_OP_TIMEOUT)
+}
+
 export async function fetch(cwd: string): Promise<string> {
   const { stdout, stderr } = await gitExec(cwd, ['fetch', '--all', '--prune'], 30000)
   return (stdout + stderr).trim()

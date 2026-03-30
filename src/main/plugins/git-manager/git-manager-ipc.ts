@@ -221,6 +221,31 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_PUSH_WITH_TAGS, async (event, projectDir: string) => {
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const output = await gitOps.pushWithTags(projectDir, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('git-manager:push-progress', progress)
+        }
+      })
+      return { success: true, output }
+    } catch (err) {
+      getServices().logError('[git-manager] push --follow-tags failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Push with tags failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_PUSH_TAG, async (_event, projectDir: string, tagName: string, force?: boolean) => {
+    try {
+      await gitOps.pushTag(projectDir, tagName, force)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[git-manager] push tag failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Push tag failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_CANCEL_PUSH, () => {
     return { cancelled: gitOps.cancelPush() }
   })
