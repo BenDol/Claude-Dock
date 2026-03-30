@@ -1782,6 +1782,7 @@ const GitManagerApp: React.FC = () => {
               y={submoduleHeaderCtx.y}
               folderName="all"
               subPaths={submodules.map((s) => s.path)}
+              projectDir={activeDir}
               onPullRebase={async (subPaths) => {
                 setSubmodulesLoading(true)
                 const { results } = await getDockApi().gitManager.pullRebaseSubmodules(activeDir, subPaths)
@@ -1792,6 +1793,7 @@ const GitManagerApp: React.FC = () => {
                 refresh()
                 setSubmodulesLoading(false)
               }}
+              onRefresh={refresh}
               onClose={() => setSubmoduleHeaderCtx(null)}
             />
           )}
@@ -9593,7 +9595,9 @@ const SubmoduleTreeNodeView: React.FC<{
           y={ctxMenu.y}
           folderName={node.name}
           subPaths={collectSubmodulePaths(node)}
+          projectDir={projectDir}
           onPullRebase={onPullRebase}
+          onRefresh={onRefresh}
           onClose={() => setCtxMenu(null)}
         />
       )}
@@ -9782,10 +9786,13 @@ const SubmoduleFolderContextMenu: React.FC<{
   x: number; y: number
   folderName: string
   subPaths: string[]
+  projectDir: string
   onPullRebase: (subPaths: string[]) => void
+  onRefresh?: () => void
   onClose: () => void
-}> = ({ x, y, folderName, subPaths, onPullRebase, onClose }) => {
+}> = ({ x, y, folderName, subPaths, projectDir, onPullRebase, onRefresh, onClose }) => {
   const ref = useRef<HTMLDivElement>(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -9795,10 +9802,34 @@ const SubmoduleFolderContextMenu: React.FC<{
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
+  const api = getDockApi()
+
   return (
     <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       <div className="gm-ctx-item" onClick={() => { onPullRebase(subPaths); onClose() }}>
         Pull rebase all ({subPaths.length})
+      </div>
+      <div className="gm-ctx-separator" />
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : async () => {
+        setBusy(true)
+        await api.gitManager.syncSubmodules(projectDir, subPaths)
+        await api.gitManager.updateSubmodules(projectDir, subPaths, true)
+        setBusy(false)
+        onRefresh?.()
+        onClose()
+      }}>
+        {busy ? 'Working...' : `Sync & Update all (${subPaths.length})`}
+      </div>
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : async () => {
+        setBusy(true)
+        for (const sp of subPaths) {
+          await api.gitManager.forceReinitSubmodule(projectDir, sp)
+        }
+        setBusy(false)
+        onRefresh?.()
+        onClose()
+      }}>
+        {busy ? 'Working...' : `Force reinitialize all (${subPaths.length})`}
       </div>
     </div>
   )
@@ -9856,6 +9887,16 @@ const SubmoduleContextMenu: React.FC<{
       </div>
       <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : doUpdate}>
         Update submodule (init)
+      </div>
+      <div className={`gm-ctx-item${busy ? ' gm-ctx-item-disabled' : ''}`} onClick={busy ? undefined : async () => {
+        setBusy(true)
+        const r = await api.gitManager.forceReinitSubmodule(projectDir, subPath)
+        setBusy(false)
+        if (!r.success) { onClose(); return }
+        onRefresh?.()
+        onClose()
+      }}>
+        Force reinitialize
       </div>
       <div className="gm-ctx-separator" />
       <div

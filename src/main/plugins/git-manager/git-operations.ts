@@ -1912,6 +1912,33 @@ export async function pullRebaseSubmodules(
   const results: { path: string; success: boolean; output?: string; error?: string }[] = []
   for (const subPath of paths) {
     const absPath = path.resolve(cwd, subPath)
+    // Check if the submodule directory exists and is a valid git repo
+    const gitEntry = path.join(absPath, '.git')
+    if (!fs.existsSync(gitEntry)) {
+      // Submodule not initialized — try to init it first
+      svc.log(`[git-manager] pullRebaseSubmodule ${subPath}: not initialized, running init`)
+      try {
+        await gitExec(cwd, ['submodule', 'sync', '--', subPath], 15000)
+        await gitExec(cwd, ['submodule', 'update', '--init', '--', subPath], 120000)
+      } catch (initErr) {
+        // sync+update failed — try forceReinit as fallback
+        svc.log(`[git-manager] pullRebaseSubmodule ${subPath}: init failed, trying forceReinit`)
+        try {
+          await forceReinitSubmodule(cwd, subPath)
+        } catch (reinitErr) {
+          const msg = reinitErr instanceof Error ? reinitErr.message : 'Unknown error'
+          results.push({ path: subPath, success: false, error: `Submodule not initialized and reinit failed: ${msg}` })
+          svc.logError(`[git-manager] pullRebaseSubmodule ${subPath} reinit failed:`, reinitErr)
+          continue
+        }
+      }
+      // Verify it's now initialized
+      if (!fs.existsSync(gitEntry)) {
+        results.push({ path: subPath, success: false, error: 'Submodule could not be initialized — directory is missing .git after init' })
+        continue
+      }
+      svc.log(`[git-manager] pullRebaseSubmodule ${subPath}: initialized successfully`)
+    }
     try {
       const output = await pull(absPath, 'rebase')
       results.push({ path: subPath, success: true, output })
