@@ -625,6 +625,13 @@ const GitManagerApp: React.FC = () => {
   const [syntaxHL, setSyntaxHL] = useState(true)
   const [escToHide, setEscToHide] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showSuccess = useCallback((msg: string) => {
+    setSuccessMsg(msg)
+    if (successTimerRef.current) clearTimeout(successTimerRef.current)
+    successTimerRef.current = setTimeout(() => setSuccessMsg(null), 4000)
+  }, [])
   const [actionError, setActionError] = useState<ActionError | null>(null)
   const actionBusyRef = useRef(false)
   const [identitySetup, setIdentitySetup] = useState<{ retry?: () => Promise<void> } | null>(null)
@@ -1632,6 +1639,12 @@ const GitManagerApp: React.FC = () => {
           <button onClick={() => setError(null)}>&#10005;</button>
         </div>
       )}
+      {successMsg && (
+        <div className="gm-success-bar">
+          <span>{successMsg}</span>
+          <button onClick={() => setSuccessMsg(null)}>&#10005;</button>
+        </div>
+      )}
 
       {mergeState?.inProgress && (
         <div className="gm-merge-bar">
@@ -2051,6 +2064,7 @@ const GitManagerApp: React.FC = () => {
               onSelect={handleSelectCommit}
               onAction={refresh}
               onError={handleSmartError}
+              onSuccess={showSuccess}
               onCheckout={handleCheckoutBranch}
             />
           ) : activeTab === 'conflicts' && (mergeState?.inProgress || (status && status.conflicts.length > 0)) ? (
@@ -2205,6 +2219,7 @@ const GitManagerApp: React.FC = () => {
           onClose={() => setTagSidebarCtx(null)}
           onAction={refresh}
           onError={handleSmartError}
+          onSuccess={showSuccess}
           onCheckout={handleCheckoutBranch}
         />
       )}
@@ -2384,8 +2399,9 @@ const CommitLog: React.FC<{
   onSelect: (hash: string) => void
   onAction: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
+  onSuccess?: (msg: string) => void
   onCheckout: (name: string) => void
-}> = React.memo(({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError, onCheckout }) => {
+}> = React.memo(({ commits, branches, stashes, selectedHash, currentBranch, projectDir, totalCommitCount, scrollToHash, onScrollToHandled, onSelect, onAction, onError, onSuccess, onCheckout }) => {
   const [showGraph, setShowGraph] = useState(() => localStorage.getItem('gm-show-graph') !== 'false')
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; commit: GitCommitInfo } | null>(null)
   const [stashCtxMenu, setStashCtxMenu] = useState<{ x: number; y: number; stash: GitStashEntry } | null>(null)
@@ -2928,6 +2944,7 @@ const CommitLog: React.FC<{
           onClose={() => setTagCtxMenu(null)}
           onAction={onAction}
           onError={onError}
+          onSuccess={onSuccess}
           onCheckout={onCheckout}
         />
       )}
@@ -7423,8 +7440,9 @@ const TagContextMenu: React.FC<{
   onClose: () => void
   onAction: () => void
   onError: (msg: string, retry?: () => Promise<void>) => void
+  onSuccess?: (msg: string) => void
   onCheckout?: (name: string) => void
-}> = ({ x, y, tagName, commitHash, projectDir, onClose, onAction, onError, onCheckout }) => {
+}> = ({ x, y, tagName, commitHash, projectDir, onClose, onAction, onError, onSuccess, onCheckout }) => {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -7469,10 +7487,14 @@ const TagContextMenu: React.FC<{
   const doPushTag = async (force?: boolean) => {
     onClose()
     const r = await api.gitManager.pushTag(projectDir, tagName, force)
-    if (!r.success) onError(`Push tag failed: ${r.error || 'Unknown error'}`, async () => {
-      const r2 = await api.gitManager.pushTag(projectDir, tagName, force)
-      if (!r2.success) throw new Error(r2.error || 'Push tag still failed')
-    })
+    if (!r.success) {
+      onError(`Push tag failed: ${r.error || 'Unknown error'}`, async () => {
+        const r2 = await api.gitManager.pushTag(projectDir, tagName, force)
+        if (!r2.success) throw new Error(r2.error || 'Push tag still failed')
+      })
+    } else {
+      onSuccess?.(`Tag '${tagName}' pushed to remote${force ? ' (force)' : ''}`)
+    }
     onAction()
   }
 

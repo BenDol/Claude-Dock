@@ -658,6 +658,25 @@
   font-size: 14px;
 }
 
+.gm-success-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #9ece6a22;
+  color: #9ece6a;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.gm-success-bar button {
+  background: none;
+  border: none;
+  color: #9ece6a;
+  cursor: pointer;
+  font-size: 14px;
+}
+
 /* Error dialog */
 .gm-error-dialog-header {
   display: flex;
