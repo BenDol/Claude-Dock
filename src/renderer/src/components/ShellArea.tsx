@@ -211,21 +211,22 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
   // Drag-to-resize between shell columns (horizontal)
   const handleColumnResize = useCallback((leftColId: string, rightColId: string, e: React.MouseEvent) => {
     e.preventDefault()
-    const startX = e.clientX
+    let lastX = e.clientX
     const bodyEl = areaRef.current?.querySelector('.shell-area-body') as HTMLElement
     if (!bodyEl) return
     const totalWidth = bodyEl.clientWidth
-    const leftRatio = columnRatios.get(leftColId) ?? 1
-    const rightRatio = columnRatios.get(rightColId) ?? 1
-    const sumRatio = leftRatio + rightRatio
 
     const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX
-      const deltaRatio = (delta / totalWidth) * sumRatio * columns.length
+      const delta = ev.clientX - lastX
+      lastX = ev.clientX
       setColumnRatios(prev => {
         const next = new Map(prev)
-        next.set(leftColId, Math.max(0.15, leftRatio + deltaRatio))
-        next.set(rightColId, Math.max(0.15, rightRatio - deltaRatio))
+        const leftR = next.get(leftColId) ?? 1
+        const rightR = next.get(rightColId) ?? 1
+        const sumR = leftR + rightR
+        const deltaR = (delta / totalWidth) * sumR
+        next.set(leftColId, Math.max(0.15, leftR + deltaR))
+        next.set(rightColId, Math.max(0.15, rightR - deltaR))
         return next
       })
     }
@@ -240,27 +241,27 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [columnRatios, columns.length])
+  }, [])
 
   // Drag-to-resize between stacked panels in a column (vertical)
   const handlePanelResize = useCallback((topShellId: string, bottomShellId: string, e: React.MouseEvent) => {
     e.preventDefault()
-    const startY = e.clientY
+    let lastY = e.clientY
     const colEl = (e.target as HTMLElement).closest('.shell-column') as HTMLElement
     if (!colEl) return
     const totalHeight = colEl.clientHeight
-    const topRatio = panelRatios.get(topShellId) ?? 1
-    const bottomRatio = panelRatios.get(bottomShellId) ?? 1
-    const panelCount = colEl.querySelectorAll('.shell-panel').length
-    const sumRatio = topRatio + bottomRatio
 
     const onMove = (ev: MouseEvent) => {
-      const delta = ev.clientY - startY
-      const deltaRatio = (delta / totalHeight) * sumRatio * panelCount
+      const delta = ev.clientY - lastY
+      lastY = ev.clientY
       setPanelRatios(prev => {
         const next = new Map(prev)
-        next.set(topShellId, Math.max(0.15, topRatio + deltaRatio))
-        next.set(bottomShellId, Math.max(0.15, bottomRatio - deltaRatio))
+        const topR = next.get(topShellId) ?? 1
+        const bottomR = next.get(bottomShellId) ?? 1
+        const sumR = topR + bottomR
+        const deltaR = (delta / totalHeight) * sumR
+        next.set(topShellId, Math.max(0.15, topR + deltaR))
+        next.set(bottomShellId, Math.max(0.15, bottomR - deltaR))
         return next
       })
     }
@@ -275,7 +276,7 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [panelRatios])
+  }, [])
 
   return (
     <div className="shell-area" ref={areaRef} style={{ height: areaHeight }}>

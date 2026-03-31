@@ -542,7 +542,7 @@ function handleMessage(msg) {
               sessionId: session_id || null,
               // null = new panel (renderer creates one), "__first__" = use default shell:0
               shellId: useFirstShell ? '__first__' : (shell_id || null),
-              shellLayout: shell_layout || 'split', // 'split' (default) or 'stack'
+              shellLayout: shell_layout || 'split', // 'split' or 'stack', null = default (split)
               submit: submit !== false, // default true
               shell: shell || null, // null = use configured default
               timestamp: Date.now()

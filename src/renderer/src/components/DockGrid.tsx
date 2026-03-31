@@ -91,25 +91,28 @@ const DockGrid: React.FC = () => {
   const handleGridResize = useCallback((index: number, e: React.MouseEvent) => {
     e.preventDefault()
     const isHorizontal = orientation === 'landscape'
-    const startPos = isHorizontal ? e.clientX : e.clientY
+    let lastPos = isHorizontal ? e.clientX : e.clientY
     const totalSize = isHorizontal ? containerWidth : containerHeight
     const count = isHorizontal ? logicalCols : terminals.length
-    const currentRatios = isHorizontal
+    const initRatios = isHorizontal
       ? (columnRatios.length === count ? [...columnRatios] : Array(count).fill(1))
       : (rowRatios.length === count ? [...rowRatios] : Array(count).fill(1))
-    const leftRatio = currentRatios[index]
-    const rightRatio = currentRatios[index + 1]
-    const sumRatio = leftRatio + rightRatio
 
     const onMove = (ev: MouseEvent) => {
       const pos = isHorizontal ? ev.clientX : ev.clientY
-      const delta = pos - startPos
-      const deltaRatio = (delta / totalSize) * sumRatio * count
-      const newRatios = [...currentRatios]
-      newRatios[index] = Math.max(0.15, leftRatio + deltaRatio)
-      newRatios[index + 1] = Math.max(0.15, rightRatio - deltaRatio)
-      if (isHorizontal) setColumnRatios(newRatios)
-      else setRowRatios(newRatios)
+      const delta = pos - lastPos
+      lastPos = pos
+      const setter = isHorizontal ? setColumnRatios : setRowRatios
+      setter(prev => {
+        const ratios = prev.length === count ? [...prev] : [...initRatios]
+        const leftR = ratios[index]
+        const rightR = ratios[index + 1]
+        const sumR = leftR + rightR
+        const deltaR = (delta / totalSize) * sumR
+        ratios[index] = Math.max(0.15, leftR + deltaR)
+        ratios[index + 1] = Math.max(0.15, rightR - deltaR)
+        return ratios
+      })
     }
     const onUp = () => {
       document.removeEventListener('mousemove', onMove)
