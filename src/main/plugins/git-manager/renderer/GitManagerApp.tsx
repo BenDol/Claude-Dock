@@ -3732,6 +3732,7 @@ const CommitFileTreeView: React.FC<{
   const [loading, setLoading] = useState(true)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
+  const [blobSrc, setBlobSrc] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [filter, setFilter] = useState('')
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -3742,6 +3743,7 @@ const CommitFileTreeView: React.FC<{
     setLoading(true)
     setSelectedFile(null)
     setFileContent(null)
+    setBlobSrc(null)
     setFilter('')
     getDockApi().gitManager.getCommitFileTree(projectDir, hash)
       .then((result) => { if (!cancelled) setFiles(result) })
@@ -3750,15 +3752,27 @@ const CommitFileTreeView: React.FC<{
     return () => { cancelled = true }
   }, [hash, projectDir])
 
-  // Load content when file selected
+  // Load content when file selected — binary files use getFileBlob, text uses getFileAtCommit
   useEffect(() => {
-    if (!selectedFile) { setFileContent(null); return }
+    if (!selectedFile) { setFileContent(null); setBlobSrc(null); return }
     let cancelled = false
     setLoadingContent(true)
-    getDockApi().gitManager.getFileAtCommit(projectDir, hash, selectedFile)
-      .then((content) => { if (!cancelled) setFileContent(content) })
-      .catch(() => { if (!cancelled) setFileContent(null) })
-      .finally(() => { if (!cancelled) setLoadingContent(false) })
+    setFileContent(null)
+    setBlobSrc(null)
+    const api = getDockApi()
+    const isBinary = !!getFileViewer(selectedFile)
+
+    if (isBinary) {
+      api.gitManager.getFileBlob(projectDir, selectedFile, hash)
+        .then((src) => { if (!cancelled) setBlobSrc(src) })
+        .catch(() => { if (!cancelled) setBlobSrc(null) })
+        .finally(() => { if (!cancelled) setLoadingContent(false) })
+    } else {
+      api.gitManager.getFileAtCommit(projectDir, hash, selectedFile)
+        .then((content) => { if (!cancelled) setFileContent(content) })
+        .catch(() => { if (!cancelled) setFileContent(null) })
+        .finally(() => { if (!cancelled) setLoadingContent(false) })
+    }
     return () => { cancelled = true }
   }, [selectedFile, hash, projectDir])
 
@@ -3805,6 +3819,22 @@ const CommitFileTreeView: React.FC<{
           <div className="gm-ftree-placeholder">Select a file to view its contents</div>
         ) : loadingContent ? (
           <div className="gm-loading" style={{ padding: 16 }}>Loading...</div>
+        ) : blobSrc ? (
+          <div className="gm-ftree-code-wrap">
+            <div className="gm-ftree-code-header">
+              <FileTypeIcon name={selectedFile.split('/').pop() || selectedFile} />
+              <span>{selectedFile}</span>
+            </div>
+            <div className="gm-ftree-binary">
+              {blobSrc.startsWith('data:image/') ? (
+                <img src={blobSrc} alt={selectedFile} className="gm-ftree-binary-img" />
+              ) : blobSrc.startsWith('data:application/pdf') ? (
+                <embed src={blobSrc} type="application/pdf" className="gm-ftree-binary-pdf" />
+              ) : (
+                <div className="gm-ftree-placeholder">Binary file — preview not available</div>
+              )}
+            </div>
+          </div>
         ) : fileContent != null ? (
           <div className="gm-ftree-code-wrap">
             <div className="gm-ftree-code-header">
