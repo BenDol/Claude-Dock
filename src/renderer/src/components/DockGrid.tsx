@@ -127,33 +127,23 @@ const DockGrid: React.FC = () => {
     document.addEventListener('mouseup', onUp)
   }, [orientation, containerWidth, containerHeight, logicalCols, terminals.length, columnRatios, rowRatios, setColumnRatios, setRowRatios])
 
-  // Compute resize handle positions from the layout
+  // Compute resize handle positions from logical column/row boundaries
   const resizeHandles: Array<{ index: number; pos: number; isHorizontal: boolean }> = []
   if (orientation === 'landscape' && logicalCols > 1) {
-    // Find column boundaries from the layout
     const colWidth = containerWidth / cols
-    const seen = new Set<number>()
-    for (const l of layout) {
-      const rightEdge = l.x + l.w
-      if (rightEdge < cols && !seen.has(rightEdge)) {
-        seen.add(rightEdge)
-        const colIdx = Math.round(rightEdge / GRID_RESOLUTION) - 1
-        if (colIdx >= 0 && colIdx < logicalCols - 1) {
-          resizeHandles.push({ index: colIdx, pos: rightEdge * colWidth, isHorizontal: true })
-        }
-      }
+    // Derive boundaries from the first row's items (they define column edges)
+    const firstRowItems = layout.filter(l => l.y === 0).sort((a, b) => a.x - b.x)
+    let cumX = 0
+    for (let i = 0; i < firstRowItems.length - 1; i++) {
+      cumX = firstRowItems[i].x + firstRowItems[i].w
+      resizeHandles.push({ index: i, pos: cumX * colWidth, isHorizontal: true })
     }
   } else if (orientation === 'portrait' && terminals.length > 1) {
-    // Row boundaries
+    const sortedItems = [...layout].sort((a, b) => a.y - b.y)
     let cumY = 0
-    for (const l of layout) {
-      if (cumY > 0) {
-        const idx = layout.indexOf(l) - 1
-        if (idx >= 0) {
-          resizeHandles.push({ index: idx, pos: cumY * (rowHeight + gapSize), isHorizontal: false })
-        }
-      }
-      cumY = l.y + l.h
+    for (let i = 0; i < sortedItems.length - 1; i++) {
+      cumY = sortedItems[i].y + sortedItems[i].h
+      resizeHandles.push({ index: i, pos: cumY * (rowHeight + gapSize), isHorizontal: false })
     }
   }
 
