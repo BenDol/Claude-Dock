@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import './ShellEventCards.css'
@@ -37,6 +37,7 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const clearEvents = useDockStore((s) => s.clearShellEvents)
   const ignoreHash = useDockStore((s) => s.ignoreEventHash)
   const [minimized, setMinimized] = useState(false)
+  const prevCountRef = useRef(0)
 
   // Filter to events for this terminal's session, excluding ignored hashes
   const visibleEvents = events.filter((e) => {
@@ -44,6 +45,14 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
     const key = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
     return !ignoredHashes.includes(key)
   })
+
+  // Auto-expand when new events arrive while minimized
+  useEffect(() => {
+    if (minimized && visibleEvents.length > prevCountRef.current) {
+      setMinimized(false)
+    }
+    prevCountRef.current = visibleEvents.length
+  }, [visibleEvents.length, minimized])
 
   const handleClick = useCallback(
     (event: (typeof events)[0]) => {
