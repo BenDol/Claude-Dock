@@ -348,17 +348,21 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     const isFirstShellRequest = targetShellId === '__first__'
     const effectiveShellId = isFirstShellRequest ? null : targetShellId
 
-    if (shellAreaOpen && !effectiveShellId) {
-      // No shell_id specified and shell area already open — open a NEW shell panel
-      // instead of clobbering the existing one.
+    // If the shell ID references a different terminal (stale from a previous session),
+    // treat it as null — the caller intended a specific panel that no longer exists.
+    const isStaleShellId = effectiveShellId && !effectiveShellId.includes(terminalId)
+    const resolvedShellId = isStaleShellId ? null : effectiveShellId
+
+    if (shellAreaOpen && !resolvedShellId) {
+      // No shell_id specified (or stale) and shell area already open — open a NEW shell
+      // panel instead of clobbering the existing one.
       setNewShellCommand({ command: cmd, submit, shellType, layout: shellLayout })
       return
     }
 
     // Determine which shell ID to write to.
-    // Ignore stale shell IDs from previous sessions that reference a different terminal.
     const defaultShellId = `shell:${terminalId}:0`
-    const writeShellId = (effectiveShellId && effectiveShellId.includes(terminalId)) ? effectiveShellId : defaultShellId
+    const writeShellId = resolvedShellId || defaultShellId
 
     if (shellAreaOpen) {
       // Shell already open — if the requested shell type matches (or none specified),
