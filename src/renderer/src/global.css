@@ -1700,12 +1700,26 @@ body {
   color: var(--text-primary);
 }
 
+.shell-panel-terminal-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 .shell-panel-terminal {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   /* Match xterm's background so the gap below the last row is invisible */
   background: var(--term-bg, #1a1b26);
+}
+
+/* Smaller scroll-to-bottom button for shell panels */
+.shell-scroll-btn {
+  padding: 3px 10px;
+  font-size: 10px;
 }
 
 /* Bottom-left toggle button to open shell panel */
@@ -4007,6 +4021,14 @@ label:hover .setting-scope-btn,
   color: #e0af68;
   margin-left: 6px;
   opacity: 0.85;
+}
+
+.ci-run-actor {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  opacity: 0.6;
 }
 
 .ci-run-actions {

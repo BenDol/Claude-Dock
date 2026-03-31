@@ -28,7 +28,7 @@ interface ShellPanelProps {
 }
 
 const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label, flexRatio, minimized, onToggleMinimize, isInColumn }) => {
-  const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
+  const { initTerminal, fit, focus, termRef, scrolledUp, scrollToBottom } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
   const [linked, setLinked] = useState(false)
@@ -253,14 +253,27 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
           </svg>
         </button>
       </div>
-      <div
-        className="shell-panel-terminal"
-        ref={terminalRef}
-        onClick={(e) => {
-          e.stopPropagation()
-          focus()
-        }}
-      />
+      <div className="shell-panel-terminal-wrap">
+        <div
+          className="shell-panel-terminal"
+          ref={terminalRef}
+          onClick={(e) => {
+            e.stopPropagation()
+            focus()
+          }}
+        />
+        {scrolledUp && (
+          <button
+            className="scroll-to-bottom-btn shell-scroll-btn"
+            onClick={scrollToBottom}
+            title="Scroll to bottom"
+          >
+            <svg width="32" height="10" viewBox="0 0 32 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="2,2 16,8 30,2" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   )
 }

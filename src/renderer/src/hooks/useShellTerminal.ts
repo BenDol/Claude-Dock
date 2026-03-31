@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
@@ -24,6 +24,9 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   const containerRef = useRef<HTMLDivElement | null>(null)
   const spawnedRef = useRef(false)
   const dataBufferRef = useRef<string[]>([])
+  const scrolledUpRef = useRef(false)
+  const [scrollBtnVisible, setScrollBtnVisible] = useState(false)
+  const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -128,6 +131,23 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
       const { cols, rows } = term
       getDockApi().shell.resize(shellId, cols, rows)
 
+      // Track scroll position for scroll-to-bottom button
+      const viewport = container.querySelector('.xterm-viewport') as HTMLElement
+      if (viewport) {
+        viewport.addEventListener('scroll', () => {
+          const gap = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop
+          const isAtBottom = gap < 80
+          const prev = scrolledUpRef.current
+          scrolledUpRef.current = !isAtBottom
+          if (prev !== scrolledUpRef.current) {
+            if (scrollBtnTimerRef.current) clearTimeout(scrollBtnTimerRef.current)
+            scrollBtnTimerRef.current = setTimeout(() => {
+              setScrollBtnVisible(scrolledUpRef.current)
+            }, 150)
+          }
+        })
+      }
+
       termRef.current = term
       fitAddonRef.current = fitAddon
 
@@ -210,6 +230,10 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
     termRef.current?.focus()
   }, [])
 
+  const scrollToBottom = useCallback(() => {
+    termRef.current?.scrollToBottom()
+  }, [])
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -236,5 +260,5 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
     }, 50)
   }, [settings, fit])
 
-  return { initTerminal, fit, focus, termRef }
+  return { initTerminal, fit, focus, termRef, scrolledUp: scrollBtnVisible, scrollToBottom }
 }

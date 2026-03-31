@@ -958,6 +958,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                   <span className="ci-run-name">
                     {run.name}
                     {runProgress.has(run.id) && <span className="ci-run-pct">{runProgress.get(run.id)}%</span>}
+                    {run.actor && <span className="ci-run-actor">{run.actor}</span>}
                   </span>
                   <span className="ci-run-meta">#{run.runNumber} on <span className="ci-run-branch">{run.headBranch}</span> · <ElapsedTime since={run.createdAt} className="ci-run-elapsed" /></span>
                 </div>
@@ -993,6 +994,7 @@ export default function CiPanel({ projectDir, provider, searchQuery, currentBran
                 <span className="ci-run-name">
                   {run.name}
                   {runProgress.has(run.id) && <span className="ci-run-pct">{runProgress.get(run.id)}%</span>}
+                  {run.actor && <span className="ci-run-actor">{run.actor}</span>}
                 </span>
                 <span className="ci-run-meta">
                   #{run.runNumber} · <span className="ci-run-branch">{run.headBranch}</span> · {run.event} · {formatTime(run.createdAt)}
