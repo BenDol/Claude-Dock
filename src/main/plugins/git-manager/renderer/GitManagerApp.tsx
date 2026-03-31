@@ -3877,6 +3877,7 @@ const CommitDetailPanel: React.FC<{
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
+  const [fileListCtx, setFileListCtx] = useState<{ x: number; y: number; file: GitFileDiff } | null>(null)
   const [dragStart, setDragStart] = useState<string | null>(null)
   const lastClickedRef = useRef<string | null>(null)
   const isDragging = useRef(false)
@@ -4244,6 +4245,12 @@ const CommitDetailPanel: React.FC<{
                       }
                     }}
                     onDoubleClick={() => { setScrollToFileIdx(fi); setFileListExpanded(false) }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const zoom = parseFloat(document.documentElement.style.zoom) || 1
+                      setFileListCtx({ x: e.clientX / zoom, y: e.clientY / zoom, file: f })
+                    }}
                   >
                     <FileStatusBadge status={f.status} />
                     <EllipsisPath className="gm-detail-file-list-name" text={f.path} />
@@ -4296,9 +4303,103 @@ const CommitDetailPanel: React.FC<{
           onClose={() => setCtxMenu(null)}
         />
       )}
+      {fileListCtx && (
+        <CommitFileListContextMenu
+          x={fileListCtx.x}
+          y={fileListCtx.y}
+          file={fileListCtx.file}
+          commitHash={detail.hash}
+          commitSubject={detail.subject}
+          projectDir={projectDir}
+          onResetFile={handleResetFile}
+          onClose={() => setFileListCtx(null)}
+        />
+      )}
     </div>
   )
 })
+
+const CommitFileListContextMenu: React.FC<{
+  x: number; y: number
+  file: GitFileDiff
+  commitHash: string
+  commitSubject: string
+  projectDir: string
+  onResetFile: (filePath: string) => void
+  onClose: () => void
+}> = ({ x, y, file, commitHash, commitSubject, projectDir, onResetFile, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null)
+  const [copySubmenu, setCopySubmenu] = useState(false)
+  const [claudeSubmenu, setClaudeSubmenu] = useState(false)
+  const api = getDockApi()
+  const fileName = file.path.split('/').pop() || file.path
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const vw = window.innerWidth / zoom
+    const vh = window.innerHeight / zoom
+    const cx = parseFloat(el.style.left)
+    const cy = parseFloat(el.style.top)
+    if (cx + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
+    if (cy + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
+  }, [])
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div className="gm-ctx-item gm-ctx-danger" onClick={() => { onClose(); onResetFile(file.path) }}>Reset this file</div>
+      <div className="gm-ctx-separator" />
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.app.openInExplorer(projectDir + '/' + file.path) }}>Open file</div>
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.gitManager.showInFolder(projectDir, file.path) }}>Show in folder</div>
+      <div className="gm-ctx-separator" />
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSubmenu(true)}
+        onMouseLeave={() => setClaudeSubmenu(false)}
+      >
+        <span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" /><path d="M19 15l.5 2 2 .5-2 .5-.5 2-.5-2-2-.5 2-.5.5-2z" /></svg>Claude Actions</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {claudeSubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendWriteTestsTask([file.path], commitHash, commitSubject) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2v6.5L20 22H4L9.5 8.5V2" /><line x1="8" y1="2" x2="16" y2="2" /><line x1="6" y1="18" x2="18" y2="18" /></svg>Write Tests</span></div>
+            <div className="gm-ctx-item" onClick={() => { onClose(); sendReferenceThisTask([file.path], commitHash, commitSubject) }}><span className="gm-ctx-item-label"><svg className="gm-ctx-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" /><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" /></svg>Reference This</span></div>
+          </div>
+        )}
+      </div>
+      <div className="gm-ctx-separator" />
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setCopySubmenu(true)}
+        onMouseLeave={() => setCopySubmenu(false)}
+      >
+        <span>Copy path</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {copySubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(file.path); onClose() }}>
+              Relative: {file.path}
+            </div>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(projectDir + '/' + file.path); onClose() }}>
+              Full path
+            </div>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(fileName); onClose() }}>
+              Filename: {fileName}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 const CommitDiffContextMenu: React.FC<{
   x: number; y: number
