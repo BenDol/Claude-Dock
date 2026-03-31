@@ -325,6 +325,68 @@ export class DockWindow {
   }
 
   /**
+   * Purge all cached data for a shell before (re-)spawning it.
+   * Clears in-memory buffers, persisted output/log files, event scan offsets,
+   * and any pending events associated with this shell ID.
+   */
+  purgeShellCache(shellId: string): void {
+    log(`[shell-output] purging cache for ${shellId}`)
+
+    // 1. Clear in-memory output buffer
+    this.shellOutputBuffers.delete(shellId)
+
+    // 2. Reset event scan offset so old lines aren't re-scanned
+    this.shellEventScanOffsets.delete(shellId)
+
+    const userData = app.getPath('userData')
+
+    // 3. Remove shell entry from dock-shell-output.json and delete its log file
+    try {
+      const outputFile = path.join(userData, 'dock-shell-output.json')
+      let existing: Record<string, any> = {}
+      try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { /* new file */ }
+
+      let changed = false
+      for (const key of Object.keys(existing)) {
+        const entry = existing[key]
+        if (entry.shells && entry.shells[shellId]) {
+          // Delete the individual log file if it exists
+          const logFile = entry.shells[shellId].logFile
+          if (logFile) {
+            try { fs.unlinkSync(logFile) } catch { /* already gone */ }
+          }
+          delete entry.shells[shellId]
+          changed = true
+          if (Object.keys(entry.shells).length === 0) {
+            delete existing[key]
+          }
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
+      }
+    } catch (err) {
+      log(`[shell-output] purge output failed: ${err instanceof Error ? err.message : err}`)
+    }
+
+    // 4. Remove pending events for this shell
+    try {
+      const pendingFile = path.join(userData, 'dock-pending-events.json')
+      let pending: any[] = []
+      try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8')) } catch { /* new file */ }
+      if (Array.isArray(pending)) {
+        const before = pending.length
+        pending = pending.filter((e) => e.shellId !== shellId)
+        if (pending.length !== before) {
+          fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
+        }
+      }
+    } catch (err) {
+      log(`[shell-output] purge events failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
+  /**
    * Bulk-remove all shells owned by this dock window from the persisted output.
    * Called on window close to clean up in a single file write.
    */

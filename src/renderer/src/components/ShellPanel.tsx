@@ -107,6 +107,18 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
     [resizeRef, initTerminal, focus]
   )
 
+  // Listen for keyboard navigation focus-shell events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.terminalId === terminalId) {
+        focus()
+      }
+    }
+    window.addEventListener('focus-shell', handler)
+    return () => window.removeEventListener('focus-shell', handler)
+  }, [terminalId, focus])
+
   // Write initial command after shell is ready — wait for first data (prompt)
   // before sending, to avoid the command being swallowed by a slow shell startup.
   // Track which command was sent so new commands (from MCP bridge) still fire.

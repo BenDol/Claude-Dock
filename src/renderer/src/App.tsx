@@ -701,7 +701,7 @@ function DockApp() {
     })
   }, [])
 
-  // Directional focus navigation — supports grid ↔ toolbar transitions
+  // Directional focus navigation — supports grid ↔ toolbar ↔ shell transitions
   const focusDirection = useCallback((direction: Direction) => {
     const state = useDockStore.getState()
 
@@ -720,10 +720,45 @@ function DockApp() {
       return
     }
 
+    // If currently in a shell panel, navigate back to the terminal or to adjacent shell
+    if (state.focusRegion === 'shell') {
+      if (direction === 'up') {
+        // Return focus to the parent terminal
+        useDockStore.getState().setFocusRegion('grid')
+        window.dispatchEvent(new CustomEvent('refocus-terminal'))
+        return
+      }
+      if (direction === 'left' || direction === 'right') {
+        // Navigate to adjacent terminal's shell (or terminal if no shell)
+        const maxCols = useSettingsStore.getState().settings.grid.maxColumns
+        const { layout } = computeAutoLayout(state.terminals.map((t) => t.id), maxCols)
+        const targetId = findAdjacentTerminal(layout, state.focusedTerminalId!, direction)
+        if (targetId && targetId !== TOOLBAR_FOCUS_ID) {
+          useDockStore.getState().setFocusedTerminal(targetId)
+          // Try to focus the target's shell; the shell listens and falls back to terminal
+          setTimeout(() => window.dispatchEvent(new CustomEvent('focus-shell', { detail: { terminalId: targetId } })), 50)
+        }
+        return
+      }
+      // Down from shell — no-op (already at bottom)
+      return
+    }
+
     // Grid navigation
     if (!state.focusedTerminalId || state.terminals.length === 0) return
     const maxCols = useSettingsStore.getState().settings.grid.maxColumns
     const { layout } = computeAutoLayout(state.terminals.map((t) => t.id), maxCols)
+
+    // Down from grid — if this terminal has an open shell, focus it
+    if (direction === 'down') {
+      const hasShell = document.querySelector(`[data-terminal-id="${state.focusedTerminalId}"] .shell-area`)
+      if (hasShell) {
+        useDockStore.getState().setFocusRegion('shell')
+        window.dispatchEvent(new CustomEvent('focus-shell', { detail: { terminalId: state.focusedTerminalId } }))
+        return
+      }
+    }
+
     const targetId = findAdjacentTerminal(layout, state.focusedTerminalId, direction)
     if (targetId === TOOLBAR_FOCUS_ID) {
       useDockStore.getState().setFocusRegion('toolbar')

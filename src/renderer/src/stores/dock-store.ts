@@ -9,7 +9,7 @@ interface DockState {
   gridMode: GridMode
   focusedTerminalId: string | null
   /** Which region of the UI currently has keyboard focus */
-  focusRegion: 'grid' | 'toolbar'
+  focusRegion: 'grid' | 'toolbar' | 'shell'
   nextTerminalNum: number
   unlockedTerminals: Set<string>
   rcTerminals: Set<string>
@@ -54,7 +54,7 @@ interface DockState {
   toggleTerminalLock: (id: string) => void
   swapTerminals: (id1: string, id2: string) => void
   setFocusedTerminal: (id: string | null) => void
-  setFocusRegion: (region: 'grid' | 'toolbar') => void
+  setFocusRegion: (region: 'grid' | 'toolbar' | 'shell') => void
   focusNextTerminal: () => void
   setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
