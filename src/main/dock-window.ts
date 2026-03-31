@@ -431,6 +431,94 @@ export class DockWindow {
 
     fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
     log(`[shell-events] ${newEvents.length} new event(s) written to pending file`)
+
+    // Send events to renderer for UI notification cards
+    if (!this.window.isDestroyed()) {
+      for (const event of newEvents) {
+        this.window.webContents.send(IPC.SHELL_EVENT, event)
+      }
+    }
+
+    // Only auto-inject into the Claude terminal when the setting is enabled
+    if (getSettings().behavior.shellEventAutoSubmit) {
+      this.injectEventsIntoTerminal(newEvents)
+    }
+  }
+
+  /**
+   * Queue of events waiting to be injected into a Claude terminal.
+   * Events are held until the terminal appears idle (no output for a few seconds).
+   */
+  private eventInjectionQueue: Array<{ sessionId: string; message: string }> = []
+  private eventInjectionTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Inject shell events into the Claude Code terminal as user input.
+   * Waits until the terminal is idle (no pty output for 3 seconds) before typing,
+   * to avoid interrupting active output or user typing.
+   */
+  private injectEventsIntoTerminal(events: Array<{ sessionId: string; shellId: string; type: string; payload: any; timestamp: number }>): void {
+    // Group events by session and format as a single message
+    const bySession = new Map<string, string[]>()
+    for (const e of events) {
+      const lines = bySession.get(e.sessionId) || []
+      const payload = typeof e.payload === 'object' ? JSON.stringify(e.payload) : e.payload
+      lines.push(`[dock-event] ${e.type}: ${payload}`)
+      bySession.set(e.sessionId, lines)
+    }
+
+    for (const [sessionId, lines] of bySession) {
+      const message = lines.join('\n')
+      this.eventInjectionQueue.push({ sessionId, message })
+    }
+
+    // Start the injection check loop if not already running
+    if (!this.eventInjectionTimer) {
+      this.tryInjectEvents()
+    }
+  }
+
+  private tryInjectEvents(): void {
+    if (this.eventInjectionQueue.length === 0) {
+      this.eventInjectionTimer = null
+      return
+    }
+
+    const IDLE_THRESHOLD_MS = 3000
+    const now = Date.now()
+
+    // Process each queued event
+    const remaining: typeof this.eventInjectionQueue = []
+    for (const item of this.eventInjectionQueue) {
+      const terminalId = this.ptyManager.findTerminalBySessionId(item.sessionId)
+      if (!terminalId) {
+        // No terminal found for this session — drop the event
+        log(`[shell-events] no terminal for session ${item.sessionId}, dropping event injection`)
+        continue
+      }
+
+      // Check if the terminal has been idle long enough
+      const lastActivity = this.ptyManager.getLastDataTime(terminalId)
+      const idleMs = now - lastActivity
+
+      if (idleMs >= IDLE_THRESHOLD_MS) {
+        // Terminal is idle — inject the event
+        log(`[shell-events] injecting event into terminal ${terminalId} (idle ${idleMs}ms)`)
+        this.ptyManager.write(terminalId, item.message + '\r')
+      } else {
+        // Not idle yet — keep in queue for retry
+        remaining.push(item)
+      }
+    }
+
+    this.eventInjectionQueue = remaining
+
+    // If there are remaining events, retry in 2 seconds
+    if (remaining.length > 0) {
+      this.eventInjectionTimer = setTimeout(() => this.tryInjectEvents(), 2000)
+    } else {
+      this.eventInjectionTimer = null
+    }
   }
 
   private trackWindowState(): void {

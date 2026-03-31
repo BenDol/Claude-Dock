@@ -32,6 +32,17 @@ interface DockState {
   pendingWorktrees: Map<string, string>
   /** Maps terminal ID → session ID for manual resume (user-provided session ID) */
   manualResumeIds: Map<string, string>
+  /** Shell events detected from ##DOCK_EVENT## markers */
+  shellEvents: Array<{
+    id: string
+    sessionId: string
+    shellId: string
+    type: string
+    payload: any
+    timestamp: number
+  }>
+  /** Event types the user has chosen to ignore */
+  ignoredEventTypes: string[]
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -56,6 +67,11 @@ interface DockState {
   setTerminalWorktree: (id: string, worktreePath: string | null) => void
   setPendingWorktree: (id: string, branch: string | null) => void
   setManualResumeId: (id: string, sessionId: string | null) => void
+  addShellEvent: (event: { sessionId: string; shellId: string; type: string; payload: any; timestamp: number }) => void
+  dismissShellEvent: (id: string) => void
+  clearShellEvents: () => void
+  ignoreEventType: (type: string) => void
+  unignoreEventType: (type: string) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -78,6 +94,8 @@ export const useDockStore = create<DockState>((set, get) => ({
   terminalWorktrees: new Map<string, string>(),
   pendingWorktrees: new Map<string, string>(),
   manualResumeIds: new Map<string, string>(),
+  shellEvents: [],
+  ignoredEventTypes: [],
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -245,5 +263,24 @@ export const useDockStore = create<DockState>((set, get) => ({
       manualResumeIds.delete(id)
     }
     return { manualResumeIds }
-  })
+  }),
+
+  addShellEvent: (event) => set((state) => ({
+    shellEvents: [...state.shellEvents, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)
+  })),
+
+  dismissShellEvent: (id) => set((state) => ({
+    shellEvents: state.shellEvents.filter((e) => e.id !== id)
+  })),
+
+  clearShellEvents: () => set({ shellEvents: [] }),
+
+  ignoreEventType: (type) => set((state) => ({
+    ignoredEventTypes: [...new Set([...state.ignoredEventTypes, type])],
+    shellEvents: state.shellEvents.filter((e) => e.type !== type)
+  })),
+
+  unignoreEventType: (type) => set((state) => ({
+    ignoredEventTypes: state.ignoredEventTypes.filter((t) => t !== type)
+  }))
 }))

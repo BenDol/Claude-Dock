@@ -7,6 +7,9 @@ import { useGridLayout } from '../hooks/useGridLayout'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 
+// Register global shell event listener (once, at grid level)
+let shellEventListenerRegistered = false
+
 const DockGrid: React.FC = () => {
   const terminals = useDockStore((s) => s.terminals)
   const focusedTerminalId = useDockStore((s) => s.focusedTerminalId)
@@ -17,6 +20,15 @@ const DockGrid: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
   const [containerHeight, setContainerHeight] = useState(600)
+
+  // Listen for shell events from the main process (once globally)
+  useEffect(() => {
+    if (shellEventListenerRegistered) return
+    shellEventListenerRegistered = true
+    getDockApi().shell.onShellEvent((_e: any, event: any) => {
+      useDockStore.getState().addShellEvent(event)
+    })
+  }, [])
 
   // Track container size and feed it to the grid layout hook for orientation detection
   useEffect(() => {

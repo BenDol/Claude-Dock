@@ -517,4 +517,9 @@ export class PtyManager {
     }
     return false
   }
+
+  /** Get the last data timestamp for a specific terminal (for idle detection). */
+  getLastDataTime(terminalId: string): number {
+    return this.lastDataTime.get(terminalId) || 0
+  }
 }

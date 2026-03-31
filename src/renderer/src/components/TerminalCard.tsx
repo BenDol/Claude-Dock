@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 
 const ShellArea = lazy(() => import('./ShellArea'))
+const ShellEventCards = lazy(() => import('./ShellEventCards'))
 
 interface TerminalCardProps {
   terminalId: string
@@ -159,6 +160,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [shellAreaOpen, setShellAreaOpen] = useState(false)
   const [shellAreaMounted, setShellAreaMounted] = useState(false)
   const [shellInitialCommand, setShellInitialCommand] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const worktreePath = useDockStore((s) => s.terminalWorktrees.get(terminalId))
   const pendingWorktreeBranch = useDockStore((s) => s.pendingWorktrees.get(terminalId))
   const projectDir = useDockStore((s) => s.projectDir)
@@ -321,6 +323,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     }
     setResolving(false)
   }, [worktreePath, projectDir, terminalId, setTerminalWorktree, removeTerminal])
+
+  // Fetch session ID for this terminal (used to filter shell events)
+  useEffect(() => {
+    getDockApi().terminal.getSessionId(terminalId).then((id: string | null) => setSessionId(id))
+  }, [terminalId])
 
   const toggleShell = useCallback(() => {
     setShellAreaOpen((prev) => {
@@ -582,6 +589,9 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               <WorktreeIcon />
             </button>
           </div>
+          <Suspense fallback={null}>
+            <ShellEventCards terminalId={terminalId} sessionId={sessionId} />
+          </Suspense>
           {shellEnabled && shellAreaMounted && (
             <Suspense fallback={null}>
               <div style={shellAreaOpen ? undefined : { height: 0, overflow: 'hidden' }}>
