@@ -140,7 +140,7 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     if (!newShellCommand || !canAdd) return
     const shell = makeShell()
     setPendingNewShell({ ...newShellCommand, _shellId: shell.shellId } as any)
-    const useSplit = newShellCommand.layout === 'split'
+    const useSplit = newShellCommand.layout !== 'stack'
     setColumns(prev => {
       if (useSplit) {
         // New column to the right of the last column

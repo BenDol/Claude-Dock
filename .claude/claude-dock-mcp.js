@@ -366,7 +366,7 @@ function handleMessage(msg) {
               shell_layout: {
                 type: 'string',
                 enum: ['split', 'stack'],
-                description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "stack".'
+                description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "split".'
               }
             },
             required: ['command']
@@ -542,7 +542,7 @@ function handleMessage(msg) {
               sessionId: session_id || null,
               // null = new panel (renderer creates one), "__first__" = use default shell:0
               shellId: useFirstShell ? '__first__' : (shell_id || null),
-              shellLayout: shell_layout || null, // 'split' or 'stack', null = default (stack)
+              shellLayout: shell_layout || 'split', // 'split' (default) or 'stack'
               submit: submit !== false, // default true
               shell: shell || null, // null = use configured default
               timestamp: Date.now()
