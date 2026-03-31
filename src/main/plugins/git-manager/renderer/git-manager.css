@@ -1884,6 +1884,190 @@
   line-height: 1.4;
 }
 
+/* Detail view tabs (Diff / File Tree) */
+.gm-detail-view-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  padding: 0 12px;
+}
+
+.gm-detail-view-tab {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.gm-detail-view-tab:hover {
+  color: var(--text-primary);
+}
+
+.gm-detail-view-tab-active {
+  color: var(--accent-color, #7aa2f7);
+  border-bottom-color: var(--accent-color, #7aa2f7);
+}
+
+/* Commit file tree */
+.gm-ftree {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gm-ftree-sidebar {
+  width: 240px;
+  min-width: 180px;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.gm-ftree-filter {
+  font-size: 11px;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--term-font-family);
+}
+
+.gm-ftree-filter::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.gm-ftree-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.gm-ftree-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.gm-ftree-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: var(--term-font-family);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gm-ftree-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.gm-ftree-item-active {
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
+}
+
+.gm-ftree-dir {
+  font-weight: 500;
+}
+
+.gm-ftree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gm-ftree-arrow {
+  font-size: 9px;
+  color: var(--text-secondary);
+  transition: transform 0.12s;
+  flex-shrink: 0;
+  width: 10px;
+  text-align: center;
+}
+
+.gm-ftree-arrow-open {
+  transform: rotate(90deg);
+}
+
+.gm-ftree-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.gm-ftree-content {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+.gm-ftree-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.gm-ftree-code-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.gm-ftree-code-header {
+  font-size: 11px;
+  font-family: var(--term-font-family);
+  padding: 6px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-ftree-code {
+  display: flex;
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.gm-ftree-pre {
+  margin: 0;
+  padding: 4px 12px;
+  font-family: var(--term-font-family);
+  font-size: 12px;
+  line-height: 1.6;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.gm-ftree-pre code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
 .gm-detail-info {
   display: flex;
   flex-direction: column;

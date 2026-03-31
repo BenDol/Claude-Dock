@@ -56,6 +56,14 @@ export function registerGitManagerIpc(): void {
     return gitOps.getFileBlob(projectDir, filePath, ref)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GET_COMMIT_FILE_TREE, async (_event, projectDir: string, hash: string) => {
+    return gitOps.getCommitFileTree(projectDir, hash)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_FILE_AT_COMMIT, async (_event, projectDir: string, hash: string, filePath: string) => {
+    return gitOps.getFileAtCommit(projectDir, hash, filePath)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_STAGE, async (_event, projectDir: string, paths: string[]) => {
     try {
       await gitOps.stageFiles(projectDir, paths)

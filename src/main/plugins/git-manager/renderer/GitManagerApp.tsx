@@ -3540,6 +3540,203 @@ const SearchIcon: React.FC = React.memo(() => (
   </svg>
 ))
 
+// --- Commit file tree view ---
+
+interface FileTreeNode {
+  name: string
+  path: string
+  children: Map<string, FileTreeNode>
+  isFile: boolean
+}
+
+function buildFileTree(files: { path: string }[]): FileTreeNode {
+  const root: FileTreeNode = { name: '', path: '', children: new Map(), isFile: false }
+  for (const f of files) {
+    const parts = f.path.split('/')
+    let current = root
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const isLast = i === parts.length - 1
+      if (!current.children.has(part)) {
+        current.children.set(part, {
+          name: part,
+          path: parts.slice(0, i + 1).join('/'),
+          children: new Map(),
+          isFile: isLast
+        })
+      }
+      current = current.children.get(part)!
+    }
+  }
+  return root
+}
+
+const FileTreeNodeView: React.FC<{
+  node: FileTreeNode
+  depth: number
+  selectedPath: string | null
+  onSelect: (path: string) => void
+}> = ({ node, depth, selectedPath, onSelect }) => {
+  const [collapsed, setCollapsed] = usePersistedCollapsed(`ftree:${node.path}`)
+  const sortedChildren = useMemo(() => {
+    const entries = [...node.children.values()]
+    // Folders first, then files, alphabetical within each
+    return entries.sort((a, b) => {
+      if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
+      return a.name.localeCompare(b.name)
+    })
+  }, [node.children])
+
+  if (node.isFile) {
+    return (
+      <div
+        className={`gm-ftree-item gm-ftree-file${selectedPath === node.path ? ' gm-ftree-item-active' : ''}`}
+        style={{ paddingLeft: 12 + depth * 16 }}
+        onClick={() => onSelect(node.path)}
+        title={node.path}
+      >
+        <FileTreeFileIcon />
+        <span className="gm-ftree-name">{node.name}</span>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div
+        className="gm-ftree-item gm-ftree-dir"
+        style={{ paddingLeft: 12 + depth * 16 }}
+        onClick={() => setCollapsed((p) => !p)}
+      >
+        <span className={`gm-ftree-arrow${collapsed ? '' : ' gm-ftree-arrow-open'}`}>&#9656;</span>
+        <FileTreeDirIcon />
+        <span className="gm-ftree-name">{node.name}</span>
+      </div>
+      {!collapsed && sortedChildren.map((child) => (
+        <FileTreeNodeView key={child.name} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+      ))}
+    </>
+  )
+}
+
+const FileTreeFileIcon: React.FC = React.memo(() => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+  </svg>
+))
+
+const FileTreeDirIcon: React.FC = React.memo(() => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+  </svg>
+))
+
+const CommitFileTreeView: React.FC<{
+  hash: string
+  projectDir: string
+  syntaxHL: boolean
+}> = React.memo(({ hash, projectDir, syntaxHL }) => {
+  const [files, setFiles] = useState<{ path: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [fileContent, setFileContent] = useState<string | null>(null)
+  const [loadingContent, setLoadingContent] = useState(false)
+  const [filter, setFilter] = useState('')
+
+  // Load tree when hash changes
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setSelectedFile(null)
+    setFileContent(null)
+    setFilter('')
+    getDockApi().gitManager.getCommitFileTree(projectDir, hash)
+      .then((result) => { if (!cancelled) setFiles(result) })
+      .catch(() => { if (!cancelled) setFiles([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [hash, projectDir])
+
+  // Load content when file selected
+  useEffect(() => {
+    if (!selectedFile) { setFileContent(null); return }
+    let cancelled = false
+    setLoadingContent(true)
+    getDockApi().gitManager.getFileAtCommit(projectDir, hash, selectedFile)
+      .then((content) => { if (!cancelled) setFileContent(content) })
+      .catch(() => { if (!cancelled) setFileContent(null) })
+      .finally(() => { if (!cancelled) setLoadingContent(false) })
+    return () => { cancelled = true }
+  }, [selectedFile, hash, projectDir])
+
+  const filteredFiles = useMemo(() => {
+    if (!filter) return files
+    const lower = filter.toLowerCase()
+    return files.filter((f) => f.path.toLowerCase().includes(lower))
+  }, [files, filter])
+
+  const tree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles])
+
+  const highlighted = useMemo(() => {
+    if (!fileContent || !selectedFile || !syntaxHL) return null
+    return highlightCode(selectedFile, fileContent)
+  }, [fileContent, selectedFile, syntaxHL])
+
+  const contentLines = fileContent?.split('\n') || []
+
+  if (loading) return <div className="gm-loading" style={{ padding: 16 }}>Loading file tree...</div>
+
+  return (
+    <div className="gm-ftree">
+      <div className="gm-ftree-sidebar">
+        <input
+          className="gm-ftree-filter"
+          type="text"
+          placeholder="Filter files..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div className="gm-ftree-list">
+          {[...tree.children.values()].sort((a, b) => {
+            if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
+            return a.name.localeCompare(b.name)
+          }).map((node) => (
+            <FileTreeNodeView key={node.name} node={node} depth={0} selectedPath={selectedFile} onSelect={setSelectedFile} />
+          ))}
+          {filteredFiles.length === 0 && <div className="gm-ftree-empty">{filter ? 'No matches' : 'No files'}</div>}
+        </div>
+      </div>
+      <div className="gm-ftree-content">
+        {!selectedFile ? (
+          <div className="gm-ftree-placeholder">Select a file to view its contents</div>
+        ) : loadingContent ? (
+          <div className="gm-loading" style={{ padding: 16 }}>Loading...</div>
+        ) : fileContent != null ? (
+          <div className="gm-ftree-code-wrap">
+            <div className="gm-ftree-code-header">{selectedFile}</div>
+            <div className="gm-ftree-code">
+              <div className="gm-conflict-editor-gutter" aria-hidden>
+                {contentLines.map((_, i) => (
+                  <div key={i} className="gm-conflict-editor-linenum">{i + 1}</div>
+                ))}
+              </div>
+              <pre className="gm-ftree-pre gm-highlighted">
+                <code dangerouslySetInnerHTML={highlighted
+                  ? { __html: highlighted.join('\n') + '\n' }
+                  : undefined
+                }>{highlighted ? undefined : fileContent + '\n'}</code>
+              </pre>
+            </div>
+          </div>
+        ) : (
+          <div className="gm-ftree-placeholder">Unable to load file content</div>
+        )}
+      </div>
+    </div>
+  )
+})
+
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
   projectDir: string
@@ -3565,6 +3762,7 @@ const CommitDetailPanel: React.FC<{
   const [focusedFileIdx, setFocusedFileIdx] = useState<number | null>(null)
   const [hoveredFileIdx, setHoveredFileIdx] = useState<number | null>(null)
   const activeFilterIdx = focusedFileIdx ?? hoveredFileIdx
+  const [detailView, setDetailView] = useState<'diff' | 'tree'>('diff')
 
   const handleResetFile = useCallback(async (filePath: string) => {
     if (!window.confirm(`Reset "${filePath}" to its state before this commit?`)) return
@@ -3867,6 +4065,14 @@ const CommitDetailPanel: React.FC<{
         <div className="gm-detail-subject">{detail.subject}</div>
         {detail.body && <div className="gm-detail-body">{detail.body}</div>}
       </div>
+      <div className="gm-detail-view-tabs">
+        <button className={`gm-detail-view-tab${detailView === 'diff' ? ' gm-detail-view-tab-active' : ''}`} onClick={() => setDetailView('diff')}>Diff</button>
+        <button className={`gm-detail-view-tab${detailView === 'tree' ? ' gm-detail-view-tab-active' : ''}`} onClick={() => setDetailView('tree')}>File Tree</button>
+      </div>
+      {detailView === 'tree' ? (
+        <CommitFileTreeView hash={detail.hash} projectDir={projectDir} syntaxHL={syntaxHL} />
+      ) : (
+      <>
       <div className="gm-detail-files" ref={(el) => {
         // Track sticky panel height so diff file headers can position below it
         if (!el) return
@@ -3944,6 +4150,8 @@ const CommitDetailPanel: React.FC<{
           />
         ))}
       </div>
+      </>
+      )}
 
       {ctxMenu && (
         <CommitDiffContextMenu

@@ -1860,6 +1860,20 @@ async function enrichSubmoduleDetails(cwd: string, submodules: GitSubmoduleInfo[
  * Get file content as a base64 data URL. If ref is given, reads from that git ref;
  * otherwise reads from the working tree.
  */
+export async function getCommitFileTree(cwd: string, hash: string): Promise<{ path: string; type: 'blob' | 'tree' }[]> {
+  const { stdout } = await gitExec(cwd, ['ls-tree', '-r', '--name-only', hash], 15000)
+  return stdout.trim().split('\n').filter(Boolean).map((p) => ({ path: p, type: 'blob' as const }))
+}
+
+export async function getFileAtCommit(cwd: string, hash: string, filePath: string): Promise<string | null> {
+  try {
+    const { stdout } = await gitExec(cwd, ['show', `${hash}:${filePath}`], 10000)
+    return stdout
+  } catch {
+    return null
+  }
+}
+
 export async function getFileBlob(cwd: string, filePath: string, ref?: string): Promise<string | null> {
   const ext = filePath.split('.').pop()?.toLowerCase() || ''
   const mimeMap: Record<string, string> = {
