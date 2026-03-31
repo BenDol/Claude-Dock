@@ -391,7 +391,11 @@ export async function getStatus(cwd: string, fast?: boolean): Promise<GitStatusR
       }
     }
   } catch (err) {
-    getServices().logError('[git-manager] getStatus failed:', err)
+    // Suppress noisy logging for non-git directories (polls every few seconds)
+    const msg = err instanceof Error ? err.message : ''
+    if (!msg.includes('not a git repository')) {
+      getServices().logError('[git-manager] getStatus failed:', err)
+    }
     // Try fallback for branch name
     try {
       const { stdout } = await gitExec(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
