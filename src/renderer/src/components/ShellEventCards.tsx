@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import './ShellEventCards.css'
@@ -35,6 +35,7 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const ignoredHashes = useDockStore((s) => s.ignoredEventHashes)
   const dismissEvent = useDockStore((s) => s.dismissShellEvent)
   const ignoreHash = useDockStore((s) => s.ignoreEventHash)
+  const [minimized, setMinimized] = useState(false)
 
   // Filter to events for this terminal's session, excluding ignored hashes
   const visibleEvents = events.filter((e) => {
@@ -75,8 +76,18 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
 
   if (visibleEvents.length === 0) return null
 
+  if (minimized) {
+    return (
+      <div className="shell-event-cards-minimized" onClick={() => setMinimized(false)} title="Show events">
+        <span className="shell-event-minimized-icon">{'\u26A0'}</span>
+        <span className="shell-event-minimized-count">{visibleEvents.length}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="shell-event-cards">
+      <button className="shell-event-minimize-btn" onClick={() => setMinimized(true)} title="Minimize events">{'\u2015'}</button>
       {visibleEvents.map((event) => {
         const icon = EVENT_ICONS[event.type] || '\u25CF'
         const color = EVENT_COLORS[event.type] || '#6b6966'

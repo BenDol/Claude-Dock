@@ -7,6 +7,48 @@
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   max-height: 120px;
   overflow-y: auto;
+  position: relative;
+}
+
+.shell-event-minimize-btn {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1;
+  z-index: 1;
+}
+.shell-event-minimize-btn:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.shell-event-cards-minimized {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.shell-event-cards-minimized:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.shell-event-minimized-icon {
+  font-size: 10px;
+  color: #b8860b;
+}
+.shell-event-minimized-count {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .shell-event-card {
