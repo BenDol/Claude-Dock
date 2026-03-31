@@ -376,11 +376,12 @@ export class DockWindow {
   }
 
   /**
-   * Scan shell output lines for new ##DOCK_EVENT:type:payload## markers since last scan.
+   * Scan shell output for new ##DOCK_EVENT:type:payload## markers since last scan.
+   * Joins lines before scanning to handle events split across terminal line-wrap boundaries.
    * Appends any new events to dock-pending-events.json for the MCP server to pick up.
    */
   private detectAndWritePendingEvents(shellData: Record<string, any>): void {
-    const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/
+    const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/g
     const newEvents: Array<{ sessionId: string; shellId: string; type: string; payload: any; timestamp: number }> = []
 
     for (const [sessionId, entry] of Object.entries(shellData)) {
@@ -389,20 +390,25 @@ export class DockWindow {
         const lines: string[] = shell.lines || []
         const lastOffset = this.shellEventScanOffsets.get(shellId) || 0
 
-        // Only scan new lines since last check
-        for (let i = lastOffset; i < lines.length; i++) {
-          const match = lines[i].match(eventPattern)
-          if (match) {
-            let payload: any = match[2]
-            try { payload = JSON.parse(match[2]) } catch { /* keep raw string */ }
-            newEvents.push({
-              sessionId,
-              shellId,
-              type: match[1],
-              payload,
-              timestamp: Date.now()
-            })
-          }
+        if (lastOffset >= lines.length) {
+          this.shellEventScanOffsets.set(shellId, lines.length)
+          continue
+        }
+
+        // Join new lines into a single string so events split by terminal
+        // line-wrapping are matched across the boundary
+        const newContent = lines.slice(lastOffset).join('')
+        let match: RegExpExecArray | null
+        while ((match = eventPattern.exec(newContent)) !== null) {
+          let payload: any = match[2]
+          try { payload = JSON.parse(match[2]) } catch { /* keep raw string */ }
+          newEvents.push({
+            sessionId,
+            shellId,
+            type: match[1],
+            payload,
+            timestamp: Date.now()
+          })
         }
         this.shellEventScanOffsets.set(shellId, lines.length)
       }

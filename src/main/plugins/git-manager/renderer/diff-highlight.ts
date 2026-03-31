@@ -8,6 +8,7 @@ const EXT_MAP: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
   mjs: 'javascript', cjs: 'javascript', json: 'json', json5: 'json',
   html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml', xhtml: 'xml', xsl: 'xml', xslt: 'xml',
+  svelte: 'xml', vue: 'xml', astro: 'xml',
   css: 'css', scss: 'scss', less: 'less', sass: 'scss', styl: 'stylus',
   coffee: 'coffeescript', litcoffee: 'coffeescript',
   hbs: 'handlebars', handlebars: 'handlebars',

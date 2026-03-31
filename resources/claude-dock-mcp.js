@@ -761,16 +761,16 @@ function handleMessage(msg) {
             const scanLines = lines.slice(-(last_n || 50))
 
             // Parse ##DOCK_EVENT:type:payload## markers
-            const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/
+            // Join lines before scanning — terminal line-wrap can split events across lines
+            const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/g
             const events = []
-            for (const line of scanLines) {
-              const match = line.match(eventPattern)
-              if (match) {
-                try {
-                  events.push({ type: match[1], payload: JSON.parse(match[2]), raw: line.trim() })
-                } catch {
-                  events.push({ type: match[1], payload: match[2], raw: line.trim() })
-                }
+            const joined = scanLines.join('')
+            let evMatch
+            while ((evMatch = eventPattern.exec(joined)) !== null) {
+              try {
+                events.push({ type: evMatch[1], payload: JSON.parse(evMatch[2]) })
+              } catch {
+                events.push({ type: evMatch[1], payload: evMatch[2] })
               }
             }
 
