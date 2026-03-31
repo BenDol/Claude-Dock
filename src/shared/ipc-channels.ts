@@ -138,6 +138,8 @@ export const IPC = {
   GIT_MGR_GET_REMOTES: 'gitMgr:getRemotes',
   GIT_MGR_ADD_REMOTE: 'gitMgr:addRemote',
   GIT_MGR_REMOVE_REMOTE: 'gitMgr:removeRemote',
+  GIT_MGR_RENAME_REMOTE: 'gitMgr:renameRemote',
+  GIT_MGR_SET_REMOTE_URL: 'gitMgr:setRemoteUrl',
   GIT_MGR_GET_MERGE_STATE: 'gitMgr:getMergeState',
   GIT_MGR_GET_CONFLICT_CONTENT: 'gitMgr:getConflictContent',
   GIT_MGR_RESOLVE_CONFLICT: 'gitMgr:resolveConflict',

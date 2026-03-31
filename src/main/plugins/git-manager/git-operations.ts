@@ -1361,6 +1361,17 @@ export async function removeRemote(cwd: string, name: string): Promise<void> {
   await gitExec(cwd, ['remote', 'remove', name], 10000)
 }
 
+export async function renameRemote(cwd: string, oldName: string, newName: string): Promise<void> {
+  await gitExec(cwd, ['remote', 'rename', oldName, newName], 10000)
+}
+
+export async function setRemoteUrl(cwd: string, name: string, url: string, pushUrl?: string): Promise<void> {
+  await gitExec(cwd, ['remote', 'set-url', name, url], 10000)
+  if (pushUrl !== undefined) {
+    await gitExec(cwd, ['remote', 'set-url', '--push', name, pushUrl], 10000)
+  }
+}
+
 // --- Submodules ---
 
 // --- Commit message generation ---

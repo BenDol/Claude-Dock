@@ -557,6 +557,26 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_MGR_RENAME_REMOTE, async (_event, projectDir: string, oldName: string, newName: string) => {
+    try {
+      await gitOps.renameRemote(projectDir, oldName, newName)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[git-manager] rename remote failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Rename remote failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_SET_REMOTE_URL, async (_event, projectDir: string, name: string, url: string, pushUrl?: string) => {
+    try {
+      await gitOps.setRemoteUrl(projectDir, name, url, pushUrl)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[git-manager] set remote url failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Set remote URL failed' }
+    }
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GET_MERGE_STATE, async (_event, projectDir: string) => {
     return gitOps.getMergeState(projectDir)
   })

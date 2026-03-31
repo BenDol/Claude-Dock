@@ -235,6 +235,8 @@ export interface DockApi {
     getRemotes: (projectDir: string) => Promise<{ name: string; fetchUrl: string; pushUrl: string }[]>
     addRemote: (projectDir: string, name: string, url: string) => Promise<{ success: boolean; error?: string }>
     removeRemote: (projectDir: string, name: string) => Promise<{ success: boolean; error?: string }>
+    renameRemote: (projectDir: string, oldName: string, newName: string) => Promise<{ success: boolean; error?: string }>
+    setRemoteUrl: (projectDir: string, name: string, url: string, pushUrl?: string) => Promise<{ success: boolean; error?: string }>
     getMergeState: (projectDir: string) => Promise<GitMergeState>
     getConflictContent: (projectDir: string, filePath: string) => Promise<GitConflictFileContent>
     resolveConflict: (projectDir: string, filePath: string, resolution: 'ours' | 'theirs' | 'both', chunkIndex?: number) => Promise<{ success: boolean; error?: string }>
@@ -565,6 +567,8 @@ const dockApi: DockApi = {
     getRemotes: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_REMOTES, projectDir),
     addRemote: (projectDir, name, url) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_REMOTE, projectDir, name, url),
     removeRemote: (projectDir, name) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_REMOTE, projectDir, name),
+    renameRemote: (projectDir, oldName, newName) => ipcRenderer.invoke(IPC.GIT_MGR_RENAME_REMOTE, projectDir, oldName, newName),
+    setRemoteUrl: (projectDir, name, url, pushUrl) => ipcRenderer.invoke(IPC.GIT_MGR_SET_REMOTE_URL, projectDir, name, url, pushUrl),
     getMergeState: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_MERGE_STATE, projectDir),
     getConflictContent: (projectDir, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_GET_CONFLICT_CONTENT, projectDir, filePath),
     resolveConflict: (projectDir, filePath, resolution, chunkIndex) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_CONFLICT, projectDir, filePath, resolution, chunkIndex),

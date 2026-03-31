@@ -1229,6 +1229,7 @@ const GitManagerApp: React.FC = () => {
 
   const [pullDialogOpen, setPullDialogOpen] = useState(false)
   const [remotes, setRemotes] = useState<{ name: string; fetchUrl: string; pushUrl: string }[]>([])
+  const [editingRemote, setEditingRemote] = useState<{ name: string; fetchUrl: string; pushUrl: string } | null>(null)
   const repoProvider = useMemo<GitProvider>(() => {
     const origin = remotes.find((r) => r.name === 'origin') || remotes[0]
     return origin ? detectProvider(origin.fetchUrl) : 'generic'
@@ -1715,6 +1716,10 @@ const GitManagerApp: React.FC = () => {
           <CollapsibleSection title="Remotes" count={remoteBranches.length} defaultCollapsed onAdd={() => setSidebarModal('addRemote')} addTitle="Add remote">
             <RemoteBranchTree
               branches={remoteBranches}
+              onEditRemote={(remoteName) => {
+                const info = remotes.find((r) => r.name === remoteName)
+                if (info) setEditingRemote(info)
+              }}
               onRemoveRemote={(remoteName, branchNames) => {
                 setConfirmModal({
                   title: `Remove remote "${remoteName}"`,
@@ -2149,6 +2154,15 @@ const GitManagerApp: React.FC = () => {
         <AddRemoteModal
           projectDir={activeDir}
           onClose={() => setSidebarModal(null)}
+          onDone={refresh}
+          onError={handleSmartError}
+        />
+      )}
+      {editingRemote && (
+        <EditRemoteModal
+          projectDir={activeDir}
+          remote={editingRemote}
+          onClose={() => setEditingRemote(null)}
           onDone={refresh}
           onError={handleSmartError}
         />
@@ -3571,6 +3585,34 @@ function buildFileTree(files: { path: string }[]): FileTreeNode {
   return root
 }
 
+/** Flatten single-child directory chains: a/b/c → "a/b/c" when a and b have no files */
+function flattenTree(node: FileTreeNode): FileTreeNode {
+  const flattened: FileTreeNode = { name: node.name, path: node.path, children: new Map(), isFile: node.isFile }
+  for (const [key, child] of node.children) {
+    let current = child
+    let compactName = current.name
+    // Collapse chains of single-child directories
+    while (!current.isFile && current.children.size === 1) {
+      const only = [...current.children.values()][0]
+      if (only.isFile) break // stop if the single child is a file
+      compactName += '/' + only.name
+      current = only
+    }
+    // Recursively flatten the children of the (possibly collapsed) node
+    const flatChild: FileTreeNode = {
+      name: compactName,
+      path: current.path,
+      children: new Map(),
+      isFile: current.isFile
+    }
+    for (const [ck, cv] of current.children) {
+      flatChild.children.set(ck, flattenTree(cv))
+    }
+    flattened.children.set(key, flatChild)
+  }
+  return flattened
+}
+
 // File type color map — maps extensions to colors for visual identification
 const FILE_TYPE_COLORS: Record<string, string> = {
   // JS/TS
@@ -3730,6 +3772,7 @@ const CommitFileTreeView: React.FC<{
 }> = React.memo(({ hash, projectDir, syntaxHL }) => {
   const [files, setFiles] = useState<{ path: string }[]>([])
   const [loading, setLoading] = useState(true)
+  const [flatten, setFlatten] = usePersistedCollapsed('ftree-flatten', true)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [blobSrc, setBlobSrc] = useState<string | null>(null)
@@ -3782,7 +3825,8 @@ const CommitFileTreeView: React.FC<{
     return files.filter((f) => f.path.toLowerCase().includes(lower))
   }, [files, filter])
 
-  const tree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles])
+  const rawTree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles])
+  const tree = useMemo(() => flatten ? flattenTree(rawTree) : rawTree, [rawTree, flatten])
 
   const highlighted = useMemo(() => {
     if (!fileContent || !selectedFile || !syntaxHL) return null
@@ -3796,13 +3840,24 @@ const CommitFileTreeView: React.FC<{
   return (
     <div className="gm-ftree">
       <div className="gm-ftree-sidebar" ref={sidebarRef}>
-        <input
-          className="gm-ftree-filter"
-          type="text"
-          placeholder="Filter files..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
+        <div className="gm-ftree-toolbar">
+          <input
+            className="gm-ftree-filter"
+            type="text"
+            placeholder="Filter files..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <button
+            className={`gm-ftree-flatten-btn${flatten ? ' gm-ftree-flatten-btn-active' : ''}`}
+            onClick={() => setFlatten((p) => !p)}
+            title={flatten ? 'Compact paths (on) — click to expand all directories' : 'Compact paths (off) — click to flatten single-child directories'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
+            </svg>
+          </button>
+        </div>
         <div className="gm-ftree-list">
           {[...tree.children.values()].sort((a, b) => {
             if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
@@ -6766,7 +6821,8 @@ const SectionChevron: React.FC<{ collapsed: boolean }> = React.memo(({ collapsed
 const RemoteBranchTree: React.FC<{
   branches: GitBranchInfo[]
   onRemoveRemote?: (remoteName: string, branchNames: string[]) => void
-}> = ({ branches, onRemoveRemote }) => {
+  onEditRemote?: (remoteName: string) => void
+}> = ({ branches, onRemoveRemote, onEditRemote }) => {
   // Group by remote name (e.g. origin/main -> origin group)
   const groups = useMemo(() => {
     const map = new Map<string, GitBranchInfo[]>()
@@ -6783,7 +6839,7 @@ const RemoteBranchTree: React.FC<{
   return (
     <>
       {[...groups.entries()].map(([remote, items]) => (
-        <RemoteBranchGroup key={remote} remote={remote} branches={items} onRemoveRemote={onRemoveRemote} />
+        <RemoteBranchGroup key={remote} remote={remote} branches={items} onRemoveRemote={onRemoveRemote} onEditRemote={onEditRemote} />
       ))}
     </>
   )
@@ -6793,7 +6849,8 @@ const RemoteBranchGroup: React.FC<{
   remote: string
   branches: GitBranchInfo[]
   onRemoveRemote?: (remoteName: string, branchNames: string[]) => void
-}> = ({ remote, branches, onRemoveRemote }) => {
+  onEditRemote?: (remoteName: string) => void
+}> = ({ remote, branches, onRemoveRemote, onEditRemote }) => {
   const [collapsed, setCollapsed] = usePersistedCollapsed(`remote:${remote}`)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const ctxRef = useRef<HTMLDivElement>(null)
@@ -6809,7 +6866,7 @@ const RemoteBranchGroup: React.FC<{
 
   const handleCtx = (e: React.MouseEvent) => {
     e.preventDefault()
-    if (!onRemoveRemote) return
+    if (!onRemoveRemote && !onEditRemote) return
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
     setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
   }
@@ -6836,17 +6893,31 @@ const RemoteBranchGroup: React.FC<{
           <span className="gm-branch-name">{b.name.slice(remote.length + 1)}</span>
         </div>
       ))}
-      {ctxMenu && onRemoveRemote && (
+      {ctxMenu && (
         <div className="gm-ctx-menu" ref={ctxRef} style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-          <div
-            className="gm-ctx-item gm-ctx-danger"
-            onClick={() => {
-              onRemoveRemote(remote, branches.map((b) => b.name))
-              setCtxMenu(null)
-            }}
-          >
-            Remove remote "{remote}"
-          </div>
+          {onEditRemote && (
+            <div
+              className="gm-ctx-item"
+              onClick={() => {
+                onEditRemote(remote)
+                setCtxMenu(null)
+              }}
+            >
+              Edit remote "{remote}"
+            </div>
+          )}
+          {onRemoveRemote && onEditRemote && <div className="gm-ctx-separator" />}
+          {onRemoveRemote && (
+            <div
+              className="gm-ctx-item gm-ctx-danger"
+              onClick={() => {
+                onRemoveRemote(remote, branches.map((b) => b.name))
+                setCtxMenu(null)
+              }}
+            >
+              Remove remote "{remote}"
+            </div>
+          )}
         </div>
       )}
     </>
@@ -9498,6 +9569,115 @@ const AddRemoteModal: React.FC<{
         <div className="gm-modal-footer">
           <button className="gm-modal-btn gm-modal-btn-primary" onClick={handleAdd} disabled={busy || !name.trim() || !url.trim()}>
             {busy ? 'Adding...' : 'Add remote'}
+          </button>
+          <button className="gm-modal-btn" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const EditRemoteModal: React.FC<{
+  projectDir: string
+  remote: { name: string; fetchUrl: string; pushUrl: string }
+  onClose: () => void
+  onDone: () => void
+  onError: (msg: string) => void
+}> = ({ projectDir, remote, onClose, onDone, onError }) => {
+  const [name, setName] = useState(remote.name)
+  const [fetchUrl, setFetchUrl] = useState(remote.fetchUrl)
+  const [pushUrl, setPushUrl] = useState(remote.pushUrl)
+  const [separatePushUrl, setSeparatePushUrl] = useState(remote.fetchUrl !== remote.pushUrl)
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  const hasChanges = name.trim() !== remote.name
+    || fetchUrl.trim() !== remote.fetchUrl
+    || (separatePushUrl ? pushUrl.trim() !== remote.pushUrl : fetchUrl.trim() !== remote.pushUrl)
+
+  const handleSave = async () => {
+    if (!name.trim() || !fetchUrl.trim() || busy || !hasChanges) return
+    setBusy(true)
+    const api = getDockApi()
+    const effectivePushUrl = separatePushUrl ? pushUrl.trim() : undefined
+
+    // Rename first if name changed
+    if (name.trim() !== remote.name) {
+      const r = await api.gitManager.renameRemote(projectDir, remote.name, name.trim())
+      if (!r.success) { setBusy(false); onError(`Rename remote failed: ${r.error || 'Unknown error'}`); return }
+    }
+
+    // Set URLs (use the potentially-renamed name)
+    const currentName = name.trim()
+    if (fetchUrl.trim() !== remote.fetchUrl || (separatePushUrl ? pushUrl.trim() !== remote.pushUrl : fetchUrl.trim() !== remote.pushUrl)) {
+      const r = await api.gitManager.setRemoteUrl(projectDir, currentName, fetchUrl.trim(), effectivePushUrl)
+      if (!r.success) { setBusy(false); onError(`Set remote URL failed: ${r.error || 'Unknown error'}`); return }
+    }
+
+    setBusy(false)
+    onDone()
+    onClose()
+  }
+
+  return (
+    <div className="gm-modal-overlay" onClick={onClose}>
+      <div className="gm-modal gm-modal-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="gm-modal-header">
+          <span>Edit remote</span>
+          <button className="gm-modal-close" onClick={onClose}>&#10005;</button>
+        </div>
+        <div className="gm-modal-body">
+          <label className="gm-modal-field">
+            <span>Name</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="origin"
+              className="gm-modal-input"
+            />
+          </label>
+          <label className="gm-modal-field">
+            <span>Fetch URL</span>
+            <input
+              type="text"
+              value={fetchUrl}
+              onChange={(e) => { setFetchUrl(e.target.value); if (!separatePushUrl) setPushUrl(e.target.value) }}
+              placeholder="https://github.com/user/repo.git"
+              className="gm-modal-input"
+            />
+          </label>
+          <label className="gm-modal-field gm-modal-field-row">
+            <input
+              type="checkbox"
+              checked={separatePushUrl}
+              onChange={(e) => {
+                setSeparatePushUrl(e.target.checked)
+                if (!e.target.checked) setPushUrl(fetchUrl)
+              }}
+            />
+            <span>Use separate push URL</span>
+          </label>
+          {separatePushUrl && (
+            <label className="gm-modal-field">
+              <span>Push URL</span>
+              <input
+                type="text"
+                value={pushUrl}
+                onChange={(e) => setPushUrl(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+                placeholder="https://github.com/user/repo.git"
+                className="gm-modal-input"
+              />
+            </label>
+          )}
+        </div>
+        <div className="gm-modal-footer">
+          <button className="gm-modal-btn gm-modal-btn-primary" onClick={handleSave} disabled={busy || !name.trim() || !fetchUrl.trim() || !hasChanges}>
+            {busy ? 'Saving...' : 'Save'}
           </button>
           <button className="gm-modal-btn" onClick={onClose}>Cancel</button>
         </div>
