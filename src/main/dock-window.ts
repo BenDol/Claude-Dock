@@ -416,7 +416,8 @@ export class DockWindow {
 
     if (newEvents.length === 0) return
 
-    // Append to pending events file (MCP server reads and clears this)
+    // Deduplicate: drop events whose type+hash match an existing pending or new event
+    const seen = new Set<string>()
     const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
     let pending: any[] = []
     try {
@@ -424,24 +425,39 @@ export class DockWindow {
       if (!Array.isArray(pending)) pending = []
     } catch { /* new file */ }
 
-    pending.push(...newEvents)
+    // Build set of existing keys
+    for (const e of pending) {
+      const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : null
+      if (h) seen.add(h)
+    }
+
+    const dedupedEvents = newEvents.filter((e) => {
+      const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : null
+      if (h && seen.has(h)) return false
+      if (h) seen.add(h)
+      return true
+    })
+
+    if (dedupedEvents.length === 0) return
+
+    pending.push(...dedupedEvents)
 
     // Cap at 100 pending events to prevent unbounded growth
     if (pending.length > 100) pending = pending.slice(-100)
 
     fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
-    log(`[shell-events] ${newEvents.length} new event(s) written to pending file`)
+    log(`[shell-events] ${dedupedEvents.length} new event(s) written to pending file`)
 
     // Send events to renderer for UI notification cards
     if (!this.window.isDestroyed()) {
-      for (const event of newEvents) {
+      for (const event of dedupedEvents) {
         this.window.webContents.send(IPC.SHELL_EVENT, event)
       }
     }
 
     // Only auto-inject into the Claude terminal when the setting is enabled
     if (getSettings().behavior.shellEventAutoSubmit) {
-      this.injectEventsIntoTerminal(newEvents)
+      this.injectEventsIntoTerminal(dedupedEvents)
     }
   }
 

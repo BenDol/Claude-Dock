@@ -265,9 +265,24 @@ export const useDockStore = create<DockState>((set, get) => ({
     return { manualResumeIds }
   }),
 
-  addShellEvent: (event) => set((state) => ({
-    shellEvents: [...state.shellEvents, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)
-  })),
+  addShellEvent: (event) => set((state) => {
+    // Deduplicate: if an event with the same type exists and has the same payload hash
+    // (or same type within 10s for hashless events like server_stopped), update it instead
+    const hash = typeof event.payload === 'object' ? event.payload.hash : undefined
+    const dupeIdx = state.shellEvents.findIndex((e) => {
+      if (e.type !== event.type || e.sessionId !== event.sessionId) return false
+      if (hash) return typeof e.payload === 'object' && e.payload.hash === hash
+      return event.timestamp - e.timestamp < 10000
+    })
+    if (dupeIdx >= 0) {
+      const updated = [...state.shellEvents]
+      updated[dupeIdx] = { ...updated[dupeIdx], payload: event.payload, timestamp: event.timestamp }
+      return { shellEvents: updated }
+    }
+    return {
+      shellEvents: [...state.shellEvents, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)
+    }
+  }),
 
   dismissShellEvent: (id) => set((state) => ({
     shellEvents: state.shellEvents.filter((e) => e.id !== id)
