@@ -49,6 +49,7 @@
 .gm-toolbar-btn-pushing {
   color: #e0af68 !important;
   border-color: rgba(224, 175, 104, 0.3) !important;
+  border-radius: 0 !important;
   position: relative;
   overflow: hidden;
   z-index: 0;
