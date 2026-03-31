@@ -6,6 +6,7 @@ import { useDockStore } from '../stores/dock-store'
 import { useGridLayout } from '../hooks/useGridLayout'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
+import { GRID_RESOLUTION } from '../lib/grid-math'
 
 // Register global shell event listener (once, at grid level)
 let shellEventListenerRegistered = false
@@ -15,7 +16,7 @@ const DockGrid: React.FC = () => {
   const focusedTerminalId = useDockStore((s) => s.focusedTerminalId)
   const swapTerminals = useDockStore((s) => s.swapTerminals)
   const gapSize = useSettingsStore((s) => s.settings.grid.gapSize)
-  const { cols, layout, setContainerSize } = useGridLayout()
+  const { cols, logicalCols, layout, orientation, setContainerSize, columnRatios, setColumnRatios, rowRatios, setRowRatios } = useGridLayout()
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -85,6 +86,74 @@ const DockGrid: React.FC = () => {
     [layout, swapTerminals]
   )
 
+  // --- Resize handles between grid columns (landscape) or rows (portrait) ---
+
+  const handleGridResize = useCallback((index: number, e: React.MouseEvent) => {
+    e.preventDefault()
+    const isHorizontal = orientation === 'landscape'
+    const startPos = isHorizontal ? e.clientX : e.clientY
+    const totalSize = isHorizontal ? containerWidth : containerHeight
+    const count = isHorizontal ? logicalCols : terminals.length
+    const currentRatios = isHorizontal
+      ? (columnRatios.length === count ? [...columnRatios] : Array(count).fill(1))
+      : (rowRatios.length === count ? [...rowRatios] : Array(count).fill(1))
+    const leftRatio = currentRatios[index]
+    const rightRatio = currentRatios[index + 1]
+    const sumRatio = leftRatio + rightRatio
+
+    const onMove = (ev: MouseEvent) => {
+      const pos = isHorizontal ? ev.clientX : ev.clientY
+      const delta = pos - startPos
+      const deltaRatio = (delta / totalSize) * sumRatio * count
+      const newRatios = [...currentRatios]
+      newRatios[index] = Math.max(0.15, leftRatio + deltaRatio)
+      newRatios[index + 1] = Math.max(0.15, rightRatio - deltaRatio)
+      if (isHorizontal) setColumnRatios(newRatios)
+      else setRowRatios(newRatios)
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 50)
+    }
+    document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [orientation, containerWidth, containerHeight, logicalCols, terminals.length, columnRatios, rowRatios, setColumnRatios, setRowRatios])
+
+  // Compute resize handle positions from the layout
+  const resizeHandles: Array<{ index: number; pos: number; isHorizontal: boolean }> = []
+  if (orientation === 'landscape' && logicalCols > 1) {
+    // Find column boundaries from the layout
+    const colWidth = containerWidth / cols
+    const seen = new Set<number>()
+    for (const l of layout) {
+      const rightEdge = l.x + l.w
+      if (rightEdge < cols && !seen.has(rightEdge)) {
+        seen.add(rightEdge)
+        const colIdx = Math.round(rightEdge / GRID_RESOLUTION) - 1
+        if (colIdx >= 0 && colIdx < logicalCols - 1) {
+          resizeHandles.push({ index: colIdx, pos: rightEdge * colWidth, isHorizontal: true })
+        }
+      }
+    }
+  } else if (orientation === 'portrait' && terminals.length > 1) {
+    // Row boundaries
+    let cumY = 0
+    for (const l of layout) {
+      if (cumY > 0) {
+        const idx = layout.indexOf(l) - 1
+        if (idx >= 0) {
+          resizeHandles.push({ index: idx, pos: cumY * (rowHeight + gapSize), isHorizontal: false })
+        }
+      }
+      cumY = l.y + l.h
+    }
+  }
+
   if (terminals.length === 0) return null
 
   return (
@@ -116,6 +185,17 @@ const DockGrid: React.FC = () => {
           </div>
         ))}
       </ReactGridLayout>
+      {resizeHandles.map((h) => (
+        <div
+          key={`resize-${h.index}-${h.isHorizontal ? 'h' : 'v'}`}
+          className={`grid-resize-handle ${h.isHorizontal ? 'grid-resize-handle-col' : 'grid-resize-handle-row'}`}
+          style={h.isHorizontal
+            ? { left: h.pos - 3, top: 0, width: 6, height: '100%' }
+            : { top: h.pos - 3, left: 0, height: 6, width: '100%' }
+          }
+          onMouseDown={(e) => handleGridResize(h.index, e)}
+        />
+      ))}
     </div>
   )
 }

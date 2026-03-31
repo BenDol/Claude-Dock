@@ -41,6 +41,10 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
   const nextIdRef = useRef(1)
   const areaRef = useRef<HTMLDivElement>(null)
   const preferredShell = useSettingsStore((s) => s.settings.shellPanel?.preferredShell ?? 'default')
+  // Per-column flex ratios (for split/horizontal resize)
+  const [columnRatios, setColumnRatios] = useState<Map<string, number>>(new Map())
+  // Per-panel flex ratios within columns (for stack/vertical resize)
+  const [panelRatios, setPanelRatios] = useState<Map<string, number>>(new Map())
 
   const makeShell = useCallback((): ShellInstance => {
     const id = String(nextIdRef.current++)
@@ -192,6 +196,75 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     document.addEventListener('mouseup', onUp)
   }, [areaHeight])
 
+  // Drag-to-resize between shell columns (horizontal)
+  const handleColumnResize = useCallback((leftColId: string, rightColId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const bodyEl = areaRef.current?.querySelector('.shell-area-body') as HTMLElement
+    if (!bodyEl) return
+    const totalWidth = bodyEl.clientWidth
+    const leftRatio = columnRatios.get(leftColId) ?? 1
+    const rightRatio = columnRatios.get(rightColId) ?? 1
+    const sumRatio = leftRatio + rightRatio
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX
+      const deltaRatio = (delta / totalWidth) * sumRatio * columns.length
+      setColumnRatios(prev => {
+        const next = new Map(prev)
+        next.set(leftColId, Math.max(0.15, leftRatio + deltaRatio))
+        next.set(rightColId, Math.max(0.15, rightRatio - deltaRatio))
+        return next
+      })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.dispatchEvent(new Event('shell-layout-changed'))
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [columnRatios, columns.length])
+
+  // Drag-to-resize between stacked panels in a column (vertical)
+  const handlePanelResize = useCallback((topShellId: string, bottomShellId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const colEl = (e.target as HTMLElement).closest('.shell-column') as HTMLElement
+    if (!colEl) return
+    const totalHeight = colEl.clientHeight
+    const topRatio = panelRatios.get(topShellId) ?? 1
+    const bottomRatio = panelRatios.get(bottomShellId) ?? 1
+    const panelCount = colEl.querySelectorAll('.shell-panel').length
+    const sumRatio = topRatio + bottomRatio
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientY - startY
+      const deltaRatio = (delta / totalHeight) * sumRatio * panelCount
+      setPanelRatios(prev => {
+        const next = new Map(prev)
+        next.set(topShellId, Math.max(0.15, topRatio + deltaRatio))
+        next.set(bottomShellId, Math.max(0.15, bottomRatio - deltaRatio))
+        return next
+      })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.dispatchEvent(new Event('shell-layout-changed'))
+    }
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [panelRatios])
+
   return (
     <div className="shell-area" ref={areaRef} style={{ height: areaHeight }}>
       <div className="shell-area-handle" onMouseDown={handleDragStart}>
@@ -201,26 +274,39 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
         <Suspense fallback={null}>
           {columns.map((col, ci) => (
             <React.Fragment key={col.id}>
-              {ci > 0 && <div className="shell-column-divider" />}
-              <div className="shell-column">
+              {ci > 0 && (
+                <div
+                  className="shell-column-divider"
+                  onMouseDown={(e) => handleColumnResize(columns[ci - 1].id, col.id, e)}
+                />
+              )}
+              <div className="shell-column" style={{ flex: columnRatios.get(col.id) ?? 1 }}>
                 {col.shells.map((shell, si) => {
                   const isFirstShell = si === 0 && ci === 0
                   const newCmd = pendingNewShell && (pendingNewShell as any)._shellId === shell.shellId ? pendingNewShell : null
                   return (
-                    <ShellPanel
-                      key={shell.id}
-                      shellId={shell.shellId}
-                      terminalId={terminalId}
-                      onClose={() => removeShell(col.id, shell.id)}
-                      onSplitRight={canAdd ? () => addShellRight(col.id) : undefined}
-                      onStackBelow={canAdd ? () => addShellBelow(col.id) : undefined}
-                      onMoveToSplit={col.shells.length > 1 ? () => moveToSplit(col.id, shell.id) : undefined}
-                      onMoveToStack={columns.length > 1 && col.shells.length === 1 ? () => moveToStack(col.id, shell.id) : undefined}
-                      initialCommand={newCmd ? newCmd.command : (isFirstShell ? initialCommand : undefined)}
-                      submitCommand={newCmd ? newCmd.submit : (isFirstShell ? submitCommand : undefined)}
-                      shellType={newCmd ? newCmd.shellType : (isFirstShell ? shellType : undefined)}
-                      label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
-                    />
+                    <React.Fragment key={shell.id}>
+                      {si > 0 && (
+                        <div
+                          className="shell-panel-divider"
+                          onMouseDown={(e) => handlePanelResize(col.shells[si - 1].shellId, shell.shellId, e)}
+                        />
+                      )}
+                      <ShellPanel
+                        shellId={shell.shellId}
+                        terminalId={terminalId}
+                        onClose={() => removeShell(col.id, shell.id)}
+                        onSplitRight={canAdd ? () => addShellRight(col.id) : undefined}
+                        onStackBelow={canAdd ? () => addShellBelow(col.id) : undefined}
+                        onMoveToSplit={col.shells.length > 1 ? () => moveToSplit(col.id, shell.id) : undefined}
+                        onMoveToStack={columns.length > 1 && col.shells.length === 1 ? () => moveToStack(col.id, shell.id) : undefined}
+                        initialCommand={newCmd ? newCmd.command : (isFirstShell ? initialCommand : undefined)}
+                        submitCommand={newCmd ? newCmd.submit : (isFirstShell ? submitCommand : undefined)}
+                        shellType={newCmd ? newCmd.shellType : (isFirstShell ? shellType : undefined)}
+                        label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
+                        flexRatio={panelRatios.get(shell.shellId)}
+                      />
+                    </React.Fragment>
                   )
                 })}
               </div>

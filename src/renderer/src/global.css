@@ -1124,10 +1124,29 @@ body {
   flex: 1;
   overflow: hidden;
   padding: 0;
+  position: relative;
 }
 
 .dock-grid {
   height: 100%;
+}
+
+/* Grid resize handles (overlaid between terminal cells) */
+.grid-resize-handle {
+  position: absolute;
+  z-index: 10;
+  transition: background 0.12s;
+}
+.grid-resize-handle-col {
+  cursor: col-resize;
+}
+.grid-resize-handle-row {
+  cursor: row-resize;
+}
+.grid-resize-handle:hover {
+  background: var(--accent-color);
+  opacity: 0.6;
+  border-radius: 2px;
 }
 
 /* Terminal Card */
@@ -1471,9 +1490,25 @@ body {
 }
 
 .shell-column-divider {
-  width: 1px;
+  width: 5px;
   background: var(--border-color);
   flex-shrink: 0;
+  cursor: col-resize;
+  transition: background 0.12s;
+}
+.shell-column-divider:hover {
+  background: var(--accent-color);
+}
+
+.shell-panel-divider {
+  height: 5px;
+  background: var(--border-color);
+  flex-shrink: 0;
+  cursor: row-resize;
+  transition: background 0.12s;
+}
+.shell-panel-divider:hover {
+  background: var(--accent-color);
 }
 
 /* Shell Panel (individual shell within area) */

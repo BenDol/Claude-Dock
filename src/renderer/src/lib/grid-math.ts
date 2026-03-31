@@ -73,51 +73,77 @@ export function findTerminalFromToolbar(layout: Layout[]): string | null {
   return topRow[0].i
 }
 
+/** Resolution multiplier — each logical column/row maps to this many grid units,
+ *  allowing fractional sizing via integer sub-units. */
+export const GRID_RESOLUTION = 120
+
 export function computeAutoLayout(
   terminalIds: string[],
-  maxCols: number
-): { cols: number; layout: Layout[] } {
+  maxCols: number,
+  columnRatios?: number[]
+): { cols: number; logicalCols: number; layout: Layout[] } {
   const n = terminalIds.length
-  if (n === 0) return { cols: maxCols, layout: [] }
+  if (n === 0) return { cols: maxCols * GRID_RESOLUTION, logicalCols: maxCols, layout: [] }
 
-  const cols = Math.min(Math.ceil(Math.sqrt(n)), maxCols)
-  const rows = Math.ceil(n / cols)
+  const logicalCols = Math.min(Math.ceil(Math.sqrt(n)), maxCols)
+  const rows = Math.ceil(n / logicalCols)
 
   // Determine if the last row has empty cells that can be filled by spanning
-  const lastRowCount = n % cols || cols
-  const hasEmptyCells = lastRowCount < cols && rows > 1
+  const lastRowCount = n % logicalCols || logicalCols
+  const hasEmptyCells = lastRowCount < logicalCols && rows > 1
+
+  // Compute sub-column widths from ratios (default: equal)
+  const ratios = columnRatios && columnRatios.length === logicalCols ? columnRatios : Array(logicalCols).fill(1)
+  const ratioSum = ratios.reduce((a, b) => a + b, 0)
+  const totalSubCols = logicalCols * GRID_RESOLUTION
+  const subWidths = ratios.map(r => Math.round((r / ratioSum) * totalSubCols))
+  // Fix rounding so widths sum exactly to totalSubCols
+  const diff = totalSubCols - subWidths.reduce((a, b) => a + b, 0)
+  if (diff !== 0) subWidths[subWidths.length - 1] += diff
+
+  const subXs: number[] = []
+  let cumX = 0
+  for (const w of subWidths) { subXs.push(cumX); cumX += w }
 
   const layout: Layout[] = terminalIds.map((id, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
+    const col = i % logicalCols
+    const row = Math.floor(i / logicalCols)
 
     // Terminal in the row above an empty last-row cell spans down to fill it
     const spansDown = hasEmptyCells && row === rows - 2 && col >= lastRowCount
 
     return {
       i: id,
-      x: col,
+      x: subXs[col],
       y: row,
-      w: 1,
+      w: subWidths[col],
       h: spansDown ? 2 : 1,
       static: true // no drag in auto mode
     }
   })
 
-  return { cols, layout }
+  return { cols: totalSubCols, logicalCols, layout }
 }
 
-/** Portrait layout: single column, all terminals stacked vertically */
+/** Portrait layout: single column, all terminals stacked vertically.
+ *  Uses GRID_RESOLUTION sub-rows for proportional height sizing. */
 export function computePortraitLayout(
-  terminalIds: string[]
-): { cols: number; layout: Layout[] } {
-  const layout: Layout[] = terminalIds.map((id, i) => ({
-    i: id,
-    x: 0,
-    y: i,
-    w: 1,
-    h: 1,
-    static: true
-  }))
-  return { cols: 1, layout }
+  terminalIds: string[],
+  rowRatios?: number[]
+): { cols: number; logicalCols: number; layout: Layout[] } {
+  const n = terminalIds.length
+  const ratios = rowRatios && rowRatios.length === n ? rowRatios : Array(n).fill(1)
+  const ratioSum = ratios.reduce((a, b) => a + b, 0) || 1
+  const totalSubRows = n * GRID_RESOLUTION
+  const subHeights = ratios.map(r => Math.max(1, Math.round((r / ratioSum) * totalSubRows)))
+  const hDiff = totalSubRows - subHeights.reduce((a, b) => a + b, 0)
+  if (hDiff !== 0 && subHeights.length > 0) subHeights[subHeights.length - 1] += hDiff
+
+  let cumY = 0
+  const layout: Layout[] = terminalIds.map((id, i) => {
+    const y = cumY
+    cumY += subHeights[i]
+    return { i: id, x: 0, y, w: GRID_RESOLUTION, h: subHeights[i], static: true }
+  })
+  return { cols: GRID_RESOLUTION, logicalCols: 1, layout }
 }

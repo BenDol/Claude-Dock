@@ -20,9 +20,10 @@ interface ShellPanelProps {
   /** Override the shell type (e.g. 'bash', 'cmd', 'powershell'). null = use configured default */
   shellType?: string | null
   label?: string
+  flexRatio?: number
 }
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label }) => {
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label, flexRatio }) => {
   const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
@@ -154,7 +155,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
   const canAdd = onSplitRight || onStackBelow
 
   return (
-    <div className="shell-panel">
+    <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined}>
       <div className="shell-panel-handle">
         <span className="shell-panel-label">{label || 'Shell'}{shellType && shellType !== 'default' ? <span className="shell-panel-type">{shellType}</span> : null}</span>
         {canAdd && (

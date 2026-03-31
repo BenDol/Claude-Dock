@@ -34,6 +34,7 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const events = useDockStore((s) => s.shellEvents)
   const ignoredHashes = useDockStore((s) => s.ignoredEventHashes)
   const dismissEvent = useDockStore((s) => s.dismissShellEvent)
+  const clearEvents = useDockStore((s) => s.clearShellEvents)
   const ignoreHash = useDockStore((s) => s.ignoreEventHash)
   const [minimized, setMinimized] = useState(false)
 
@@ -87,7 +88,10 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
 
   return (
     <div className="shell-event-cards">
-      <button className="shell-event-minimize-btn" onClick={() => setMinimized(true)} title="Minimize events">{'\u2015'}</button>
+      <div className="shell-event-panel-actions">
+        <button className="shell-event-clear-btn" onClick={clearEvents} title="Clear all events">{'\u2716'}</button>
+        <button className="shell-event-minimize-btn" onClick={() => setMinimized(true)} title="Minimize events">{'\u2015'}</button>
+      </div>
       {visibleEvents.map((event) => {
         const icon = EVENT_ICONS[event.type] || '\u25CF'
         const color = EVENT_COLORS[event.type] || '#6b6966'
