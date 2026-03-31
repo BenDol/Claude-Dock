@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { SearchAddon } from '@xterm/addon-search'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
@@ -21,12 +22,17 @@ interface UseShellTerminalOptions {
 export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const searchAddonRef = useRef<SearchAddon | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const spawnedRef = useRef(false)
   const dataBufferRef = useRef<string[]>([])
   const scrolledUpRef = useRef(false)
   const [scrollBtnVisible, setScrollBtnVisible] = useState(false)
   const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  // Write batching — accumulate data and flush via rAF to reduce xterm write() calls
+  const writeBufRef = useRef('')
+  const writeRafRef = useRef<number | null>(null)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -38,14 +44,24 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
     }
   }, [shellId])
 
-  // Buffer data from shell PTY
+  // Buffer data from shell PTY — batch writes via rAF for throughput
   useEffect(() => {
     const cleanup = getDockApi().shell.onData((id, data) => {
       if (id !== shellId) return
-      if (termRef.current) {
-        termRef.current.write(data)
-      } else {
+      if (!termRef.current) {
         dataBufferRef.current.push(data)
+        return
+      }
+      writeBufRef.current += data
+      if (writeRafRef.current === null) {
+        writeRafRef.current = requestAnimationFrame(() => {
+          writeRafRef.current = null
+          const buf = writeBufRef.current
+          writeBufRef.current = ''
+          if (buf && termRef.current) {
+            termRef.current.write(buf)
+          }
+        })
       }
     })
     return cleanup
@@ -75,6 +91,10 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
       const unicode11Addon = new Unicode11Addon()
       term.loadAddon(unicode11Addon)
       term.unicode.activeVersion = '11'
+
+      const searchAddon = new SearchAddon()
+      term.loadAddon(searchAddon)
+      searchAddonRef.current = searchAddon
 
       term.open(container)
 
@@ -161,9 +181,21 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
 
       const api = getDockApi()
 
-      // Copy/paste key handlers
+      // Key handlers
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true
+
+        // Ctrl+F: open search
+        if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
+          e.preventDefault()
+          setSearchOpen(true)
+          return false
+        }
+        // Escape: close search if open
+        if (e.key === 'Escape' && searchAddonRef.current) {
+          searchAddonRef.current.clearDecorations()
+          setSearchOpen(false)
+        }
 
         // Ctrl+Shift+C: copy
         if (e.ctrlKey && e.shiftKey && e.key === 'C') {
@@ -237,6 +269,7 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   // Cleanup
   useEffect(() => {
     return () => {
+      if (writeRafRef.current !== null) cancelAnimationFrame(writeRafRef.current)
       getDockApi().shell.kill(shellId)
       termRef.current?.dispose()
       termRef.current = null
@@ -260,5 +293,5 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
     }, 50)
   }, [settings, fit])
 
-  return { initTerminal, fit, focus, termRef, scrolledUp: scrollBtnVisible, scrollToBottom }
+  return { initTerminal, fit, focus, termRef, scrolledUp: scrollBtnVisible, scrollToBottom, searchAddonRef, searchOpen, setSearchOpen }
 }

@@ -2,9 +2,70 @@ import React, { useCallback, useRef, useEffect, useState, useLayoutEffect } from
 import { useShellTerminal } from '../hooks/useShellTerminal'
 import { useResizeObserver } from '../hooks/useResizeObserver'
 import { getDockApi } from '../lib/ipc-bridge'
+import type { SearchAddon } from '@xterm/addon-search'
 
 const MAX_LINK_LINES = 100
 const MAX_LINK_CHARS = 8000
+
+const ShellSearchBar: React.FC<{
+  searchAddonRef: React.RefObject<SearchAddon | null>
+  onClose: () => void
+  onFocusTerminal: () => void
+}> = ({ searchAddonRef, onClose, onFocusTerminal }) => {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [query, setQuery] = useState('')
+  const [resultInfo, setResultInfo] = useState('')
+
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select() }, [])
+
+  useEffect(() => {
+    const addon = searchAddonRef.current
+    if (!addon) return
+    const disposable = addon.onDidChangeResults((e) => {
+      if (e.resultCount === 0) setResultInfo(query ? 'No results' : '')
+      else if (e.resultIndex === -1) setResultInfo(`${e.resultCount}+ results`)
+      else setResultInfo(`${e.resultIndex + 1} of ${e.resultCount}`)
+    })
+    return () => disposable.dispose()
+  }, [searchAddonRef, query])
+
+  const searchOpts = useCallback(() => ({
+    caseSensitive: false, regex: false, wholeWord: false, incremental: true,
+    decorations: {
+      matchBackground: '#fabd2f55', matchBorder: '#fabd2f88', matchOverviewRuler: '#fabd2f',
+      activeMatchBackground: '#fabd2faa', activeMatchBorder: '#fabd2f', activeMatchColorOverviewRuler: '#fe8019'
+    }
+  }), [])
+
+  const findNext = useCallback(() => { if (query) searchAddonRef.current?.findNext(query, searchOpts()) }, [query, searchAddonRef, searchOpts])
+  const findPrev = useCallback(() => { if (query) searchAddonRef.current?.findPrevious(query, searchOpts()) }, [query, searchAddonRef, searchOpts])
+  const close = useCallback(() => { searchAddonRef.current?.clearDecorations(); onClose(); onFocusTerminal() }, [searchAddonRef, onClose, onFocusTerminal])
+
+  useEffect(() => {
+    if (query) searchAddonRef.current?.findNext(query, searchOpts())
+    else { searchAddonRef.current?.clearDecorations(); setResultInfo('') }
+  }, [query, searchAddonRef, searchOpts])
+
+  return (
+    <div className="terminal-search-bar shell-search-bar">
+      <input ref={inputRef} className="terminal-search-input" type="text" value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') close(); else if (e.key === 'Enter') e.shiftKey ? findPrev() : findNext() }}
+        placeholder="Search..." spellCheck={false}
+      />
+      {resultInfo && <span className="terminal-search-info">{resultInfo}</span>}
+      <button className="terminal-search-nav" onClick={findPrev} title="Previous (Shift+Enter)">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1,7 5,3 9,7" /></svg>
+      </button>
+      <button className="terminal-search-nav" onClick={findNext} title="Next (Enter)">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1,3 5,7 9,3" /></svg>
+      </button>
+      <button className="terminal-search-nav" onClick={close} title="Close (Esc)">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" /></svg>
+      </button>
+    </div>
+  )
+}
 
 interface ShellPanelProps {
   shellId: string
@@ -28,7 +89,7 @@ interface ShellPanelProps {
 }
 
 const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label, flexRatio, minimized, onToggleMinimize, isInColumn }) => {
-  const { initTerminal, fit, focus, termRef, scrolledUp, scrollToBottom } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
+  const { initTerminal, fit, focus, termRef, scrolledUp, scrollToBottom, searchAddonRef, searchOpen, setSearchOpen } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
   const [linked, setLinked] = useState(false)
@@ -253,6 +314,13 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
           </svg>
         </button>
       </div>
+      {searchOpen && (
+        <ShellSearchBar
+          searchAddonRef={searchAddonRef}
+          onClose={() => setSearchOpen(false)}
+          onFocusTerminal={focus}
+        />
+      )}
       <div className="shell-panel-terminal-wrap">
         <div
           className="shell-panel-terminal"

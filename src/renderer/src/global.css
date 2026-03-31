@@ -1722,6 +1722,12 @@ body {
   font-size: 10px;
 }
 
+/* Shell search bar — compact variant of the terminal search bar */
+.shell-search-bar {
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
 /* Bottom-left toggle button to open shell panel */
 .shell-toggle-bottom {
   position: absolute;
