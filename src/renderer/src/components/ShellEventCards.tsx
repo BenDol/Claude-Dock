@@ -32,14 +32,16 @@ const EVENT_COLORS: Record<string, string> = {
 
 const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId }) => {
   const events = useDockStore((s) => s.shellEvents)
-  const ignoredTypes = useDockStore((s) => s.ignoredEventTypes)
+  const ignoredHashes = useDockStore((s) => s.ignoredEventHashes)
   const dismissEvent = useDockStore((s) => s.dismissShellEvent)
-  const ignoreType = useDockStore((s) => s.ignoreEventType)
+  const ignoreHash = useDockStore((s) => s.ignoreEventHash)
 
-  // Filter to events for this terminal's session, excluding ignored types
-  const visibleEvents = events.filter(
-    (e) => e.sessionId === sessionId && !ignoredTypes.includes(e.type)
-  )
+  // Filter to events for this terminal's session, excluding ignored hashes
+  const visibleEvents = events.filter((e) => {
+    if (e.sessionId !== sessionId) return false
+    const key = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
+    return !ignoredHashes.includes(key)
+  })
 
   const handleClick = useCallback(
     (event: (typeof events)[0]) => {
@@ -61,11 +63,14 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   )
 
   const handleIgnore = useCallback(
-    (e: React.MouseEvent, eventType: string) => {
+    (e: React.MouseEvent, event: (typeof events)[0]) => {
       e.stopPropagation()
-      ignoreType(eventType)
+      const key = typeof event.payload === 'object' && event.payload?.hash
+        ? `${event.type}:${event.payload.hash}`
+        : event.type
+      ignoreHash(key)
     },
-    [ignoreType]
+    [ignoreHash]
   )
 
   if (visibleEvents.length === 0) return null
@@ -106,8 +111,8 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
               <div className="shell-event-actions">
                 <button
                   className="shell-event-ignore-btn"
-                  onClick={(e) => handleIgnore(e, event.type)}
-                  title={`Ignore all "${event.type}" events`}
+                  onClick={(e) => handleIgnore(e, event)}
+                  title="Ignore this event"
                 >
                   {'\u2298'}
                 </button>

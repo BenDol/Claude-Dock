@@ -41,8 +41,8 @@ interface DockState {
     payload: any
     timestamp: number
   }>
-  /** Event types the user has chosen to ignore */
-  ignoredEventTypes: string[]
+  /** Event hashes the user has chosen to ignore (type:hash or type for hashless) */
+  ignoredEventHashes: string[]
 
   // Actions
   setDockInfo: (id: string, projectDir: string) => void
@@ -70,8 +70,8 @@ interface DockState {
   addShellEvent: (event: { sessionId: string; shellId: string; type: string; payload: any; timestamp: number }) => void
   dismissShellEvent: (id: string) => void
   clearShellEvents: () => void
-  ignoreEventType: (type: string) => void
-  unignoreEventType: (type: string) => void
+  ignoreEventHash: (key: string) => void
+  unignoreEventHash: (key: string) => void
 }
 
 export const useDockStore = create<DockState>((set, get) => ({
@@ -95,7 +95,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   pendingWorktrees: new Map<string, string>(),
   manualResumeIds: new Map<string, string>(),
   shellEvents: [],
-  ignoredEventTypes: [],
+  ignoredEventHashes: [],
 
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
@@ -266,9 +266,13 @@ export const useDockStore = create<DockState>((set, get) => ({
   }),
 
   addShellEvent: (event) => set((state) => {
+    // Skip events the user has ignored by hash
+    const hash = typeof event.payload === 'object' ? event.payload.hash : undefined
+    const ignoreKey = hash ? `${event.type}:${hash}` : event.type
+    if (state.ignoredEventHashes.includes(ignoreKey)) return state
+
     // Deduplicate: if an event with the same type exists and has the same payload hash
     // (or same type within 10s for hashless events like server_stopped), update it instead
-    const hash = typeof event.payload === 'object' ? event.payload.hash : undefined
     const dupeIdx = state.shellEvents.findIndex((e) => {
       if (e.type !== event.type || e.sessionId !== event.sessionId) return false
       if (hash) return typeof e.payload === 'object' && e.payload.hash === hash
@@ -290,12 +294,15 @@ export const useDockStore = create<DockState>((set, get) => ({
 
   clearShellEvents: () => set({ shellEvents: [] }),
 
-  ignoreEventType: (type) => set((state) => ({
-    ignoredEventTypes: [...new Set([...state.ignoredEventTypes, type])],
-    shellEvents: state.shellEvents.filter((e) => e.type !== type)
+  ignoreEventHash: (key) => set((state) => ({
+    ignoredEventHashes: [...new Set([...state.ignoredEventHashes, key])],
+    shellEvents: state.shellEvents.filter((e) => {
+      const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
+      return h !== key
+    })
   })),
 
-  unignoreEventType: (type) => set((state) => ({
-    ignoredEventTypes: state.ignoredEventTypes.filter((t) => t !== type)
+  unignoreEventHash: (key) => set((state) => ({
+    ignoredEventHashes: state.ignoredEventHashes.filter((k) => k !== key)
   }))
 }))
