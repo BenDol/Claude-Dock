@@ -1511,6 +1511,44 @@ body {
   background: var(--accent-color);
 }
 
+/* Minimized shell panel — collapsed bar */
+.shell-panel-minimized {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.shell-panel-minimized:hover {
+  background: var(--hover-color);
+  border-color: var(--accent-color);
+}
+/* Horizontal bar (stacked/column layout — panel collapses to a thin row) */
+.shell-panel-minimized-h {
+  height: 20px;
+  min-height: 20px;
+}
+/* Vertical bar (split layout — panel collapses to a thin column) */
+.shell-panel-minimized-v {
+  width: 20px;
+  min-width: 20px;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+}
+.shell-panel-minimized-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
 /* Shell Panel (individual shell within area) */
 .shell-panel {
   flex: 1;

@@ -45,6 +45,18 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
   const [columnRatios, setColumnRatios] = useState<Map<string, number>>(new Map())
   // Per-panel flex ratios within columns (for stack/vertical resize)
   const [panelRatios, setPanelRatios] = useState<Map<string, number>>(new Map())
+  // Minimized shells — stored as shellId set
+  const [minimizedShells, setMinimizedShells] = useState<Set<string>>(new Set())
+
+  const toggleMinimize = useCallback((shellId: string) => {
+    setMinimizedShells(prev => {
+      const next = new Set(prev)
+      if (next.has(shellId)) next.delete(shellId)
+      else next.add(shellId)
+      return next
+    })
+    setTimeout(() => window.dispatchEvent(new Event('shell-layout-changed')), 50)
+  }, [])
 
   const makeShell = useCallback((): ShellInstance => {
     const id = String(nextIdRef.current++)
@@ -280,7 +292,11 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
                   onMouseDown={(e) => handleColumnResize(columns[ci - 1].id, col.id, e)}
                 />
               )}
-              <div className="shell-column" style={{ flex: columnRatios.get(col.id) ?? 1 }}>
+              <div className="shell-column" style={{
+                flex: col.shells.every(s => minimizedShells.has(s.shellId))
+                  ? '0 0 auto'
+                  : (columnRatios.get(col.id) ?? 1)
+              }}>
                 {col.shells.map((shell, si) => {
                   const isFirstShell = si === 0 && ci === 0
                   const newCmd = pendingNewShell && (pendingNewShell as any)._shellId === shell.shellId ? pendingNewShell : null
@@ -304,7 +320,10 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
                         submitCommand={newCmd ? newCmd.submit : (isFirstShell ? submitCommand : undefined)}
                         shellType={newCmd ? newCmd.shellType : (isFirstShell ? shellType : undefined)}
                         label={totalShells > 1 ? `Shell ${shell.id}` : undefined}
-                        flexRatio={panelRatios.get(shell.shellId)}
+                        flexRatio={minimizedShells.has(shell.shellId) ? undefined : panelRatios.get(shell.shellId)}
+                        minimized={minimizedShells.has(shell.shellId)}
+                        onToggleMinimize={() => toggleMinimize(shell.shellId)}
+                        isInColumn={col.shells.length > 1}
                       />
                     </React.Fragment>
                   )

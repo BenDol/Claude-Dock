@@ -21,9 +21,13 @@ interface ShellPanelProps {
   shellType?: string | null
   label?: string
   flexRatio?: number
+  minimized?: boolean
+  onToggleMinimize?: () => void
+  /** Whether this panel is stacked with others in a column */
+  isInColumn?: boolean
 }
 
-const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label, flexRatio }) => {
+const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, onSplitRight, onStackBelow, onMoveToSplit, onMoveToStack, initialCommand, submitCommand = true, shellType, label, flexRatio, minimized, onToggleMinimize, isInColumn }) => {
   const { initTerminal, fit, focus, termRef } = useShellTerminal({ shellId, shellType: shellType ?? undefined })
   const commandSentRef = useRef(false)
   const resizeRef = useResizeObserver(fit, 100)
@@ -154,6 +158,18 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
 
   const canAdd = onSplitRight || onStackBelow
 
+  if (minimized) {
+    return (
+      <div
+        className={`shell-panel-minimized ${isInColumn ? 'shell-panel-minimized-h' : 'shell-panel-minimized-v'}`}
+        onClick={onToggleMinimize}
+        title="Restore shell panel"
+      >
+        <span className="shell-panel-minimized-label">{label || 'Shell'}</span>
+      </div>
+    )
+  }
+
   return (
     <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined}>
       <div className="shell-panel-handle">
@@ -224,6 +240,13 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
           </svg>
           {linked && <span className="shell-panel-action-flash">Linked</span>}
         </button>
+        {onToggleMinimize && (
+          <button className="shell-panel-action" onClick={(e) => { e.stopPropagation(); onToggleMinimize() }} title="Minimize shell panel">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="2" y1="8" x2="8" y2="8" />
+            </svg>
+          </button>
+        )}
         <button className="shell-panel-close" onClick={onClose} title="Close shell panel">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" />
