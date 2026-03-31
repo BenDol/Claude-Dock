@@ -3773,12 +3773,19 @@ const CommitFileTreeView: React.FC<{
   const [files, setFiles] = useState<{ path: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [flatten, setFlatten] = usePersistedCollapsed('ftree-flatten', true)
+  const [searchContent, setSearchContent] = usePersistedCollapsed('ftree-search-content', false)
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [selectedLine, setSelectedLine] = useState<number | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [blobSrc, setBlobSrc] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [filter, setFilter] = useState('')
+  const [grepResults, setGrepResults] = useState<{ path: string; line: number; text: string }[]>([])
+  const [grepLoading, setGrepLoading] = useState(false)
+  const grepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const grepGenRef = useRef(0)
   const sidebarRef = useRef<HTMLDivElement>(null)
+  const lineRef = useRef<HTMLDivElement>(null)
 
   // Load tree when hash changes
   useEffect(() => {
@@ -3819,11 +3826,50 @@ const CommitFileTreeView: React.FC<{
     return () => { cancelled = true }
   }, [selectedFile, hash, projectDir])
 
+  // Content search via git grep (debounced)
+  useEffect(() => {
+    if (!searchContent || !filter || filter.length < 2) {
+      setGrepResults([])
+      setGrepLoading(false)
+      return
+    }
+    setGrepLoading(true)
+    const gen = ++grepGenRef.current
+    if (grepTimerRef.current) clearTimeout(grepTimerRef.current)
+    grepTimerRef.current = setTimeout(async () => {
+      const results = await getDockApi().gitManager.grepCommit(projectDir, hash, filter)
+      if (gen === grepGenRef.current) {
+        setGrepResults(results)
+        setGrepLoading(false)
+      }
+    }, 300)
+    return () => { if (grepTimerRef.current) clearTimeout(grepTimerRef.current) }
+  }, [filter, searchContent, hash, projectDir])
+
+  // Scroll to highlighted line when it changes
+  useEffect(() => {
+    if (lineRef.current) lineRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [selectedLine, selectedFile])
+
+  // Group grep results by file path
+  const grepByFile = useMemo(() => {
+    const map = new Map<string, { line: number; text: string }[]>()
+    for (const r of grepResults) {
+      if (!map.has(r.path)) map.set(r.path, [])
+      map.get(r.path)!.push({ line: r.line, text: r.text })
+    }
+    return map
+  }, [grepResults])
+
   const filteredFiles = useMemo(() => {
     if (!filter) return files
     const lower = filter.toLowerCase()
+    if (searchContent && grepByFile.size > 0) {
+      // Include files matching path OR having grep hits
+      return files.filter((f) => f.path.toLowerCase().includes(lower) || grepByFile.has(f.path))
+    }
     return files.filter((f) => f.path.toLowerCase().includes(lower))
-  }, [files, filter])
+  }, [files, filter, searchContent, grepByFile])
 
   const rawTree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles])
   const tree = useMemo(() => flatten ? flattenTree(rawTree) : rawTree, [rawTree, flatten])
@@ -3844,10 +3890,19 @@ const CommitFileTreeView: React.FC<{
           <input
             className="gm-ftree-filter"
             type="text"
-            placeholder="Filter files..."
+            placeholder={searchContent ? 'Search in files...' : 'Filter files...'}
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => { setFilter(e.target.value); setSelectedLine(null) }}
           />
+          <button
+            className={`gm-ftree-flatten-btn${searchContent ? ' gm-ftree-flatten-btn-active' : ''}`}
+            onClick={() => setSearchContent((p) => !p)}
+            title={searchContent ? 'Content search (on) — searches inside files' : 'Content search (off) — click to search inside file contents'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
           <button
             className={`gm-ftree-flatten-btn${flatten ? ' gm-ftree-flatten-btn-active' : ''}`}
             onClick={() => setFlatten((p) => !p)}
@@ -3858,15 +3913,47 @@ const CommitFileTreeView: React.FC<{
             </svg>
           </button>
         </div>
-        <div className="gm-ftree-list">
-          {[...tree.children.values()].sort((a, b) => {
-            if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
-            return a.name.localeCompare(b.name)
-          }).map((node) => (
-            <FileTreeNodeView key={node.name} node={node} depth={0} selectedPath={selectedFile} onSelect={setSelectedFile} />
-          ))}
-          {filteredFiles.length === 0 && <div className="gm-ftree-empty">{filter ? 'No matches' : 'No files'}</div>}
-        </div>
+        {searchContent && filter.length >= 2 && grepByFile.size > 0 ? (
+          <div className="gm-ftree-list">
+            {grepLoading && <div className="gm-ftree-empty"><span className="gm-toolbar-spinner" style={{ width: 10, height: 10 }} /> Searching...</div>}
+            {[...grepByFile.entries()].map(([path, hits]) => (
+              <div key={path}>
+                <div
+                  className={`gm-ftree-item gm-ftree-file gm-ftree-grep-file${selectedFile === path && selectedLine == null ? ' gm-ftree-item-active' : ''}`}
+                  onClick={() => { setSelectedFile(path); setSelectedLine(null) }}
+                  title={path}
+                >
+                  <FileTypeIcon name={path.split('/').pop() || path} />
+                  <span className="gm-ftree-name">{path}</span>
+                  <span className="gm-ftree-grep-count">{hits.length}</span>
+                </div>
+                {hits.slice(0, 10).map((hit, i) => (
+                  <div
+                    key={i}
+                    className={`gm-ftree-item gm-ftree-grep-hit${selectedFile === path && selectedLine === hit.line ? ' gm-ftree-item-active' : ''}`}
+                    onClick={() => { setSelectedFile(path); setSelectedLine(hit.line) }}
+                    title={`Line ${hit.line}: ${hit.text.trim()}`}
+                  >
+                    <span className="gm-ftree-grep-line">L{hit.line}</span>
+                    <span className="gm-ftree-grep-text">{hit.text.trim()}</span>
+                  </div>
+                ))}
+                {hits.length > 10 && <div className="gm-ftree-grep-more">...{hits.length - 10} more matches</div>}
+              </div>
+            ))}
+            {!grepLoading && grepByFile.size === 0 && <div className="gm-ftree-empty">No content matches</div>}
+          </div>
+        ) : (
+          <div className="gm-ftree-list">
+            {[...tree.children.values()].sort((a, b) => {
+              if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
+              return a.name.localeCompare(b.name)
+            }).map((node) => (
+              <FileTreeNodeView key={node.name} node={node} depth={0} selectedPath={selectedFile} onSelect={(p) => { setSelectedFile(p); setSelectedLine(null) }} />
+            ))}
+            {filteredFiles.length === 0 && <div className="gm-ftree-empty">{filter ? 'No matches' : 'No files'}</div>}
+          </div>
+        )}
       </div>
       <ResizeHandle side="left" targetRef={sidebarRef} min={140} max={500} storageKey="gm-ftree-sidebar-width" />
       <div className="gm-ftree-content">
@@ -3899,14 +3986,32 @@ const CommitFileTreeView: React.FC<{
             <div className="gm-ftree-code">
               <div className="gm-conflict-editor-gutter" aria-hidden>
                 {contentLines.map((_, i) => (
-                  <div key={i} className="gm-conflict-editor-linenum">{i + 1}</div>
+                  <div
+                    key={i}
+                    ref={selectedLine === i + 1 ? lineRef : undefined}
+                    className={`gm-conflict-editor-linenum${selectedLine === i + 1 ? ' gm-ftree-line-highlight' : ''}`}
+                  >{i + 1}</div>
                 ))}
               </div>
               <pre className="gm-ftree-pre gm-highlighted">
-                <code dangerouslySetInnerHTML={highlighted
-                  ? { __html: highlighted.join('\n') + '\n' }
-                  : undefined
-                }>{highlighted ? undefined : fileContent + '\n'}</code>
+                {highlighted ? (
+                  <code>{highlighted.map((html, i) => (
+                    <span key={i}>
+                      <span
+                        className={selectedLine === i + 1 ? 'gm-ftree-line-highlight' : undefined}
+                        dangerouslySetInnerHTML={{ __html: html }}
+                      />
+                      {'\n'}
+                    </span>
+                  ))}</code>
+                ) : (
+                  <code>{contentLines.map((line, i) => (
+                    <span key={i}>
+                      <span className={selectedLine === i + 1 ? 'gm-ftree-line-highlight' : undefined}>{line}</span>
+                      {'\n'}
+                    </span>
+                  ))}</code>
+                )}
               </pre>
             </div>
           </div>

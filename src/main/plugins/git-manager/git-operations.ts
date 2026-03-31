@@ -1876,6 +1876,38 @@ export async function getCommitFileTree(cwd: string, hash: string): Promise<{ pa
   return stdout.trim().split('\n').filter(Boolean).map((p) => ({ path: p, type: 'blob' as const }))
 }
 
+export async function grepCommit(
+  cwd: string, hash: string, pattern: string, maxResults = 200
+): Promise<{ path: string; line: number; text: string }[]> {
+  try {
+    // -n = line numbers, -I = skip binary, --fixed-strings = literal match
+    const { stdout } = await gitExec(cwd, [
+      'grep', '-n', '-I', '-i', '--fixed-strings', `--max-count=${maxResults}`, pattern, hash
+    ], 15000)
+    const results: { path: string; line: number; text: string }[] = []
+    // Output format: <hash>:<path>:<lineNo>:<text>
+    const prefix = hash + ':'
+    for (const line of stdout.split('\n')) {
+      if (!line.startsWith(prefix)) continue
+      const rest = line.slice(prefix.length)
+      const colonIdx1 = rest.indexOf(':')
+      if (colonIdx1 < 0) continue
+      const filePath = rest.slice(0, colonIdx1)
+      const rest2 = rest.slice(colonIdx1 + 1)
+      const colonIdx2 = rest2.indexOf(':')
+      if (colonIdx2 < 0) continue
+      const lineNo = parseInt(rest2.slice(0, colonIdx2), 10)
+      const text = rest2.slice(colonIdx2 + 1)
+      if (!isNaN(lineNo)) results.push({ path: filePath, line: lineNo, text })
+      if (results.length >= maxResults) break
+    }
+    return results
+  } catch {
+    // git grep exits 1 when no matches found
+    return []
+  }
+}
+
 export async function getFileAtCommit(cwd: string, hash: string, filePath: string): Promise<string | null> {
   try {
     const { stdout } = await gitExec(cwd, ['show', `${hash}:${filePath}`], 10000)

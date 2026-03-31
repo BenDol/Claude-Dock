@@ -288,11 +288,29 @@ export const useDockStore = create<DockState>((set, get) => ({
     }
   }),
 
-  dismissShellEvent: (id) => set((state) => ({
-    shellEvents: state.shellEvents.filter((e) => e.id !== id)
-  })),
+  dismissShellEvent: (id) => set((state) => {
+    const event = state.shellEvents.find((e) => e.id === id)
+    const hash = event && typeof event.payload === 'object' && event.payload?.hash
+      ? `${event.type}:${event.payload.hash}` : null
+    return {
+      shellEvents: state.shellEvents.filter((e) => e.id !== id),
+      // Suppress this hash so the same event doesn't reappear from the next scan
+      ignoredEventHashes: hash
+        ? [...new Set([...state.ignoredEventHashes, hash])]
+        : state.ignoredEventHashes
+    }
+  }),
 
-  clearShellEvents: () => set({ shellEvents: [] }),
+  clearShellEvents: () => set((state) => {
+    // Add all current event hashes to ignored so they don't reappear
+    const hashes = state.shellEvents
+      .map((e) => typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : null)
+      .filter(Boolean) as string[]
+    return {
+      shellEvents: [],
+      ignoredEventHashes: [...new Set([...state.ignoredEventHashes, ...hashes])]
+    }
+  }),
 
   ignoreEventHash: (key) => set((state) => ({
     ignoredEventHashes: [...new Set([...state.ignoredEventHashes, key])],

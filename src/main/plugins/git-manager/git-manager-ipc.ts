@@ -64,6 +64,10 @@ export function registerGitManagerIpc(): void {
     return gitOps.getFileAtCommit(projectDir, hash, filePath)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GREP_COMMIT, async (_event, projectDir: string, hash: string, pattern: string) => {
+    return gitOps.grepCommit(projectDir, hash, pattern)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_STAGE, async (_event, projectDir: string, paths: string[]) => {
     try {
       await gitOps.stageFiles(projectDir, paths)

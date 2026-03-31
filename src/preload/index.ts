@@ -184,6 +184,7 @@ export interface DockApi {
     getFileBlob: (projectDir: string, filePath: string, ref?: string) => Promise<string | null>
     getCommitFileTree: (projectDir: string, hash: string) => Promise<{ path: string; type: 'blob' | 'tree' }[]>
     getFileAtCommit: (projectDir: string, hash: string, filePath: string) => Promise<string | null>
+    grepCommit: (projectDir: string, hash: string, pattern: string) => Promise<{ path: string; line: number; text: string }[]>
     stage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     unstage: (projectDir: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
     commit: (projectDir: string, message: string) => Promise<{ success: boolean; hash?: string; error?: string }>
@@ -508,6 +509,7 @@ const dockApi: DockApi = {
     getFileBlob: (projectDir: string, filePath: string, ref?: string) => ipcRenderer.invoke(IPC.GIT_MGR_GET_FILE_BLOB, projectDir, filePath, ref) as Promise<string | null>,
     getCommitFileTree: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_GET_COMMIT_FILE_TREE, projectDir, hash),
     getFileAtCommit: (projectDir, hash, filePath) => ipcRenderer.invoke(IPC.GIT_MGR_GET_FILE_AT_COMMIT, projectDir, hash, filePath),
+    grepCommit: (projectDir, hash, pattern) => ipcRenderer.invoke(IPC.GIT_MGR_GREP_COMMIT, projectDir, hash, pattern),
     stage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_STAGE, projectDir, paths),
     unstage: (projectDir, paths) => ipcRenderer.invoke(IPC.GIT_MGR_UNSTAGE, projectDir, paths),
     commit: (projectDir, message) => ipcRenderer.invoke(IPC.GIT_MGR_COMMIT, projectDir, message),

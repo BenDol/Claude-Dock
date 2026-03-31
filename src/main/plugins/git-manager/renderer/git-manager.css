@@ -1981,6 +1981,60 @@
   color: var(--accent-color, #7aa2f7);
 }
 
+/* Grep result styles */
+.gm-ftree-grep-file {
+  font-weight: 600;
+}
+
+.gm-ftree-grep-count {
+  font-size: 9px;
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
+  color: var(--accent-color, #7aa2f7);
+  padding: 0 5px;
+  border-radius: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.gm-ftree-grep-hit {
+  padding-left: 28px !important;
+  font-size: 11px;
+  gap: 6px;
+  opacity: 0.85;
+}
+
+.gm-ftree-grep-line {
+  font-size: 10px;
+  color: var(--accent-color, #7aa2f7);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 28px;
+}
+
+.gm-ftree-grep-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: var(--term-font-family);
+}
+
+.gm-ftree-grep-more {
+  padding: 2px 28px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* Line highlight for grep results */
+.gm-ftree-line-highlight {
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
+}
+
+div.gm-ftree-line-highlight {
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.2));
+}
+
 .gm-ftree-list {
   flex: 1;
   overflow-y: auto;
