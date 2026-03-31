@@ -1925,8 +1925,7 @@
 
 .gm-ftree-sidebar {
   width: 240px;
-  min-width: 180px;
-  border-right: 1px solid var(--border-color);
+  min-width: 140px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2032,6 +2031,9 @@
 }
 
 .gm-ftree-code-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   font-family: var(--term-font-family);
   padding: 6px 12px;
@@ -2040,8 +2042,12 @@
   color: var(--text-secondary);
   flex-shrink: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gm-ftree-code-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gm-ftree-code {

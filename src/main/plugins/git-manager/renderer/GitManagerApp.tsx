@@ -3571,6 +3571,111 @@ function buildFileTree(files: { path: string }[]): FileTreeNode {
   return root
 }
 
+// File type color map — maps extensions to colors for visual identification
+const FILE_TYPE_COLORS: Record<string, string> = {
+  // JS/TS
+  ts: '#3178c6', tsx: '#3178c6', js: '#f1e05a', jsx: '#f1e05a',
+  mjs: '#f1e05a', cjs: '#f1e05a',
+  // Web
+  html: '#e34c26', htm: '#e34c26', css: '#563d7c', scss: '#c6538c', less: '#1d365d',
+  svelte: '#ff3e00', vue: '#41b883', astro: '#ff5d01',
+  // Data
+  json: '#a8b577', yaml: '#cb171e', yml: '#cb171e', toml: '#9c4221', xml: '#f26522', svg: '#ffb13b',
+  // Python
+  py: '#3572a5', pyw: '#3572a5', pyi: '#3572a5',
+  // Ruby
+  rb: '#701516',
+  // Rust
+  rs: '#dea584',
+  // Go
+  go: '#00add8',
+  // JVM
+  java: '#b07219', kt: '#a97bff', kts: '#a97bff', scala: '#c22d40', groovy: '#4298b8', gradle: '#4298b8',
+  // .NET
+  cs: '#178600', fs: '#b845fc',
+  // C/C++
+  c: '#555555', h: '#555555', cpp: '#f34b7d', cxx: '#f34b7d', cc: '#f34b7d', hpp: '#f34b7d',
+  // Apple
+  swift: '#f05138', m: '#438eff', mm: '#438eff',
+  // PHP
+  php: '#4f5d95',
+  // Shell
+  sh: '#89e051', bash: '#89e051', zsh: '#89e051', ps1: '#012456', bat: '#c1f12e',
+  // Markdown
+  md: '#083fa1', mdx: '#083fa1',
+  // Lua
+  lua: '#000080',
+  // Dart
+  dart: '#00b4ab',
+  // Elixir/Erlang
+  ex: '#6e4a7e', exs: '#6e4a7e', erl: '#b83998',
+  // Haskell
+  hs: '#5e5086',
+  // Config
+  ini: '#d1dbe0', cfg: '#d1dbe0', conf: '#d1dbe0', env: '#ecd53f',
+  // Docker/Infra
+  dockerfile: '#384d54', tf: '#5c4ee5', hcl: '#5c4ee5',
+  // SQL
+  sql: '#e38c00',
+  // Protobuf/GraphQL
+  proto: '#c6c6c6', graphql: '#e10098', gql: '#e10098',
+  // Images
+  png: '#a0a0a0', jpg: '#a0a0a0', jpeg: '#a0a0a0', gif: '#a0a0a0', webp: '#a0a0a0', ico: '#a0a0a0',
+  // Lock/generated
+  lock: '#555', gitignore: '#555',
+}
+
+function getFileColor(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  return FILE_TYPE_COLORS[ext] || '#9aa5ce'
+}
+
+// File icon component with color coding
+const FileTypeIcon: React.FC<{ name: string }> = React.memo(({ name }) => {
+  const color = getFileColor(name)
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+
+  // Image files
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif'].includes(ext)) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
+      </svg>
+    )
+  }
+
+  // Config/settings files
+  if (['json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties'].includes(ext) || name.startsWith('.')) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+      </svg>
+    )
+  }
+
+  // Markdown
+  if (['md', 'mdx'].includes(ext)) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
+      </svg>
+    )
+  }
+
+  // Default code file icon
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
+    </svg>
+  )
+})
+
+const FileTreeDirIcon: React.FC<{ open?: boolean }> = React.memo(({ open }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill={open ? '#e0af6833' : 'none'} stroke="#e0af68" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+  </svg>
+))
+
 const FileTreeNodeView: React.FC<{
   node: FileTreeNode
   depth: number
@@ -3580,7 +3685,6 @@ const FileTreeNodeView: React.FC<{
   const [collapsed, setCollapsed] = usePersistedCollapsed(`ftree:${node.path}`)
   const sortedChildren = useMemo(() => {
     const entries = [...node.children.values()]
-    // Folders first, then files, alphabetical within each
     return entries.sort((a, b) => {
       if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
       return a.name.localeCompare(b.name)
@@ -3595,7 +3699,7 @@ const FileTreeNodeView: React.FC<{
         onClick={() => onSelect(node.path)}
         title={node.path}
       >
-        <FileTreeFileIcon />
+        <FileTypeIcon name={node.name} />
         <span className="gm-ftree-name">{node.name}</span>
       </div>
     )
@@ -3609,7 +3713,7 @@ const FileTreeNodeView: React.FC<{
         onClick={() => setCollapsed((p) => !p)}
       >
         <span className={`gm-ftree-arrow${collapsed ? '' : ' gm-ftree-arrow-open'}`}>&#9656;</span>
-        <FileTreeDirIcon />
+        <FileTreeDirIcon open={!collapsed} />
         <span className="gm-ftree-name">{node.name}</span>
       </div>
       {!collapsed && sortedChildren.map((child) => (
@@ -3618,19 +3722,6 @@ const FileTreeNodeView: React.FC<{
     </>
   )
 }
-
-const FileTreeFileIcon: React.FC = React.memo(() => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
-    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-  </svg>
-))
-
-const FileTreeDirIcon: React.FC = React.memo(() => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
-    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-  </svg>
-))
 
 const CommitFileTreeView: React.FC<{
   hash: string
@@ -3643,6 +3734,7 @@ const CommitFileTreeView: React.FC<{
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [filter, setFilter] = useState('')
+  const sidebarRef = useRef<HTMLDivElement>(null)
 
   // Load tree when hash changes
   useEffect(() => {
@@ -3689,7 +3781,7 @@ const CommitFileTreeView: React.FC<{
 
   return (
     <div className="gm-ftree">
-      <div className="gm-ftree-sidebar">
+      <div className="gm-ftree-sidebar" ref={sidebarRef}>
         <input
           className="gm-ftree-filter"
           type="text"
@@ -3707,6 +3799,7 @@ const CommitFileTreeView: React.FC<{
           {filteredFiles.length === 0 && <div className="gm-ftree-empty">{filter ? 'No matches' : 'No files'}</div>}
         </div>
       </div>
+      <ResizeHandle side="left" targetRef={sidebarRef} min={140} max={500} storageKey="gm-ftree-sidebar-width" />
       <div className="gm-ftree-content">
         {!selectedFile ? (
           <div className="gm-ftree-placeholder">Select a file to view its contents</div>
@@ -3714,7 +3807,10 @@ const CommitFileTreeView: React.FC<{
           <div className="gm-loading" style={{ padding: 16 }}>Loading...</div>
         ) : fileContent != null ? (
           <div className="gm-ftree-code-wrap">
-            <div className="gm-ftree-code-header">{selectedFile}</div>
+            <div className="gm-ftree-code-header">
+              <FileTypeIcon name={selectedFile.split('/').pop() || selectedFile} />
+              <span>{selectedFile}</span>
+            </div>
             <div className="gm-ftree-code">
               <div className="gm-conflict-editor-gutter" aria-hidden>
                 {contentLines.map((_, i) => (
