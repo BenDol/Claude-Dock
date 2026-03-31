@@ -292,11 +292,16 @@ function handleMessage(msg) {
     case 'initialize':
       return jsonRpcResponse(id, {
         protocolVersion: '2024-11-05',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'claude-dock', version: '2.0.0' }
+        capabilities: {
+          tools: {},
+          experimental: { 'claude/channel': {} }
+        },
+        serverInfo: { name: 'claude-dock', version: '2.0.0' },
+        instructions: 'Shell events from Dock arrive as channel notifications. React to them (e.g. exception_detected, server_stopped, compile_error) by investigating and helping the user.'
       })
 
     case 'notifications/initialized':
+      startEventWatcher()
       return null
 
     case 'tools/list': {
@@ -883,6 +888,60 @@ function handleMessage(msg) {
       }
       return null
   }
+}
+
+// ---------- Active event push via channel notifications ----------
+
+let eventWatcher = null
+let lastEventCount = 0
+
+/**
+ * Watch dock-pending-events.json for new events and push them to Claude
+ * via notifications/claude/channel so Claude reacts without needing to poll.
+ */
+function startEventWatcher() {
+  if (eventWatcher) return
+  // Seed initial count so we don't push stale events on startup
+  lastEventCount = readPendingEvents().length
+
+  // Poll the file every 2 seconds (fs.watch is unreliable on Windows for atomic writes)
+  eventWatcher = setInterval(() => {
+    try {
+      const events = readPendingEvents()
+      if (events.length <= lastEventCount) {
+        lastEventCount = events.length
+        return
+      }
+      const newEvents = events.slice(lastEventCount)
+      lastEventCount = events.length
+
+      // Format and push each event as a channel notification
+      const lines = []
+      for (const e of newEvents) {
+        const shellShort = e.shellId ? e.shellId.split(':').pop() : '?'
+        const time = new Date(e.timestamp).toLocaleTimeString()
+        const payload = typeof e.payload === 'object' ? JSON.stringify(e.payload) : e.payload
+        lines.push(`[${time}] [shell:${shellShort}] **${e.type}**: ${payload}`)
+      }
+
+      const notification = JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/claude/channel',
+        params: {
+          content: `## Shell Events (${newEvents.length} new)\n${lines.join('\n')}`,
+          meta: {
+            event_count: String(newEvents.length),
+            event_types: [...new Set(newEvents.map(e => e.type))].join(',')
+          }
+        }
+      })
+      process.stdout.write(notification + '\n')
+
+      // Clear consumed events
+      clearPendingEvents()
+      lastEventCount = 0
+    } catch { /* ignore polling errors */ }
+  }, 2000)
 }
 
 // Stdio transport
