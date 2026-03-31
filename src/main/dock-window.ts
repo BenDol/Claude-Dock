@@ -120,6 +120,7 @@ export class DockWindow {
         // Route shell panel PTY exit to the SHELL_EXIT channel
         if (terminalId.startsWith('shell:')) {
           this.window.webContents.send(IPC.SHELL_EXIT, terminalId, exitCode)
+          this.removeShellOutput(terminalId)
           return
         }
         this.window.webContents.send(IPC.TERMINAL_EXIT, terminalId, exitCode)
@@ -211,6 +212,8 @@ export class DockWindow {
     })
 
     this.window.on('closed', () => {
+      // Remove all shell entries from the persisted output file
+      this.removeAllShellOutputs()
       this.ptyManager.killAll()
       this.projectSettingsWatcher.stop()
       if (this.shellCommandWatcher) clearInterval(this.shellCommandWatcher)
@@ -288,6 +291,73 @@ export class DockWindow {
   // Strip ANSI escape sequences for clean text output
   private static stripAnsi(s: string): string {
     return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+  }
+
+  /**
+   * Remove a closed shell from the in-memory buffer and from the persisted
+   * dock-shell-output.json so that dock_list_shells no longer reports it.
+   */
+  private removeShellOutput(shellId: string): void {
+    this.shellOutputBuffers.delete(shellId)
+    try {
+      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+      let existing: Record<string, any> = {}
+      try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { return }
+
+      let changed = false
+      for (const key of Object.keys(existing)) {
+        const entry = existing[key]
+        if (entry.shells && entry.shells[shellId]) {
+          delete entry.shells[shellId]
+          changed = true
+          // Remove the session entry entirely if no shells remain
+          if (Object.keys(entry.shells).length === 0) {
+            delete existing[key]
+          }
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
+      }
+    } catch (err) {
+      log(`[shell-output] remove failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
+  /**
+   * Bulk-remove all shells owned by this dock window from the persisted output.
+   * Called on window close to clean up in a single file write.
+   */
+  private removeAllShellOutputs(): void {
+    const shellIds = new Set(this.shellOutputBuffers.keys())
+    this.shellOutputBuffers.clear()
+    if (shellIds.size === 0) return
+    try {
+      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+      let existing: Record<string, any> = {}
+      try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { return }
+
+      let changed = false
+      for (const key of Object.keys(existing)) {
+        const entry = existing[key]
+        if (!entry.shells) continue
+        for (const sid of Object.keys(entry.shells)) {
+          if (shellIds.has(sid)) {
+            delete entry.shells[sid]
+            changed = true
+          }
+        }
+        if (Object.keys(entry.shells).length === 0) {
+          delete existing[key]
+          changed = true
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
+      }
+    } catch (err) {
+      log(`[shell-output] removeAll failed: ${err instanceof Error ? err.message : err}`)
+    }
   }
 
   private trackShellOutput(shellId: string, data: string): void {
