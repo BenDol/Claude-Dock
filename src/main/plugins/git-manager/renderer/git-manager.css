@@ -2104,6 +2104,10 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+.gm-detail-files-sticky:has(.gm-detail-files-header-expanded) {
+  border-bottom: none;
+}
+
 .gm-detail-files-header {
   padding: 8px 12px;
   font-size: 11px;
