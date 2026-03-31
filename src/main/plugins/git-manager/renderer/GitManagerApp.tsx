@@ -5252,15 +5252,10 @@ const WorkingChanges: React.FC<{
     setBusy(true)
     const paths = stageableUnstaged.map((f) => f.path)
     setStagingPaths(new Set(paths))
-    const BATCH = 50
-    let failed = false
-    for (let i = 0; i < paths.length; i += BATCH) {
-      const chunk = paths.slice(i, i + BATCH)
-      setBatchProgress(`Staging ${Math.min(i + BATCH, paths.length)}/${paths.length}...`)
-      const r = await api.gitManager.stage(projectDir, chunk)
-      if (!r.success) { handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`); failed = true; break }
-      if (paths.length > BATCH) await refreshStatus()
-    }
+    setBatchProgress(`Staging ${paths.length} files...`)
+    const r = await api.gitManager.stage(projectDir, paths)
+    const failed = !r.success
+    if (failed) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
     setBatchProgress(null)
     const newStatus = await getDockApi().gitManager.getStatus(projectDir)
     setLocalStatus(newStatus)
@@ -5276,13 +5271,8 @@ const WorkingChanges: React.FC<{
     setBusy(true)
     const paths = status.staged.map((f) => f.path)
     setStagingPaths(new Set(paths))
-    const BATCH = 50
-    for (let i = 0; i < paths.length; i += BATCH) {
-      const chunk = paths.slice(i, i + BATCH)
-      setBatchProgress(`Unstaging ${Math.min(i + BATCH, paths.length)}/${paths.length}...`)
-      await api.gitManager.unstage(projectDir, chunk)
-      if (paths.length > BATCH) await refreshStatus()
-    }
+    setBatchProgress(`Unstaging ${paths.length} files...`)
+    await api.gitManager.unstage(projectDir, paths)
     setBatchProgress(null)
     await refreshStatus()
     setStagingPaths(new Set())

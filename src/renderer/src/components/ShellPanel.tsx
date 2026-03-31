@@ -231,8 +231,22 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
     )
   }
 
+  const handlePanelKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
+      e.preventDefault()
+      e.stopPropagation()
+      setSearchOpen(true)
+    }
+    if (e.key === 'Escape' && searchOpen) {
+      e.stopPropagation()
+      searchAddonRef.current?.clearDecorations()
+      setSearchOpen(false)
+      focus()
+    }
+  }, [searchOpen, setSearchOpen, focus, searchAddonRef])
+
   return (
-    <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined}>
+    <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined} tabIndex={-1} onKeyDown={handlePanelKeyDown}>
       <div className="shell-panel-handle">
         <span className="shell-panel-label">{label || 'Shell'}{shellType && shellType !== 'default' ? <span className="shell-panel-type">{shellType}</span> : null}</span>
         {canAdd && (
@@ -300,6 +314,11 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
           </svg>
           {linked && <span className="shell-panel-action-flash">Linked</span>}
+        </button>
+        <button className="shell-panel-action" onClick={(e) => { e.stopPropagation(); setSearchOpen(!searchOpen) }} title="Search (Ctrl+F)">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
         </button>
         {onToggleMinimize && (
           <button className="shell-panel-action" onClick={(e) => { e.stopPropagation(); onToggleMinimize() }} title="Minimize shell panel">

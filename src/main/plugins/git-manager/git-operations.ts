@@ -701,22 +701,42 @@ export async function getCommitDetail(cwd: string, hash: string): Promise<GitCom
 
 export async function stageFiles(cwd: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return
-  const BATCH = 50
-  for (let i = 0; i < paths.length; i += BATCH) {
-    await gitExec(cwd, ['add', '--', ...paths.slice(i, i + BATCH)], 10000)
+  // Use pathspec-from-file via stdin to avoid Windows command line length limits
+  // with long paths or large file counts. Falls back to batched args for older git.
+  try {
+    await gitExecStdin(cwd, ['add', '--pathspec-from-file=-', '--'], paths.join('\n'), 60000)
+  } catch (err: any) {
+    if (err.message?.includes('pathspec-from-file')) {
+      // Fallback: batch via args (git < 2.26)
+      const BATCH = 30
+      for (let i = 0; i < paths.length; i += BATCH) {
+        await gitExec(cwd, ['add', '--', ...paths.slice(i, i + BATCH)], 30000)
+      }
+    } else {
+      throw err
+    }
   }
 }
 
 export async function unstageFiles(cwd: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return
-  const BATCH = 50
-  for (let i = 0; i < paths.length; i += BATCH) {
-    const chunk = paths.slice(i, i + BATCH)
-    try {
-      await gitExec(cwd, ['restore', '--staged', '--', ...chunk], 10000)
-    } catch {
-      // Fallback for older git without restore
-      await gitExec(cwd, ['reset', 'HEAD', '--', ...chunk], 10000)
+  // Use pathspec-from-file via stdin to avoid command line length limits
+  try {
+    await gitExecStdin(cwd, ['restore', '--staged', '--pathspec-from-file=-', '--'], paths.join('\n'), 60000)
+  } catch (err: any) {
+    if (err.message?.includes('pathspec-from-file') || err.message?.includes('restore')) {
+      // Fallback: batch via args
+      const BATCH = 30
+      for (let i = 0; i < paths.length; i += BATCH) {
+        const chunk = paths.slice(i, i + BATCH)
+        try {
+          await gitExec(cwd, ['restore', '--staged', '--', ...chunk], 30000)
+        } catch {
+          await gitExec(cwd, ['reset', 'HEAD', '--', ...chunk], 30000)
+        }
+      }
+    } else {
+      throw err
     }
   }
 }
