@@ -245,5 +245,13 @@ export const IPC = {
   SETTINGS_CHANGED: 'settings:changed',
   UPDATER_PROGRESS: 'updater:progress',
   NOTIFICATION_SHOW: 'notification:show',
-  PLUGIN_WINDOW_STATE: 'plugin:windowState'
+  PLUGIN_WINDOW_STATE: 'plugin:windowState',
+
+  // Test Runner
+  TEST_RUNNER_OPEN: 'testRunner:open',
+  TEST_RUNNER_DETECT: 'testRunner:detect',
+  TEST_RUNNER_DISCOVER: 'testRunner:discover',
+  TEST_RUNNER_RUN: 'testRunner:run',
+  TEST_RUNNER_STOP: 'testRunner:stop',
+  TEST_RUNNER_GET_STATUS: 'testRunner:getStatus'
 } as const

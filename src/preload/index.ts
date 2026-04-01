@@ -351,6 +351,17 @@ export interface DockApi {
     openDevTools: () => Promise<void>
     openLogs: () => Promise<void>
   }
+  testRunner: {
+    open: (projectDir: string) => Promise<void>
+    detect: (projectDir: string) => Promise<{ adapterId: string; configFile: string; configDir: string; confidence: number }[]>
+    discover: (projectDir: string, adapterId: string) => Promise<any[]>
+    run: (projectDir: string, adapterId: string, testIds: string[], options?: any) => Promise<{ success: boolean; runId?: string; error?: string }>
+    stop: (projectDir: string) => Promise<{ stopped: boolean }>
+    getStatus: (projectDir: string) => Promise<{ running: boolean }>
+    onOutput: (callback: (data: string) => void) => () => void
+    onResults: (callback: (results: any) => void) => () => void
+    onStatus: (callback: (status: any) => void) => () => void
+  }
 }
 
 const dockApi: DockApi = {
@@ -737,6 +748,29 @@ const dockApi: DockApi = {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
     openDevTools: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_DEVTOOLS),
     openLogs: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_LOGS)
+  },
+  testRunner: {
+    open: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_OPEN, projectDir),
+    detect: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_DETECT, projectDir),
+    discover: (projectDir, adapterId) => ipcRenderer.invoke(IPC.TEST_RUNNER_DISCOVER, projectDir, adapterId),
+    run: (projectDir, adapterId, testIds, options?) => ipcRenderer.invoke(IPC.TEST_RUNNER_RUN, projectDir, adapterId, testIds, options),
+    stop: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_STOP, projectDir),
+    getStatus: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_GET_STATUS, projectDir),
+    onOutput: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: string) => callback(data)
+      ipcRenderer.on('testRunner:output', handler)
+      return () => ipcRenderer.removeListener('testRunner:output', handler)
+    },
+    onResults: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, results: any) => callback(results)
+      ipcRenderer.on('testRunner:results', handler)
+      return () => ipcRenderer.removeListener('testRunner:results', handler)
+    },
+    onStatus: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: any) => callback(status)
+      ipcRenderer.on('testRunner:status', handler)
+      return () => ipcRenderer.removeListener('testRunner:status', handler)
+    }
   }
 }
 

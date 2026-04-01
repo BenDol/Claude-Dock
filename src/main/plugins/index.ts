@@ -16,10 +16,13 @@ import { setServices as setGitManagerServices } from './git-manager/services'
 import { createBundledServices as createGitManagerServices } from './git-manager/bundled-services'
 import { setServices as setCloudIntegrationServices } from './cloud-integration/services'
 import { createBundledServices as createCloudIntegrationServices } from './cloud-integration/bundled-services'
+import { setServices as setTestRunnerServices } from './test-runner/services'
+import { createBundledServices as createTestRunnerServices } from './test-runner/bundled-services'
 
 // Register service factories for built-in plugins
 registerServiceFactory('git-manager', createGitManagerServices, setGitManagerServices)
 registerServiceFactory('cloud-integration', createCloudIntegrationServices, setCloudIntegrationServices)
+registerServiceFactory('test-runner', createTestRunnerServices, setTestRunnerServices)
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.
