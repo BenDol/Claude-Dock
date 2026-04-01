@@ -10,22 +10,30 @@ import { useEditorStore, isBinaryFile } from '../stores/editor-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
 
-// Configure Monaco loader — use local workers in both dev and production.
-// In production the app is at resources/app.asar, but monaco-editor is in
-// node_modules which gets extracted to app.asar.unpacked or stays in place.
-// The @monaco-editor/react loader handles this automatically when we don't
-// override paths — it fetches from CDN as fallback. For offline/Electron,
-// we try the local path first.
-try {
-  const monacoPath = require('path').join(__dirname, '../node_modules/monaco-editor/min/vs')
-  const fs = require('fs')
-  if (fs.existsSync(monacoPath)) {
-    loader.config({ paths: { vs: monacoPath } })
+// Configure Monaco to use bundled workers instead of CDN.
+// In Electron with contextIsolation, we can't use require('path')/require('fs').
+// Instead, import monaco-editor directly and pass it to the loader — this
+// makes @monaco-editor/react use the already-bundled monaco instead of
+// trying to load it from CDN.
+import * as monacoEditor from 'monaco-editor'
+import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
+import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
+import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
+import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
+
+// Configure Monaco workers to use bundled files (not CDN)
+self.MonacoEnvironment = {
+  getWorker(_: string, label: string) {
+    if (label === 'typescript' || label === 'javascript') return new tsWorker()
+    if (label === 'json') return new jsonWorker()
+    if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker()
+    if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker()
+    return new editorWorker()
   }
-  // If local path doesn't exist, @monaco-editor/react falls back to CDN
-} catch {
-  // In renderer context path/fs may not be available — CDN fallback is fine
 }
+
+loader.config({ monaco: monacoEditor })
 
 const FONT_SIZE_KEY = 'editor-font-size'
 const DEFAULT_FONT_SIZE = 13
