@@ -411,16 +411,38 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       term.loadAddon(searchAddon)
       searchAddonRef.current = searchAddon
 
-      term.open(container)
+      // Guard: ensure the container has real dimensions before opening xterm.
+      // If the flex layout hasn't settled yet (e.g. DockPanelLayout is still
+      // mounting), xterm's Viewport.syncScrollArea can crash accessing
+      // undefined renderer dimensions. Wait for the next frame.
+      const openTerminal = () => {
+        try {
+          term.open(container)
+        } catch (err) {
+          // xterm.open can throw if dimensions aren't ready — retry next frame
+          if (String(err).includes('dimensions')) {
+            requestAnimationFrame(openTerminal)
+            return
+          }
+          throw err
+        }
 
-      // Use canvas renderer instead of DOM renderer (avoids CSS dump) or WebGL (GPU contention)
-      try {
-        term.loadAddon(new CanvasAddon())
-      } catch {
-        // Falls back to DOM renderer if canvas fails
+        // Use canvas renderer instead of DOM renderer (avoids CSS dump) or WebGL (GPU contention)
+        try {
+          term.loadAddon(new CanvasAddon())
+        } catch {
+          // Falls back to DOM renderer if canvas fails
+        }
+
+        fitAddon.fit()
       }
 
-      fitAddon.fit()
+      if (container.clientWidth < 1 || container.clientHeight < 1) {
+        // Container not sized yet — defer to next frame
+        requestAnimationFrame(openTerminal)
+      } else {
+        openTerminal()
+      }
 
       // Send real terminal dimensions to PTY immediately (not the default 80x24)
       const { cols, rows } = term
