@@ -158,7 +158,7 @@ const WorkspaceTreeNode: React.FC<{
           depth={depth + 1}
           projectDir={projectDir}
           selectedPaths={selectedPaths}
-          expandedPaths={effectiveExpandedPaths}
+          expandedPaths={expandedPaths}
           filter={filter}
           onSelect={onSelect}
           onToggleExpand={onToggleExpand}

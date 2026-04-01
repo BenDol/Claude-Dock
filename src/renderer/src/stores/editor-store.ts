@@ -56,9 +56,28 @@ export interface EditorTab {
   pendingReveal?: { line: number; column: number } | null
 }
 
+/** Navigation history entry — records a cursor position in a specific tab */
+export interface NavHistoryEntry {
+  tabId: string
+  line: number
+  column: number
+}
+
+const MAX_NAV_HISTORY = 100
+
 interface EditorState {
   tabs: EditorTab[]
   activeTabId: string | null
+
+  // Navigation history (back/forward)
+  navBack: NavHistoryEntry[]
+  navForward: NavHistoryEntry[]
+  /** Push current position to back stack. Call before navigating away. */
+  pushNavPosition: (tabId: string, line: number, column: number) => void
+  /** Navigate back (mouse button 4 / Alt+Left). Pass current cursor position for forward stack. */
+  navigateBack: (currentLine?: number, currentColumn?: number) => NavHistoryEntry | null
+  /** Navigate forward (mouse button 5 / Alt+Right). Pass current cursor position for back stack. */
+  navigateForward: (currentLine?: number, currentColumn?: number) => NavHistoryEntry | null
 
   openFile: (projectDir: string, relativePath: string, content: string) => void
   openFileAtPosition: (projectDir: string, relativePath: string, content: string, line: number, column: number) => void
@@ -79,6 +98,47 @@ function makeId(projectDir: string, relativePath: string): string {
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeTabId: null,
+  navBack: [],
+  navForward: [],
+
+  pushNavPosition: (tabId, line, column) => {
+    const { navBack } = get()
+    // Don't push duplicate consecutive entries (same tab + same line)
+    const last = navBack[navBack.length - 1]
+    if (last && last.tabId === tabId && last.line === line) return
+    const newBack = [...navBack, { tabId, line, column }]
+    if (newBack.length > MAX_NAV_HISTORY) newBack.shift()
+    set({ navBack: newBack, navForward: [] }) // clear forward on new navigation
+  },
+
+  navigateBack: (currentLine?: number, currentColumn?: number) => {
+    const { navBack, navForward, activeTabId } = get()
+    if (navBack.length === 0) return null
+    const newBack = [...navBack]
+    const entry = newBack.pop()!
+    const newForward = [...navForward]
+    if (activeTabId) {
+      newForward.push({ tabId: activeTabId, line: currentLine ?? 1, column: currentColumn ?? 1 })
+    }
+    if (newForward.length > MAX_NAV_HISTORY) newForward.shift()
+    set({ navBack: newBack, navForward: newForward, activeTabId: entry.tabId })
+    return entry
+  },
+
+  navigateForward: (currentLine?: number, currentColumn?: number) => {
+    const { navBack, navForward, activeTabId } = get()
+    if (navForward.length === 0) return null
+    const newForward = [...navForward]
+    const entry = newForward.pop()!
+    const newBack = [...navBack]
+    if (activeTabId) {
+      newBack.push({ tabId: activeTabId, line: currentLine ?? 1, column: currentColumn ?? 1 })
+    }
+    if (newBack.length > MAX_NAV_HISTORY) newBack.shift()
+    set({ navBack: newBack, navForward: newForward, activeTabId: entry.tabId })
+    return entry
+  },
+
 
   openFile: (projectDir, relativePath, content) => {
     const id = makeId(projectDir, relativePath)

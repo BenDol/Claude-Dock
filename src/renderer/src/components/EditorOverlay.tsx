@@ -42,6 +42,8 @@ const EditorOverlay: React.FC = () => {
   const closeAllTabs = useEditorStore((s) => s.closeAllTabs)
   const updateContent = useEditorStore((s) => s.updateContent)
   const markSaved = useEditorStore((s) => s.markSaved)
+  const navBackCount = useEditorStore((s) => s.navBack.length)
+  const navForwardCount = useEditorStore((s) => s.navForward.length)
 
   const moveTab = useEditorStore((s) => s.moveTab)
   const removeTab = useEditorStore((s) => s.removeTab)
@@ -222,6 +224,54 @@ const EditorOverlay: React.FC = () => {
     })
   }, [removeTab])
 
+  // Navigation back/forward helpers
+  const revealNavEntry = useCallback((entry: { tabId: string; line: number; column: number } | null) => {
+    if (!entry) return
+    // If the entry's tab exists, switch to it and reveal position
+    const { tabs: currentTabs } = useEditorStore.getState()
+    const tab = currentTabs.find((t) => t.id === entry.tabId)
+    if (!tab) return
+    // Set pending reveal so the tab switch effect positions the cursor
+    useEditorStore.getState().clearPendingReveal(entry.tabId) // clear any existing
+    useEditorStore.setState({
+      tabs: currentTabs.map((t) =>
+        t.id === entry.tabId ? { ...t, pendingReveal: { line: entry.line, column: entry.column } } : t
+      ),
+      activeTabId: entry.tabId
+    })
+  }, [])
+
+  const handleNavBack = useCallback(() => {
+    const pos = editorRef.current?.getPosition()
+    const entry = useEditorStore.getState().navigateBack(pos?.lineNumber, pos?.column)
+    revealNavEntry(entry)
+  }, [revealNavEntry])
+
+  const handleNavForward = useCallback(() => {
+    const pos = editorRef.current?.getPosition()
+    const entry = useEditorStore.getState().navigateForward(pos?.lineNumber, pos?.column)
+    revealNavEntry(entry)
+  }, [revealNavEntry])
+
+  // Mouse button 4 (back) and 5 (forward) for navigation
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      // button 3 = mouse button 4 (back), button 4 = mouse button 5 (forward)
+      if (e.button === 3) {
+        e.preventDefault()
+        handleNavBack()
+      } else if (e.button === 4) {
+        e.preventDefault()
+        handleNavForward()
+      }
+    }
+    const overlayEl = document.querySelector('.editor-overlay')
+    if (overlayEl) {
+      overlayEl.addEventListener('mouseup', handler as EventListener)
+      return () => overlayEl.removeEventListener('mouseup', handler as EventListener)
+    }
+  }, [handleNavBack, handleNavForward])
+
   // Keyboard shortcuts — Ctrl+S and Ctrl+W
   // Don't handle Escape here — let Monaco use it for its own UI (search close, etc.)
   useEffect(() => {
@@ -234,6 +284,15 @@ const EditorOverlay: React.FC = () => {
         e.preventDefault()
         const { activeTabId: id } = useEditorStore.getState()
         if (id) handleCloseTab(id)
+      }
+      // Alt+Left = navigate back, Alt+Right = navigate forward
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handleNavBack()
+      }
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleNavForward()
       }
     }
     window.addEventListener('keydown', handler)
@@ -258,6 +317,17 @@ const EditorOverlay: React.FC = () => {
   const handleEditorMount = useCallback((editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
     editorRef.current = editor
     monacoRef.current = monaco
+
+    // Track mouse clicks in the editor — push nav position before cursor moves
+    editor.onMouseDown((e) => {
+      if (e.event.leftButton) {
+        const pos = editor.getPosition()
+        const { activeTabId: tabId } = useEditorStore.getState()
+        if (pos && tabId) {
+          useEditorStore.getState().pushNavPosition(tabId, pos.lineNumber, pos.column)
+        }
+      }
+    })
 
     // Initialize language services once
     if (!langServicesInitRef.current && projectDir) {
@@ -393,7 +463,15 @@ const EditorOverlay: React.FC = () => {
             <div
               key={tab.id}
               className={`editor-tab${isActive ? ' editor-tab-active' : ''}${isDropTarget ? ' editor-tab-drop-target' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                // Push current position before switching tabs
+                const pos = editorRef.current?.getPosition()
+                const { activeTabId: curId } = useEditorStore.getState()
+                if (curId && curId !== tab.id && pos) {
+                  useEditorStore.getState().pushNavPosition(curId, pos.lineNumber, pos.column)
+                }
+                setActiveTab(tab.id)
+              }}
               onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }}
               title={tab.relativePath}
               draggable
@@ -409,6 +487,8 @@ const EditorOverlay: React.FC = () => {
           )
         })}
         <div className="editor-tab-spacer" />
+        <button className="editor-nav-btn" onClick={handleNavBack} disabled={navBackCount === 0} title="Go Back (Alt+Left / Mouse4)">&#8592;</button>
+        <button className="editor-nav-btn" onClick={handleNavForward} disabled={navForwardCount === 0} title="Go Forward (Alt+Right / Mouse5)">&#8594;</button>
         {saving && <span className="editor-saving">Saving...</span>}
         {saveError && <span className="editor-save-error">{saveError}</span>}
         <button className="editor-close-all" onClick={handleCloseAll} title="Close all tabs">×</button>

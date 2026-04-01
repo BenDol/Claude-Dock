@@ -1362,6 +1362,28 @@ body {
   flex: 1;
 }
 
+.editor-nav-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 5px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  transition: color 0.1s;
+}
+
+.editor-nav-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--hover-color, rgba(255,255,255,0.1));
+}
+
+.editor-nav-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
 .editor-close-all {
   background: none;
   border: none;
