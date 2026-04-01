@@ -439,6 +439,31 @@ function handleMessage(msg) {
             },
             required: ['session_id']
           }
+        },
+        {
+          name: 'dock_clear_shell',
+          description:
+            'Clear a shell panel\'s terminal output, scrollback buffer, and log file. ' +
+            'Use this before starting a new server or build to get a clean terminal. ' +
+            'The shell process keeps running — only the visible output is cleared.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: {
+                type: 'string',
+                description: 'Your session ID. Used to find the shell panel.'
+              },
+              shell_id: {
+                type: 'string',
+                description: 'Target shell panel ID to clear (e.g. "shell:term-1-123:0"). Use dock_list_shells to discover IDs.'
+              },
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project directory. Used to route to the correct dock window.'
+              }
+            },
+            required: ['shell_id']
+          }
         }
       ]
 
@@ -794,6 +819,55 @@ function handleMessage(msg) {
           } catch (err) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `Failed to check shell events: ${err.message || err}` }]
+            })
+          }
+        }
+
+        case 'dock_clear_shell': {
+          const { session_id, shell_id: clearShellId, project_dir } = args
+          if (!clearShellId) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameter: shell_id.' }]
+            })
+          }
+
+          // Resolve projectDir from session_id if not provided
+          let resolvedDir = project_dir || null
+          if (!resolvedDir && session_id) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedDir = term.projectDir
+          }
+
+          try {
+            // Write a clear command to the shell commands file for the dock to process
+            const entry = {
+              id: crypto.randomUUID(),
+              type: 'clear',
+              shellId: clearShellId,
+              projectDir: resolvedDir,
+              sessionId: session_id || null,
+              timestamp: Date.now()
+            }
+
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(shellCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+
+            const cutoff = Date.now() - 30000
+            commands = commands.filter(c => c.timestamp > cutoff)
+            commands.push(entry)
+
+            fs.writeFileSync(shellCommandsFile, JSON.stringify(commands, null, 2))
+
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Shell ${clearShellId} cleared (terminal output, scrollback, and log file).` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to clear shell: ${err.message || err}` }],
+              isError: true
             })
           }
         }

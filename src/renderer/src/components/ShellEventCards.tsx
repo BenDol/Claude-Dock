@@ -88,7 +88,7 @@ function buildTooltipSections(type: string, payload: any): Array<{ label: string
   return sections
 }
 
-const EventTooltip: React.FC<{ event: any; color: string; anchorRect: DOMRect }> = ({ event, color, anchorRect }) => {
+const EventTooltip: React.FC<{ event: any; color: string; anchorRect: DOMRect; onMouseEnter: () => void; onMouseLeave: () => void }> = ({ event, color, anchorRect, onMouseEnter, onMouseLeave }) => {
   const ref = useRef<HTMLDivElement>(null)
   const type = event.type
   const label = EVENT_LABELS[type] || type.replace(/_/g, ' ')
@@ -116,7 +116,7 @@ const EventTooltip: React.FC<{ event: any; color: string; anchorRect: DOMRect }>
   }, [anchorRect])
 
   return createPortal(
-    <div className="shell-event-tooltip" ref={ref} style={{ left: pos.left, top: pos.top }}>
+    <div className="shell-event-tooltip" ref={ref} style={{ left: pos.left, top: pos.top }} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onClick={(e) => e.stopPropagation()}>
       <div className="shell-event-tooltip-header" style={{ borderLeftColor: color }}>
         <span className="shell-event-tooltip-icon" style={{ color }}>{icon}</span>
         <span className="shell-event-tooltip-title">{label}</span>
@@ -151,6 +151,8 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const prevCountRef = useRef(0)
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tooltipHoveredRef = useRef(false)
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
 
   const visibleEvents = events.filter((e) => {
@@ -197,10 +199,14 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   }, [visibleEvents.length, minimized])
 
   useEffect(() => {
-    return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current) }
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+      if (dismissTimerRef.current) clearTimeout(dismissTimerRef.current)
+    }
   }, [])
 
   const handleMouseEnter = useCallback((id: string, e: React.MouseEvent) => {
+    if (dismissTimerRef.current) { clearTimeout(dismissTimerRef.current); dismissTimerRef.current = null }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
     hoverTimerRef.current = setTimeout(() => setHovered({ id, rect }), 400)
@@ -209,6 +215,19 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const handleMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
     hoverTimerRef.current = null
+    // Delay dismiss so mouse can move to tooltip
+    dismissTimerRef.current = setTimeout(() => {
+      if (!tooltipHoveredRef.current) setHovered(null)
+    }, 150)
+  }, [])
+
+  const handleTooltipEnter = useCallback(() => {
+    tooltipHoveredRef.current = true
+    if (dismissTimerRef.current) { clearTimeout(dismissTimerRef.current); dismissTimerRef.current = null }
+  }, [])
+
+  const handleTooltipLeave = useCallback(() => {
+    tooltipHoveredRef.current = false
     setHovered(null)
   }, [])
 
@@ -316,7 +335,7 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
                 title="Dismiss"
               >{'\u00D7'}</button>
             </div>
-            {hovered?.id === event.id && <EventTooltip event={event} color={color} anchorRect={hovered.rect} />}
+            {hovered?.id === event.id && <EventTooltip event={event} color={color} anchorRect={hovered.rect} onMouseEnter={handleTooltipEnter} onMouseLeave={handleTooltipLeave} />}
           </div>
         )
       })}

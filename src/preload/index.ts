@@ -93,6 +93,7 @@ export interface DockApi {
     onData: (callback: (shellId: string, data: string) => void) => () => void
     onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
     onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null, shellType: string | null, targetShellId: string | null, shellLayout: 'split' | 'stack' | null) => void) => () => void
+    onClearShell: (callback: (shellId: string) => void) => () => void
     onShellEvent: (handler: (_e: any, event: any) => void) => () => void
     dismissEvents: (hashKeys: string[]) => Promise<void>
   }
@@ -411,6 +412,11 @@ const dockApi: DockApi = {
       const handler = (_event: Electron.IpcRendererEvent, command: string, submit?: boolean, targetTerminalId?: string | null, shellType?: string | null, targetShellId?: string | null, shellLayout?: 'split' | 'stack' | null) => callback(command, submit ?? true, targetTerminalId ?? null, shellType ?? null, targetShellId ?? null, shellLayout ?? null)
       ipcRenderer.on(IPC.SHELL_RUN_COMMAND, handler)
       return () => ipcRenderer.removeListener(IPC.SHELL_RUN_COMMAND, handler)
+    },
+    onClearShell: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, shellId: string) => callback(shellId)
+      ipcRenderer.on(IPC.SHELL_CLEAR, handler)
+      return () => ipcRenderer.removeListener(IPC.SHELL_CLEAR, handler)
     },
     onShellEvent: (handler) => {
       ipcRenderer.on(IPC.SHELL_EVENT, handler)

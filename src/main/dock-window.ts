@@ -250,7 +250,8 @@ export class DockWindow {
         let changed = false
 
         for (const cmd of commands) {
-          if (!cmd.id || !cmd.command || cmd.timestamp < cutoff) continue
+          if (!cmd.id || cmd.timestamp < cutoff) continue
+          if (!cmd.command && cmd.type !== 'clear') continue
           if (this.processedCommandIds.has(cmd.id)) continue
 
           // Always require projectDir match — commands without a projectDir
@@ -263,6 +264,17 @@ export class DockWindow {
           changed = true
 
           if (!this.window.isDestroyed()) {
+            // Handle clear commands -- purge cache and send clear IPC
+            if (cmd.type === 'clear') {
+              const targetShellId = cmd.shellId || null
+              if (targetShellId) {
+                log(`[shell-command] clearing shell: ${targetShellId}`)
+                this.purgeShellCache(targetShellId)
+                this.window.webContents.send(IPC.SHELL_CLEAR, targetShellId)
+              }
+              continue
+            }
+
             const submit = cmd.submit ?? true
             // Resolve sessionId to terminalId so the renderer routes to the right terminal
             let targetTerminalId: string | null = null

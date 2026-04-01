@@ -44,6 +44,18 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
     }
   }, [shellId])
 
+  // Listen for clear commands from main process (MCP dock_clear_shell)
+  useEffect(() => {
+    return getDockApi().shell.onClearShell((id) => {
+      if (id !== shellId || !termRef.current) return
+      termRef.current.clear()
+      termRef.current.reset()
+      // Clear any buffered data
+      dataBufferRef.current = []
+      writeBufRef.current = ''
+    })
+  }, [shellId])
+
   // Buffer data from shell PTY — batch writes via rAF for throughput
   useEffect(() => {
     const cleanup = getDockApi().shell.onData((id, data) => {

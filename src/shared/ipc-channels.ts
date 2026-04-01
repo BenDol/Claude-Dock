@@ -20,6 +20,7 @@ export const IPC = {
   SHELL_EVENT: 'shell:event',     // Main -> Renderer
   SHELL_EVENT_DISMISS: 'shell:eventDismiss', // Renderer -> Main (remove from pending file)
   SHELL_RUN_COMMAND: 'shell:runCommand', // Main -> Renderer (open shell panel + run command)
+  SHELL_CLEAR: 'shell:clear',           // Main -> Renderer (clear a shell panel's terminal + buffer)
 
   DOCK_GET_INFO: 'dock:getInfo',
   SETTINGS_GET: 'settings:get',

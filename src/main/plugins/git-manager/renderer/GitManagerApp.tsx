@@ -3786,6 +3786,11 @@ const CommitFileTreeView: React.FC<{
   const grepGenRef = useRef(0)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const lineRef = useRef<HTMLDivElement>(null)
+  const [fileSearch, setFileSearch] = useState('')
+  const [fileSearchOpen, setFileSearchOpen] = useState(false)
+  const [fileSearchIdx, setFileSearchIdx] = useState(0)
+  const fileSearchRef = useRef<HTMLInputElement>(null)
+  const codeWrapRef = useRef<HTMLDivElement>(null)
 
   // Load tree when hash changes
   useEffect(() => {
@@ -3850,6 +3855,34 @@ const CommitFileTreeView: React.FC<{
   useEffect(() => {
     if (lineRef.current) lineRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [selectedLine, selectedFile])
+
+  // Close file search when switching files
+  useEffect(() => { setFileSearchOpen(false); setFileSearch('') }, [selectedFile])
+
+  // Compute search match line numbers
+  const fileSearchMatches = useMemo(() => {
+    if (!fileSearch || !fileContent) return []
+    const lower = fileSearch.toLowerCase()
+    const lines = fileContent.split('\n')
+    const matches: number[] = []
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(lower)) matches.push(i + 1)
+    }
+    return matches
+  }, [fileSearch, fileContent])
+
+  // Scroll to current match
+  useEffect(() => {
+    if (fileSearchMatches.length === 0 || !codeWrapRef.current) return
+    const lineNo = fileSearchMatches[fileSearchIdx % fileSearchMatches.length]
+    const el = codeWrapRef.current.querySelector(`[data-search-line="${lineNo}"]`) as HTMLElement | null
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [fileSearchIdx, fileSearchMatches])
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (fileSearchOpen) fileSearchRef.current?.focus()
+  }, [fileSearchOpen])
 
   // Group grep results by file path
   const grepByFile = useMemo(() => {
@@ -3956,7 +3989,16 @@ const CommitFileTreeView: React.FC<{
         )}
       </div>
       <ResizeHandle side="left" targetRef={sidebarRef} min={140} max={500} storageKey="gm-ftree-sidebar-width" />
-      <div className="gm-ftree-content">
+      <div className="gm-ftree-content" tabIndex={-1} onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f' && fileContent != null) {
+          e.preventDefault()
+          setFileSearchOpen(true)
+        }
+        if (e.key === 'Escape' && fileSearchOpen) {
+          setFileSearchOpen(false)
+          setFileSearch('')
+        }
+      }}>
         {!selectedFile ? (
           <div className="gm-ftree-placeholder">Select a file to view its contents</div>
         ) : loadingContent ? (
@@ -3978,39 +4020,85 @@ const CommitFileTreeView: React.FC<{
             </div>
           </div>
         ) : fileContent != null ? (
-          <div className="gm-ftree-code-wrap">
+          <div className="gm-ftree-code-wrap" ref={codeWrapRef}>
             <div className="gm-ftree-code-header">
               <FileTypeIcon name={selectedFile.split('/').pop() || selectedFile} />
               <span>{selectedFile}</span>
             </div>
+            {fileSearchOpen && (
+              <div className="gm-ftree-search-bar">
+                <input
+                  ref={fileSearchRef}
+                  className="gm-ftree-search-input"
+                  type="text"
+                  placeholder="Find in file..."
+                  value={fileSearch}
+                  onChange={(e) => { setFileSearch(e.target.value); setFileSearchIdx(0) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (e.shiftKey) setFileSearchIdx((i) => (i - 1 + (fileSearchMatches.length || 1)) % (fileSearchMatches.length || 1))
+                      else setFileSearchIdx((i) => (i + 1) % (fileSearchMatches.length || 1))
+                    }
+                    if (e.key === 'Escape') { setFileSearchOpen(false); setFileSearch('') }
+                  }}
+                />
+                {fileSearch && (
+                  <span className="gm-ftree-search-count">
+                    {fileSearchMatches.length > 0
+                      ? `${(fileSearchIdx % fileSearchMatches.length) + 1}/${fileSearchMatches.length}`
+                      : 'No results'}
+                  </span>
+                )}
+                <button className="gm-ftree-search-nav" onClick={() => setFileSearchIdx((i) => (i - 1 + (fileSearchMatches.length || 1)) % (fileSearchMatches.length || 1))} title="Previous (Shift+Enter)">&#9650;</button>
+                <button className="gm-ftree-search-nav" onClick={() => setFileSearchIdx((i) => (i + 1) % (fileSearchMatches.length || 1))} title="Next (Enter)">&#9660;</button>
+                <button className="gm-ftree-search-close" onClick={() => { setFileSearchOpen(false); setFileSearch('') }} title="Close (Esc)">&#10005;</button>
+              </div>
+            )}
             <div className="gm-ftree-code">
               <div className="gm-conflict-editor-gutter" aria-hidden>
-                {contentLines.map((_, i) => (
-                  <div
-                    key={i}
-                    ref={selectedLine === i + 1 ? lineRef : undefined}
-                    className={`gm-conflict-editor-linenum${selectedLine === i + 1 ? ' gm-ftree-line-highlight' : ''}`}
-                  >{i + 1}</div>
-                ))}
+                {contentLines.map((_, i) => {
+                  const lineNo = i + 1
+                  const isMatch = fileSearchMatches.includes(lineNo)
+                  const isCurrent = isMatch && fileSearchMatches.length > 0 && fileSearchMatches[fileSearchIdx % fileSearchMatches.length] === lineNo
+                  return (
+                    <div
+                      key={i}
+                      ref={selectedLine === lineNo ? lineRef : undefined}
+                      data-search-line={lineNo}
+                      className={`gm-conflict-editor-linenum${selectedLine === lineNo ? ' gm-ftree-line-highlight' : ''}${isCurrent ? ' gm-ftree-search-current' : isMatch ? ' gm-ftree-search-match' : ''}`}
+                    >{lineNo}</div>
+                  )
+                })}
               </div>
               <pre className="gm-ftree-pre gm-highlighted">
                 {highlighted ? (
-                  <code>{highlighted.map((html, i) => (
-                    <span key={i}>
-                      <span
-                        className={selectedLine === i + 1 ? 'gm-ftree-line-highlight' : undefined}
-                        dangerouslySetInnerHTML={{ __html: html }}
-                      />
-                      {'\n'}
-                    </span>
-                  ))}</code>
+                  <code>{highlighted.map((html, i) => {
+                    const lineNo = i + 1
+                    const isMatch = fileSearchMatches.includes(lineNo)
+                    const isCurrent = isMatch && fileSearchMatches.length > 0 && fileSearchMatches[fileSearchIdx % fileSearchMatches.length] === lineNo
+                    return (
+                      <span key={i}>
+                        <span
+                          className={`${selectedLine === lineNo ? 'gm-ftree-line-highlight' : ''}${isCurrent ? ' gm-ftree-search-current' : isMatch ? ' gm-ftree-search-match' : ''}` || undefined}
+                          dangerouslySetInnerHTML={{ __html: html }}
+                        />
+                        {'\n'}
+                      </span>
+                    )
+                  })}</code>
                 ) : (
-                  <code>{contentLines.map((line, i) => (
-                    <span key={i}>
-                      <span className={selectedLine === i + 1 ? 'gm-ftree-line-highlight' : undefined}>{line}</span>
-                      {'\n'}
-                    </span>
-                  ))}</code>
+                  <code>{contentLines.map((line, i) => {
+                    const lineNo = i + 1
+                    const isMatch = fileSearchMatches.includes(lineNo)
+                    const isCurrent = isMatch && fileSearchMatches.length > 0 && fileSearchMatches[fileSearchIdx % fileSearchMatches.length] === lineNo
+                    return (
+                      <span key={i}>
+                        <span className={`${selectedLine === lineNo ? 'gm-ftree-line-highlight' : ''}${isCurrent ? ' gm-ftree-search-current' : isMatch ? ' gm-ftree-search-match' : ''}` || undefined}>{line}</span>
+                        {'\n'}
+                      </span>
+                    )
+                  })}</code>
                 )}
               </pre>
             </div>
