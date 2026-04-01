@@ -82,7 +82,7 @@ export class TestRunnerWindowManager {
     win.on('unmaximize', persistState)
 
     win.webContents.on('render-process-gone', (_event, details) => {
-      svc().log(`[test-runner] renderer gone for ${projectDir}: reason=${details.reason}`)
+      svc().log(`[test-runner] renderer gone for ${projectDir}: reason=${details.reason} exitCode=${details.exitCode}`)
       if (details.reason === 'crashed' || details.reason === 'oom' || details.reason === 'killed') {
         setTimeout(() => {
           if (!win.isDestroyed()) {
@@ -92,6 +92,8 @@ export class TestRunnerWindowManager {
         }, 1000)
       }
     })
+    win.on('unresponsive', () => svc().log(`[test-runner] window unresponsive for ${projectDir}`))
+    win.on('responsive', () => svc().log(`[test-runner] window responsive again for ${projectDir}`))
 
     win.on('close', (event) => {
       if (this.forceClosing.has(projectDir)) return

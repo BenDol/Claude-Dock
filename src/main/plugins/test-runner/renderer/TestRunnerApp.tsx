@@ -60,12 +60,66 @@ function countTests(items: TestItem[]): number {
 const TestRunnerApp: React.FC = () => {
   const projectDir = new URLSearchParams(window.location.search).get('projectDir') || ''
   const api = getDockApi()
-  const settings = useSettingsStore()
+  const loadSettings = useSettingsStore((s) => s.load)
 
-  // Theme
+  // Theme — must load settings first, then apply
   useEffect(() => {
-    applyThemeToDocument(settings.theme)
-  }, [settings.theme])
+    loadSettings().then(() => {
+      applyThemeToDocument(useSettingsStore.getState().settings)
+    })
+  }, [loadSettings])
+
+  // Block Ctrl+A from selecting all page text
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !e.shiftKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  // Zoom: Ctrl+MouseWheel and Ctrl++/- with persistence
+  useEffect(() => {
+    const ZOOM_KEY = 'testrunner-zoom'
+    const MIN_ZOOM = 0.5
+    const MAX_ZOOM = 2.0
+    const STEP = 0.1
+
+    const saved = localStorage.getItem(ZOOM_KEY)
+    let zoom = saved ? parseFloat(saved) : 1
+    if (isNaN(zoom) || zoom < MIN_ZOOM || zoom > MAX_ZOOM) zoom = 1
+    document.documentElement.style.zoom = String(zoom)
+
+    const applyZoom = (z: number) => {
+      zoom = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      document.documentElement.style.zoom = String(zoom)
+      localStorage.setItem(ZOOM_KEY, String(zoom))
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      applyZoom(zoom + (e.deltaY < 0 ? STEP : -STEP))
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + STEP) }
+      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - STEP) }
+      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
+    }
+
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
 
   // State
   const [frameworks, setFrameworks] = useState<DetectionResult[]>([])
@@ -236,15 +290,15 @@ const TestRunnerApp: React.FC = () => {
   return (
     <div className="tr-app">
       {/* Titlebar */}
-      <div className="tr-titlebar">
-        <div className="tr-titlebar-left">
+      <div className="tr-titlebar" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+        <div className="tr-titlebar-left" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <TestIcon />
           <span>Test Runner</span>
           <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>{projectDir.split(/[/\\]/).pop()}</span>
         </div>
-        <div className="tr-titlebar-right">
-          <button className="tr-titlebar-btn" onClick={handleMinimize}>&#8211;</button>
-          <button className="tr-titlebar-btn" onClick={handleMaximize}>&#9633;</button>
+        <div className="tr-titlebar-right" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button className="tr-titlebar-btn" onClick={handleMinimize}>&#x2015;</button>
+          <button className="tr-titlebar-btn" onClick={handleMaximize}>&#9744;</button>
           <button className="tr-titlebar-btn tr-titlebar-close" onClick={handleClose}>&#10005;</button>
         </div>
       </div>
