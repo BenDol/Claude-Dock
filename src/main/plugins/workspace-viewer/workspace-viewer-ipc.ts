@@ -1,8 +1,9 @@
-import { ipcMain, shell } from 'electron'
+import { ipcMain, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
 import { readDirectory, readTree, sanitizePath } from './file-scanner'
+import { loadPluginWindow } from '../plugin-renderer-utils'
 import { getServices } from './services'
 
 /** Resolve and validate a relative path within the project. Returns null if unsafe. */
@@ -148,6 +149,58 @@ export function registerWorkspaceViewerIpc(): void {
       return { success: false, error: err instanceof Error ? err.message : 'Write failed' }
     }
   })
+
+  // Detach editor tab to a standalone BrowserWindow
+  const detachedWindows = new Map<string, BrowserWindow>()
+
+  ipcMain.handle(IPC.WS_VIEWER_DETACH_EDITOR, async (_event, projectDir: string, tabData: string) => {
+    try {
+      const win = new BrowserWindow({
+        width: 900,
+        height: 650,
+        minWidth: 500,
+        minHeight: 350,
+        frame: false,
+        title: 'Editor',
+        backgroundColor: '#1e1e2e',
+        webPreferences: {
+          preload: path.join(__dirname, '../preload/index.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false
+        }
+      })
+
+      // Load the dock renderer with a query param — tab data sent via IPC after load
+      // (not in URL, which has length limits for large file contents)
+      const queryParam = `?detachedEditor=true&projectDir=${encodeURIComponent(projectDir)}`
+      const rendererUrl = process.env.ELECTRON_RENDERER_URL
+      if (rendererUrl) {
+        await win.loadURL(`${rendererUrl}${queryParam}`)
+      } else {
+        await win.loadFile(path.join(__dirname, '../renderer/index.html'), { search: queryParam.slice(1) })
+      }
+
+      // Send tab data via IPC after the window has loaded
+      win.webContents.send('editor:hydrate-tabs', tabData)
+
+      win.webContents.on('before-input-event', (_evt, input) => {
+        if (input.type !== 'keyDown') return
+        if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+          win.webContents.toggleDevTools()
+        }
+      })
+
+      const id = `detached-${Date.now()}`
+      detachedWindows.set(id, win)
+      win.on('closed', () => detachedWindows.delete(id))
+
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[workspace-viewer] detach editor failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Detach failed' }
+    }
+  })
 }
 
 export function disposeWorkspaceViewerIpc(): void {
@@ -157,7 +210,8 @@ export function disposeWorkspaceViewerIpc(): void {
     IPC.WS_VIEWER_RENAME, IPC.WS_VIEWER_DELETE,
     IPC.WS_VIEWER_CREATE_FILE, IPC.WS_VIEWER_CREATE_FOLDER,
     IPC.WS_VIEWER_MOVE_CLAUDE,
-    IPC.WS_VIEWER_READ_FILE, IPC.WS_VIEWER_WRITE_FILE
+    IPC.WS_VIEWER_READ_FILE, IPC.WS_VIEWER_WRITE_FILE,
+    IPC.WS_VIEWER_DETACH_EDITOR
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }

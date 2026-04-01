@@ -65,6 +65,8 @@ interface EditorState {
   setActiveTab: (id: string) => void
   updateContent: (id: string, content: string) => void
   markSaved: (id: string, content: string) => void
+  moveTab: (fromIndex: number, toIndex: number) => void
+  removeTab: (id: string) => EditorTab | null  // removes without closing — returns the tab for detach
 }
 
 function makeId(projectDir: string, relativePath: string): string {
@@ -125,5 +127,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       tabs: get().tabs.map((t) => t.id === id ? { ...t, content, savedContent: content } : t)
     })
+  },
+
+  moveTab: (fromIndex, toIndex) => {
+    const { tabs } = get()
+    if (fromIndex < 0 || fromIndex >= tabs.length || toIndex < 0 || toIndex >= tabs.length) return
+    if (fromIndex === toIndex) return
+    const newTabs = [...tabs]
+    const [moved] = newTabs.splice(fromIndex, 1)
+    newTabs.splice(toIndex, 0, moved)
+    set({ tabs: newTabs })
+  },
+
+  removeTab: (id) => {
+    const { tabs, activeTabId } = get()
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx < 0) return null
+    const tab = tabs[idx]
+    const newTabs = tabs.filter((t) => t.id !== id)
+    let newActive = activeTabId
+    if (activeTabId === id) {
+      newActive = newTabs.length > 0
+        ? (newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null)
+        : null
+    }
+    set({ tabs: newTabs, activeTabId: newActive })
+    return tab
   }
 }))

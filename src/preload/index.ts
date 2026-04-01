@@ -376,7 +376,9 @@ export interface DockApi {
     moveClaude: (projectDir: string, sourcePath: string, targetDir: string) => Promise<{ success: boolean; error?: string }>
     readFile: (projectDir: string, relativePath: string) => Promise<{ content?: string; error?: string }>
     writeFile: (projectDir: string, relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
+    detachEditor: (projectDir: string, tabData: string) => Promise<{ success: boolean; error?: string }>
     onChanged: (callback: (changes: string[]) => void) => () => void
+    onHydrateTabs: (callback: (tabData: string) => void) => () => void
   }
 }
 
@@ -806,10 +808,16 @@ const dockApi: DockApi = {
     moveClaude: (projectDir, sourcePath, targetDir) => ipcRenderer.invoke(IPC.WS_VIEWER_MOVE_CLAUDE, projectDir, sourcePath, targetDir),
     readFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_FILE, projectDir, relativePath),
     writeFile: (projectDir, relativePath, content) => ipcRenderer.invoke(IPC.WS_VIEWER_WRITE_FILE, projectDir, relativePath, content),
+    detachEditor: (projectDir, tabData) => ipcRenderer.invoke(IPC.WS_VIEWER_DETACH_EDITOR, projectDir, tabData),
     onChanged: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
       ipcRenderer.on('wsViewer:changed', handler)
       return () => ipcRenderer.removeListener('wsViewer:changed', handler)
+    },
+    onHydrateTabs: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, tabData: string) => callback(tabData)
+      ipcRenderer.on('editor:hydrate-tabs', handler)
+      return () => ipcRenderer.removeListener('editor:hydrate-tabs', handler)
     }
   }
 }

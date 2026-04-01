@@ -16,7 +16,7 @@ import { usePanelStore } from '@dock-renderer/stores/panel-store'
 registerPanel({
   id: 'workspace-viewer',
   pluginId: 'workspace-viewer',
-  title: 'Files',
+  title: 'Workspace',
   icon: React.createElement(FilesIcon),
   component: lazy(() => import('./WorkspaceViewerPanel')),
   headerActions: lazy(() => import('./HeaderActions')),
@@ -29,7 +29,7 @@ registerPanel({
 // Register the toolbar toggle button
 registerToolbarAction({
   id: 'workspace-viewer',
-  title: 'Files',
+  title: 'Workspace',
   icon: React.createElement(FilesIcon),
   onClick: () => {
     const store = usePanelStore.getState()

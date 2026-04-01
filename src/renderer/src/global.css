@@ -533,6 +533,15 @@ body {
   color: #9ece6a;
 }
 
+.toolbar-btn-error {
+  color: #f7768e;
+  border-color: rgba(247, 118, 142, 0.3);
+}
+
+.toolbar-btn-error:hover {
+  color: #f7768e;
+}
+
 .toolbar-btn-window-open {
   border-color: #7aa2f7;
 }
@@ -1308,6 +1317,18 @@ body {
 
 .editor-tab-name {
   font-family: var(--term-font-family);
+}
+
+.editor-tab[draggable] {
+  cursor: grab;
+}
+
+.editor-tab[draggable]:active {
+  cursor: grabbing;
+}
+
+.editor-tab-drop-target {
+  border-left: 2px solid var(--accent-color, #7aa2f7);
 }
 
 .editor-tab-dirty {

@@ -17,25 +17,10 @@ interface ToolbarProps {
   onAddTerminal: () => void
   onRestoreLastClosed: () => void
   onAddTerminalWithSession: (sessionId: string) => void
-  onOpenSettings: () => void
+  onOpenSettings: (opts?: { tab?: string; section?: string }) => void
 }
 
-const stripAnsi = (str: string): string =>
-  str
-    .replace(/\x1b\][^\x07]*\x07/g, '') // OSC sequences (e.g. title set)
-    .replace(/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nq-uy=><~]/g, '')
-
-const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
-async function sendRCCommand(api: ReturnType<typeof getDockApi>, terminalId: string): Promise<void> {
-  await api.terminal.write(terminalId, '/remote-control')
-  await delay(300)
-  await api.terminal.write(terminalId, '\x1b') // dismiss autocomplete
-  await delay(100)
-  await api.terminal.write(terminalId, '\r') // submit
-}
-
-const RemoteControlIcon: React.FC = () => (
+const McpStatusIcon: React.FC = () => (
   <svg
     width="14"
     height="14"
@@ -111,10 +96,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
   useToolbarNavigation(toolbarRef)
 
   const terminalCount = useDockStore((s) => s.terminals.length)
-  const rcCount = useDockStore((s) => s.rcTerminals.size)
-  const hasLoadingTerminals = useDockStore((s) => s.loadingTerminals.size > 0)
-  const [toggling, setToggling] = useState(false)
-  const rcBufsRef = useRef<Map<string, string>>(new Map())
+  const linkedEnabled = useSettingsStore((s) => s.settings.linked?.enabled ?? false)
+  // MCP status: null = loading, 'not_installed' | 'installed_inactive' | 'installed_active'
+  const [mcpStatus, setMcpStatus] = useState<'not_installed' | 'installed_inactive' | 'installed_active' | null>(null)
   const [runtimeActions, setRuntimeActions] = useState<PluginToolbarAction[]>([])
   const [badges, setBadges] = useState<Record<string, string | number>>({})
   const [badgeVariants, setBadgeVariants] = useState<Record<string, string>>({})
@@ -300,93 +284,20 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
     return cleanup
   }, [])
 
-  // Listen for RC disconnect only while RC terminals exist
+  // Check MCP install/linked status asynchronously on mount
   useEffect(() => {
-    if (rcCount === 0) {
-      rcBufsRef.current.clear()
-      return
-    }
-    const api = getDockApi()
-    const cleanup = api.terminal.onData((id, data) => {
-      const store = useDockStore.getState()
-      if (!store.rcTerminals.has(id)) return
-      const stripped = stripAnsi(data)
-      const prev = rcBufsRef.current.get(id) || ''
-      const buf = prev + stripped
-      rcBufsRef.current.set(id, buf.slice(-100))
-      const compact = buf.toLowerCase().replace(/\s/g, '')
-      if (compact.includes('remotecontroldisconnected')) {
-        store.setTerminalRC(id, false)
-        rcBufsRef.current.delete(id)
-      }
+    getDockApi().linked.checkMcp()
+      .then((r) => setMcpStatus(r.installed ? (linkedEnabled ? 'installed_active' : 'installed_inactive') : 'not_installed'))
+      .catch(() => setMcpStatus('not_installed'))
+  }, [])
+
+  // Update derived status when linked setting changes (no re-fetch needed)
+  useEffect(() => {
+    setMcpStatus((prev) => {
+      if (!prev || prev === 'not_installed') return prev
+      return linkedEnabled ? 'installed_active' : 'installed_inactive'
     })
-    return cleanup
-  }, [rcCount > 0])
-
-  const toggleRemoteControl = useCallback(async () => {
-    if (toggling) return
-    const api = getDockApi()
-    const state = useDockStore.getState()
-    const alive = state.terminals.filter((t) => t.isAlive)
-    if (alive.length === 0) return
-
-    const anyHaveRC = alive.some((t) => state.rcTerminals.has(t.id))
-
-    setToggling(true)
-
-    if (anyHaveRC) {
-      // Turn OFF — only stop RC on terminals that have it (parallel)
-      const toDisable = alive.filter((t) => state.rcTerminals.has(t.id))
-      await Promise.all(toDisable.map(async (terminal) => {
-        await sendRCCommand(api, terminal.id)
-        await delay(800)
-        await api.terminal.write(terminal.id, '\x1b[A') // up arrow
-        await delay(100)
-        await api.terminal.write(terminal.id, '\x1b[A') // up arrow
-        await delay(100)
-        await api.terminal.write(terminal.id, '\r') // confirm stop
-        useDockStore.getState().setTerminalRC(terminal.id, false)
-      }))
-    } else {
-      // Turn ON — send to all terminals in parallel
-      const toEnable = alive.filter((t) => !state.rcTerminals.has(t.id))
-      await Promise.all(toEnable.map((terminal) =>
-        new Promise<void>(async (resolve) => {
-          let resolved = false
-          let buf = ''
-          const RC_ACTIVE = '/remote-control is active'
-
-          const cleanupData = api.terminal.onData((id, data) => {
-            if (id !== terminal.id || resolved) return
-            const stripped = stripAnsi(data)
-            buf += stripped
-            buf = buf.slice(-200)
-            if (buf.includes(RC_ACTIVE)) {
-              resolved = true
-              clearTimeout(timer)
-              cleanupData()
-              useDockStore.getState().setTerminalRC(terminal.id, true)
-              resolve()
-            }
-          })
-
-          await sendRCCommand(api, terminal.id)
-
-          const timer = setTimeout(() => {
-            if (!resolved) {
-              resolved = true
-              cleanupData()
-              // Assume success on timeout
-              useDockStore.getState().setTerminalRC(terminal.id, true)
-              resolve()
-            }
-          }, 3000)
-        })
-      ))
-    }
-
-    setToggling(false)
-  }, [toggling])
+  }, [linkedEnabled])
 
   const api = getDockApi()
 
@@ -398,20 +309,19 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
         <button
           data-toolbar-btn
           tabIndex={-1}
-          className={`toolbar-btn toolbar-btn-icon${rcCount > 0 ? ' toolbar-btn-active' : ''}`}
-          onClick={toggleRemoteControl}
-          disabled={toggling || hasLoadingTerminals}
+          className={`toolbar-btn toolbar-btn-icon${mcpStatus === 'installed_active' ? ' toolbar-btn-active' : mcpStatus === 'installed_inactive' ? ' toolbar-btn-error' : ''}`}
+          onClick={() => onOpenSettings({ tab: 'behavior', section: 'mcp' })}
           title={
-            rcCount > 0
-              ? `Remote Control: ${rcCount}/${terminalCount} (click to stop)`
-              : 'Remote Control: OFF (click to start)'
+            mcpStatus === 'installed_active'
+              ? 'MCP Server: Active (click to configure)'
+              : mcpStatus === 'installed_inactive'
+                ? 'MCP Server: Installed but inactive (click to configure)'
+                : mcpStatus === 'not_installed'
+                  ? 'MCP Server: Not installed (click to configure)'
+                  : 'MCP Server'
           }
         >
-          {toggling ? (
-            <span className="toolbar-spinner" />
-          ) : (
-            <RemoteControlIcon />
-          )}
+          <McpStatusIcon />
         </button>
       </div>
       <div className="toolbar-center" />

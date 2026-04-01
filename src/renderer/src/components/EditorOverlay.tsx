@@ -25,6 +25,13 @@ try {
   // In renderer context path/fs may not be available — CDN fallback is fine
 }
 
+const FONT_SIZE_KEY = 'editor-font-size'
+const DEFAULT_FONT_SIZE = 13
+const MIN_FONT_SIZE = 8
+const MAX_FONT_SIZE = 32
+/** Minimum pixels of drag movement before we consider it a real drag (prevents accidental detach on click) */
+const MIN_DRAG_DISTANCE = 20
+
 const EditorOverlay: React.FC = () => {
   const tabs = useEditorStore((s) => s.tabs)
   const activeTabId = useEditorStore((s) => s.activeTabId)
@@ -34,17 +41,17 @@ const EditorOverlay: React.FC = () => {
   const updateContent = useEditorStore((s) => s.updateContent)
   const markSaved = useEditorStore((s) => s.markSaved)
 
+  const moveTab = useEditorStore((s) => s.moveTab)
+  const removeTab = useEditorStore((s) => s.removeTab)
+
   const activeTab = tabs.find((t) => t.id === activeTabId) || null
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const saveRef = useRef<() => void>(() => {})
+  const tabBarRef = useRef<HTMLDivElement>(null)
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-
-  // Editor font size (zoom) — persisted to localStorage
-  const FONT_SIZE_KEY = 'editor-font-size'
-  const DEFAULT_FONT_SIZE = 13
-  const MIN_FONT_SIZE = 8
-  const MAX_FONT_SIZE = 32
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const [fontSize, setFontSize] = useState(() => {
     try {
       const saved = localStorage.getItem(FONT_SIZE_KEY)
@@ -146,6 +153,67 @@ const EditorOverlay: React.FC = () => {
     closeAllTabs()
   }, [closeAllTabs])
 
+  // Tab reorder via drag
+  const handleTabDragStart = useCallback((e: React.DragEvent, tabId: string, idx: number) => {
+    e.dataTransfer.setData('application/x-editor-tab', JSON.stringify({ tabId, idx }))
+    e.dataTransfer.effectAllowed = 'move'
+    dragStartPos.current = { x: e.clientX, y: e.clientY }
+  }, [])
+
+  const handleTabDragOver = useCallback((e: React.DragEvent, idx: number) => {
+    if (!e.dataTransfer.types.includes('application/x-editor-tab')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverIdx(idx)
+  }, [])
+
+  const handleTabDrop = useCallback((e: React.DragEvent, toIdx: number) => {
+    setDragOverIdx(null)
+    dragStartPos.current = null
+    const raw = e.dataTransfer.getData('application/x-editor-tab')
+    if (!raw) return
+    e.preventDefault()
+    try {
+      const { idx: fromIdx } = JSON.parse(raw)
+      if (typeof fromIdx === 'number') moveTab(fromIdx, toIdx)
+    } catch { /* ignore */ }
+  }, [moveTab])
+
+  // Detach tab to standalone window — fires when tab drag ends outside the tab bar.
+  // Only detaches if the user dragged a meaningful distance (prevents accidental detach on click).
+  const handleTabDragEnd = useCallback((e: React.DragEvent, tabId: string) => {
+    setDragOverIdx(null)
+    const startPos = dragStartPos.current
+    dragStartPos.current = null
+
+    // Only consider detach if the drop didn't land on a valid target
+    if (e.dataTransfer.dropEffect !== 'none') return
+
+    // Check minimum drag distance to prevent accidental detach
+    if (startPos) {
+      const dx = e.clientX - startPos.x
+      const dy = e.clientY - startPos.y
+      if (Math.sqrt(dx * dx + dy * dy) < MIN_DRAG_DISTANCE) return
+    }
+
+    const tab = useEditorStore.getState().tabs.find((t) => t.id === tabId)
+    if (!tab) return
+
+    // Warn about unsaved changes
+    if (tab.content !== tab.savedContent) {
+      if (!confirm(`"${tab.fileName}" has unsaved changes. Detach anyway?`)) return
+    }
+
+    const removed = removeTab(tabId)
+    if (!removed) return
+
+    const tabData = JSON.stringify([removed])
+    getDockApi().workspaceViewer.detachEditor(removed.projectDir, tabData).catch(() => {
+      // If detach fails, restore the tab
+      useEditorStore.getState().openFile(removed.projectDir, removed.relativePath, removed.content)
+    })
+  }, [removeTab])
+
   // Keyboard shortcuts — Ctrl+S and Ctrl+W
   // Don't handle Escape here — let Monaco use it for its own UI (search close, etc.)
   useEffect(() => {
@@ -187,21 +255,27 @@ const EditorOverlay: React.FC = () => {
   return (
     <div className="editor-overlay">
       {/* Tab bar */}
-      <div className="editor-tab-bar">
-        {tabs.map((tab) => {
+      <div className="editor-tab-bar" ref={tabBarRef} onDragLeave={() => setDragOverIdx(null)}>
+        {tabs.map((tab, idx) => {
           const isDirty = tab.content !== tab.savedContent
           const isActive = tab.id === activeTabId
+          const isDropTarget = dragOverIdx === idx
           return (
             <div
               key={tab.id}
-              className={`editor-tab${isActive ? ' editor-tab-active' : ''}`}
+              className={`editor-tab${isActive ? ' editor-tab-active' : ''}${isDropTarget ? ' editor-tab-drop-target' : ''}`}
               onClick={() => setActiveTab(tab.id)}
-              onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }} // middle-click close
+              onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }}
               title={tab.relativePath}
+              draggable
+              onDragStart={(e) => handleTabDragStart(e, tab.id, idx)}
+              onDragOver={(e) => handleTabDragOver(e, idx)}
+              onDrop={(e) => handleTabDrop(e, idx)}
+              onDragEnd={(e) => handleTabDragEnd(e, tab.id)}
             >
               <span className="editor-tab-name">{tab.fileName}</span>
               {isDirty && <span className="editor-tab-dirty">●</span>}
-              <button className="editor-tab-close" onClick={(e) => handleCloseTab(tab.id, e)}>×</button>
+              <button className="editor-tab-close" draggable={false} onClick={(e) => handleCloseTab(tab.id, e)}>×</button>
             </div>
           )
         })}

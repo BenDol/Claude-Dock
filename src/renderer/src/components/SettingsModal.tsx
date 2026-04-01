@@ -276,12 +276,14 @@ const AdditionalDirsEditor: React.FC = () => {
 
 interface SettingsModalProps {
   onClose: () => void
+  initialTab?: SettingsTab
+  initialSection?: string
 }
 
 type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior'
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
-  const [tab, setTab] = useState<SettingsTab>('appearance')
+const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, initialSection }) => {
+  const [tab, setTab] = useState<SettingsTab>(initialTab || 'appearance')
   const projectDir = useDockStore((s) => s.projectDir)
   const settings = useSettingsStore((s) => s.settings)
   const update = useSettingsStore((s) => s.update)
@@ -977,7 +979,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                 </div>
                 </SettingsAccordion>
 
-                <SettingsAccordion title="Dock MCP Server">
+                <SettingsAccordion title="Dock MCP Server" defaultOpen={initialSection === 'mcp'}>
                 <div className="settings-row">
                   <span className="settings-label">
                     Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}

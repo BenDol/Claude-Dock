@@ -80,7 +80,7 @@
 .ws-panel-tree {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .ws-panel-tree:focus {
@@ -89,6 +89,10 @@
 
 .ws-panel-tree::-webkit-scrollbar {
   width: 5px;
+}
+
+.ws-panel-tree::-webkit-scrollbar:horizontal {
+  height: 0;
 }
 
 /* Tree items */
@@ -101,8 +105,6 @@
   font-family: var(--term-font-family);
   cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   user-select: none;
 }
 

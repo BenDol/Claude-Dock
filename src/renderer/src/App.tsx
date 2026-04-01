@@ -19,6 +19,7 @@ import { getTaskMeta, buildClaudeFlags } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
 const isLauncher = searchParams.has('launcher')
+const isDetachedEditor = searchParams.has('detachedEditor')
 const pluginView = getPluginViews().find((v) => searchParams.has(v.queryParam))
 
 function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
@@ -194,6 +195,13 @@ function App() {
     ? <PluginUpdaterModal onClose={() => setShowPluginUpdater(false)} />
     : null
 
+  if (isDetachedEditor) {
+    return (
+      <RendererErrorBoundary label="detached-editor">
+        <DetachedEditorShell />
+      </RendererErrorBoundary>
+    )
+  }
   if (pluginView) {
     const PluginComponent = pluginView.component
     return (
@@ -427,6 +435,55 @@ function buildMergeResolvePrompt(task: MergeResolveTask, dir: string): string {
   return parts.join('\n')
 }
 
+/** Detached editor window — renders EditorOverlay full-screen with tabs from URL */
+const LazyEditorOverlay = React.lazy(() => import('./components/EditorOverlay'))
+
+function DetachedEditorShell() {
+  const loadSettings = useSettingsStore((s) => s.load)
+
+  useEffect(() => {
+    loadSettings().then(() => {
+      applyThemeToDocument(useSettingsStore.getState().settings)
+    })
+  }, [loadSettings])
+
+  // Hydrate editor store from IPC (main process sends tab data after window loads)
+  useEffect(() => {
+    const cleanup = getDockApi().workspaceViewer.onHydrateTabs((tabData: string) => {
+      try {
+        const tabs = JSON.parse(tabData)
+        const { useEditorStore } = require('./stores/editor-store')
+        const store = useEditorStore.getState()
+        for (const tab of tabs) {
+          if (tab.projectDir && tab.relativePath && tab.content != null) {
+            store.openFile(tab.projectDir, tab.relativePath, tab.content)
+          }
+        }
+      } catch { /* ignore malformed data */ }
+    })
+    return cleanup
+  }, [])
+
+  return (
+    <div className="app" style={{ height: '100vh' }}>
+      {/* Frameless window title bar with drag region + controls */}
+      <div className="detached-editor-titlebar" style={{ WebkitAppRegion: 'drag', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 'var(--toolbar-height)', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', padding: '0 8px', flexShrink: 0 } as React.CSSProperties}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>Editor</span>
+        <div style={{ WebkitAppRegion: 'no-drag', display: 'flex', gap: 2 } as React.CSSProperties}>
+          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.minimize()}>&#x2015;</button>
+          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.maximize()}>&#9744;</button>
+          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.close()}>&#10005;</button>
+        </div>
+      </div>
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <Suspense fallback={<div className="loading">Loading editor...</div>}>
+          <LazyEditorOverlay />
+        </Suspense>
+      </div>
+    </div>
+  )
+}
+
 function DockApp() {
   const terminals = useDockStore((s) => s.terminals)
   const projectDir = useDockStore((s) => s.projectDir)
@@ -438,7 +495,7 @@ function DockApp() {
   const loadSettings = useSettingsStore((s) => s.load)
   const autoSpawn = useSettingsStore((s) => s.settings.behavior.autoSpawnFirstTerminal)
 
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = useState<{ tab?: string; section?: string } | false>(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
   const [isResumingSession, setIsResumingSession] = useState(false)
@@ -814,7 +871,7 @@ function DockApp() {
             break
           case ',':
             e.preventDefault()
-            setShowSettings(true)
+            setShowSettings({})
             break
           case 'n':
             e.preventDefault()
@@ -887,7 +944,7 @@ function DockApp() {
         onAddTerminal={handleAddTerminal}
         onRestoreLastClosed={handleRestoreLastClosed}
         onAddTerminalWithSession={handleAddTerminalWithSession}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={(opts) => setShowSettings(opts || {})}
       />
       {terminals.length === 0 ? (
         <EmptyState onAddTerminal={handleAddTerminal} projectDir={projectDir} />
@@ -896,7 +953,7 @@ function DockApp() {
           <DockGrid />
         </DockPanelLayout>
       )}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} initialTab={(showSettings as any).tab} initialSection={(showSettings as any).section} />}
       {pendingTask && (
         <TerminalPicker
           taskLabel={getTaskMeta(pendingTask).label}
