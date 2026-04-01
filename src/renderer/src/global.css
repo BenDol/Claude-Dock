@@ -1215,7 +1215,7 @@ body {
   opacity: 0.4;
   cursor: grab;
   letter-spacing: -2px;
-  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .dock-panel-header[draggable] {
