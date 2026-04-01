@@ -947,6 +947,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     onChange={(e) => update({ shellPanel: { ...settings.shellPanel, defaultHeight: parseInt(e.target.value) || 200 } } as any)}
                   />
                 </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={settings.behavior?.shellEventsEnabled ?? true}
+                    onChange={(e) => updateBehavior({ shellEventsEnabled: e.target.checked })}
+                  />
+                  Show dock event cards in terminals
+                </label>
+                <div className="settings-description">
+                  Displays event cards (exceptions, compile errors, server status, etc.) detected from shell output above each terminal.
+                </div>
                 </SettingsAccordion>
 
                 <SettingsAccordion title="Privacy">

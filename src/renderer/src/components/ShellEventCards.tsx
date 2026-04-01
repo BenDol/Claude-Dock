@@ -153,7 +153,8 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tooltipHoveredRef = useRef(false)
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
+  // Tracks which event types are hidden (toggled off). Empty = all visible.
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
 
   const visibleEvents = events.filter((e) => {
     if (e.sessionId !== sessionId) return false
@@ -167,23 +168,23 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
     typeCounts.set(e.type, (typeCounts.get(e.type) || 0) + 1)
   }
 
-  // Clean stale filters when event types disappear
+  // Clean stale hidden types when event types disappear
   useEffect(() => {
-    if (activeFilters.size === 0) return
-    const stale = [...activeFilters].filter((t) => !typeCounts.has(t))
-    if (stale.length > 0) setActiveFilters((prev) => {
+    if (hiddenTypes.size === 0) return
+    const stale = [...hiddenTypes].filter((t) => !typeCounts.has(t))
+    if (stale.length > 0) setHiddenTypes((prev) => {
       const next = new Set(prev)
       stale.forEach((t) => next.delete(t))
       return next
     })
-  }, [typeCounts, activeFilters])
+  }, [typeCounts, hiddenTypes])
 
-  const filteredEvents = activeFilters.size === 0
+  const filteredEvents = hiddenTypes.size === 0
     ? visibleEvents
-    : visibleEvents.filter((e) => activeFilters.has(e.type))
+    : visibleEvents.filter((e) => !hiddenTypes.has(e.type))
 
   const toggleFilter = useCallback((type: string) => {
-    setActiveFilters((prev) => {
+    setHiddenTypes((prev) => {
       const next = new Set(prev)
       if (next.has(type)) next.delete(type)
       else next.add(type)
@@ -283,14 +284,14 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
           {[...typeCounts.entries()].map(([type, count]) => {
             const icon = EVENT_ICONS[type] || '\u25CF'
             const color = EVENT_COLORS[type] || '#6b6966'
-            const active = activeFilters.has(type)
+            const hidden = hiddenTypes.has(type)
             return (
               <button
                 key={type}
-                className={`shell-event-filter-btn${active ? ' shell-event-filter-active' : ''}`}
+                className={`shell-event-filter-btn${hidden ? '' : ' shell-event-filter-active'}`}
                 style={{ '--filter-color': color } as React.CSSProperties}
                 onClick={() => toggleFilter(type)}
-                title={`${active ? 'Show all' : 'Filter to'} ${type.replace(/_/g, ' ')}`}
+                title={`${hidden ? 'Show' : 'Hide'} ${type.replace(/_/g, ' ')}`}
               >
                 <span className="shell-event-filter-icon" style={{ color }}>{icon}</span>
                 <span className="shell-event-filter-count">{count}</span>

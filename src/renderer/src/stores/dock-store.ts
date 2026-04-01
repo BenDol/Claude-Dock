@@ -272,11 +272,11 @@ export const useDockStore = create<DockState>((set, get) => ({
     if (state.ignoredEventHashes.includes(ignoreKey)) return state
 
     // Deduplicate: remove any existing event with the same type+hash (or same
-    // type within 10s for hashless events) so the new one appears at the end
+    // type for hashless events like server_ready) so the new one appears at the end
     const filtered = state.shellEvents.filter((e) => {
       if (e.type !== event.type || e.sessionId !== event.sessionId) return true
       if (hash) return !(typeof e.payload === 'object' && e.payload.hash === hash)
-      return event.timestamp - e.timestamp >= 10000
+      return false // hashless: always replace existing event of same type
     })
     return {
       shellEvents: [...filtered, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)

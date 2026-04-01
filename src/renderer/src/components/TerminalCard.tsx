@@ -154,6 +154,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const claudeFlags = useDockStore((s) => s.claudeTaskFlags.get(terminalId))
   const permIndicator = parsePermissionIndicator(claudeFlags)
   const shellEnabled = useSettingsStore((s) => s.settings.shellPanel?.enabled ?? true)
+  const shellEventsEnabled = useSettingsStore((s) => s.settings.behavior?.shellEventsEnabled ?? true)
   const defaultShellHeight = useSettingsStore((s) => s.settings.shellPanel?.defaultHeight ?? 200)
   const pendingShellCommand = useDockStore((s) => s.pendingShellCommand)
   const setPendingShellCommand = useDockStore((s) => s.setPendingShellCommand)
@@ -589,9 +590,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               <WorktreeIcon />
             </button>
           </div>
-          <Suspense fallback={null}>
-            <ShellEventCards terminalId={terminalId} sessionId={sessionId} />
-          </Suspense>
+          {shellEventsEnabled && (
+            <Suspense fallback={null}>
+              <ShellEventCards terminalId={terminalId} sessionId={sessionId} />
+            </Suspense>
+          )}
           {shellEnabled && shellAreaMounted && (
             <Suspense fallback={null}>
               <div style={shellAreaOpen ? undefined : { height: 0, overflow: 'hidden' }}>

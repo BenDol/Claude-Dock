@@ -60,6 +60,7 @@ export interface Settings {
     idleNotificationMinLines: number
     idleNotificationDelayMs: number
     shellEventAutoSubmit: boolean
+    shellEventsEnabled: boolean
   }
   updater: {
     profile: string // 'latest' | 'bleeding-edge' | specific release tag
@@ -264,7 +265,8 @@ export const DEFAULT_SETTINGS: Settings = {
     idleNotification: false,
     idleNotificationMinLines: 10,
     idleNotificationDelayMs: 5000,
-    shellEventAutoSubmit: false
+    shellEventAutoSubmit: false,
+    shellEventsEnabled: true
   },
   updater: {
     profile: 'latest',
