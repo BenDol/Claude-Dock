@@ -577,8 +577,10 @@ function handleMessage(msg) {
                   if (useFirstShell && !resolvedShellId) resolvedShellId = shellIds[0] || null
                   if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
                     logFile = sessionEntry.shells[resolvedShellId].logFile || null
-                    const ageMs = Date.now() - (sessionEntry.shells[resolvedShellId].lastUpdate || 0)
-                    shellActive = ageMs < 5 * 60 * 1000
+                    // Shell exists in the output file = it's open. Closed shells are
+                    // removed by the dock app (removeShellOutput). Don't use lastUpdate
+                    // age to determine liveness — idle shells are still active.
+                    shellActive = true
                   }
                 }
               } catch { /* shell output file may not exist yet */ }

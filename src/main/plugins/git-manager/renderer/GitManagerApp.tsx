@@ -5255,7 +5255,7 @@ const WorkingChanges: React.FC<{
     setBatchProgress(`Staging ${paths.length} files...`)
     const r = await api.gitManager.stage(projectDir, paths)
     const failed = !r.success
-    if (failed) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
+    if (failed) onError(`Stage failed: ${r.error || 'Unknown error'}`)
     setBatchProgress(null)
     const newStatus = await getDockApi().gitManager.getStatus(projectDir)
     setLocalStatus(newStatus)
@@ -5349,7 +5349,7 @@ const WorkingChanges: React.FC<{
     if (entry && !isStageable(entry)) return
     setStagingPaths((prev) => new Set(prev).add(filePath))
     const r = await api.gitManager.stage(projectDir, [filePath])
-    if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`)
     const newStatus = await getDockApi().gitManager.getStatus(projectDir)
     setLocalStatus(newStatus)
     if (onStatusRefreshed) onStatusRefreshed(newStatus)
@@ -5427,7 +5427,7 @@ const WorkingChanges: React.FC<{
     if (stageable.length === 0) return
     setStagingPaths(new Set(stageable))
     const r = await api.gitManager.stage(projectDir, stageable)
-    if (!r.success) handleSmartError(`Stage failed: ${r.error || 'Unknown error'}`)
+    if (!r.success) onError(`Stage failed: ${r.error || 'Unknown error'}`)
     await refreshStatus()
     setStagingPaths(new Set())
     setSelectedPaths(new Set())
