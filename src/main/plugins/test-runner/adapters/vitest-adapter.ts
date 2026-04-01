@@ -62,6 +62,9 @@ export class VitestAdapter implements RunnerAdapter {
     const names = testIds.filter((id) => !id.includes('/') && !id.includes('.'))
     if (files.length > 0) args.push(...files)
     if (names.length > 0 && !options?.grep) args.push(`--testNamePattern="${names.join('|')}"`)
+    // Extra args from project config or plugin settings
+    const extraArgs = options?.adapterConfig?.extraArgs
+    if (extraArgs) args.push(extraArgs)
     return args.join(' ')
   }
 

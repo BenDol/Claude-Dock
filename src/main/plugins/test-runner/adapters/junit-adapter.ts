@@ -180,10 +180,18 @@ export class JUnitMavenAdapter extends JUnitAdapterBase {
     } catch { return null }
   }
 
-  buildRunCommand(_projectDir: string, _config: DetectionResult, testIds: string[], _options?: RunOptions): string {
-    if (testIds.length === 0) return 'mvn test -Dsurefire.useFile=false'
-    const tests = testIds.join(',')
-    return `mvn test -Dtest=${tests} -Dsurefire.useFile=false`
+  buildRunCommand(_projectDir: string, _config: DetectionResult, testIds: string[], options?: RunOptions): string {
+    const parts = ['mvn', 'test']
+    // Maven profiles from project config
+    const profiles = options?.adapterConfig?.profiles
+    if (profiles) parts.push(`-P${profiles}`)
+    // Test selection
+    if (testIds.length > 0) parts.push(`-Dtest=${testIds.join(',')}`)
+    parts.push('-Dsurefire.useFile=false')
+    // Extra args from project config or plugin settings
+    const extraArgs = options?.adapterConfig?.extraArgs
+    if (extraArgs) parts.push(extraArgs)
+    return parts.join(' ')
   }
 }
 
@@ -204,9 +212,13 @@ export class JUnitGradleAdapter extends JUnitAdapterBase {
     } catch { return null }
   }
 
-  buildRunCommand(_projectDir: string, _config: DetectionResult, testIds: string[], _options?: RunOptions): string {
-    if (testIds.length === 0) return './gradlew test'
-    const tests = testIds.map((t) => `--tests "${t}"`).join(' ')
-    return `./gradlew test ${tests}`
+  buildRunCommand(_projectDir: string, _config: DetectionResult, testIds: string[], options?: RunOptions): string {
+    const parts = ['./gradlew', 'test']
+    if (testIds.length > 0) {
+      for (const t of testIds) parts.push(`--tests "${t}"`)
+    }
+    const extraArgs = options?.adapterConfig?.extraArgs
+    if (extraArgs) parts.push(extraArgs)
+    return parts.join(' ')
   }
 }

@@ -43,6 +43,11 @@ export interface RunOptions {
   watch?: boolean
   verbose?: boolean
   grep?: string
+  adapterConfig?: {
+    profiles?: string
+    extraArgs?: string
+    env?: Record<string, string>
+  }
 }
 
 export interface TestRunResult {

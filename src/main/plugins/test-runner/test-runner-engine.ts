@@ -3,6 +3,7 @@ import { getServices } from './services'
 import { detectAdapters, getAdapter } from './adapters/adapter-registry'
 import type { DetectionResult, TestItem, TestRunResult, RunOptions } from './adapters/runner-adapter'
 import { TestRunnerWindowManager } from './test-runner-window'
+import { getAdapterConfig, clearConfigCache } from './project-config'
 
 const svc = () => getServices()
 
@@ -34,6 +35,7 @@ export async function detect(projectDir: string): Promise<DetectionResult[]> {
 export function clearDetectionCache(projectDir?: string): void {
   if (projectDir) detectionCache.delete(projectDir)
   else detectionCache.clear()
+  clearConfigCache(projectDir)
 }
 
 export async function discover(projectDir: string, adapterId: string): Promise<TestItem[]> {
@@ -71,7 +73,24 @@ export async function runTests(
   const config = detections.find((d) => d.adapterId === adapterId)
   if (!config) throw new Error(`Framework ${adapterId} not detected in ${projectDir}`)
 
-  const command = adapter.buildRunCommand(projectDir, config, testIds, options)
+  // Load project config (.claude/test-runner.json) and merge with plugin settings
+  const pluginSettings: Record<string, unknown> = {}
+  try {
+    for (const key of ['mavenProfiles', 'mavenExtraArgs', 'gradleExtraArgs', 'vitestExtraArgs']) {
+      const val = svc().getPluginSetting(projectDir, 'test-runner', key)
+      if (val != null) pluginSettings[key] = val
+    }
+  } catch { /* ignore */ }
+  const adapterConfig = getAdapterConfig(projectDir, adapterId, pluginSettings)
+
+  const mergedOptions: RunOptions = {
+    ...options,
+    adapterConfig: adapterConfig.profiles || adapterConfig.extraArgs
+      ? { profiles: adapterConfig.profiles, extraArgs: adapterConfig.extraArgs, env: adapterConfig.env }
+      : options?.adapterConfig
+  }
+
+  const command = adapter.buildRunCommand(projectDir, config, testIds, mergedOptions)
   const runId = `run-${Date.now()}`
 
   svc().log(`[test-runner] running: ${command} in ${projectDir}`)
@@ -83,12 +102,15 @@ export async function runTests(
 
   safeSend('testRunner:status', { status: 'running', runId })
 
+  // Merge environment variables from adapter config
+  const spawnEnv = { ...process.env, FORCE_COLOR: '1', ...(adapterConfig.env || {}) }
+
   let proc: ChildProcess
   try {
     proc = spawn(command, {
       cwd: config.configDir,
       shell: true,
-      env: { ...process.env, FORCE_COLOR: '1' }
+      env: spawnEnv
     })
   } catch (err) {
     svc().logError('[test-runner] spawn failed:', err)

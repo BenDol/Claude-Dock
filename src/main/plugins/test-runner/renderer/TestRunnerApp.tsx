@@ -131,8 +131,10 @@ const TestRunnerApp: React.FC = () => {
   const [testFilter, setTestFilter] = useState('')
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
   const [running, setRunning] = useState(false)
+  const [runningTests, setRunningTests] = useState<Set<string>>(new Set())
   const [output, setOutput] = useState('')
   const [results, setResults] = useState<TestRunResult | null>(null)
+  const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null)
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const outputRef = useRef<HTMLPreElement>(null)
 
@@ -175,27 +177,46 @@ const TestRunnerApp: React.FC = () => {
     })
     const cleanupResults = api.testRunner.onResults((r) => {
       setResults(r)
+      setRunningTests(new Set())
     })
     const cleanupStatus = api.testRunner.onStatus((s) => {
+      if (s.status !== 'running') setRunningTests(new Set())
       setRunning(s.status === 'running')
     })
     return () => { cleanupOutput(); cleanupResults(); cleanupStatus() }
   }, [])
 
+  // Collect all test IDs from the tree for marking as running
+  const allTestIds = useCallback(() => {
+    const ids = new Set<string>()
+    const walk = (items: TestItem[]) => {
+      for (const item of items) {
+        ids.add(item.id)
+        if (item.children) walk(item.children)
+      }
+    }
+    walk(testTree)
+    return ids
+  }, [testTree])
+
   const handleRunAll = useCallback(async () => {
     if (!activeFramework || running) return
     setOutput('')
     setResults(null)
+    setSelectedDetailId(null)
     setExpandedErrors(new Set())
+    setRunningTests(allTestIds())
     setRunning(true)
     await api.testRunner.run(projectDir, activeFramework, [])
-  }, [projectDir, activeFramework, running])
+  }, [projectDir, activeFramework, running, allTestIds])
 
   const handleRunSelected = useCallback(async () => {
     if (!activeFramework || running || selectedTests.size === 0) return
     setOutput('')
     setResults(null)
+    setSelectedDetailId(null)
     setExpandedErrors(new Set())
+    setRunningTests(new Set(selectedTests))
     setRunning(true)
     await api.testRunner.run(projectDir, activeFramework, [...selectedTests])
   }, [projectDir, activeFramework, running, selectedTests])
@@ -364,9 +385,12 @@ const TestRunnerApp: React.FC = () => {
                           depth={0}
                           selectedTests={selectedTests}
                           expandedNodes={expandedNodes}
+                          runningTests={runningTests}
                           lastResults={results}
+                          selectedDetailId={selectedDetailId}
                           onToggleSelect={toggleTestSelection}
                           onToggleExpand={toggleExpand}
+                          onSelectDetail={setSelectedDetailId}
                         />
                       ))}
                       {visibleTree.length === 0 && <div className="tr-empty-small">{testFilter ? 'No matches' : 'No tests found'}</div>}
@@ -404,37 +428,35 @@ const TestRunnerApp: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Output */}
-                <pre className="tr-output" ref={outputRef}>
-                  {output || (running ? 'Starting test run...\n' : 'Click "Run All Tests" to start.\n')}
-                </pre>
-
-                {/* Results */}
+                {/* Summary bar */}
                 {results && (
+                  <div className="tr-results-summary">
+                    {results.summary.passed > 0 && <span className="tr-results-passed">{results.summary.passed} passed</span>}
+                    {results.summary.failed > 0 && <span className="tr-results-failed">{results.summary.failed} failed</span>}
+                    {results.summary.skipped > 0 && <span className="tr-results-skipped">{results.summary.skipped} skipped</span>}
+                    <span>{results.summary.total} total</span>
+                    {results.summary.duration != null && <span>{(results.summary.duration / 1000).toFixed(1)}s</span>}
+                  </div>
+                )}
+
+                {/* Test detail or output */}
+                {selectedDetailId && results ? (
+                  <TestDetailPanel
+                    testResult={results.tests.find((t) => t.id === selectedDetailId || t.name === selectedDetailId)}
+                    output={output}
+                    onClose={() => setSelectedDetailId(null)}
+                    onShowOutput={() => setSelectedDetailId(null)}
+                  />
+                ) : (
+                  <pre className="tr-output" ref={outputRef}>
+                    {output || (running ? 'Starting test run...\n' : 'Click "Run All Tests" to start.\n')}
+                  </pre>
+                )}
+
+                {/* Legacy results list removed — status now shown inline in tree */}
+                {false && results && (
                   <div className="tr-results">
-                    <div className="tr-results-summary">
-                      {results.summary.passed > 0 && <span className="tr-results-passed">{results.summary.passed} passed</span>}
-                      {results.summary.failed > 0 && <span className="tr-results-failed">{results.summary.failed} failed</span>}
-                      {results.summary.skipped > 0 && <span className="tr-results-skipped">{results.summary.skipped} skipped</span>}
-                      <span>{results.summary.total} total</span>
-                      {results.summary.duration != null && <span>{(results.summary.duration / 1000).toFixed(1)}s</span>}
-                    </div>
-                    <div className="tr-results-list">
-                      {results.tests.map((t) => (
-                        <React.Fragment key={t.id}>
-                          <div className="tr-result-row" onClick={() => t.error && toggleError(t.id)}>
-                            <span className={t.status === 'passed' ? 'tr-result-icon-pass' : t.status === 'failed' ? 'tr-result-icon-fail' : 'tr-result-icon-skip'}>
-                              {t.status === 'passed' ? '✓' : t.status === 'failed' ? '✗' : '○'}
-                            </span>
-                            <span className="tr-result-name">{t.suite ? `${t.suite} > ` : ''}{t.name}</span>
-                            {t.duration != null && <span className="tr-result-duration">{t.duration}ms</span>}
-                          </div>
-                          {t.error && expandedErrors.has(t.id) && (
-                            <div className="tr-result-error">{t.error.message}{t.error.stack ? '\n' + t.error.stack : ''}</div>
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </div>
+                    <div className="tr-results-list"></div>
                   </div>
                 )}
               </div>
@@ -460,47 +482,79 @@ const TestTreeNode: React.FC<{
   depth: number
   selectedTests: Set<string>
   expandedNodes: Set<string>
+  runningTests: Set<string>
   lastResults: TestRunResult | null
+  selectedDetailId: string | null
   onToggleSelect: (item: TestItem) => void
   onToggleExpand: (id: string) => void
-}> = ({ item, depth, selectedTests, expandedNodes, lastResults, onToggleSelect, onToggleExpand }) => {
+  onSelectDetail: (id: string) => void
+}> = ({ item, depth, selectedTests, expandedNodes, runningTests, lastResults, selectedDetailId, onToggleSelect, onToggleExpand, onSelectDetail }) => {
   const hasChildren = item.children && item.children.length > 0
   const expanded = expandedNodes.has(item.id)
   const testIds = collectTestIds(item)
   const allSelected = testIds.every((id) => selectedTests.has(id))
   const someSelected = !allSelected && testIds.some((id) => selectedTests.has(id))
 
-  // Find result status for this item
-  const resultStatus = lastResults?.tests.find((t) => t.id === item.id || t.name === item.label)?.status
+  // Determine state: running, passed, failed, or idle
+  const isRunning = runningTests.has(item.id) || testIds.some((id) => runningTests.has(id))
+  const resultEntry = lastResults?.tests.find((t) => t.id === item.id || t.name === item.label)
+  const resultStatus = resultEntry?.status
+  const isDetailSelected = selectedDetailId === item.id
+
+  // For suites/describes: aggregate child results
+  const hasFailedChild = hasChildren && lastResults?.tests.some((t) => {
+    return testIds.includes(t.id) && t.status === 'failed'
+  })
+  const allChildrenPassed = hasChildren && !isRunning && lastResults && testIds.length > 0 &&
+    testIds.every((id) => lastResults.tests.some((t) => t.id === id && t.status === 'passed'))
+
+  // Determine what icon to show in place of the checkbox
+  const showStatusIcon = isRunning || resultStatus || hasFailedChild || allChildrenPassed
+
+  const handleClick = () => {
+    if (resultEntry && !hasChildren) {
+      onSelectDetail(item.id)
+    } else if (hasChildren) {
+      onToggleExpand(item.id)
+    } else {
+      onToggleSelect(item)
+    }
+  }
 
   return (
     <>
       <div
-        className="tr-tree-item"
+        className={`tr-tree-item${isDetailSelected ? ' tr-tree-item-selected' : ''}`}
         style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={() => hasChildren ? onToggleExpand(item.id) : onToggleSelect(item)}
+        onClick={handleClick}
       >
         {hasChildren && (
           <span className={`tr-tree-arrow${expanded ? ' tr-tree-arrow-open' : ''}`} onClick={(e) => { e.stopPropagation(); onToggleExpand(item.id) }}>&#9656;</span>
         )}
         {!hasChildren && <span className="tr-tree-arrow-spacer" />}
-        <input
-          type="checkbox"
-          className="tr-tree-checkbox"
-          checked={allSelected}
-          ref={(el) => { if (el) el.indeterminate = someSelected }}
-          onChange={() => onToggleSelect(item)}
-          onClick={(e) => e.stopPropagation()}
-        />
-        <span className={`tr-tree-type-icon tr-tree-type-${item.type}`}>
-          {item.type === 'file' ? '📄' : item.type === 'suite' ? '📦' : item.type === 'describe' ? '📁' : '⚡'}
-        </span>
-        <span className="tr-tree-label">{item.label}</span>
-        {resultStatus && (
-          <span className={`tr-tree-status tr-tree-status-${resultStatus}`}>
-            {resultStatus === 'passed' ? '✓' : resultStatus === 'failed' ? '✗' : '○'}
+        {showStatusIcon ? (
+          <span className="tr-tree-status-icon">
+            {isRunning ? (
+              <span className="tr-tree-spinner" />
+            ) : resultStatus === 'passed' || allChildrenPassed ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            ) : resultStatus === 'failed' || hasFailedChild ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f7768e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            ) : resultStatus === 'skipped' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e0af68" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            ) : (
+              <input type="checkbox" className="tr-tree-checkbox" checked={allSelected}
+                ref={(el) => { if (el) el.indeterminate = someSelected }}
+                onChange={() => onToggleSelect(item)} onClick={(e) => e.stopPropagation()} />
+            )}
           </span>
+        ) : (
+          <input type="checkbox" className="tr-tree-checkbox" checked={allSelected}
+            ref={(el) => { if (el) el.indeterminate = someSelected }}
+            onChange={() => onToggleSelect(item)} onClick={(e) => e.stopPropagation()} />
         )}
+        <span className="tr-tree-label">{item.label}</span>
+        {resultEntry?.duration != null && <span className="tr-tree-duration">{resultEntry.duration}ms</span>}
       </div>
       {hasChildren && expanded && item.children!.map((child) => (
         <TestTreeNode
@@ -509,12 +563,98 @@ const TestTreeNode: React.FC<{
           depth={depth + 1}
           selectedTests={selectedTests}
           expandedNodes={expandedNodes}
+          runningTests={runningTests}
           lastResults={lastResults}
+          selectedDetailId={selectedDetailId}
           onToggleSelect={onToggleSelect}
           onToggleExpand={onToggleExpand}
+          onSelectDetail={onSelectDetail}
         />
       ))}
     </>
+  )
+}
+
+// --- Test detail panel ---
+
+const TestDetailPanel: React.FC<{
+  testResult?: TestResult
+  output: string
+  onClose: () => void
+  onShowOutput: () => void
+}> = ({ testResult, output, onClose, onShowOutput }) => {
+  if (!testResult) {
+    return (
+      <div className="tr-detail">
+        <div className="tr-detail-header">
+          <span>Test not found in results</span>
+          <button className="tr-detail-close" onClick={onClose}>&#10005;</button>
+        </div>
+      </div>
+    )
+  }
+
+  const statusLabel = testResult.status === 'passed' ? 'PASSED' : testResult.status === 'failed' ? 'FAILED' : testResult.status === 'skipped' ? 'SKIPPED' : 'ERROR'
+
+  return (
+    <div className="tr-detail">
+      <div className="tr-detail-header">
+        <span className={`tr-detail-status tr-detail-status-${testResult.status}`}>
+          {testResult.status === 'passed' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+          ) : testResult.status === 'failed' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          )}
+          {statusLabel}
+        </span>
+        <span className="tr-detail-name">{testResult.suite ? `${testResult.suite} > ` : ''}{testResult.name}</span>
+        <span style={{ flex: 1 }} />
+        {testResult.duration != null && <span className="tr-detail-duration">{testResult.duration}ms</span>}
+        <button className="tr-detail-btn" onClick={onShowOutput} title="Show raw output">Output</button>
+        <button className="tr-detail-close" onClick={onClose}>&#10005;</button>
+      </div>
+
+      <div className="tr-detail-body">
+        {testResult.status === 'passed' && !testResult.error && (
+          <div className="tr-detail-pass-msg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ece6a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+            <span>Test passed successfully</span>
+            {testResult.duration != null && <span className="tr-detail-duration-large">in {testResult.duration}ms</span>}
+          </div>
+        )}
+
+        {testResult.status === 'skipped' && (
+          <div className="tr-detail-skip-msg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e0af68" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            <span>Test was skipped</span>
+          </div>
+        )}
+
+        {testResult.error && (
+          <div className="tr-detail-error">
+            <div className="tr-detail-error-header">Error</div>
+            <div className="tr-detail-error-message">{testResult.error.message}</div>
+            {testResult.error.expected != null && testResult.error.actual != null && (
+              <div className="tr-detail-diff">
+                <div className="tr-detail-diff-row">
+                  <span className="tr-detail-diff-label">Expected:</span>
+                  <code className="tr-detail-diff-value tr-detail-diff-expected">{testResult.error.expected}</code>
+                </div>
+                <div className="tr-detail-diff-row">
+                  <span className="tr-detail-diff-label">Actual:</span>
+                  <code className="tr-detail-diff-value tr-detail-diff-actual">{testResult.error.actual}</code>
+                </div>
+              </div>
+            )}
+            {testResult.error.stack && (
+              <pre className="tr-detail-stack">{testResult.error.stack}</pre>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

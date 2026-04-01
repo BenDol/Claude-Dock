@@ -284,12 +284,14 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
       {filteredEvents.map((event) => {
         const icon = EVENT_ICONS[event.type] || '\u25CF'
         const color = EVENT_COLORS[event.type] || '#6b6966'
-        const summary =
+        const rawSummary =
           typeof event.payload === 'object'
             ? event.payload.reason ||
               event.payload.header?.slice(0, 80) ||
-              event.type
-            : event.payload || event.type
+              null
+            : event.payload || null
+        // Only show summary if it adds info beyond the type name
+        const summary = rawSummary && rawSummary !== event.type ? String(rawSummary).slice(0, 80) : null
 
         return (
           <div
@@ -302,7 +304,7 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
           >
             <span className="shell-event-icon" style={{ color }}>{icon}</span>
             <span className="shell-event-type">{event.type.replace(/_/g, ' ')}</span>
-            <span className="shell-event-summary">{String(summary).slice(0, 80)}</span>
+            {summary && <span className="shell-event-summary">{summary}</span>}
             <div className="shell-event-actions">
               <button
                 className="shell-event-ignore-btn"
