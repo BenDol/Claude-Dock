@@ -2,7 +2,7 @@ import { ipcMain, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
-import { readDirectory, readTree, sanitizePath } from './file-scanner'
+import { readDirectory, readTree, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
 
 import { getServices } from './services'
 
@@ -23,10 +23,33 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WORKSPACE_READ_TREE, async (_event, projectDir: string, maxDepth?: number, hideIgnored?: boolean) => {
+  ipcMain.handle(IPC.WORKSPACE_READ_TREE, async (event, projectDir: string, maxDepth?: number, hideIgnored?: boolean) => {
+    const depth = Math.min(Math.max(maxDepth ?? 2, 1), 5)
+    const hi = hideIgnored ?? false
+
+    // Try cache first — instant return, no filesystem scan
+    const cached = loadTreeCache(projectDir, depth, hi)
+    if (cached) {
+      // Return cache immediately, then refresh in background and notify renderer
+      setImmediate(async () => {
+        try {
+          const fresh = readTree(projectDir, depth, hi)
+          saveTreeCache(projectDir, fresh, depth, hi)
+          // Send updated tree to renderer if the window is still alive
+          try {
+            const wc = event.sender
+            if (!wc.isDestroyed()) wc.send('workspace:treeRefreshed', fresh)
+          } catch { /* ignore */ }
+        } catch { /* ignore background refresh failure */ }
+      })
+      return cached
+    }
+
+    // No cache — scan synchronously (first-ever load for this project)
     try {
-      const depth = Math.min(Math.max(maxDepth ?? 2, 1), 5)
-      return readTree(projectDir, depth, hideIgnored ?? false)
+      const tree = readTree(projectDir, depth, hi)
+      saveTreeCache(projectDir, tree, depth, hi)
+      return tree
     } catch (err) {
       getServices().logError('[workspace] readTree failed:', err); return []
     }

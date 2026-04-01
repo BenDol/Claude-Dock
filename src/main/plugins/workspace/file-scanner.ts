@@ -1,6 +1,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import * as crypto from 'crypto'
 import { execFileSync } from 'child_process'
+import { app } from 'electron'
 
 export interface FileEntry {
   name: string
@@ -110,6 +112,88 @@ export function readTree(projectDir: string, maxDepth = 2, hideIgnored = false):
     return nodes
   }
   return walk('', 0)
+}
+
+// ── Tree cache ───────────────────────────────────────────────────────
+
+const CACHE_VERSION = 1
+const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+interface TreeCache {
+  version: number
+  projectDir: string
+  timestamp: number
+  maxDepth: number
+  hideIgnored: boolean
+  tree: TreeNode[]
+}
+
+function getCacheDir(): string {
+  try {
+    return path.join(app.getPath('userData'), 'workspace-cache')
+  } catch {
+    // app may not be ready yet during early startup
+    return ''
+  }
+}
+
+function getCacheKey(projectDir: string): string {
+  return crypto.createHash('md5').update(projectDir.replace(/\\/g, '/').toLowerCase()).digest('hex')
+}
+
+function getCachePath(projectDir: string): string {
+  return path.join(getCacheDir(), getCacheKey(projectDir) + '.json')
+}
+
+/** Load cached tree for a project. Returns null if no cache or cache is stale. */
+export function loadTreeCache(projectDir: string, maxDepth: number, hideIgnored: boolean): TreeNode[] | null {
+  const cacheDir = getCacheDir()
+  if (!cacheDir) return null
+  try {
+    const cachePath = getCachePath(projectDir)
+    if (!fs.existsSync(cachePath)) return null
+    const raw = fs.readFileSync(cachePath, 'utf-8')
+    const cache: TreeCache = JSON.parse(raw)
+    if (cache.version !== CACHE_VERSION) return null
+    if (Date.now() - cache.timestamp > CACHE_MAX_AGE) return null
+    if (cache.maxDepth < maxDepth) return null // cached at shallower depth
+    if (cache.hideIgnored !== hideIgnored) return null
+    return cache.tree
+  } catch {
+    return null
+  }
+}
+
+/** Save tree to disk cache. Non-blocking — errors are silently ignored. */
+export function saveTreeCache(projectDir: string, tree: TreeNode[], maxDepth: number, hideIgnored: boolean): void {
+  const cacheDir = getCacheDir()
+  if (!cacheDir) return
+  try {
+    fs.mkdirSync(cacheDir, { recursive: true })
+    const cache: TreeCache = {
+      version: CACHE_VERSION,
+      projectDir,
+      timestamp: Date.now(),
+      maxDepth,
+      hideIgnored,
+      tree
+    }
+    fs.writeFileSync(getCachePath(projectDir), JSON.stringify(cache))
+  } catch { /* ignore — cache is best-effort */ }
+}
+
+/** Clear cache for a project (or all caches). */
+export function clearTreeCache(projectDir?: string): void {
+  const cacheDir = getCacheDir()
+  if (!cacheDir) return
+  try {
+    if (projectDir) {
+      const p = getCachePath(projectDir)
+      if (fs.existsSync(p)) fs.unlinkSync(p)
+    } else {
+      if (fs.existsSync(cacheDir)) fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+  } catch { /* ignore */ }
 }
 
 export { sanitizePath }

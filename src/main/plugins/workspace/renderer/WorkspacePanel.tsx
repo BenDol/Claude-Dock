@@ -407,6 +407,15 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     return () => { api.workspace.watchStop(projectDir).catch(() => { /* ignore */ }) }
   }, [projectDir])
 
+  // Listen for background tree refresh (cache was served first, fresh scan arrived)
+  useEffect(() => {
+    if (!projectDir) return
+    const cleanup = api.workspace.onTreeRefreshed((freshTree: FileEntry[]) => {
+      setTree(freshTree)
+    })
+    return cleanup
+  }, [projectDir])
+
   // Refs for values used in change handler to avoid re-registering on every state change
   const expandedPathsRef = useRef(expandedPaths)
   const hideIgnoredRef = useRef(hideIgnored)

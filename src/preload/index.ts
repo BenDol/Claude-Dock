@@ -388,6 +388,7 @@ export interface DockApi {
     watchStart: (projectDir: string) => Promise<void>
     watchStop: (projectDir: string) => Promise<void>
     onChanged: (callback: (changes: string[]) => void) => () => void
+    onTreeRefreshed: (callback: (tree: any[]) => void) => () => void
     onHydrateTabs: (callback: (tabData: string) => void) => () => void
   }
 }
@@ -833,6 +834,11 @@ const dockApi: DockApi = {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
       ipcRenderer.on('workspace:changed', handler)
       return () => ipcRenderer.removeListener('workspace:changed', handler)
+    },
+    onTreeRefreshed: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, tree: any[]) => callback(tree)
+      ipcRenderer.on('workspace:treeRefreshed', handler)
+      return () => ipcRenderer.removeListener('workspace:treeRefreshed', handler)
     },
     onHydrateTabs: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, tabData: string) => callback(tabData)
