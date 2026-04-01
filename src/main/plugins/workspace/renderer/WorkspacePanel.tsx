@@ -283,7 +283,7 @@ const ContextMenu: React.FC<{
 
 // --- Main Panel ---
 
-const ZOOM_KEY = 'ws-viewer-zoom'
+const ZOOM_KEY = 'workspace-zoom'
 const MIN_ZOOM = 0.6
 const MAX_ZOOM = 1.8
 const ZOOM_STEP = 0.05
@@ -323,9 +323,9 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     allFilePaths.current = paths
   }, [tree])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
-  const [compact, setCompact] = useState(() => localStorage.getItem('ws-viewer-compact') !== 'false')
+  const [compact, setCompact] = useState(() => localStorage.getItem('workspace-compact') !== 'false')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [hideIgnored, setHideIgnored] = useState(() => localStorage.getItem('ws-viewer-hide-ignored') === 'true')
+  const [hideIgnored, setHideIgnored] = useState(() => localStorage.getItem('workspace-hide-ignored') === 'true')
   const panelRootRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(1)
 
@@ -521,8 +521,8 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   // Listen for collapse all from header action
   useEffect(() => {
     const onCollapse = () => collapseAll()
-    window.addEventListener('ws-viewer:collapse-all', onCollapse)
-    return () => window.removeEventListener('ws-viewer:collapse-all', onCollapse)
+    window.addEventListener('workspace:collapse-all', onCollapse)
+    return () => window.removeEventListener('workspace:collapse-all', onCollapse)
   }, [collapseAll])
 
   // Ctrl+F in workspace panel opens search, Ctrl+Shift+F from anywhere opens it too
@@ -674,7 +674,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
         />
         <button
           className={`ws-panel-btn${compact ? ' ws-panel-btn-active' : ''}`}
-          onClick={() => { const next = !compact; setCompact(next); localStorage.setItem('ws-viewer-compact', String(next)) }}
+          onClick={() => { const next = !compact; setCompact(next); localStorage.setItem('workspace-compact', String(next)) }}
           title={compact ? 'Compact paths (on)' : 'Compact paths (off)'}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -683,7 +683,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
         </button>
         <button
           className={`ws-panel-btn${hideIgnored ? ' ws-panel-btn-active' : ''}`}
-          onClick={() => { const next = !hideIgnored; setHideIgnored(next); localStorage.setItem('ws-viewer-hide-ignored', String(next)) }}
+          onClick={() => { const next = !hideIgnored; setHideIgnored(next); localStorage.setItem('workspace-hide-ignored', String(next)) }}
           title={hideIgnored ? 'Showing tracked files only (click to show all)' : 'Showing all files (click to hide git-ignored)'}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

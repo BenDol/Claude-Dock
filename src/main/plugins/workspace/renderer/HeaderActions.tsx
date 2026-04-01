@@ -10,7 +10,7 @@ const HeaderActions: React.FC<PanelProps> = () => {
     <div className="ws-header-actions">
       <button
         className="ws-header-btn"
-        onClick={() => window.dispatchEvent(new CustomEvent('ws-viewer:collapse-all'))}
+        onClick={() => window.dispatchEvent(new CustomEvent('workspace:collapse-all'))}
         title="Collapse all"
       >
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
