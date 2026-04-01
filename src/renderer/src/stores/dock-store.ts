@@ -271,20 +271,15 @@ export const useDockStore = create<DockState>((set, get) => ({
     const ignoreKey = hash ? `${event.type}:${hash}` : event.type
     if (state.ignoredEventHashes.includes(ignoreKey)) return state
 
-    // Deduplicate: if an event with the same type exists and has the same payload hash
-    // (or same type within 10s for hashless events like server_stopped), update it instead
-    const dupeIdx = state.shellEvents.findIndex((e) => {
-      if (e.type !== event.type || e.sessionId !== event.sessionId) return false
-      if (hash) return typeof e.payload === 'object' && e.payload.hash === hash
-      return event.timestamp - e.timestamp < 10000
+    // Deduplicate: remove any existing event with the same type+hash (or same
+    // type within 10s for hashless events) so the new one appears at the end
+    const filtered = state.shellEvents.filter((e) => {
+      if (e.type !== event.type || e.sessionId !== event.sessionId) return true
+      if (hash) return !(typeof e.payload === 'object' && e.payload.hash === hash)
+      return event.timestamp - e.timestamp >= 10000
     })
-    if (dupeIdx >= 0) {
-      const updated = [...state.shellEvents]
-      updated[dupeIdx] = { ...updated[dupeIdx], payload: event.payload, timestamp: event.timestamp }
-      return { shellEvents: updated }
-    }
     return {
-      shellEvents: [...state.shellEvents, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)
+      shellEvents: [...filtered, { ...event, id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }].slice(-20)
     }
   }),
 

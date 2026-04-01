@@ -14,6 +14,7 @@ import App from './App'
 window.onerror = (message, source, lineno, colno, error) => {
   const text = `[renderer] uncaught error: ${message} at ${source}:${lineno}:${colno}${error?.stack ? '\n' + error.stack : ''}`
   try { window.dockApi?.debug?.write(text) } catch { /* IPC may be dead */ }
+  try { window.dockApi?.debug?.reportCrash('uncaughtError', String(message), error?.stack || `${source}:${lineno}:${colno}`) } catch { /* IPC may be dead */ }
   console.error(text)
 }
 
@@ -21,6 +22,7 @@ window.onunhandledrejection = (event: PromiseRejectionEvent) => {
   const reason = event.reason
   const text = `[renderer] unhandled rejection: ${reason instanceof Error ? reason.message + '\n' + reason.stack : String(reason)}`
   try { window.dockApi?.debug?.write(text) } catch { /* IPC may be dead */ }
+  try { window.dockApi?.debug?.reportCrash('unhandledRejection', reason instanceof Error ? reason.message : String(reason), reason instanceof Error ? (reason.stack || '') : '') } catch { /* IPC may be dead */ }
   console.error(text)
 }
 

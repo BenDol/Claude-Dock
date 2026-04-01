@@ -53,6 +53,7 @@ class RendererErrorBoundary extends Component<
   componentDidCatch(error: Error, info: ErrorInfo) {
     const text = `[renderer] React error boundary caught: ${error.message}\n${error.stack || ''}\nComponent stack: ${info.componentStack || 'N/A'}`
     try { getDockApi().debug.write(text) } catch { /* IPC may be dead */ }
+    try { getDockApi().debug.reportCrash('react-error-boundary', error.message, (error.stack || '') + '\nComponent stack: ' + (info.componentStack || 'N/A')) } catch { /* IPC may be dead */ }
     console.error(text)
   }
 

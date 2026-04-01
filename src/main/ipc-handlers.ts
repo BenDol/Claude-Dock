@@ -13,6 +13,7 @@ import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLoc
 import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, installGit, checkClaudePath, fixClaudePath } from './claude-cli'
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } from './context-menu-integration'
+import { CrashReporter } from './crash-reporter'
 import { ActivityTracker } from './activity-tracker'
 import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
@@ -924,6 +925,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.DEBUG_WRITE, (_event, text: string) => {
     log(`[renderer] ${text}`)
+  })
+
+  ipcMain.handle(IPC.DEBUG_REPORT_CRASH, (_event, type: string, message: string, stack: string) => {
+    log(`[renderer] crash report: ${type} - ${message}`)
+    try {
+      const err = new Error(message)
+      err.stack = stack
+      CrashReporter.getInstance().report(`renderer:${type}`, err)
+    } catch { /* ok */ }
   })
 
   ipcMain.handle(IPC.DEBUG_OPEN_LOGS, () => {

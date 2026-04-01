@@ -12,6 +12,7 @@ import { ProjectSettingsWatcher } from './project-settings'
 import { ActivityTracker } from './activity-tracker'
 import { IdleNotifier } from './idle-notifier'
 import { log } from './logger'
+import { CrashReporter } from './crash-reporter'
 
 declare const __DEV__: boolean
 
@@ -140,6 +141,9 @@ export class DockWindow {
 
     this.window.webContents.on('render-process-gone', (_event, details) => {
       log(`DockWindow ${id}: renderer gone reason=${details.reason} exitCode=${details.exitCode}`)
+      if (details.reason !== 'clean-exit') {
+        try { CrashReporter.getInstance().reportChildProcessGone({ type: 'renderer', reason: details.reason, exitCode: details.exitCode }) } catch { /* ok */ }
+      }
     })
 
     this.window.on('unresponsive', () => {

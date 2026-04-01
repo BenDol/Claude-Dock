@@ -77,6 +77,7 @@ export const IPC = {
   PLUGIN_RESET_TRUST: 'plugin:resetTrust',
   PLUGIN_GET_OVERRIDES: 'plugin:getOverrides',
   DEBUG_WRITE: 'debug:write',
+  DEBUG_REPORT_CRASH: 'debug:reportCrash',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
   DEBUG_OPEN_LOGS: 'debug:openLogs',
 

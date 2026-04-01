@@ -348,6 +348,7 @@ export interface DockApi {
   }
   debug: {
     write: (text: string) => Promise<void>
+    reportCrash: (type: string, message: string, stack: string) => Promise<void>
     openDevTools: () => Promise<void>
     openLogs: () => Promise<void>
   }
@@ -746,6 +747,7 @@ const dockApi: DockApi = {
   },
   debug: {
     write: (text) => ipcRenderer.invoke(IPC.DEBUG_WRITE, text),
+    reportCrash: (type: string, message: string, stack: string) => ipcRenderer.invoke(IPC.DEBUG_REPORT_CRASH, type, message, stack),
     openDevTools: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_DEVTOOLS),
     openLogs: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_LOGS)
   },
