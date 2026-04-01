@@ -150,6 +150,25 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
+  // File watcher — start/stop per project
+  ipcMain.handle(IPC.WORKSPACE_WATCH_START, (event, projectDir: string) => {
+    try {
+      const { startWatching } = require('./file-watcher')
+      startWatching(projectDir, event.sender.id)
+    } catch (err) {
+      getServices().logError('[workspace] watch start failed:', err)
+    }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_WATCH_STOP, (event, projectDir: string) => {
+    try {
+      const { stopWatching } = require('./file-watcher')
+      stopWatching(projectDir, event.sender.id)
+    } catch (err) {
+      getServices().logError('[workspace] watch stop failed:', err)
+    }
+  })
+
   // Symbol navigation
   ipcMain.handle(IPC.WORKSPACE_SCAN_TS_FILES, async (_event, projectDir: string) => {
     try {
@@ -285,6 +304,9 @@ export function registerWorkspaceIpc(): void {
 }
 
 export function disposeWorkspaceIpc(): void {
+  // Stop all file watchers
+  try { const { stopAllWatchers } = require('./file-watcher'); stopAllWatchers() } catch { /* ignore */ }
+
   const channels = [
     IPC.WORKSPACE_READ_DIR, IPC.WORKSPACE_READ_TREE,
     IPC.WORKSPACE_OPEN_FILE, IPC.WORKSPACE_OPEN_IN_EXPLORER,
@@ -294,6 +316,7 @@ export function disposeWorkspaceIpc(): void {
     IPC.WORKSPACE_READ_FILE, IPC.WORKSPACE_WRITE_FILE,
     IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE,
     IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE,
+    IPC.WORKSPACE_WATCH_START, IPC.WORKSPACE_WATCH_STOP,
     IPC.WORKSPACE_SCAN_TS_FILES, IPC.WORKSPACE_BUILD_SYMBOL_INDEX, IPC.WORKSPACE_QUERY_SYMBOL,
     'workspace:getDetachedTabs'
   ]

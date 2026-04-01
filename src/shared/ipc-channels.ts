@@ -262,6 +262,8 @@ export const IPC = {
   WORKSPACE_DETACH_EDITOR: 'workspace:detachEditor',
   WORKSPACE_SEARCH: 'workspace:search',
   WORKSPACE_REPLACE: 'workspace:replace',
+  WORKSPACE_WATCH_START: 'workspace:watchStart',
+  WORKSPACE_WATCH_STOP: 'workspace:watchStop',
   WORKSPACE_SCAN_TS_FILES: 'workspace:scanTsFiles',
   WORKSPACE_BUILD_SYMBOL_INDEX: 'workspace:buildSymbolIndex',
   WORKSPACE_QUERY_SYMBOL: 'workspace:querySymbol',

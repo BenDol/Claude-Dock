@@ -1,64 +1,106 @@
+/**
+ * File watcher for the workspace plugin.
+ * Watches a project directory and sends batched change notifications.
+ * Managed per-project — start/stop via IPC.
+ */
 import * as fs from 'fs'
-import type { BrowserWindow } from 'electron'
+import { BrowserWindow } from 'electron'
 import { getServices } from './services'
 
-const DEBOUNCE_MS = 300
-const IGNORE_PATTERNS = ['.git', 'node_modules', '.cache', '__pycache__', 'target', 'dist', 'build']
+const DEBOUNCE_MS = 400
+const IGNORE_PATTERNS = new Set(['.git', 'node_modules', '.cache', '__pycache__', 'target', 'dist', 'build', '.gradle', '.idea', '.vscode', 'out', 'coverage'])
 
-/** Watches a project directory for file changes and notifies the renderer. */
-export class ProjectFileWatcher {
-  private watcher: fs.FSWatcher | null = null
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null
-  private pendingChanges: Set<string> = new Set()
+/** Active watchers by normalized project dir */
+const watchers = new Map<string, {
+  watcher: fs.FSWatcher
+  timer: ReturnType<typeof setTimeout> | null
+  pending: Set<string>
+  subscribers: Set<number> // webContents IDs
+}>()
 
-  constructor(
-    private projectDir: string,
-    private getWindow: () => BrowserWindow | null
-  ) {}
+function normalizeDir(dir: string): string {
+  return dir.replace(/\\/g, '/').toLowerCase()
+}
 
-  start(): void {
-    if (this.watcher) return
-    try {
-      this.watcher = fs.watch(this.projectDir, { recursive: true }, (_event, filename) => {
-        if (!filename) return
-        // Skip ignored paths
-        const parts = filename.replace(/\\/g, '/').split('/')
-        if (parts.some((p) => IGNORE_PATTERNS.includes(p))) return
-        this.pendingChanges.add(filename)
-        this.scheduleSend()
-      })
-      this.watcher.on('error', (err) => {
-        getServices().logError('[workspace] watcher error:', err)
-        this.stop()
-      })
-      getServices().log(`[workspace] watching ${this.projectDir}`)
-    } catch (err) {
-      getServices().logError('[workspace] failed to start watcher:', err)
-    }
+/** Start watching a project directory. Multiple subscribers (windows) can share one watcher. */
+export function startWatching(projectDir: string, webContentsId: number): void {
+  const key = normalizeDir(projectDir)
+  const existing = watchers.get(key)
+  if (existing) {
+    existing.subscribers.add(webContentsId)
+    return
   }
 
-  stop(): void {
-    if (this.watcher) {
-      this.watcher.close()
-      this.watcher = null
-    }
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer)
-      this.debounceTimer = null
-    }
-    this.pendingChanges.clear()
-  }
+  try {
+    const watcher = fs.watch(projectDir, { recursive: true }, (_event, filename) => {
+      if (!filename) return
+      const parts = filename.replace(/\\/g, '/').split('/')
+      if (parts.some((p) => IGNORE_PATTERNS.has(p))) return
 
-  private scheduleSend(): void {
-    if (this.debounceTimer) return
-    this.debounceTimer = setTimeout(() => {
-      this.debounceTimer = null
-      const changes = [...this.pendingChanges]
-      this.pendingChanges.clear()
-      const win = this.getWindow()
-      if (win && !win.isDestroyed()) {
-        try { win.webContents.send('workspace:changed', changes) } catch { /* ignore */ }
+      const entry = watchers.get(key)
+      if (!entry) return
+      entry.pending.add(filename.replace(/\\/g, '/'))
+
+      // Debounce: batch changes
+      if (!entry.timer) {
+        entry.timer = setTimeout(() => {
+          entry.timer = null
+          const changes = [...entry.pending]
+          entry.pending.clear()
+          if (changes.length === 0) return
+          // Broadcast to all subscriber windows
+          for (const wcId of entry.subscribers) {
+            try {
+              const wc = BrowserWindow.getAllWindows()
+                .map((w) => w.webContents)
+                .find((wc) => wc.id === wcId)
+              if (wc && !wc.isDestroyed()) {
+                wc.send('workspace:changed', changes)
+              }
+            } catch { /* ignore */ }
+          }
+        }, DEBOUNCE_MS)
       }
-    }, DEBOUNCE_MS)
+    })
+
+    watcher.on('error', (err) => {
+      getServices().logError('[workspace] watcher error:', err)
+      stopWatching(projectDir, webContentsId)
+    })
+
+    watchers.set(key, {
+      watcher,
+      timer: null,
+      pending: new Set(),
+      subscribers: new Set([webContentsId])
+    })
+
+    getServices().log(`[workspace] started watching ${projectDir}`)
+  } catch (err) {
+    getServices().logError('[workspace] failed to start watcher:', err)
   }
+}
+
+/** Stop watching for a specific subscriber. Closes watcher if no subscribers remain. */
+export function stopWatching(projectDir: string, webContentsId: number): void {
+  const key = normalizeDir(projectDir)
+  const entry = watchers.get(key)
+  if (!entry) return
+
+  entry.subscribers.delete(webContentsId)
+  if (entry.subscribers.size === 0) {
+    entry.watcher.close()
+    if (entry.timer) clearTimeout(entry.timer)
+    watchers.delete(key)
+    getServices().log(`[workspace] stopped watching ${projectDir}`)
+  }
+}
+
+/** Stop all watchers (plugin dispose) */
+export function stopAllWatchers(): void {
+  for (const [, entry] of watchers) {
+    entry.watcher.close()
+    if (entry.timer) clearTimeout(entry.timer)
+  }
+  watchers.clear()
 }

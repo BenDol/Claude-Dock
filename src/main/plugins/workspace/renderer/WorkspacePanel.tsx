@@ -399,15 +399,62 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   useEffect(() => { loadTree() }, [loadTree])
 
-  // Watch for filesystem changes — debounce to avoid hammering on rapid edits
+  // Start file watcher on mount, stop on unmount
   useEffect(() => {
     if (!projectDir) return
-    const cleanup = api.workspace.onChanged(() => {
+    api.workspace.watchStart(projectDir).catch(() => { /* ignore */ })
+    return () => { api.workspace.watchStop(projectDir).catch(() => { /* ignore */ }) }
+  }, [projectDir])
+
+  // Handle filesystem change notifications — targeted updates for expanded dirs
+  useEffect(() => {
+    if (!projectDir) return
+    const cleanup = api.workspace.onChanged((changes: string[]) => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
-      refreshTimerRef.current = setTimeout(() => { refreshTimerRef.current = null; loadTree() }, 500)
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null
+        // Find which parent directories were affected
+        const affectedDirs = new Set<string>()
+        for (const change of changes) {
+          const parts = change.split('/')
+          parts.pop() // remove filename — get parent dir
+          affectedDirs.add(parts.join('/') || '') // '' = root
+        }
+        // For each affected dir that's currently expanded (or is root), refresh its children
+        let needsFullReload = false
+        for (const dir of affectedDirs) {
+          if (dir === '' || expandedPaths.has(dir)) {
+            // This dir is visible — need to update
+            if (dir === '') {
+              needsFullReload = true
+              break
+            }
+          }
+        }
+        if (needsFullReload || affectedDirs.has('')) {
+          // Root-level changes — full reload (still fast with depth 4)
+          loadTree()
+        } else {
+          // Targeted: re-read only the affected expanded directories
+          for (const dir of affectedDirs) {
+            if (expandedPaths.has(dir)) {
+              api.workspace.readDir(projectDir, dir, hideIgnored).then((children) => {
+                setTree((prev) => {
+                  const update = (items: FileEntry[]): FileEntry[] =>
+                    items.map((item) =>
+                      item.path === dir ? { ...item, children } :
+                      item.children ? { ...item, children: update(item.children) } : item
+                    )
+                  return update(prev)
+                })
+              }).catch(() => { /* ignore */ })
+            }
+          }
+        }
+      }, 500)
     })
     return () => { cleanup(); if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current) }
-  }, [projectDir, loadTree])
+  }, [projectDir, loadTree, expandedPaths, hideIgnored])
 
   const handleToggleExpand = useCallback(async (entryPath: string) => {
     // If collapsing, just remove from expanded set
