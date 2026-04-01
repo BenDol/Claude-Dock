@@ -158,7 +158,7 @@ const WorkspaceTreeNode: React.FC<{
           depth={depth + 1}
           projectDir={projectDir}
           selectedPaths={selectedPaths}
-          expandedPaths={expandedPaths}
+          expandedPaths={effectiveExpandedPaths}
           filter={filter}
           onSelect={onSelect}
           onToggleExpand={onToggleExpand}
@@ -407,9 +407,9 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [projectDir])
 
   // Refs for values used in change handler to avoid re-registering on every state change
-  const expandedPathsRef = useRef(expandedPaths)
+  const expandedPathsRef = useRef(effectiveExpandedPaths)
   const hideIgnoredRef = useRef(hideIgnored)
-  useEffect(() => { expandedPathsRef.current = expandedPaths }, [expandedPaths])
+  useEffect(() => { expandedPathsRef.current = effectiveExpandedPaths }, [effectiveExpandedPaths])
   useEffect(() => { hideIgnoredRef.current = hideIgnored }, [hideIgnored])
 
   // Handle filesystem change notifications — targeted updates for expanded dirs
@@ -638,18 +638,53 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     })
   }, [tree, compact, projectDir, hideIgnored])
 
+  // When filter is active, auto-expand directories containing matches
+  const filterExpandedPaths = useMemo(() => {
+    if (!filter || filter.length < 1) return null
+    const lower = filter.toLowerCase()
+    const dirs = new Set<string>()
+    // Walk the raw tree (not display tree) to find matching files and expand their parents
+    const walk = (entries: FileEntry[], parentPaths: string[]): boolean => {
+      let hasMatch = false
+      for (const e of entries) {
+        const nameMatches = e.name.toLowerCase().includes(lower)
+        let childHasMatch = false
+        if (e.isDirectory && e.children) {
+          childHasMatch = walk(e.children, [...parentPaths, e.path])
+        }
+        if (nameMatches || childHasMatch) {
+          hasMatch = true
+          // Expand all parent directories leading to this match
+          for (const p of parentPaths) dirs.add(p)
+          if (e.isDirectory) dirs.add(e.path)
+        }
+      }
+      return hasMatch
+    }
+    walk(tree, [])
+    return dirs
+  }, [tree, filter])
+
+  // Merge user expanded paths with filter-auto-expanded paths
+  const effectiveExpandedPaths = useMemo(() => {
+    if (!filterExpandedPaths) return expandedPaths
+    const merged = new Set(expandedPaths)
+    for (const p of filterExpandedPaths) merged.add(p)
+    return merged
+  }, [expandedPaths, filterExpandedPaths])
+
   // Build flat list of visible entries for keyboard navigation
   const visibleEntries = useMemo(() => {
     const list: FileEntry[] = []
     const walk = (entries: FileEntry[]) => {
       for (const e of entries) {
         list.push(e)
-        if (e.isDirectory && expandedPaths.has(e.path) && e.children) walk(e.children)
+        if (e.isDirectory && effectiveExpandedPaths.has(e.path) && e.children) walk(e.children)
       }
     }
     walk(displayTree)
     return list
-  }, [displayTree, expandedPaths])
+  }, [displayTree, effectiveExpandedPaths])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const focusedPath = lastClickedPath || (selectedPaths.size > 0 ? [...selectedPaths][0] : null)
@@ -685,13 +720,13 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     } else if (e.key === 'ArrowRight') {
       e.preventDefault()
       const entry = visibleEntries[idx]
-      if (entry.isDirectory && !expandedPaths.has(entry.path)) {
+      if (entry.isDirectory && !effectiveExpandedPaths.has(entry.path)) {
         handleToggleExpand(entry.path)
       }
     } else if (e.key === 'ArrowLeft') {
       e.preventDefault()
       const entry = visibleEntries[idx]
-      if (entry.isDirectory && expandedPaths.has(entry.path)) {
+      if (entry.isDirectory && effectiveExpandedPaths.has(entry.path)) {
         handleToggleExpand(entry.path)
       }
     } else if (e.key === 'Enter') {
@@ -751,7 +786,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
             depth={0}
             projectDir={projectDir}
             selectedPaths={selectedPaths}
-            expandedPaths={expandedPaths}
+            expandedPaths={effectiveExpandedPaths}
             filter={filter}
             onSelect={handleSelect}
             onToggleExpand={handleToggleExpand}
