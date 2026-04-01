@@ -292,33 +292,41 @@ export const useDockStore = create<DockState>((set, get) => ({
     const event = state.shellEvents.find((e) => e.id === id)
     const hash = event && typeof event.payload === 'object' && event.payload?.hash
       ? `${event.type}:${event.payload.hash}` : null
+    // Remove from the pending events file so the dedup cache is cleared —
+    // future occurrences of the same event will be detected and shown again.
+    if (hash) {
+      window.dockApi?.shell.dismissEvents([hash]).catch(() => { /* non-critical */ })
+    }
     return {
-      shellEvents: state.shellEvents.filter((e) => e.id !== id),
-      // Suppress this hash so the same event doesn't reappear from the next scan
-      ignoredEventHashes: hash
-        ? [...new Set([...state.ignoredEventHashes, hash])]
-        : state.ignoredEventHashes
+      shellEvents: state.shellEvents.filter((e) => e.id !== id)
     }
   }),
 
   clearShellEvents: () => set((state) => {
-    // Add all current event hashes to ignored so they don't reappear
     const hashes = state.shellEvents
       .map((e) => typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : null)
       .filter(Boolean) as string[]
+    // Clear from the pending events file so future occurrences can be detected
+    if (hashes.length > 0) {
+      window.dockApi?.shell.dismissEvents(hashes).catch(() => { /* non-critical */ })
+    }
     return {
       shellEvents: [],
       ignoredEventHashes: [...new Set([...state.ignoredEventHashes, ...hashes])]
     }
   }),
 
-  ignoreEventHash: (key) => set((state) => ({
-    ignoredEventHashes: [...new Set([...state.ignoredEventHashes, key])],
-    shellEvents: state.shellEvents.filter((e) => {
-      const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
-      return h !== key
-    })
-  })),
+  ignoreEventHash: (key) => set((state) => {
+    // Also clear from pending file so it doesn't block future dedup checks
+    window.dockApi?.shell.dismissEvents([key]).catch(() => { /* non-critical */ })
+    return {
+      ignoredEventHashes: [...new Set([...state.ignoredEventHashes, key])],
+      shellEvents: state.shellEvents.filter((e) => {
+        const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
+        return h !== key
+      })
+    }
+  }),
 
   unignoreEventHash: (key) => set((state) => ({
     ignoredEventHashes: state.ignoredEventHashes.filter((k) => k !== key)

@@ -388,6 +388,32 @@ export class DockWindow {
   }
 
   /**
+   * Remove dismissed events from dock-pending-events.json by their type:hash keys.
+   * This clears the dedup cache so future occurrences of the same event can be detected.
+   */
+  dismissPendingEvents(hashKeys: string[]): void {
+    if (hashKeys.length === 0) return
+    const keySet = new Set(hashKeys)
+    try {
+      const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
+      let pending: any[] = []
+      try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8')) } catch { return }
+      if (!Array.isArray(pending)) return
+      const before = pending.length
+      pending = pending.filter((e) => {
+        const h = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : null
+        return !h || !keySet.has(h)
+      })
+      if (pending.length !== before) {
+        fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
+        log(`[shell-events] dismissed ${before - pending.length} event(s) from pending file`)
+      }
+    } catch (err) {
+      log(`[shell-events] dismiss failed: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
+  /**
    * Bulk-remove all shells owned by this dock window from the persisted output.
    * Called on window close to clean up in a single file write.
    */

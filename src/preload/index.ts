@@ -94,6 +94,7 @@ export interface DockApi {
     onExit: (callback: (shellId: string, exitCode: number) => void) => () => void
     onRunCommand: (callback: (command: string, submit: boolean, targetTerminalId: string | null, shellType: string | null, targetShellId: string | null, shellLayout: 'split' | 'stack' | null) => void) => () => void
     onShellEvent: (handler: (_e: any, event: any) => void) => () => void
+    dismissEvents: (hashKeys: string[]) => Promise<void>
   }
   dock: {
     getInfo: () => Promise<{ id: string; projectDir: string } | null>
@@ -402,7 +403,8 @@ const dockApi: DockApi = {
     onShellEvent: (handler) => {
       ipcRenderer.on(IPC.SHELL_EVENT, handler)
       return () => ipcRenderer.removeListener(IPC.SHELL_EVENT, handler)
-    }
+    },
+    dismissEvents: (hashKeys: string[]) => ipcRenderer.invoke(IPC.SHELL_EVENT_DISMISS, hashKeys)
   },
   dock: {
     getInfo: () => ipcRenderer.invoke(IPC.DOCK_GET_INFO),

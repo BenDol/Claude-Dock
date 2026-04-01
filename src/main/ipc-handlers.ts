@@ -285,6 +285,11 @@ export function registerIpcHandlers(): void {
     return false
   })
 
+  ipcMain.handle(IPC.SHELL_EVENT_DISMISS, (event, hashKeys: string[]) => {
+    const dock = getDockForEvent(event)
+    if (dock) dock.dismissPendingEvents(hashKeys)
+  })
+
   ipcMain.handle(IPC.SHELL_WRITE, (event, shellId: string, data: string) => {
     const dock = getDockForEvent(event)
     if (dock) dock.ptyManager.write(shellId, data)

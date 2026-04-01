@@ -18,6 +18,7 @@ export const IPC = {
   SHELL_DATA: 'shell:data',       // Main -> Renderer
   SHELL_EXIT: 'shell:exit',       // Main -> Renderer
   SHELL_EVENT: 'shell:event',     // Main -> Renderer
+  SHELL_EVENT_DISMISS: 'shell:eventDismiss', // Renderer -> Main (remove from pending file)
   SHELL_RUN_COMMAND: 'shell:runCommand', // Main -> Renderer (open shell panel + run command)
 
   DOCK_GET_INFO: 'dock:getInfo',
