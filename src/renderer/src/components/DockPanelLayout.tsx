@@ -143,6 +143,11 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
         title="Drag to move panel to a different edge"
       >
         <span className="dock-panel-title">{activePanel!.title}</span>
+        {activePanel!.headerActions && (
+          <Suspense fallback={null}>
+            {React.createElement(activePanel!.headerActions, { projectDir })}
+          </Suspense>
+        )}
         <span className="dock-panel-drag-hint">&#8942;&#8942;</span>
       </div>
       <div className="dock-panel-body">

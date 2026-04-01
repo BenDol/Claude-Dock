@@ -4,6 +4,7 @@ import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
+import { usePanelStore } from '../stores/panel-store'
 import { useToolbarNavigation } from '../hooks/useToolbarNavigation'
 import type { PluginToolbarAction } from '../../../shared/plugin-types'
 import type { DockNotification, NotificationAction } from '../../../shared/ci-types'
@@ -193,6 +194,16 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
     })
     return cleanup
   }, [projectDir])
+
+  // Merge dockable panel visibility into the open-windows set so toolbar
+  // buttons for panel-based plugins get the blue highlight border
+  const panelActive = usePanelStore((s) => s.visible ? s.activePanelId : null)
+  const effectiveOpenWindows = useMemo(() => {
+    if (!panelActive) return openPluginWindows
+    const merged = new Set(openPluginWindows)
+    merged.add(panelActive)
+    return merged
+  }, [openPluginWindows, panelActive])
 
   // Load runtime plugin toolbar actions on mount, sanitizing SVG icons
   useEffect(() => {
@@ -428,7 +439,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
             data-toolbar-btn
             tabIndex={-1}
             key={action.id}
-            className={`toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap${openPluginWindows.has(action.id) ? ' toolbar-btn-window-open' : ''}`}
+            className={`toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap${effectiveOpenWindows.has(action.id) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => action.onClick(projectDir)}
             title={action.title}
           >
@@ -448,7 +459,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
             data-toolbar-btn
             tabIndex={-1}
             key={action.pluginId}
-            className={`toolbar-btn toolbar-btn-icon${openPluginWindows.has(action.pluginId) ? ' toolbar-btn-window-open' : ''}`}
+            className={`toolbar-btn toolbar-btn-icon${effectiveOpenWindows.has(action.pluginId) ? ' toolbar-btn-window-open' : ''}`}
             onClick={() => getDockApi().plugins.invoke(action.action, projectDir)}
             title={action.title}
           >

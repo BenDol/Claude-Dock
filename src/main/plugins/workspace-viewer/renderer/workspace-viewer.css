@@ -1,3 +1,30 @@
+/* Header actions (collapse/expand all in the FILES header) */
+.ws-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+
+.ws-header-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  opacity: 0.6;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.ws-header-btn:hover {
+  opacity: 1;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
 /* Workspace Viewer Panel */
 .ws-panel {
   display: flex;

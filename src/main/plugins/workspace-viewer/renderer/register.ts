@@ -19,6 +19,7 @@ registerPanel({
   title: 'Files',
   icon: React.createElement(FilesIcon),
   component: lazy(() => import('./WorkspaceViewerPanel')),
+  headerActions: lazy(() => import('./HeaderActions')),
   defaultPosition: 'left',
   defaultSize: 250,
   minSize: 150,
@@ -38,11 +39,7 @@ registerToolbarAction({
       store.setActivePanel('workspace-viewer')
     }
   },
-  order: 40,
-  getStatusDot: async () => {
-    const store = usePanelStore.getState()
-    return (store.activePanelId === 'workspace-viewer' && store.visible) ? 'success' : null
-  }
+  order: 40
 })
 
 function FilesIcon(): React.ReactElement {

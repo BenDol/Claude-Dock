@@ -16,6 +16,7 @@ export interface PanelRegistration {
   title: string
   icon: ReactNode
   component: LazyExoticComponent<ComponentType<PanelProps>>
+  headerActions?: LazyExoticComponent<ComponentType<PanelProps>>
   defaultPosition: 'left' | 'right' | 'top' | 'bottom'
   defaultSize: number
   minSize?: number

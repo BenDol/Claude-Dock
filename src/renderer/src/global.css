@@ -1157,6 +1157,7 @@ body {
 .dock-panel-header {
   display: flex;
   align-items: center;
+  gap: 4px;
   padding: 0 10px;
   height: var(--toolbar-height);
   border-bottom: 1px solid var(--border-color);

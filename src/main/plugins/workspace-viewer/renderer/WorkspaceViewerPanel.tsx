@@ -64,8 +64,9 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}M`
 }
 
-/** Flatten single-child directory chains: a/b/c → "a/b/c" */
-function flattenEntries(entries: FileEntry[]): FileEntry[] {
+/** Flatten single-child directory chains: a/b/c → "a/b/c"
+ *  Also collects paths of intermediate dirs that need lazy-loading. */
+function flattenEntries(entries: FileEntry[], needsLoad?: Set<string>): FileEntry[] {
   return entries.map((entry) => {
     if (!entry.isDirectory || !entry.children) return entry
     let current = entry
@@ -74,10 +75,14 @@ function flattenEntries(entries: FileEntry[]): FileEntry[] {
       current = current.children[0]
       compactName += '/' + current.name
     }
+    // If the deepest flattened dir has no children loaded, mark it for lazy loading
+    if (current.isDirectory && !current.children && needsLoad) {
+      needsLoad.add(current.path)
+    }
     return {
       ...current,
       name: compactName,
-      children: current.children ? flattenEntries(current.children) : undefined
+      children: current.children ? flattenEntries(current.children, needsLoad) : undefined
     }
   })
 }
@@ -407,31 +412,46 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
         next.delete(entryPath)
       } else {
         next.add(entryPath)
-        // Lazy load children if not already loaded
-        const findEntry = (items: FileEntry[]): FileEntry | null => {
-          for (const item of items) {
-            if (item.path === entryPath) return item
-            if (item.children) { const found = findEntry(item.children); if (found) return found }
-          }
-          return null
-        }
-        const entry = findEntry(tree)
-        if (entry && entry.isDirectory && !entry.children) {
-          api.workspaceViewer.readDir(projectDir, entryPath).then((children) => {
-            setTree((prev) => {
-              const update = (items: FileEntry[]): FileEntry[] =>
-                items.map((item) =>
-                  item.path === entryPath ? { ...item, children } :
-                  item.children ? { ...item, children: update(item.children) } : item
-                )
-              return update(prev)
-            })
-          })
-        }
       }
       return next
     })
-  }, [tree, projectDir])
+
+    // Check if the entry needs lazy-loading (children not yet fetched)
+    const findEntry = (items: FileEntry[]): FileEntry | null => {
+      for (const item of items) {
+        if (item.path === entryPath) return item
+        if (item.children) { const found = findEntry(item.children); if (found) return found }
+      }
+      return null
+    }
+    const entry = findEntry(tree)
+
+    // If the entry exists but has no children loaded, OR if the entry doesn't
+    // exist in the tree at all (flattened compact path that's deeper than the
+    // initially loaded tree), fetch children via IPC.
+    const needsLoad = !entry || (entry.isDirectory && !entry.children)
+    if (needsLoad) {
+      const children = await api.workspaceViewer.readDir(projectDir, entryPath)
+      if (children.length > 0 || entry) {
+        setTree((prev) => {
+          // If entry exists in tree, attach children to it
+          if (entry) {
+            const update = (items: FileEntry[]): FileEntry[] =>
+              items.map((item) =>
+                item.path === entryPath ? { ...item, children } :
+                item.children ? { ...item, children: update(item.children) } : item
+              )
+            return update(prev)
+          }
+          // If entry doesn't exist (deep flattened path), we need to build
+          // the intermediate path and insert. Reload the tree to get fresh data.
+          return prev
+        })
+        // If entry wasn't found, do a full reload to pick up the deeper structure
+        if (!entry) loadTree()
+      }
+    }
+  }, [tree, projectDir, loadTree])
 
   const handleSelect = useCallback((filePath: string, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -504,10 +524,45 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     setExpandedPaths(allDirs)
   }, [tree])
 
+  // Listen for collapse/expand all from header actions
+  useEffect(() => {
+    const onCollapse = () => collapseAll()
+    const onExpand = () => expandAll()
+    window.addEventListener('ws-viewer:collapse-all', onCollapse)
+    window.addEventListener('ws-viewer:expand-all', onExpand)
+    return () => {
+      window.removeEventListener('ws-viewer:collapse-all', onCollapse)
+      window.removeEventListener('ws-viewer:expand-all', onExpand)
+    }
+  }, [collapseAll, expandAll])
+
+  // Compute display tree (with compact mode) and auto-load missing dirs
+  const displayTree = useMemo(() => {
+    if (!compact) return tree
+    const needsLoad = new Set<string>()
+    const result = flattenEntries(tree, needsLoad)
+    // Auto-load unloaded directories that compact mode exposed
+    if (needsLoad.size > 0) {
+      for (const dirPath of needsLoad) {
+        api.workspaceViewer.readDir(projectDir, dirPath).then((children) => {
+          if (children.length === 0) return
+          setTree((prev) => {
+            const update = (items: FileEntry[]): FileEntry[] =>
+              items.map((item) =>
+                item.path === dirPath ? { ...item, children } :
+                item.children ? { ...item, children: update(item.children) } : item
+              )
+            return update(prev)
+          })
+        })
+      }
+    }
+    return result
+  }, [tree, compact, projectDir])
+
   // Build flat list of visible entries for keyboard navigation
   const visibleEntries = useMemo(() => {
     const list: FileEntry[] = []
-    const displayTree = compact ? flattenEntries(tree) : tree
     const walk = (entries: FileEntry[]) => {
       for (const e of entries) {
         list.push(e)
@@ -516,7 +571,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     }
     walk(displayTree)
     return list
-  }, [tree, expandedPaths, compact])
+  }, [displayTree, expandedPaths])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const focusedPath = lastClickedPath || (selectedPaths.size > 0 ? [...selectedPaths][0] : null)
@@ -592,22 +647,12 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
             <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
           </svg>
         </button>
-        <button className="ws-panel-btn" onClick={collapseAll} title="Collapse all">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
-          </svg>
-        </button>
-        <button className="ws-panel-btn" onClick={expandAll} title="Expand all">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-          </svg>
-        </button>
         <button className="ws-panel-btn" onClick={loadTree} title="Refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></svg>
         </button>
       </div>
       <div className="ws-panel-tree" tabIndex={0} onKeyDown={handleKeyDown}>
-        {(compact ? flattenEntries(tree) : tree).map((entry) => (
+        {displayTree.map((entry) => (
           <WorkspaceTreeNode
             key={entry.path}
             entry={entry}
