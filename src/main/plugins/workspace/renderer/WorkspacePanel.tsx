@@ -410,7 +410,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   // Refs for values used in change handler to avoid re-registering on every state change
   const expandedPathsRef = useRef(expandedPaths)
   const hideIgnoredRef = useRef(hideIgnored)
-  useEffect(() => { expandedPathsRef.current = effectiveExpandedPaths }, [effectiveExpandedPaths])
+  useEffect(() => { expandedPathsRef.current = expandedPaths }, [expandedPaths])
   useEffect(() => { hideIgnoredRef.current = hideIgnored }, [hideIgnored])
 
   // Handle filesystem change notifications — targeted updates for expanded dirs
