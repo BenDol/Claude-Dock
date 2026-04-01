@@ -6,11 +6,20 @@ import { getServices } from './services'
 
 export function registerTestRunnerIpc(): void {
   ipcMain.handle(IPC.TEST_RUNNER_OPEN, async (_event, projectDir: string) => {
-    await TestRunnerWindowManager.getInstance().open(projectDir)
+    try {
+      await TestRunnerWindowManager.getInstance().open(projectDir)
+    } catch (err) {
+      getServices().logError('[test-runner] open window failed:', err)
+    }
   })
 
   ipcMain.handle(IPC.TEST_RUNNER_DETECT, async (_event, projectDir: string) => {
-    return engine.detect(projectDir)
+    try {
+      return await engine.detect(projectDir)
+    } catch (err) {
+      getServices().logError('[test-runner] detect failed:', err)
+      return []
+    }
   })
 
   ipcMain.handle(IPC.TEST_RUNNER_DISCOVER, async (_event, projectDir: string, adapterId: string) => {
@@ -33,11 +42,20 @@ export function registerTestRunnerIpc(): void {
   })
 
   ipcMain.handle(IPC.TEST_RUNNER_STOP, async (_event, projectDir: string) => {
-    return { stopped: engine.stopTests(projectDir) }
+    try {
+      return { stopped: engine.stopTests(projectDir) }
+    } catch (err) {
+      getServices().logError('[test-runner] stop failed:', err)
+      return { stopped: false }
+    }
   })
 
   ipcMain.handle(IPC.TEST_RUNNER_GET_STATUS, async (_event, projectDir: string) => {
-    return { running: engine.isRunning(projectDir) }
+    try {
+      return { running: engine.isRunning(projectDir) }
+    } catch (err) {
+      return { running: false }
+    }
   })
 }
 

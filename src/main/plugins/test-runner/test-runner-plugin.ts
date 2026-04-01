@@ -17,15 +17,19 @@ export class TestRunnerPlugin implements DockPlugin {
   readonly lazyLoad = true
 
   register(bus: PluginEventBus): void {
-    registerTestRunnerIpc()
+    try {
+      registerTestRunnerIpc()
+    } catch (err) {
+      getServices().logError('[test-runner] IPC registration failed (non-fatal):', err)
+    }
 
     bus.on('project:postClose', this.id, ({ projectDir }) => {
-      TestRunnerWindowManager.getInstance().close(projectDir)
+      try { TestRunnerWindowManager.getInstance().close(projectDir) } catch { /* non-fatal */ }
     })
 
     bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
       if (pluginId === this.id) {
-        TestRunnerWindowManager.getInstance().close(projectDir)
+        try { TestRunnerWindowManager.getInstance().close(projectDir) } catch { /* non-fatal */ }
       }
     })
 
@@ -33,8 +37,8 @@ export class TestRunnerPlugin implements DockPlugin {
   }
 
   dispose(): void {
-    disposeTestRunnerIpc()
-    TestRunnerWindowManager.getInstance().closeAll()
+    try { disposeTestRunnerIpc() } catch { /* ignore */ }
+    try { TestRunnerWindowManager.getInstance().closeAll() } catch { /* ignore */ }
     getServices().log('[test-runner] plugin disposed')
   }
 }

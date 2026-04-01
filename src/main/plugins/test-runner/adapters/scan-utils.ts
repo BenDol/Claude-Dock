@@ -2,17 +2,21 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { TestItem } from './runner-adapter'
 
+/** Max files to return from a single scan to prevent unbounded I/O */
+const MAX_SCAN_FILES = 2000
+
 /**
  * Recursively scan a directory for files matching any of the given patterns.
- * Skips directories in the skipDirs set.
+ * Skips directories in the skipDirs set. Caps at MAX_SCAN_FILES results.
  */
 export function scanTestFiles(dir: string, patterns: RegExp[], skipDirs: Set<string>, maxDepth = 10): string[] {
   const results: string[] = []
   const walk = (current: string, depth: number) => {
-    if (depth > maxDepth) return
+    if (depth > maxDepth || results.length >= MAX_SCAN_FILES) return
     let entries: fs.Dirent[]
     try { entries = fs.readdirSync(current, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
+      if (results.length >= MAX_SCAN_FILES) return
       if (entry.isDirectory()) {
         if (!skipDirs.has(entry.name)) walk(path.join(current, entry.name), depth + 1)
       } else if (entry.isFile()) {
