@@ -90,7 +90,7 @@ export class TestRunnerPlugin implements DockPlugin {
       }
     })
 
-    getServices().log('[test-runner] plugin registered')
+    getServices().log('[test-runner] plugin registered (v2)')
   }
 
   dispose(): void {

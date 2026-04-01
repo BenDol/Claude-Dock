@@ -1,3 +1,4 @@
+// Build trigger: 2026-04-02
 import { app, BrowserWindow } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'

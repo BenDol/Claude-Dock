@@ -19,7 +19,7 @@ export class WorkspacePlugin implements DockPlugin {
     try { registerWorkspaceIpc() } catch (err) {
       getServices().logError('[workspace] IPC registration failed:', err)
     }
-    getServices().log('[workspace] plugin registered')
+    getServices().log('[workspace] plugin registered (v2)')
   }
 
   dispose(): void {
