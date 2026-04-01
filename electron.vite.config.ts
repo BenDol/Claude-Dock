@@ -43,7 +43,8 @@ try {
 const pluginBuildShas: Record<string, string> = {
   'git-sync': getPluginBuildSha('src/main/plugins/git-sync'),
   'git-manager': getPluginBuildSha('src/main/plugins/git-manager'),
-  'cloud-integration': getPluginBuildSha('src/main/plugins/cloud-integration')
+  'cloud-integration': getPluginBuildSha('src/main/plugins/cloud-integration'),
+  'test-runner': getPluginBuildSha('src/main/plugins/test-runner')
 }
 
 export default defineConfig({
