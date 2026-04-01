@@ -134,6 +134,56 @@
   background: rgba(197, 57, 47, 0.15);
 }
 
+/* --- Filter buttons --- */
+
+.shell-event-filters {
+  display: flex;
+  gap: 3px;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+}
+
+.shell-event-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.45);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.shell-event-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.shell-event-filter-btn.shell-event-filter-active {
+  background: color-mix(in srgb, var(--filter-color) 15%, transparent);
+  border-color: color-mix(in srgb, var(--filter-color) 40%, transparent);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.shell-event-filter-icon {
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.shell-event-filter-label {
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.shell-event-filter-count {
+  opacity: 0.5;
+  font-size: 8px;
+}
+
 .shell-ignored-btn {
   background: none;
   border: 1px solid rgba(255, 255, 255, 0.15);

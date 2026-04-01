@@ -151,12 +151,43 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
   const prevCountRef = useRef(0)
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set())
 
   const visibleEvents = events.filter((e) => {
     if (e.sessionId !== sessionId) return false
     const key = typeof e.payload === 'object' && e.payload?.hash ? `${e.type}:${e.payload.hash}` : e.type
     return !ignoredHashes.includes(key)
   })
+
+  // Build type counts for filter buttons
+  const typeCounts = new Map<string, number>()
+  for (const e of visibleEvents) {
+    typeCounts.set(e.type, (typeCounts.get(e.type) || 0) + 1)
+  }
+
+  // Clean stale filters when event types disappear
+  useEffect(() => {
+    if (activeFilters.size === 0) return
+    const stale = [...activeFilters].filter((t) => !typeCounts.has(t))
+    if (stale.length > 0) setActiveFilters((prev) => {
+      const next = new Set(prev)
+      stale.forEach((t) => next.delete(t))
+      return next
+    })
+  }, [typeCounts, activeFilters])
+
+  const filteredEvents = activeFilters.size === 0
+    ? visibleEvents
+    : visibleEvents.filter((e) => activeFilters.has(e.type))
+
+  const toggleFilter = useCallback((type: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type)
+      else next.add(type)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (minimized && visibleEvents.length > prevCountRef.current) {
@@ -228,7 +259,29 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
         <button className="shell-event-clear-btn" onClick={clearEvents} title="Clear all events">{'\u2716'}</button>
         <button className="shell-event-minimize-btn" onClick={() => setMinimized(true)} title="Minimize events">{'\u2015'}</button>
       </div>
-      {visibleEvents.map((event) => {
+      {typeCounts.size > 1 && (
+        <div className="shell-event-filters">
+          {[...typeCounts.entries()].map(([type, count]) => {
+            const icon = EVENT_ICONS[type] || '\u25CF'
+            const color = EVENT_COLORS[type] || '#6b6966'
+            const active = activeFilters.has(type)
+            return (
+              <button
+                key={type}
+                className={`shell-event-filter-btn${active ? ' shell-event-filter-active' : ''}`}
+                style={{ '--filter-color': color } as React.CSSProperties}
+                onClick={() => toggleFilter(type)}
+                title={`${active ? 'Show all' : 'Filter to'} ${type.replace(/_/g, ' ')}`}
+              >
+                <span className="shell-event-filter-icon" style={{ color }}>{icon}</span>
+                <span className="shell-event-filter-label">{type.replace(/_/g, ' ')}</span>
+                <span className="shell-event-filter-count">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {filteredEvents.map((event) => {
         const icon = EVENT_ICONS[event.type] || '\u25CF'
         const color = EVENT_COLORS[event.type] || '#6b6966'
         const summary =
