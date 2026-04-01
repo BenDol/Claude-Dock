@@ -518,28 +518,12 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   const collapseAll = useCallback(() => setExpandedPaths(new Set()), [])
 
-  const expandAll = useCallback(() => {
-    const allDirs = new Set<string>()
-    const walk = (entries: FileEntry[]) => {
-      for (const e of entries) {
-        if (e.isDirectory) { allDirs.add(e.path); if (e.children) walk(e.children) }
-      }
-    }
-    walk(tree)
-    setExpandedPaths(allDirs)
-  }, [tree])
-
-  // Listen for collapse/expand all from header actions
+  // Listen for collapse all from header action
   useEffect(() => {
     const onCollapse = () => collapseAll()
-    const onExpand = () => expandAll()
     window.addEventListener('ws-viewer:collapse-all', onCollapse)
-    window.addEventListener('ws-viewer:expand-all', onExpand)
-    return () => {
-      window.removeEventListener('ws-viewer:collapse-all', onCollapse)
-      window.removeEventListener('ws-viewer:expand-all', onExpand)
-    }
-  }, [collapseAll, expandAll])
+    return () => window.removeEventListener('ws-viewer:collapse-all', onCollapse)
+  }, [collapseAll])
 
   // Ctrl+F in workspace panel opens search, Ctrl+Shift+F from anywhere opens it too
   useEffect(() => {

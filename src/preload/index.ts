@@ -381,6 +381,7 @@ export interface DockApi {
     replace: (projectDir: string, opts: { query: string; replacement: string; filePath?: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) => Promise<any>
     undoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
     redoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
+    getDetachedTabs: () => Promise<string | null>
     onChanged: (callback: (changes: string[]) => void) => () => void
     onHydrateTabs: (callback: (tabData: string) => void) => () => void
   }
@@ -817,6 +818,7 @@ const dockApi: DockApi = {
     replace: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_REPLACE, projectDir, opts),
     undoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_UNDO_REPLACE),
     redoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_REDO_REPLACE),
+    getDetachedTabs: () => ipcRenderer.invoke('workspace:getDetachedTabs'),
     onChanged: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
       ipcRenderer.on('workspace:changed', handler)

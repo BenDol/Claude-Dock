@@ -193,7 +193,15 @@ export function registerWorkspaceIpc(): void {
   })
 
   // Detach editor tab to a standalone BrowserWindow
+  let pendingTabData: string | null = null
   const detachedWindows = new Map<string, BrowserWindow>()
+
+  // Renderer pulls tab data when it's mounted and ready
+  ipcMain.handle('workspace:getDetachedTabs', () => {
+    const data = pendingTabData
+    pendingTabData = null
+    return data
+  })
 
   ipcMain.handle(IPC.WORKSPACE_DETACH_EDITOR, async (_event, projectDir: string, tabData: string) => {
     try {
@@ -217,14 +225,14 @@ export function registerWorkspaceIpc(): void {
       // (not in URL, which has length limits for large file contents)
       const queryParam = `?detachedEditor=true&projectDir=${encodeURIComponent(projectDir)}`
       const rendererUrl = process.env.ELECTRON_RENDERER_URL
+      // Store tab data so the renderer can pull it when ready
+      pendingTabData = tabData
+
       if (rendererUrl) {
         await win.loadURL(`${rendererUrl}${queryParam}`)
       } else {
         await win.loadFile(path.join(__dirname, '../renderer/index.html'), { search: queryParam.slice(1) })
       }
-
-      // Send tab data via IPC after the window has loaded
-      win.webContents.send('editor:hydrate-tabs', tabData)
 
       win.webContents.on('before-input-event', (_evt, input) => {
         if (input.type !== 'keyDown') return
@@ -254,7 +262,8 @@ export function disposeWorkspaceIpc(): void {
     IPC.WORKSPACE_MOVE_CLAUDE,
     IPC.WORKSPACE_READ_FILE, IPC.WORKSPACE_WRITE_FILE,
     IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE,
-    IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE
+    IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE,
+    'workspace:getDetachedTabs'
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }

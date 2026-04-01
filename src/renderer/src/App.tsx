@@ -447,9 +447,10 @@ function DetachedEditorShell() {
     })
   }, [loadSettings])
 
-  // Hydrate editor store from IPC (main process sends tab data after window loads)
+  // Pull tab data from main process when mounted (renderer pulls, not push — avoids race condition)
   useEffect(() => {
-    const cleanup = getDockApi().workspace.onHydrateTabs((tabData: string) => {
+    getDockApi().workspace.getDetachedTabs().then((tabData) => {
+      if (!tabData) return
       try {
         const tabs = JSON.parse(tabData)
         const { useEditorStore } = require('./stores/editor-store')
@@ -460,8 +461,7 @@ function DetachedEditorShell() {
           }
         }
       } catch { /* ignore malformed data */ }
-    })
-    return cleanup
+    }).catch(() => { /* ignore */ })
   }, [])
 
   return (

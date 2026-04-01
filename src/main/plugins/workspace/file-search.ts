@@ -3,9 +3,12 @@
  * Uses `git grep` for git repos (fast, respects .gitignore).
  * Falls back to manual recursive search for non-git repos.
  */
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export interface SearchOptions {
   query: string
@@ -52,37 +55,36 @@ function isGitRepo(dir: string): boolean {
   try { return fs.existsSync(path.join(dir, '.git')) } catch { return false }
 }
 
-/** Search using git grep (fast, respects .gitignore) */
-function searchWithGit(opts: SearchOptions): SearchResult {
+/** Search using git grep (fast, respects .gitignore). Async to avoid blocking main process. */
+async function searchWithGit(opts: SearchOptions): Promise<SearchResult> {
   const start = Date.now()
   const limit = opts.maxResults ?? MAX_RESULTS
-  const args = ['grep', '-n', '--column', '-I'] // -n line numbers, --column, -I skip binary
+  const args = ['grep', '-n', '--column', '-I']
 
   if (!opts.caseSensitive) args.push('-i')
   if (opts.wholeWord) args.push('-w')
   if (opts.regex) {
-    args.push('-E') // extended regex
+    args.push('-E')
   } else {
-    args.push('-F') // fixed string (literal)
+    args.push('-F')
   }
-  args.push(`--max-count=${Math.ceil(limit / 5)}`) // per-file cap
-
-  // Query must come before `--` separator, pathspec after
+  args.push(`--max-count=${Math.ceil(limit / 5)}`)
   args.push('-e', opts.query)
   if (opts.filePattern) args.push('--', opts.filePattern)
 
   try {
-    const stdout = execFileSync('git', args, {
+    const { stdout } = await execFileAsync('git', args, {
       cwd: opts.projectDir,
       encoding: 'utf-8',
       timeout: SEARCH_TIMEOUT,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ['pipe', 'pipe', 'pipe']
+      maxBuffer: 10 * 1024 * 1024
     })
     return parseGitGrepOutput(stdout, limit, Date.now() - start)
   } catch (err: any) {
     // git grep exits 1 when no matches — that's not an error
-    if (err.status === 1) return { matches: [], totalMatches: 0, truncated: false, durationMs: Date.now() - start }
+    if (err.code === 1 || err.status === 1 || (err.stderr === '' && err.stdout === '')) {
+      return { matches: [], totalMatches: 0, truncated: false, durationMs: Date.now() - start }
+    }
     return { matches: [], totalMatches: 0, truncated: false, durationMs: Date.now() - start }
   }
 }
@@ -117,13 +119,13 @@ function parseGitGrepOutput(stdout: string, limit: number, durationMs: number): 
   return { matches, totalMatches, truncated: totalMatches > limit, durationMs }
 }
 
-/** Fallback: manual recursive search (for non-git repos) */
-function searchManual(opts: SearchOptions): SearchResult {
+/** Fallback: manual recursive search (for non-git repos). Async to avoid blocking main process. */
+async function searchManual(opts: SearchOptions): Promise<SearchResult> {
   const start = Date.now()
   const limit = opts.maxResults ?? MAX_RESULTS
   const matches: SearchMatch[] = []
   let totalMatches = 0
-  let flags = opts.caseSensitive ? 'g' : 'gi'
+  const flags = opts.caseSensitive ? 'g' : 'gi'
   let pattern: RegExp
 
   try {
@@ -139,48 +141,62 @@ function searchManual(opts: SearchOptions): SearchResult {
 
   const filePatternRe = opts.filePattern ? globToRegex(opts.filePattern) : null
 
-  const walk = (dir: string, relDir: string) => {
-    if (matches.length >= limit || Date.now() - start > SEARCH_TIMEOUT) return
+  // Collect files to search first (sync dir scan is fast), then read contents async
+  const filesToSearch: { absPath: string; relPath: string }[] = []
+  const collectFiles = (dir: string, relDir: string) => {
+    if (filesToSearch.length >= limit * 10 || Date.now() - start > SEARCH_TIMEOUT) return
     let entries: fs.Dirent[]
     try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
-
     for (const entry of entries) {
-      if (matches.length >= limit || Date.now() - start > SEARCH_TIMEOUT) return
+      if (filesToSearch.length >= limit * 10) return
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) walk(path.join(dir, entry.name), relDir ? `${relDir}/${entry.name}` : entry.name)
+        if (!SKIP_DIRS.has(entry.name)) collectFiles(path.join(dir, entry.name), relDir ? `${relDir}/${entry.name}` : entry.name)
       } else if (entry.isFile()) {
         const ext = entry.name.split('.').pop()?.toLowerCase() || ''
         if (BINARY_EXTS.has(ext)) continue
         const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
         if (filePatternRe && !filePatternRe.test(relPath)) continue
-
-        try {
-          const stat = fs.statSync(path.join(dir, entry.name))
-          if (stat.size > 1024 * 1024) continue // skip files > 1MB
-          const content = fs.readFileSync(path.join(dir, entry.name), 'utf-8')
-          const lines = content.split('\n')
-          for (let i = 0; i < lines.length && matches.length < limit; i++) {
-            pattern.lastIndex = 0
-            const m = pattern.exec(lines[i])
-            if (m) {
-              totalMatches++
-              const text = lines[i].trim()
-              matches.push({
-                filePath: relPath,
-                line: i + 1,
-                column: m.index + 1,
-                text: text.length > 300 ? text.slice(0, 300) + '...' : text,
-                matchStart: m.index,
-                matchEnd: m.index + m[0].length
-              })
-            }
-          }
-        } catch { /* skip unreadable files */ }
+        filesToSearch.push({ absPath: path.join(dir, entry.name), relPath })
       }
     }
   }
+  collectFiles(opts.projectDir, '')
 
-  walk(opts.projectDir, '')
+  // Search file contents in batches to yield to the event loop
+  const BATCH_SIZE = 20
+  for (let i = 0; i < filesToSearch.length && matches.length < limit; i += BATCH_SIZE) {
+    if (Date.now() - start > SEARCH_TIMEOUT) break
+    // Yield to event loop between batches so the UI doesn't freeze
+    if (i > 0) await new Promise((r) => setImmediate(r))
+
+    const batch = filesToSearch.slice(i, i + BATCH_SIZE)
+    for (const { absPath, relPath } of batch) {
+      if (matches.length >= limit) break
+      try {
+        const stat = fs.statSync(absPath)
+        if (stat.size > 1024 * 1024) continue
+        const content = fs.readFileSync(absPath, 'utf-8')
+        const lines = content.split('\n')
+        for (let li = 0; li < lines.length && matches.length < limit; li++) {
+          pattern.lastIndex = 0
+          const m = pattern.exec(lines[li])
+          if (m) {
+            totalMatches++
+            const text = lines[li].trim()
+            matches.push({
+              filePath: relPath,
+              line: li + 1,
+              column: m.index + 1,
+              text: text.length > 300 ? text.slice(0, 300) + '...' : text,
+              matchStart: m.index,
+              matchEnd: m.index + m[0].length
+            })
+          }
+        }
+      } catch { /* skip unreadable files */ }
+    }
+  }
+
   return { matches, totalMatches, truncated: totalMatches > limit, durationMs: Date.now() - start }
 }
 
@@ -192,8 +208,8 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(escaped, 'i')
 }
 
-/** Main search function — picks the best strategy */
-export function searchFiles(opts: SearchOptions): SearchResult {
+/** Main search function — picks the best strategy. Async to avoid blocking main process. */
+export async function searchFiles(opts: SearchOptions): Promise<SearchResult> {
   if (!opts.query || opts.query.length < 2) {
     return { matches: [], totalMatches: 0, truncated: false, durationMs: 0 }
   }
