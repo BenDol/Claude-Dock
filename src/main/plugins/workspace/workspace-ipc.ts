@@ -150,6 +150,37 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
+  // Symbol navigation
+  ipcMain.handle(IPC.WORKSPACE_SCAN_TS_FILES, async (_event, projectDir: string) => {
+    try {
+      const { scanTsFiles } = await import('./symbol-index')
+      return await scanTsFiles(projectDir)
+    } catch (err) {
+      getServices().logError('[workspace] scanTsFiles failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_BUILD_SYMBOL_INDEX, async (_event, projectDir: string) => {
+    try {
+      const { buildSymbolIndex } = await import('./symbol-index')
+      return await buildSymbolIndex(projectDir)
+    } catch (err) {
+      getServices().logError('[workspace] buildSymbolIndex failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_QUERY_SYMBOL, async (_event, projectDir: string, name: string) => {
+    try {
+      const { querySymbol } = await import('./symbol-index')
+      return querySymbol(projectDir, name)
+    } catch (err) {
+      getServices().logError('[workspace] querySymbol failed:', err)
+      return []
+    }
+  })
+
   // Content search across workspace files
   ipcMain.handle(IPC.WORKSPACE_SEARCH, async (_event, projectDir: string, opts: any) => {
     try {
@@ -263,6 +294,7 @@ export function disposeWorkspaceIpc(): void {
     IPC.WORKSPACE_READ_FILE, IPC.WORKSPACE_WRITE_FILE,
     IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE,
     IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE,
+    IPC.WORKSPACE_SCAN_TS_FILES, IPC.WORKSPACE_BUILD_SYMBOL_INDEX, IPC.WORKSPACE_QUERY_SYMBOL,
     'workspace:getDetachedTabs'
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }

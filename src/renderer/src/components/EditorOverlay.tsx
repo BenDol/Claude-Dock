@@ -5,8 +5,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import Editor, { loader } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
-import { useEditorStore } from '../stores/editor-store'
+import type * as MonacoNS from 'monaco-editor'
+import { useEditorStore, isBinaryFile } from '../stores/editor-store'
 import { getDockApi } from '../lib/ipc-bridge'
+import { useDockStore } from '../stores/dock-store'
 
 // Configure Monaco loader — use local workers in both dev and production.
 // In production the app is at resources/app.asar, but monaco-editor is in
@@ -44,8 +46,14 @@ const EditorOverlay: React.FC = () => {
   const moveTab = useEditorStore((s) => s.moveTab)
   const removeTab = useEditorStore((s) => s.removeTab)
 
+  const clearPendingReveal = useEditorStore((s) => s.clearPendingReveal)
+  const projectDir = useDockStore((s) => s.projectDir)
+
   const activeTab = tabs.find((t) => t.id === activeTabId) || null
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
+  const monacoRef = useRef<typeof MonacoNS | null>(null)
+  const langServicesInitRef = useRef(false)
+  const extraLibsRef = useRef<Map<string, { dispose: () => void }>>(new Map())
   const saveRef = useRef<() => void>(() => {})
   const tabBarRef = useRef<HTMLDivElement>(null)
   const dragStartPos = useRef<{ x: number; y: number } | null>(null)
@@ -232,15 +240,134 @@ const EditorOverlay: React.FC = () => {
     return () => window.removeEventListener('keydown', handler)
   }, [handleCloseTab])
 
-  // When active tab changes, focus the editor
+  // When active tab changes, focus the editor and reveal pending position
   useEffect(() => {
-    if (editorRef.current) {
-      try { editorRef.current.focus() } catch { /* may fail during dispose */ }
-    }
-  }, [activeTabId])
+    if (!editorRef.current) return
+    try {
+      editorRef.current.focus()
+      // Consume pendingReveal if set
+      if (activeTab?.pendingReveal) {
+        const { line, column } = activeTab.pendingReveal
+        editorRef.current.revealLineInCenter(line)
+        editorRef.current.setPosition({ lineNumber: line, column })
+        clearPendingReveal(activeTab.id)
+      }
+    } catch { /* may fail during dispose */ }
+  }, [activeTabId, activeTab?.pendingReveal, clearPendingReveal])
 
-  const handleEditorMount = useCallback((editor: MonacoEditor.IStandaloneCodeEditor) => {
+  const handleEditorMount = useCallback((editor: MonacoEditor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
     editorRef.current = editor
+    monacoRef.current = monaco
+
+    // Initialize language services once
+    if (!langServicesInitRef.current && projectDir) {
+      langServicesInitRef.current = true
+      initLanguageServices(monaco, projectDir)
+    }
+  }, [projectDir])
+
+  /** Set up Monaco TypeScript language service with workspace files + custom providers */
+  const initLanguageServices = useCallback(async (monaco: typeof MonacoNS, projDir: string) => {
+    const api = getDockApi()
+
+    try {
+      // 1. Configure TypeScript compiler options
+      const ts = monaco.languages.typescript
+      ts.typescriptDefaults.setCompilerOptions({
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeJs,
+        jsx: ts.JsxEmit.React,
+        allowJs: true,
+        esModuleInterop: true,
+        strict: false, // Don't show type errors in all files
+        noEmit: true,
+        allowNonTsExtensions: true
+      })
+      ts.typescriptDefaults.setDiagnosticsOptions({
+        noSemanticValidation: true, // Don't show red squiggles for missing types
+        noSyntaxValidation: false
+      })
+      ts.javascriptDefaults.setDiagnosticsOptions({
+        noSemanticValidation: true,
+        noSyntaxValidation: false
+      })
+
+      // 2. Register workspace TS/JS files as extra libs (async, background)
+      const files = await api.workspace.scanTsFiles(projDir)
+      for (const f of files) {
+        const uri = `file:///${f.filePath.replace(/\\/g, '/')}`
+        const disposable = ts.typescriptDefaults.addExtraLib(f.content, uri)
+        extraLibsRef.current.set(f.filePath, disposable)
+      }
+
+      // 3. Register editor opener for cross-file Ctrl+click navigation
+      monaco.editor.registerEditorOpener({
+        openCodeEditor(_source: any, resource: any, selectionOrPosition: any) {
+          try {
+            const uri = resource.toString()
+            // Extract file path from URI — format: file:///C:/path/to/file.ts
+            let absPath = resource.path || ''
+            if (absPath.startsWith('/') && /^\/[A-Za-z]:/.test(absPath)) absPath = absPath.slice(1)
+            // Convert to relative path
+            const normProject = projDir.replace(/\\/g, '/')
+            const normAbs = absPath.replace(/\\/g, '/')
+            let relativePath = normAbs
+            if (normAbs.startsWith(normProject + '/')) {
+              relativePath = normAbs.slice(normProject.length + 1)
+            } else if (normAbs.startsWith(normProject)) {
+              relativePath = normAbs.slice(normProject.length)
+              if (relativePath.startsWith('/')) relativePath = relativePath.slice(1)
+            }
+            if (!relativePath || relativePath.includes('..')) return false
+
+            let line = 1, column = 1
+            if (selectionOrPosition) {
+              if ('lineNumber' in selectionOrPosition) {
+                line = selectionOrPosition.lineNumber
+                column = selectionOrPosition.column || 1
+              } else if ('startLineNumber' in selectionOrPosition) {
+                line = selectionOrPosition.startLineNumber
+                column = selectionOrPosition.startColumn || 1
+              }
+            }
+
+            // Read file and open at position
+            api.workspace.readFile(projDir, relativePath).then((result) => {
+              if (result.content != null) {
+                useEditorStore.getState().openFileAtPosition(projDir, relativePath, result.content, line, column)
+              }
+            }).catch(() => { /* ignore */ })
+
+            return true
+          } catch { return false }
+        }
+      })
+
+      // 4. Build regex symbol index for non-TS languages (background)
+      api.workspace.buildSymbolIndex(projDir).then((symbols) => {
+        if (symbols.length === 0) return
+        // Register custom DefinitionProvider for non-TS languages
+        const langIds = ['java', 'python', 'go', 'rust', 'csharp', 'kotlin', 'ruby', 'php', 'swift']
+        for (const langId of langIds) {
+          monaco.languages.registerDefinitionProvider(langId, {
+            provideDefinition: async (model, position) => {
+              const word = model.getWordAtPosition(position)
+              if (!word) return null
+              const results = await api.workspace.querySymbol(projDir, word.word)
+              if (results.length === 0) return null
+              return results.map((s: any) => ({
+                uri: monaco.Uri.file(`${projDir}/${s.filePath}`),
+                range: new monaco.Range(s.line, s.column, s.line, s.column + s.name.length)
+              }))
+            }
+          })
+        }
+      }).catch(() => { /* non-critical */ })
+
+    } catch (err) {
+      console.error('[EditorOverlay] language service init failed:', err)
+    }
   }, [])
 
   const handleEditorChange = useCallback((value: string | undefined) => {

@@ -53,6 +53,7 @@ export interface EditorTab {
   content: string
   savedContent: string
   language: string
+  pendingReveal?: { line: number; column: number } | null
 }
 
 interface EditorState {
@@ -60,13 +61,15 @@ interface EditorState {
   activeTabId: string | null
 
   openFile: (projectDir: string, relativePath: string, content: string) => void
+  openFileAtPosition: (projectDir: string, relativePath: string, content: string, line: number, column: number) => void
+  clearPendingReveal: (id: string) => void
   closeTab: (id: string) => void
   closeAllTabs: () => void
   setActiveTab: (id: string) => void
   updateContent: (id: string, content: string) => void
   markSaved: (id: string, content: string) => void
   moveTab: (fromIndex: number, toIndex: number) => void
-  removeTab: (id: string) => EditorTab | null  // removes without closing — returns the tab for detach
+  removeTab: (id: string) => EditorTab | null
 }
 
 function makeId(projectDir: string, relativePath: string): string {
@@ -96,6 +99,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       language: getMonacoLanguage(fileName)
     }
     set({ tabs: [...tabs, tab], activeTabId: id })
+  },
+
+  openFileAtPosition: (projectDir, relativePath, content, line, column) => {
+    const id = makeId(projectDir, relativePath)
+    const { tabs } = get()
+    const existing = tabs.find((t) => t.id === id)
+    if (existing) {
+      // Tab exists — just set pending reveal and activate
+      set({
+        tabs: tabs.map((t) => t.id === id ? { ...t, pendingReveal: { line, column } } : t),
+        activeTabId: id
+      })
+      return
+    }
+    const fileName = relativePath.split('/').pop() || relativePath
+    const tab: EditorTab = {
+      id, projectDir, relativePath, fileName, content,
+      savedContent: content,
+      language: getMonacoLanguage(fileName),
+      pendingReveal: { line, column }
+    }
+    set({ tabs: [...tabs, tab], activeTabId: id })
+  },
+
+  clearPendingReveal: (id) => {
+    set({
+      tabs: get().tabs.map((t) => t.id === id ? { ...t, pendingReveal: null } : t)
+    })
   },
 
   closeTab: (id) => {
