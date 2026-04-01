@@ -410,17 +410,17 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [projectDir, loadTree])
 
   const handleToggleExpand = useCallback(async (entryPath: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev)
-      if (next.has(entryPath)) {
+    // If collapsing, just remove from expanded set
+    if (expandedPaths.has(entryPath)) {
+      setExpandedPaths((prev) => {
+        const next = new Set(prev)
         next.delete(entryPath)
-      } else {
-        next.add(entryPath)
-      }
-      return next
-    })
+        return next
+      })
+      return
+    }
 
-    // Check if the entry needs lazy-loading (children not yet fetched)
+    // Expanding — check if children need to be loaded first
     const findEntry = (items: FileEntry[]): FileEntry | null => {
       for (const item of items) {
         if (item.path === entryPath) return item
@@ -429,33 +429,34 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
       return null
     }
     const entry = findEntry(tree)
-
-    // If the entry exists but has no children loaded, OR if the entry doesn't
-    // exist in the tree at all (flattened compact path that's deeper than the
-    // initially loaded tree), fetch children via IPC.
     const needsLoad = !entry || (entry.isDirectory && !entry.children)
+
     if (needsLoad) {
+      // Load children FIRST, update tree, THEN expand — so the first render
+      // shows the directory expanded with its children already present.
       const children = await api.workspace.readDir(projectDir, entryPath, hideIgnored)
-      if (children.length > 0 || entry) {
+      if (entry) {
         setTree((prev) => {
-          // If entry exists in tree, attach children to it
-          if (entry) {
-            const update = (items: FileEntry[]): FileEntry[] =>
-              items.map((item) =>
-                item.path === entryPath ? { ...item, children } :
-                item.children ? { ...item, children: update(item.children) } : item
-              )
-            return update(prev)
-          }
-          // If entry doesn't exist (deep flattened path), we need to build
-          // the intermediate path and insert. Reload the tree to get fresh data.
-          return prev
+          const update = (items: FileEntry[]): FileEntry[] =>
+            items.map((item) =>
+              item.path === entryPath ? { ...item, children } :
+              item.children ? { ...item, children: update(item.children) } : item
+            )
+          return update(prev)
         })
-        // If entry wasn't found, do a full reload to pick up the deeper structure
-        if (!entry) loadTree()
+      } else {
+        // Entry not found in tree (deep flattened path) — reload
+        await loadTree()
       }
     }
-  }, [tree, projectDir, loadTree])
+
+    // Now expand (children are loaded)
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+      next.add(entryPath)
+      return next
+    })
+  }, [tree, expandedPaths, projectDir, hideIgnored, loadTree])
 
   const handleSelect = useCallback((filePath: string, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
