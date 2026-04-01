@@ -1124,6 +1124,7 @@ const GitManagerApp: React.FC = () => {
   // Also reset to the main repo if we were navigated into a submodule
   useEffect(() => {
     return getDockApi().gitManager.onReopen(() => {
+      wcBusyRef.current = false
       if (activeDir !== projectDir) {
         setActiveDir(projectDir)
         setNavStack([])
@@ -1510,6 +1511,7 @@ const GitManagerApp: React.FC = () => {
       const entry = next.pop()
       if (entry) {
         // Full reset + reload for the parent repo
+        wcBusyRef.current = false
         resetRepoState()
         setActiveDir(entry.dir)
 
@@ -1568,7 +1570,7 @@ const GitManagerApp: React.FC = () => {
           )}
           {navStack.length > 0 ? (
             <span className="gm-titlebar-breadcrumb">
-              <button className="gm-breadcrumb-root" onClick={() => { resetRepoState(); setActiveDir(projectDir); setNavStack([]) }}>
+              <button className="gm-breadcrumb-root" onClick={() => { wcBusyRef.current = false; resetRepoState(); setActiveDir(projectDir); setNavStack([]) }}>
                 {projectDir.split(/[/\\]/).pop()}
               </button>
               {navStack.slice(1).map((entry, i) => (
