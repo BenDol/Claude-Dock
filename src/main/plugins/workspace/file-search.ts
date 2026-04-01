@@ -219,11 +219,56 @@ export interface ReplaceResult {
   errors: string[]
 }
 
+/** Undo/redo stack for replace operations */
+interface ReplaceSnapshot {
+  files: Map<string, string>  // absPath → original content before replace
+  description: string
+}
+
+const undoStack: ReplaceSnapshot[] = []
+const redoStack: ReplaceSnapshot[] = []
+const MAX_UNDO = 20
+
+export function undoReplace(): { success: boolean; filesRestored: number; description?: string } {
+  const snapshot = undoStack.pop()
+  if (!snapshot) return { success: false, filesRestored: 0 }
+  // Save current state for redo before restoring
+  const redoSnapshot: ReplaceSnapshot = { files: new Map(), description: snapshot.description }
+  for (const [absPath] of snapshot.files) {
+    try { redoSnapshot.files.set(absPath, fs.readFileSync(absPath, 'utf-8')) } catch { /* skip */ }
+  }
+  redoStack.push(redoSnapshot)
+  // Restore files
+  let restored = 0
+  for (const [absPath, content] of snapshot.files) {
+    try { fs.writeFileSync(absPath, content, 'utf-8'); restored++ } catch { /* skip */ }
+  }
+  return { success: true, filesRestored: restored, description: snapshot.description }
+}
+
+export function redoReplace(): { success: boolean; filesRestored: number; description?: string } {
+  const snapshot = redoStack.pop()
+  if (!snapshot) return { success: false, filesRestored: 0 }
+  // Save current state for undo before re-applying
+  const undoSnapshot: ReplaceSnapshot = { files: new Map(), description: snapshot.description }
+  for (const [absPath] of snapshot.files) {
+    try { undoSnapshot.files.set(absPath, fs.readFileSync(absPath, 'utf-8')) } catch { /* skip */ }
+  }
+  undoStack.push(undoSnapshot)
+  let restored = 0
+  for (const [absPath, content] of snapshot.files) {
+    try { fs.writeFileSync(absPath, content, 'utf-8'); restored++ } catch { /* skip */ }
+  }
+  return { success: true, filesRestored: restored, description: snapshot.description }
+}
+
+export function hasUndo(): boolean { return undoStack.length > 0 }
+export function hasRedo(): boolean { return redoStack.length > 0 }
+
 /** Replace occurrences in a single file. Returns number of replacements made.
  *  Uses string replacement (not callback) to support $1, $2 capture groups in regex mode. */
 function replaceInFile(absPath: string, pattern: RegExp, replacement: string): number {
   const content = fs.readFileSync(absPath, 'utf-8')
-  // Count matches first
   const matches = content.match(pattern)
   const count = matches ? matches.length : 0
   if (count === 0) return 0
@@ -259,6 +304,8 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
   const errors: string[] = []
   let totalReplacements = 0
   let filesChanged = 0
+  // Snapshot files before replacing (for undo)
+  const snapshot: ReplaceSnapshot = { files: new Map(), description: '' }
 
   if (opts.filePath) {
     if (!isPathSafe(opts.projectDir, opts.filePath)) {
@@ -266,6 +313,7 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
     }
     const abs = path.resolve(opts.projectDir, opts.filePath)
     try {
+      snapshot.files.set(abs, fs.readFileSync(abs, 'utf-8'))
       const count = replaceInFile(abs, pattern, opts.replacement)
       totalReplacements += count
       if (count > 0) filesChanged++
@@ -273,7 +321,6 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
       errors.push(`${opts.filePath}: ${err instanceof Error ? err.message : 'Failed'}`)
     }
   } else {
-    // Multi-file replace — search first to find matching files, then replace
     const searchResult = searchFiles({
       query: opts.query,
       projectDir: opts.projectDir,
@@ -287,6 +334,7 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
       if (!isPathSafe(opts.projectDir, fp)) continue
       const abs = path.resolve(opts.projectDir, fp)
       try {
+        snapshot.files.set(abs, fs.readFileSync(abs, 'utf-8'))
         const count = replaceInFile(abs, pattern, opts.replacement)
         totalReplacements += count
         if (count > 0) filesChanged++
@@ -294,6 +342,14 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
         errors.push(`${fp}: ${err instanceof Error ? err.message : 'Failed'}`)
       }
     }
+  }
+
+  // Push to undo stack if any changes were made
+  if (filesChanged > 0) {
+    snapshot.description = `Replace "${opts.query}" → "${opts.replacement}" (${totalReplacements} in ${filesChanged} file${filesChanged > 1 ? 's' : ''})`
+    undoStack.push(snapshot)
+    if (undoStack.length > MAX_UNDO) undoStack.shift()
+    redoStack.length = 0 // clear redo on new action
   }
 
   return { replacements: totalReplacements, filesChanged, errors }

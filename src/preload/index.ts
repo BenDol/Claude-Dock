@@ -379,6 +379,8 @@ export interface DockApi {
     detachEditor: (projectDir: string, tabData: string) => Promise<{ success: boolean; error?: string }>
     search: (projectDir: string, opts: { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; filePattern?: string }) => Promise<any>
     replace: (projectDir: string, opts: { query: string; replacement: string; filePath?: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) => Promise<any>
+    undoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
+    redoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
     onChanged: (callback: (changes: string[]) => void) => () => void
     onHydrateTabs: (callback: (tabData: string) => void) => () => void
   }
@@ -813,6 +815,8 @@ const dockApi: DockApi = {
     detachEditor: (projectDir, tabData) => ipcRenderer.invoke(IPC.WORKSPACE_DETACH_EDITOR, projectDir, tabData),
     search: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_SEARCH, projectDir, opts),
     replace: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_REPLACE, projectDir, opts),
+    undoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_UNDO_REPLACE),
+    redoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_REDO_REPLACE),
     onChanged: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
       ipcRenderer.on('workspace:changed', handler)

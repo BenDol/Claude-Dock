@@ -172,6 +172,26 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.WORKSPACE_UNDO_REPLACE, async () => {
+    try {
+      const { undoReplace } = await import('./file-search')
+      return undoReplace()
+    } catch (err) {
+      getServices().logError('[workspace] undo replace failed:', err)
+      return { success: false, filesRestored: 0 }
+    }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_REDO_REPLACE, async () => {
+    try {
+      const { redoReplace } = await import('./file-search')
+      return redoReplace()
+    } catch (err) {
+      getServices().logError('[workspace] redo replace failed:', err)
+      return { success: false, filesRestored: 0 }
+    }
+  })
+
   // Detach editor tab to a standalone BrowserWindow
   const detachedWindows = new Map<string, BrowserWindow>()
 
@@ -233,7 +253,8 @@ export function disposeWorkspaceIpc(): void {
     IPC.WORKSPACE_CREATE_FILE, IPC.WORKSPACE_CREATE_FOLDER,
     IPC.WORKSPACE_MOVE_CLAUDE,
     IPC.WORKSPACE_READ_FILE, IPC.WORKSPACE_WRITE_FILE,
-    IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE
+    IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE,
+    IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }

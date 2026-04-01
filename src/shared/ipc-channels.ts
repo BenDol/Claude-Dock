@@ -262,6 +262,8 @@ export const IPC = {
   WORKSPACE_DETACH_EDITOR: 'workspace:detachEditor',
   WORKSPACE_SEARCH: 'workspace:search',
   WORKSPACE_REPLACE: 'workspace:replace',
+  WORKSPACE_UNDO_REPLACE: 'workspace:undoReplace',
+  WORKSPACE_REDO_REPLACE: 'workspace:redoReplace',
   WORKSPACE_READ_FILE: 'workspace:readFile',
   WORKSPACE_WRITE_FILE: 'workspace:writeFile',
 

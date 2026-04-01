@@ -152,6 +152,39 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
     doSearch(query) // re-search
   }, [query, replacement, projectDir, caseSensitive, wholeWord, regex, result, groupedMatches, doSearch])
 
+  // Undo/redo for replace operations (Ctrl+Z/Y when search panel is visible with replace open)
+  useEffect(() => {
+    if (!visible || !showReplace) return
+    const handler = async (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      // Only handle when focus is inside the search panel
+      const panel = document.querySelector('.ws-search-panel')
+      if (!panel?.contains(document.activeElement) && !panel?.matches(':hover')) return
+
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        const r = await api.workspace.undoReplace()
+        if (r.success) {
+          setReplaceMsg(`Undo: restored ${r.filesRestored} file${r.filesRestored > 1 ? 's' : ''}`)
+          setTimeout(() => setReplaceMsg(null), 3000)
+          if (query.length >= 2) doSearch(query)
+        }
+      } else if (e.key === 'y' || (e.key === 'Z' && e.shiftKey)) {
+        e.preventDefault()
+        e.stopPropagation()
+        const r = await api.workspace.redoReplace()
+        if (r.success) {
+          setReplaceMsg(`Redo: re-applied to ${r.filesRestored} file${r.filesRestored > 1 ? 's' : ''}`)
+          setTimeout(() => setReplaceMsg(null), 3000)
+          if (query.length >= 2) doSearch(query)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true } as any)
+  }, [visible, showReplace, query, doSearch])
+
   if (!visible) return null
 
   return (
@@ -197,6 +230,14 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
           <button className="ws-search-replace-all-btn" onClick={handleReplaceAll} disabled={replacing || !query || !result?.totalMatches} title="Replace All">
             {replacing ? '...' : 'All'}
           </button>
+          <button className="ws-search-undo-btn" onClick={async () => {
+            const r = await api.workspace.undoReplace()
+            if (r.success) { setReplaceMsg(`Undo: restored ${r.filesRestored} file${r.filesRestored > 1 ? 's' : ''}`); setTimeout(() => setReplaceMsg(null), 3000); if (query.length >= 2) doSearch(query) }
+          }} title="Undo last replace (Ctrl+Z)">&#x21A9;</button>
+          <button className="ws-search-undo-btn" onClick={async () => {
+            const r = await api.workspace.redoReplace()
+            if (r.success) { setReplaceMsg(`Redo: ${r.filesRestored} file${r.filesRestored > 1 ? 's' : ''}`); setTimeout(() => setReplaceMsg(null), 3000); if (query.length >= 2) doSearch(query) }
+          }} title="Redo last replace (Ctrl+Y)">&#x21AA;</button>
         </div>
       )}
       {replaceMsg && <div className="ws-search-replace-msg">{replaceMsg}</div>}

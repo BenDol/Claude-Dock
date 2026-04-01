@@ -390,6 +390,18 @@
 .ws-search-replace-all-btn:disabled { opacity: 0.4; cursor: default; }
 .ws-search-replace-all-btn:hover:not(:disabled) { opacity: 0.9; }
 
+.ws-search-undo-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.ws-search-undo-btn:hover { color: var(--text-primary); border-color: var(--text-secondary); }
+
 .ws-search-replace-msg {
   font-size: 10px;
   color: #9ece6a;
