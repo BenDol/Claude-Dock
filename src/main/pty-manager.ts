@@ -31,6 +31,12 @@ export class PtyManager {
   // Data batching to reduce IPC overhead
   private pendingData = new Map<string, string>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  // Shell-specific batching: longer window (debounced) for high-throughput server logs
+  private pendingShellData = new Map<string, string>()
+  private shellFlushTimer: ReturnType<typeof setTimeout> | null = null
+  private shellFlushStart = 0
+  private static readonly SHELL_FLUSH_DEBOUNCE = 32
+  private static readonly SHELL_FLUSH_MAX_WAIT = 80
   /** Timestamp of last data received from each PTY (for idle detection) */
   private lastDataTime = new Map<string, number>()
   // Resume failure detection — watches early output for marker indicating session not found
@@ -230,6 +236,31 @@ export class PtyManager {
       return
     }
     this.lastDataTime.set(terminalId, Date.now())
+
+    // Shell PTYs use a separate longer batch window — ConPTY on Windows delivers
+    // server logs line-by-line with gaps, so the short 8ms terminal timer doesn't
+    // batch effectively. The shell timer debounces (resets on each chunk) with a
+    // max-wait cap to prevent starvation during sustained bursts.
+    if (terminalId.startsWith('shell:')) {
+      const existing = this.pendingShellData.get(terminalId)
+      this.pendingShellData.set(terminalId, existing ? existing + data : data)
+      const now = Date.now()
+      if (!this.shellFlushTimer) {
+        this.shellFlushStart = now
+      }
+      const elapsed = now - this.shellFlushStart
+      if (elapsed >= PtyManager.SHELL_FLUSH_MAX_WAIT) {
+        // Hit max wait — flush immediately
+        if (this.shellFlushTimer) clearTimeout(this.shellFlushTimer)
+        this.flushShellData()
+      } else {
+        // Debounce: reset timer on each new chunk
+        if (this.shellFlushTimer) clearTimeout(this.shellFlushTimer)
+        this.shellFlushTimer = setTimeout(() => this.flushShellData(), PtyManager.SHELL_FLUSH_DEBOUNCE)
+      }
+      return
+    }
+
     const existing = this.pendingData.get(terminalId)
     this.pendingData.set(terminalId, existing ? existing + data : data)
     if (!this.flushTimer) {
@@ -243,6 +274,15 @@ export class PtyManager {
       this.onData(terminalId, data)
     }
     this.pendingData.clear()
+  }
+
+  private flushShellData(): void {
+    this.shellFlushTimer = null
+    this.shellFlushStart = 0
+    for (const [terminalId, data] of this.pendingShellData) {
+      this.onData(terminalId, data)
+    }
+    this.pendingShellData.clear()
   }
 
   /**
@@ -456,6 +496,7 @@ export class PtyManager {
       this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
+      this.pendingShellData.delete(terminalId)
       this.lastDataTime.delete(terminalId)
       this.ephemeralIds.delete(terminalId)
       this.interactedIds.delete(terminalId)
@@ -475,7 +516,12 @@ export class PtyManager {
       clearTimeout(this.flushTimer)
       this.flushTimer = null
     }
+    if (this.shellFlushTimer) {
+      clearTimeout(this.shellFlushTimer)
+      this.shellFlushTimer = null
+    }
     this.pendingData.clear()
+    this.pendingShellData.clear()
     const count = this.ptys.size
     if (count > 0) {
       log(`pty.killAll: killing ${count} PTY(s)`)

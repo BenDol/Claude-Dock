@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, shell, app } from 'electron'
 import * as fs from 'fs'
+import * as fsp from 'fs/promises'
 import * as path from 'path'
 import { PtyManager } from './pty-manager'
 import { IPC } from '../shared/ipc-channels'
@@ -444,67 +445,79 @@ export class DockWindow {
   }
 
   private saveShellOutput(): void {
-    try {
-      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
-      let existing: Record<string, any> = {}
-      try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { /* new file */ }
+    // Snapshot current buffers synchronously so new data doesn't interfere,
+    // then do all file I/O asynchronously to avoid blocking the main thread
+    // (which delays IPC data delivery to the renderer).
+    const snapshot = new Map<string, string>()
+    for (const [shellId, content] of this.shellOutputBuffers) {
+      snapshot.set(shellId, content)
+    }
+    this.saveShellOutputAsync(snapshot).catch((err) => {
+      log(`[shell-output] save failed: ${err instanceof Error ? err.message : err}`)
+    })
+  }
 
-      // Build entries keyed by the parent terminal's session ID,
-      // with each shell's output stored separately by shell ID
-      for (const [shellId, content] of this.shellOutputBuffers) {
-        // shellId format: "shell:term-1-123456:0" — extract the parent terminal ID
-        const parts = shellId.split(':')
-        const parentTerminalId = parts.length >= 3 ? parts.slice(1, -1).join(':') : parts[1]
-        const sessionId = this.ptyManager.getSessionId(parentTerminalId)
-        if (!sessionId) continue
+  private async saveShellOutputAsync(snapshot: Map<string, string>): Promise<void> {
+    const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+    let existing: Record<string, any> = {}
+    try { existing = JSON.parse(await fsp.readFile(outputFile, 'utf-8')) } catch { /* new file */ }
 
-        const lines = content.split(/\r?\n/).filter((l) => l.trim())
-        const recentLines = lines.slice(-500)
+    const writePromises: Promise<void>[] = []
 
-        if (!existing[sessionId]) {
-          existing[sessionId] = {
-            sessionId,
-            parentTerminalId,
-            projectDir: this.projectDir,
-            shells: {},
-            lastUpdate: Date.now()
-          }
-        }
+    // Build entries keyed by the parent terminal's session ID,
+    // with each shell's output stored separately by shell ID
+    for (const [shellId, content] of snapshot) {
+      // shellId format: "shell:term-1-123456:0" — extract the parent terminal ID
+      const parts = shellId.split(':')
+      const parentTerminalId = parts.length >= 3 ? parts.slice(1, -1).join(':') : parts[1]
+      const sessionId = this.ptyManager.getSessionId(parentTerminalId)
+      if (!sessionId) continue
 
-        // Write individual log file per shell for direct file reading by Claude
-        const shellIndex = shellId.split(':').pop() || '0'
-        const logFileName = `dock-shell-${sessionId.slice(0, 8)}-${shellIndex}.log`
-        const logFilePath = path.join(app.getPath('userData'), logFileName)
-        try {
-          fs.writeFileSync(logFilePath, recentLines.join('\n') + '\n')
-        } catch { /* ignore write errors */ }
+      const lines = content.split(/\r?\n/).filter((l) => l.trim())
+      const recentLines = lines.slice(-500)
 
-        existing[sessionId].shells[shellId] = {
-          lines: recentLines,
-          logFile: logFilePath,
+      if (!existing[sessionId]) {
+        existing[sessionId] = {
+          sessionId,
+          parentTerminalId,
+          projectDir: this.projectDir,
+          shells: {},
           lastUpdate: Date.now()
         }
-        existing[sessionId].lastUpdate = Date.now()
       }
 
-      // Prune entries older than 5 minutes from other docks
-      const cutoff = Date.now() - 5 * 60 * 1000
-      for (const key of Object.keys(existing)) {
-        if (existing[key].lastUpdate < cutoff) {
-          const hasActiveShell = Object.keys(existing[key].shells || {}).some(
-            (sid) => this.shellOutputBuffers.has(sid)
-          )
-          if (!hasActiveShell) delete existing[key]
-        }
+      // Write individual log file per shell for direct file reading by Claude
+      const shellIndex = shellId.split(':').pop() || '0'
+      const logFileName = `dock-shell-${sessionId.slice(0, 8)}-${shellIndex}.log`
+      const logFilePath = path.join(app.getPath('userData'), logFileName)
+      writePromises.push(
+        fsp.writeFile(logFilePath, recentLines.join('\n') + '\n').catch(() => { /* ignore write errors */ })
+      )
+
+      existing[sessionId].shells[shellId] = {
+        lines: recentLines,
+        logFile: logFilePath,
+        lastUpdate: Date.now()
       }
-
-      fs.writeFileSync(outputFile, JSON.stringify(existing, null, 2))
-
-      // Scan for new ##DOCK_EVENT:...## markers and write them to the pending events file
-      this.detectAndWritePendingEvents(existing)
-    } catch (err) {
-      log(`[shell-output] save failed: ${err instanceof Error ? err.message : err}`)
+      existing[sessionId].lastUpdate = Date.now()
     }
+
+    // Prune entries older than 5 minutes from other docks
+    const cutoff = Date.now() - 5 * 60 * 1000
+    for (const key of Object.keys(existing)) {
+      if (existing[key].lastUpdate < cutoff) {
+        const hasActiveShell = Object.keys(existing[key].shells || {}).some(
+          (sid) => this.shellOutputBuffers.has(sid)
+        )
+        if (!hasActiveShell) delete existing[key]
+      }
+    }
+
+    writePromises.push(fsp.writeFile(outputFile, JSON.stringify(existing, null, 2)))
+    await Promise.all(writePromises)
+
+    // Scan for new ##DOCK_EVENT:...## markers and write them to the pending events file
+    this.detectAndWritePendingEvents(existing)
   }
 
   /**
@@ -512,7 +525,7 @@ export class DockWindow {
    * Joins lines before scanning to handle events split across terminal line-wrap boundaries.
    * Appends any new events to dock-pending-events.json for the MCP server to pick up.
    */
-  private detectAndWritePendingEvents(shellData: Record<string, any>): void {
+  private async detectAndWritePendingEvents(shellData: Record<string, any>): Promise<void> {
     const eventPattern = /##DOCK_EVENT:([^:]+):(.+?)##/g
     const newEvents: Array<{ sessionId: string; shellId: string; type: string; payload: any; timestamp: number }> = []
 
@@ -553,7 +566,7 @@ export class DockWindow {
     const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
     let pending: any[] = []
     try {
-      pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8'))
+      pending = JSON.parse(await fsp.readFile(pendingFile, 'utf-8'))
       if (!Array.isArray(pending)) pending = []
     } catch { /* new file */ }
 
@@ -577,7 +590,7 @@ export class DockWindow {
     // Cap at 100 pending events to prevent unbounded growth
     if (pending.length > 100) pending = pending.slice(-100)
 
-    fs.writeFileSync(pendingFile, JSON.stringify(pending, null, 2))
+    await fsp.writeFile(pendingFile, JSON.stringify(pending, null, 2))
     log(`[shell-events] ${dedupedEvents.length} new event(s) written to pending file`)
 
     // Send events to renderer for UI notification cards
