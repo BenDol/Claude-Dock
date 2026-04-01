@@ -3292,6 +3292,77 @@ label:hover .setting-scope-btn,
   font-size: 12px;
 }
 
+/* Redesigned plugin settings */
+.ps-settings {
+  margin-top: 8px;
+  padding: 8px 10px;
+  margin-left: 24px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ps-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  min-height: 26px;
+}
+
+.ps-row-toggle {
+  cursor: pointer;
+}
+.ps-row-toggle:hover { color: var(--accent-color); }
+
+.ps-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ps-help-icon {
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  position: relative;
+}
+.ps-help-icon:hover svg { opacity: 0.85 !important; }
+
+.ps-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.ps-input:focus {
+  border-color: var(--accent-color);
+}
+.ps-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.ps-input-number {
+  max-width: 70px;
+  text-align: right;
+}
+
 .plugin-settings-btn {
   background: none;
   border: 1px solid var(--border-color);

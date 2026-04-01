@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
-import type { PluginInfo, ProjectPluginStates } from '../../../shared/plugin-types'
+import type { PluginInfo, PluginSettingDef, ProjectPluginStates } from '../../../shared/plugin-types'
 
 interface PluginPanelProps {
   projectDir: string
@@ -19,6 +19,63 @@ function formatUpdateDate(ts: number): string {
   const diffDay = Math.floor(diffHr / 24)
   if (diffDay < 7) return `${diffDay}d ago`
   return d.toLocaleDateString()
+}
+
+const HelpIcon: React.FC<{ tooltip: string }> = ({ tooltip }) => (
+  <span className="ps-help-icon" title={tooltip}>
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" opacity="0.45">
+      <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zm-.75-2.5h1.5v1.5h-1.5V11zm.08-6.5c1.46 0 2.42.82 2.42 1.96 0 .88-.52 1.37-1.15 1.76-.5.31-.65.52-.65.9v.38H6.5v-.52c0-.72.33-1.17.93-1.56.5-.32.72-.52.72-.96 0-.5-.35-.8-.95-.8-.56 0-.96.33-1.02.86H4.75C4.83 5.38 5.76 4.5 7.33 4.5z"/>
+    </svg>
+  </span>
+)
+
+const SettingField: React.FC<{
+  def: PluginSettingDef
+  value: unknown
+  onChange: (value: unknown) => void
+}> = ({ def, value, onChange }) => {
+  const helpIcon = def.description ? <HelpIcon tooltip={def.description} /> : null
+
+  if (def.type === 'boolean') {
+    return (
+      <label className="ps-row ps-row-toggle">
+        <span className="ps-label">{def.label}{helpIcon}</span>
+        <input
+          type="checkbox"
+          checked={value as boolean}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+      </label>
+    )
+  }
+
+  if (def.type === 'number') {
+    return (
+      <label className="ps-row">
+        <span className="ps-label">{def.label}{helpIcon}</span>
+        <input
+          className="ps-input ps-input-number"
+          type="number"
+          value={(value as number) || 0}
+          placeholder={def.placeholder}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+        />
+      </label>
+    )
+  }
+
+  return (
+    <label className="ps-row">
+      <span className="ps-label">{def.label}{helpIcon}</span>
+      <input
+        className="ps-input"
+        type="text"
+        value={(value as string) || ''}
+        placeholder={def.placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  )
 }
 
 const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
@@ -68,11 +125,8 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
   const toggleSettingsExpanded = (pluginId: string) => {
     setExpandedSettings((prev) => {
       const next = new Set(prev)
-      if (next.has(pluginId)) {
-        next.delete(pluginId)
-      } else {
-        next.add(pluginId)
-      }
+      if (next.has(pluginId)) next.delete(pluginId)
+      else next.add(pluginId)
       return next
     })
   }
@@ -127,7 +181,6 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
                   className="plugin-reset-trust-btn"
                   onClick={async () => {
                     await getDockApi().plugins.resetTrust(plugin.id)
-                    // The trust will be re-prompted on next app launch
                     window.dispatchEvent(new CustomEvent('plugin-state-changed'))
                   }}
                   title="Reset trust decision — you will be prompted again on next launch"
@@ -137,47 +190,15 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir }) => {
               )}
             </div>
             {state.enabled && hasSettings && isExpanded && (
-              <div className="plugin-settings">
-                {plugin.settingsSchema!.map((def) => {
-                  const val = state.settings?.[def.key] ?? def.defaultValue
-                  if (def.type === 'boolean') {
-                    return (
-                      <label key={def.key} className="plugin-setting-row checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={val as boolean}
-                          onChange={(e) => updateSetting(plugin.id, def.key, e.target.checked)}
-                        />
-                        {def.label}
-                      </label>
-                    )
-                  }
-                  if (def.type === 'string') {
-                    return (
-                      <label key={def.key} className="plugin-setting-row">
-                        {def.label}
-                        <input
-                          type="text"
-                          value={(val as string) || ''}
-                          onChange={(e) => updateSetting(plugin.id, def.key, e.target.value)}
-                        />
-                      </label>
-                    )
-                  }
-                  if (def.type === 'number') {
-                    return (
-                      <label key={def.key} className="plugin-setting-row">
-                        {def.label}
-                        <input
-                          type="number"
-                          value={(val as number) || 0}
-                          onChange={(e) => updateSetting(plugin.id, def.key, parseFloat(e.target.value))}
-                        />
-                      </label>
-                    )
-                  }
-                  return null
-                })}
+              <div className="ps-settings">
+                {plugin.settingsSchema!.map((def) => (
+                  <SettingField
+                    key={def.key}
+                    def={def}
+                    value={state.settings?.[def.key] ?? def.defaultValue}
+                    onChange={(v) => updateSetting(plugin.id, def.key, v)}
+                  />
+                ))}
               </div>
             )}
           </div>

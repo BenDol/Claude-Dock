@@ -17,13 +17,13 @@ function safePath(projectDir: string, relativePath: string): string | null {
 }
 
 export function registerWorkspaceIpc(): void {
-  ipcMain.handle(IPC.WS_VIEWER_READ_DIR, async (_event, projectDir: string, relativePath: string, hideIgnored?: boolean) => {
+  ipcMain.handle(IPC.WORKSPACE_READ_DIR, async (_event, projectDir: string, relativePath: string, hideIgnored?: boolean) => {
     try { return readDirectory(projectDir, relativePath, hideIgnored ?? false) } catch (err) {
       getServices().logError('[workspace] readDir failed:', err); return []
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_READ_TREE, async (_event, projectDir: string, maxDepth?: number, hideIgnored?: boolean) => {
+  ipcMain.handle(IPC.WORKSPACE_READ_TREE, async (_event, projectDir: string, maxDepth?: number, hideIgnored?: boolean) => {
     try {
       const depth = Math.min(Math.max(maxDepth ?? 2, 1), 5)
       return readTree(projectDir, depth, hideIgnored ?? false)
@@ -32,7 +32,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_OPEN_FILE, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_OPEN_FILE, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return
@@ -42,7 +42,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_OPEN_IN_EXPLORER, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_OPEN_IN_EXPLORER, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return
@@ -52,7 +52,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_RENAME, async (_event, projectDir: string, relativePath: string, newName: string) => {
+  ipcMain.handle(IPC.WORKSPACE_RENAME, async (_event, projectDir: string, relativePath: string, newName: string) => {
     try {
       if (!newName || newName.includes('/') || newName.includes('\\')) {
         return { success: false, error: 'Invalid name' }
@@ -68,7 +68,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_DELETE, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_DELETE, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return { success: false, error: 'Invalid path' }
@@ -80,7 +80,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_CREATE_FILE, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_CREATE_FILE, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return { success: false, error: 'Invalid path' }
@@ -94,7 +94,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_CREATE_FOLDER, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_CREATE_FOLDER, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return { success: false, error: 'Invalid path' }
@@ -107,7 +107,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_MOVE_CLAUDE, async (_event, projectDir: string, sourcePath: string, targetDir: string) => {
+  ipcMain.handle(IPC.WORKSPACE_MOVE_CLAUDE, async (_event, projectDir: string, sourcePath: string, targetDir: string) => {
     try {
       const sent = getServices().sendTaskToDock(projectDir, 'claude:task', {
         type: 'file-move',
@@ -124,7 +124,7 @@ export function registerWorkspaceIpc(): void {
 
   const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 
-  ipcMain.handle(IPC.WS_VIEWER_READ_FILE, async (_event, projectDir: string, relativePath: string) => {
+  ipcMain.handle(IPC.WORKSPACE_READ_FILE, async (_event, projectDir: string, relativePath: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return { error: 'Invalid path' }
@@ -138,7 +138,7 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_WRITE_FILE, async (_event, projectDir: string, relativePath: string, content: string) => {
+  ipcMain.handle(IPC.WORKSPACE_WRITE_FILE, async (_event, projectDir: string, relativePath: string, content: string) => {
     try {
       const abs = safePath(projectDir, relativePath)
       if (!abs) return { success: false, error: 'Invalid path' }
@@ -150,10 +150,32 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
+  // Content search across workspace files
+  ipcMain.handle(IPC.WORKSPACE_SEARCH, async (_event, projectDir: string, opts: any) => {
+    try {
+      const { searchFiles } = await import('./file-search')
+      return searchFiles({ ...opts, projectDir })
+    } catch (err) {
+      getServices().logError('[workspace] search failed:', err)
+      return { matches: [], totalMatches: 0, truncated: false, durationMs: 0 }
+    }
+  })
+
+  // Search and replace across workspace files
+  ipcMain.handle(IPC.WORKSPACE_REPLACE, async (_event, projectDir: string, opts: any) => {
+    try {
+      const { replaceInFiles } = await import('./file-search')
+      return replaceInFiles({ ...opts, projectDir })
+    } catch (err) {
+      getServices().logError('[workspace] replace failed:', err)
+      return { replacements: 0, filesChanged: 0, errors: [err instanceof Error ? err.message : 'Replace failed'] }
+    }
+  })
+
   // Detach editor tab to a standalone BrowserWindow
   const detachedWindows = new Map<string, BrowserWindow>()
 
-  ipcMain.handle(IPC.WS_VIEWER_DETACH_EDITOR, async (_event, projectDir: string, tabData: string) => {
+  ipcMain.handle(IPC.WORKSPACE_DETACH_EDITOR, async (_event, projectDir: string, tabData: string) => {
     try {
       const win = new BrowserWindow({
         width: 900,
@@ -205,13 +227,13 @@ export function registerWorkspaceIpc(): void {
 
 export function disposeWorkspaceIpc(): void {
   const channels = [
-    IPC.WS_VIEWER_READ_DIR, IPC.WS_VIEWER_READ_TREE,
-    IPC.WS_VIEWER_OPEN_FILE, IPC.WS_VIEWER_OPEN_IN_EXPLORER,
-    IPC.WS_VIEWER_RENAME, IPC.WS_VIEWER_DELETE,
-    IPC.WS_VIEWER_CREATE_FILE, IPC.WS_VIEWER_CREATE_FOLDER,
-    IPC.WS_VIEWER_MOVE_CLAUDE,
-    IPC.WS_VIEWER_READ_FILE, IPC.WS_VIEWER_WRITE_FILE,
-    IPC.WS_VIEWER_DETACH_EDITOR
+    IPC.WORKSPACE_READ_DIR, IPC.WORKSPACE_READ_TREE,
+    IPC.WORKSPACE_OPEN_FILE, IPC.WORKSPACE_OPEN_IN_EXPLORER,
+    IPC.WORKSPACE_RENAME, IPC.WORKSPACE_DELETE,
+    IPC.WORKSPACE_CREATE_FILE, IPC.WORKSPACE_CREATE_FOLDER,
+    IPC.WORKSPACE_MOVE_CLAUDE,
+    IPC.WORKSPACE_READ_FILE, IPC.WORKSPACE_WRITE_FILE,
+    IPC.WORKSPACE_DETACH_EDITOR, IPC.WORKSPACE_SEARCH, IPC.WORKSPACE_REPLACE
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }

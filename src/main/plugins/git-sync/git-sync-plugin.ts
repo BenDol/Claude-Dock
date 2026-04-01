@@ -101,7 +101,8 @@ export class GitSyncPlugin implements DockPlugin {
   readonly settingsSchema: PluginSettingDef[] = [
     {
       key: 'syncSubmodules',
-      label: 'Also sync and update submodules',
+      label: 'Sync submodules',
+      description: 'Also pull and update submodules when syncing',
       type: 'boolean',
       defaultValue: false
     }

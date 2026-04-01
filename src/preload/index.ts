@@ -377,6 +377,8 @@ export interface DockApi {
     readFile: (projectDir: string, relativePath: string) => Promise<{ content?: string; error?: string }>
     writeFile: (projectDir: string, relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     detachEditor: (projectDir: string, tabData: string) => Promise<{ success: boolean; error?: string }>
+    search: (projectDir: string, opts: { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; filePattern?: string }) => Promise<any>
+    replace: (projectDir: string, opts: { query: string; replacement: string; filePath?: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) => Promise<any>
     onChanged: (callback: (changes: string[]) => void) => () => void
     onHydrateTabs: (callback: (tabData: string) => void) => () => void
   }
@@ -797,22 +799,24 @@ const dockApi: DockApi = {
     }
   },
   workspace: {
-    readDir: (projectDir, relativePath, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_DIR, projectDir, relativePath, hideIgnored),
-    readTree: (projectDir, maxDepth?, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_TREE, projectDir, maxDepth, hideIgnored),
-    openFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_FILE, projectDir, relativePath),
-    openInExplorer: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_IN_EXPLORER, projectDir, relativePath),
-    rename: (projectDir, relativePath, newName) => ipcRenderer.invoke(IPC.WS_VIEWER_RENAME, projectDir, relativePath, newName),
-    delete: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_DELETE, projectDir, relativePath),
-    createFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FILE, projectDir, relativePath),
-    createFolder: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FOLDER, projectDir, relativePath),
-    moveClaude: (projectDir, sourcePath, targetDir) => ipcRenderer.invoke(IPC.WS_VIEWER_MOVE_CLAUDE, projectDir, sourcePath, targetDir),
-    readFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_FILE, projectDir, relativePath),
-    writeFile: (projectDir, relativePath, content) => ipcRenderer.invoke(IPC.WS_VIEWER_WRITE_FILE, projectDir, relativePath, content),
-    detachEditor: (projectDir, tabData) => ipcRenderer.invoke(IPC.WS_VIEWER_DETACH_EDITOR, projectDir, tabData),
+    readDir: (projectDir, relativePath, hideIgnored?) => ipcRenderer.invoke(IPC.WORKSPACE_READ_DIR, projectDir, relativePath, hideIgnored),
+    readTree: (projectDir, maxDepth?, hideIgnored?) => ipcRenderer.invoke(IPC.WORKSPACE_READ_TREE, projectDir, maxDepth, hideIgnored),
+    openFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_OPEN_FILE, projectDir, relativePath),
+    openInExplorer: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_OPEN_IN_EXPLORER, projectDir, relativePath),
+    rename: (projectDir, relativePath, newName) => ipcRenderer.invoke(IPC.WORKSPACE_RENAME, projectDir, relativePath, newName),
+    delete: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_DELETE, projectDir, relativePath),
+    createFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_CREATE_FILE, projectDir, relativePath),
+    createFolder: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_CREATE_FOLDER, projectDir, relativePath),
+    moveClaude: (projectDir, sourcePath, targetDir) => ipcRenderer.invoke(IPC.WORKSPACE_MOVE_CLAUDE, projectDir, sourcePath, targetDir),
+    readFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_READ_FILE, projectDir, relativePath),
+    writeFile: (projectDir, relativePath, content) => ipcRenderer.invoke(IPC.WORKSPACE_WRITE_FILE, projectDir, relativePath, content),
+    detachEditor: (projectDir, tabData) => ipcRenderer.invoke(IPC.WORKSPACE_DETACH_EDITOR, projectDir, tabData),
+    search: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_SEARCH, projectDir, opts),
+    replace: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_REPLACE, projectDir, opts),
     onChanged: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
-      ipcRenderer.on('wsViewer:changed', handler)
-      return () => ipcRenderer.removeListener('wsViewer:changed', handler)
+      ipcRenderer.on('workspace:changed', handler)
+      return () => ipcRenderer.removeListener('workspace:changed', handler)
     },
     onHydrateTabs: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, tabData: string) => callback(tabData)

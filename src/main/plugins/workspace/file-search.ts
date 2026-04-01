@@ -1,0 +1,300 @@
+/**
+ * File content search engine for the workspace plugin.
+ * Uses `git grep` for git repos (fast, respects .gitignore).
+ * Falls back to manual recursive search for non-git repos.
+ */
+import { execFileSync } from 'child_process'
+import * as fs from 'fs'
+import * as path from 'path'
+
+export interface SearchOptions {
+  query: string
+  projectDir: string
+  caseSensitive?: boolean
+  wholeWord?: boolean
+  regex?: boolean
+  filePattern?: string   // glob like *.ts, *.java
+  maxResults?: number
+}
+
+export interface SearchMatch {
+  filePath: string       // relative to projectDir
+  line: number
+  column: number
+  text: string           // the matched line content (trimmed)
+  matchStart: number     // column offset of match in text
+  matchEnd: number       // end column of match in text
+}
+
+export interface SearchResult {
+  matches: SearchMatch[]
+  totalMatches: number
+  truncated: boolean
+  durationMs: number
+}
+
+const MAX_RESULTS = 500
+const SEARCH_TIMEOUT = 10000 // 10 seconds
+const SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.cache', '__pycache__',
+  '.next', '.nuxt', 'target', 'out', '.gradle', '.idea', '.vscode',
+  'bin', 'obj', '.svelte-kit', '.output', 'coverage'
+])
+const BINARY_EXTS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'ico', 'avif', 'tif', 'tiff',
+  'pdf', 'zip', 'tar', 'gz', '7z', 'rar', 'exe', 'dll', 'so', 'dylib',
+  'woff', 'woff2', 'ttf', 'otf', 'eot', 'mp3', 'mp4', 'wav', 'ogg',
+  'webm', 'mov', 'avi', 'class', 'pyc', 'o', 'obj', 'lock'
+])
+
+/** Check if project is a git repo */
+function isGitRepo(dir: string): boolean {
+  try { return fs.existsSync(path.join(dir, '.git')) } catch { return false }
+}
+
+/** Search using git grep (fast, respects .gitignore) */
+function searchWithGit(opts: SearchOptions): SearchResult {
+  const start = Date.now()
+  const limit = opts.maxResults ?? MAX_RESULTS
+  const args = ['grep', '-n', '--column', '-I'] // -n line numbers, --column, -I skip binary
+
+  if (!opts.caseSensitive) args.push('-i')
+  if (opts.wholeWord) args.push('-w')
+  if (opts.regex) {
+    args.push('-E') // extended regex
+  } else {
+    args.push('-F') // fixed string (literal)
+  }
+  args.push(`--max-count=${Math.ceil(limit / 5)}`) // per-file cap
+
+  // Query must come before `--` separator, pathspec after
+  args.push('-e', opts.query)
+  if (opts.filePattern) args.push('--', opts.filePattern)
+
+  try {
+    const stdout = execFileSync('git', args, {
+      cwd: opts.projectDir,
+      encoding: 'utf-8',
+      timeout: SEARCH_TIMEOUT,
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    return parseGitGrepOutput(stdout, limit, Date.now() - start)
+  } catch (err: any) {
+    // git grep exits 1 when no matches — that's not an error
+    if (err.status === 1) return { matches: [], totalMatches: 0, truncated: false, durationMs: Date.now() - start }
+    return { matches: [], totalMatches: 0, truncated: false, durationMs: Date.now() - start }
+  }
+}
+
+function parseGitGrepOutput(stdout: string, limit: number, durationMs: number): SearchResult {
+  const matches: SearchMatch[] = []
+  let totalMatches = 0
+
+  for (const line of stdout.split('\n')) {
+    if (!line) continue
+    // Format: file:line:column:content
+    const m = line.match(/^(.+?):(\d+):(\d+):(.*)$/)
+    if (!m) continue
+    totalMatches++
+    if (matches.length >= limit) continue
+
+    const filePath = m[1]
+    const lineNo = parseInt(m[2], 10)
+    const col = parseInt(m[3], 10)
+    const text = m[4].trim()
+
+    matches.push({
+      filePath,
+      line: lineNo,
+      column: col,
+      text: text.length > 300 ? text.slice(0, 300) + '...' : text,
+      matchStart: col - 1,
+      matchEnd: col - 1 // approximate — git grep doesn't give match length
+    })
+  }
+
+  return { matches, totalMatches, truncated: totalMatches > limit, durationMs }
+}
+
+/** Fallback: manual recursive search (for non-git repos) */
+function searchManual(opts: SearchOptions): SearchResult {
+  const start = Date.now()
+  const limit = opts.maxResults ?? MAX_RESULTS
+  const matches: SearchMatch[] = []
+  let totalMatches = 0
+  let flags = opts.caseSensitive ? 'g' : 'gi'
+  let pattern: RegExp
+
+  try {
+    if (opts.regex) {
+      pattern = new RegExp(opts.query, flags)
+    } else {
+      const escaped = opts.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      pattern = opts.wholeWord ? new RegExp(`\\b${escaped}\\b`, flags) : new RegExp(escaped, flags)
+    }
+  } catch {
+    return { matches: [], totalMatches: 0, truncated: false, durationMs: 0 }
+  }
+
+  const filePatternRe = opts.filePattern ? globToRegex(opts.filePattern) : null
+
+  const walk = (dir: string, relDir: string) => {
+    if (matches.length >= limit || Date.now() - start > SEARCH_TIMEOUT) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+
+    for (const entry of entries) {
+      if (matches.length >= limit || Date.now() - start > SEARCH_TIMEOUT) return
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) walk(path.join(dir, entry.name), relDir ? `${relDir}/${entry.name}` : entry.name)
+      } else if (entry.isFile()) {
+        const ext = entry.name.split('.').pop()?.toLowerCase() || ''
+        if (BINARY_EXTS.has(ext)) continue
+        const relPath = relDir ? `${relDir}/${entry.name}` : entry.name
+        if (filePatternRe && !filePatternRe.test(relPath)) continue
+
+        try {
+          const stat = fs.statSync(path.join(dir, entry.name))
+          if (stat.size > 1024 * 1024) continue // skip files > 1MB
+          const content = fs.readFileSync(path.join(dir, entry.name), 'utf-8')
+          const lines = content.split('\n')
+          for (let i = 0; i < lines.length && matches.length < limit; i++) {
+            pattern.lastIndex = 0
+            const m = pattern.exec(lines[i])
+            if (m) {
+              totalMatches++
+              const text = lines[i].trim()
+              matches.push({
+                filePath: relPath,
+                line: i + 1,
+                column: m.index + 1,
+                text: text.length > 300 ? text.slice(0, 300) + '...' : text,
+                matchStart: m.index,
+                matchEnd: m.index + m[0].length
+              })
+            }
+          }
+        } catch { /* skip unreadable files */ }
+      }
+    }
+  }
+
+  walk(opts.projectDir, '')
+  return { matches, totalMatches, truncated: totalMatches > limit, durationMs: Date.now() - start }
+}
+
+function globToRegex(glob: string): RegExp {
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')
+  return new RegExp(escaped, 'i')
+}
+
+/** Main search function — picks the best strategy */
+export function searchFiles(opts: SearchOptions): SearchResult {
+  if (!opts.query || opts.query.length < 2) {
+    return { matches: [], totalMatches: 0, truncated: false, durationMs: 0 }
+  }
+  if (isGitRepo(opts.projectDir)) {
+    return searchWithGit(opts)
+  }
+  return searchManual(opts)
+}
+
+export interface ReplaceOptions {
+  projectDir: string
+  query: string
+  replacement: string
+  filePath?: string          // if set, replace only in this file
+  caseSensitive?: boolean
+  wholeWord?: boolean
+  regex?: boolean
+}
+
+export interface ReplaceResult {
+  replacements: number
+  filesChanged: number
+  errors: string[]
+}
+
+/** Replace occurrences in a single file. Returns number of replacements made.
+ *  Uses string replacement (not callback) to support $1, $2 capture groups in regex mode. */
+function replaceInFile(absPath: string, pattern: RegExp, replacement: string): number {
+  const content = fs.readFileSync(absPath, 'utf-8')
+  // Count matches first
+  const matches = content.match(pattern)
+  const count = matches ? matches.length : 0
+  if (count === 0) return 0
+  const newContent = content.replace(pattern, replacement)
+  fs.writeFileSync(absPath, newContent, 'utf-8')
+  return count
+}
+
+/** Validate path stays within projectDir */
+function isPathSafe(projectDir: string, filePath: string): boolean {
+  const abs = path.resolve(projectDir, filePath)
+  const normProject = path.resolve(projectDir) + path.sep
+  return abs === path.resolve(projectDir) || abs.startsWith(normProject)
+}
+
+/** Replace across files. If filePath is set, only replaces in that file. */
+export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
+  if (!opts.query) return { replacements: 0, filesChanged: 0, errors: [] }
+
+  const flags = opts.caseSensitive ? 'g' : 'gi'
+  let pattern: RegExp
+  try {
+    if (opts.regex) {
+      pattern = new RegExp(opts.query, flags)
+    } else {
+      const escaped = opts.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      pattern = opts.wholeWord ? new RegExp(`\\b${escaped}\\b`, flags) : new RegExp(escaped, flags)
+    }
+  } catch {
+    return { replacements: 0, filesChanged: 0, errors: ['Invalid regex pattern'] }
+  }
+
+  const errors: string[] = []
+  let totalReplacements = 0
+  let filesChanged = 0
+
+  if (opts.filePath) {
+    if (!isPathSafe(opts.projectDir, opts.filePath)) {
+      return { replacements: 0, filesChanged: 0, errors: ['Path traversal blocked'] }
+    }
+    const abs = path.resolve(opts.projectDir, opts.filePath)
+    try {
+      const count = replaceInFile(abs, pattern, opts.replacement)
+      totalReplacements += count
+      if (count > 0) filesChanged++
+    } catch (err) {
+      errors.push(`${opts.filePath}: ${err instanceof Error ? err.message : 'Failed'}`)
+    }
+  } else {
+    // Multi-file replace — search first to find matching files, then replace
+    const searchResult = searchFiles({
+      query: opts.query,
+      projectDir: opts.projectDir,
+      caseSensitive: opts.caseSensitive,
+      wholeWord: opts.wholeWord,
+      regex: opts.regex,
+      maxResults: 2000
+    })
+    const filePaths = [...new Set(searchResult.matches.map((m) => m.filePath))]
+    for (const fp of filePaths) {
+      if (!isPathSafe(opts.projectDir, fp)) continue
+      const abs = path.resolve(opts.projectDir, fp)
+      try {
+        const count = replaceInFile(abs, pattern, opts.replacement)
+        totalReplacements += count
+        if (count > 0) filesChanged++
+      } catch (err) {
+        errors.push(`${fp}: ${err instanceof Error ? err.message : 'Failed'}`)
+      }
+    }
+  }
+
+  return { replacements: totalReplacements, filesChanged, errors }
+}

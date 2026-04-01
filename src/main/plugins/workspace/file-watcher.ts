@@ -57,7 +57,7 @@ export class ProjectFileWatcher {
       this.pendingChanges.clear()
       const win = this.getWindow()
       if (win && !win.isDestroyed()) {
-        try { win.webContents.send('wsViewer:changed', changes) } catch { /* ignore */ }
+        try { win.webContents.send('workspace:changed', changes) } catch { /* ignore */ }
       }
     }, DEBOUNCE_MS)
   }

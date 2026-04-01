@@ -19,44 +19,56 @@ export class TestRunnerPlugin implements DockPlugin {
   readonly settingsSchema: PluginSettingDef[] = [
     {
       key: 'autoDetectOnOpen',
-      label: 'Auto-detect test frameworks when opening a project',
+      label: 'Auto-detect frameworks',
+      description: 'Scan for test frameworks when opening a project',
       type: 'boolean',
       defaultValue: true
     },
     {
       key: 'runTimeoutMinutes',
-      label: 'Test run timeout (minutes) — 0 to disable',
+      label: 'Timeout (min)',
+      description: 'Test run timeout in minutes. Set to 0 to disable.',
       type: 'number',
+      placeholder: '10',
       defaultValue: 10
     },
     {
       key: 'verboseOutput',
-      label: 'Show verbose output from test runners',
+      label: 'Verbose output',
+      description: 'Show verbose output from test runners',
       type: 'boolean',
       defaultValue: true
     },
     {
       key: 'mavenProfiles',
-      label: 'Maven profiles (-P) — comma-separated, applied to all Maven test runs',
+      label: 'Maven profiles',
+      description: 'Comma-separated -P profiles applied to all Maven test runs',
       type: 'string',
+      placeholder: 'local,test',
       defaultValue: ''
     },
     {
       key: 'mavenExtraArgs',
-      label: 'Maven extra arguments — appended to mvn test commands',
+      label: 'Maven args',
+      description: 'Extra arguments appended to mvn test commands',
       type: 'string',
+      placeholder: '-Dskip.integration=true',
       defaultValue: ''
     },
     {
       key: 'gradleExtraArgs',
-      label: 'Gradle extra arguments — appended to gradle test commands',
+      label: 'Gradle args',
+      description: 'Extra arguments appended to gradle test commands',
       type: 'string',
+      placeholder: '--no-daemon',
       defaultValue: ''
     },
     {
       key: 'vitestExtraArgs',
-      label: 'Vitest extra arguments — appended to vitest run commands',
+      label: 'Vitest args',
+      description: 'Extra arguments appended to vitest run commands',
       type: 'string',
+      placeholder: '--reporter=verbose',
       defaultValue: ''
     }
   ]

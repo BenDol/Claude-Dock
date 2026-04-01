@@ -21,37 +21,44 @@ export class GitManagerPlugin implements DockPlugin {
   readonly settingsSchema: PluginSettingDef[] = [
     {
       key: 'autoGenerateCommitMsg',
-      label: 'Auto-generate commit message when staging files',
+      label: 'Auto-generate commit messages',
+      description: 'Automatically generate a commit message when files are staged',
       type: 'boolean',
       defaultValue: true
     },
     {
       key: 'autoFetchAll',
-      label: 'Auto Fetch All — automatically run git fetch --all on open and on interval',
+      label: 'Auto fetch all',
+      description: 'Run git fetch --all when opening and on a recurring interval',
       type: 'boolean',
       defaultValue: false
     },
     {
       key: 'autoRecheckMinutes',
-      label: 'Auto recheck time (minutes) — 0 to disable recurring fetch',
+      label: 'Fetch interval (min)',
+      description: 'Minutes between automatic fetches. Set to 0 to disable.',
       type: 'number',
+      placeholder: '15',
       defaultValue: 15
     },
     {
       key: 'syntaxHighlighting',
-      label: 'Syntax highlighting in diff views',
+      label: 'Syntax highlighting',
+      description: 'Enable syntax highlighting in diff views',
       type: 'boolean',
       defaultValue: true
     },
     {
       key: 'enableCiTab',
-      label: 'Show CI tab',
+      label: 'CI tab',
+      description: 'Show the CI/CD tab for viewing pipeline runs',
       type: 'boolean',
       defaultValue: false
     },
     {
       key: 'showActionNotifications',
-      label: 'Show notifications when CI runs complete',
+      label: 'CI notifications',
+      description: 'Show desktop notifications when CI runs complete',
       type: 'boolean',
       defaultValue: true
     }

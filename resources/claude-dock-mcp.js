@@ -544,6 +544,24 @@ function handleMessage(msg) {
             })
           }
 
+          // Validate session_id + shell_id ownership: the shell must belong to the caller's terminal
+          if (session_id && shell_id && shell_id !== '-1') {
+            const callerTerm = resolveTerminal(session_id, project_dir || null)
+            if (callerTerm) {
+              // shell_id format: "shell:<terminalId>:<index>" — extract the parent terminal ID
+              const shellParts = shell_id.split(':')
+              if (shellParts.length >= 3 && shellParts[0] === 'shell') {
+                const shellParentTermId = shellParts.slice(1, -1).join(':')
+                if (shellParentTermId !== callerTerm.id) {
+                  return jsonRpcResponse(id, {
+                    content: [{ type: 'text', text: `Rejected: shell_id "${shell_id}" belongs to terminal ${shellParentTermId}, but your session (${session_id.slice(0, 8)}) is terminal ${callerTerm.id}. You can only target shells attached to your own terminal.` }],
+                    isError: true
+                  })
+                }
+              }
+            }
+          }
+
           // Resolve projectDir from session_id if not provided
           let resolvedProjectDir = project_dir || null
           if (!resolvedProjectDir && session_id) {
@@ -693,6 +711,23 @@ function handleMessage(msg) {
             })
           }
 
+          // Validate shell_id belongs to the caller's session
+          if (shell_id) {
+            const callerTerm = resolveTerminal(session_id, null)
+            if (callerTerm) {
+              const shellParts = shell_id.split(':')
+              if (shellParts.length >= 3 && shellParts[0] === 'shell') {
+                const shellParentTermId = shellParts.slice(1, -1).join(':')
+                if (shellParentTermId !== callerTerm.id) {
+                  return jsonRpcResponse(id, {
+                    content: [{ type: 'text', text: `Rejected: shell_id "${shell_id}" does not belong to your session (${session_id.slice(0, 8)}). You can only read shells attached to your own terminal.` }],
+                    isError: true
+                  })
+                }
+              }
+            }
+          }
+
           try {
             const data = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
             // Find session by exact match or prefix match
@@ -762,6 +797,23 @@ function handleMessage(msg) {
             })
           }
 
+          // Validate shell_id belongs to the caller's session
+          if (shell_id) {
+            const callerTerm = resolveTerminal(session_id, null)
+            if (callerTerm) {
+              const shellParts = shell_id.split(':')
+              if (shellParts.length >= 3 && shellParts[0] === 'shell') {
+                const shellParentTermId = shellParts.slice(1, -1).join(':')
+                if (shellParentTermId !== callerTerm.id) {
+                  return jsonRpcResponse(id, {
+                    content: [{ type: 'text', text: `Rejected: shell_id "${shell_id}" does not belong to your session (${session_id.slice(0, 8)}). You can only check events for shells attached to your own terminal.` }],
+                    isError: true
+                  })
+                }
+              }
+            }
+          }
+
           try {
             const data = readShellOutput()
             const sessionEntry = data[session_id] || data[Object.keys(data).find(k => k.startsWith(session_id)) || '']
@@ -829,6 +881,23 @@ function handleMessage(msg) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: 'Missing required parameter: shell_id.' }]
             })
+          }
+
+          // Validate shell_id belongs to the caller's session
+          if (session_id && clearShellId) {
+            const callerTerm = resolveTerminal(session_id, project_dir || null)
+            if (callerTerm) {
+              const shellParts = clearShellId.split(':')
+              if (shellParts.length >= 3 && shellParts[0] === 'shell') {
+                const shellParentTermId = shellParts.slice(1, -1).join(':')
+                if (shellParentTermId !== callerTerm.id) {
+                  return jsonRpcResponse(id, {
+                    content: [{ type: 'text', text: `Rejected: shell_id "${clearShellId}" does not belong to your session (${session_id.slice(0, 8)}). You can only clear shells attached to your own terminal.` }],
+                    isError: true
+                  })
+                }
+              }
+            }
           }
 
           // Resolve projectDir from session_id if not provided

@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { PanelProps } from '@dock-renderer/panel-registry'
 import { useEditorStore, isBinaryFile } from '@dock-renderer/stores/editor-store'
+import SearchPanel from './SearchPanel'
 
 interface FileEntry {
   name: string
@@ -323,6 +324,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [tree])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
   const [compact, setCompact] = useState(() => localStorage.getItem('ws-viewer-compact') !== 'false')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [hideIgnored, setHideIgnored] = useState(() => localStorage.getItem('ws-viewer-hide-ignored') === 'true')
   const panelRootRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(1)
@@ -538,6 +540,27 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     }
   }, [collapseAll, expandAll])
 
+  // Ctrl+F in workspace panel opens search, Ctrl+Shift+F from anywhere opens it too
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+Shift+F from anywhere
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+        e.preventDefault()
+        setSearchOpen(true)
+        return
+      }
+      // Ctrl+F only when workspace panel is focused
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !e.shiftKey) {
+        if (panelRootRef.current?.contains(document.activeElement) || panelRootRef.current?.matches(':hover')) {
+          e.preventDefault()
+          setSearchOpen(true)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // Compute display tree (with compact mode applied)
   const displayTree = useMemo(() => {
     if (!compact) return tree
@@ -686,7 +709,11 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
         <button className="ws-panel-btn" onClick={loadTree} title="Refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></svg>
         </button>
+        <button className="ws-panel-btn" onClick={() => setSearchOpen(!searchOpen)} title="Search in files (Ctrl+Shift+F)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+        </button>
       </div>
+      <SearchPanel projectDir={projectDir} visible={searchOpen} onClose={() => setSearchOpen(false)} />
       <div className="ws-panel-tree" tabIndex={0} onKeyDown={handleKeyDown}>
         {displayTree.map((entry) => (
           <WorkspaceTreeNode

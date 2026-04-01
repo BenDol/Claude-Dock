@@ -305,3 +305,218 @@
   outline: none;
   min-width: 0;
 }
+
+/* Search Panel */
+.ws-search-panel {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  max-height: 50%;
+  overflow: hidden;
+}
+
+.ws-search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+}
+
+.ws-search-input {
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--term-font-family);
+  min-width: 0;
+}
+
+.ws-search-input:focus {
+  border-color: var(--accent-color, #7aa2f7);
+}
+
+.ws-search-toggle {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--term-font-family);
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.ws-search-toggle:hover { opacity: 0.8; }
+.ws-search-toggle-active {
+  opacity: 1;
+  color: var(--accent-color, #7aa2f7);
+  border-color: var(--accent-color, #7aa2f7);
+}
+
+.ws-search-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.ws-search-close:hover { color: var(--text-primary); }
+
+.ws-search-replace-row {
+  padding-top: 0;
+}
+
+.ws-search-replace-all-btn {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--accent-color, #7aa2f7);
+  color: #1a1b26;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.ws-search-replace-all-btn:disabled { opacity: 0.4; cursor: default; }
+.ws-search-replace-all-btn:hover:not(:disabled) { opacity: 0.9; }
+
+.ws-search-replace-msg {
+  font-size: 10px;
+  color: #9ece6a;
+  padding: 2px 10px;
+}
+
+.ws-search-filter-row {
+  padding: 0 8px 4px;
+}
+
+.ws-search-file-filter {
+  width: 100%;
+  font-size: 10px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  outline: none;
+  font-family: var(--term-font-family);
+}
+.ws-search-file-filter:focus { border-color: var(--accent-color, #7aa2f7); }
+
+.ws-search-results {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 60px;
+}
+.ws-search-results::-webkit-scrollbar { width: 5px; }
+
+.ws-search-status {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-search-duration {
+  opacity: 0.5;
+  margin-left: auto;
+}
+
+.ws-search-file-group {
+  margin-bottom: 2px;
+}
+
+.ws-search-file-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.ws-search-file-header:hover { background: var(--bg-tertiary); }
+
+.ws-search-file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--term-font-family);
+}
+
+.ws-search-file-count {
+  font-size: 9px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  padding: 0 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.ws-search-replace-file-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 3px;
+  flex-shrink: 0;
+  opacity: 0;
+}
+.ws-search-file-header:hover .ws-search-replace-file-btn { opacity: 1; }
+.ws-search-replace-file-btn:hover { color: var(--accent-color, #7aa2f7); }
+
+.ws-search-match {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px 2px 28px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--term-font-family);
+}
+.ws-search-match:hover { background: var(--bg-tertiary); }
+
+.ws-search-match-line {
+  font-size: 10px;
+  color: var(--accent-color, #7aa2f7);
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 28px;
+}
+
+.ws-search-match-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.ws-search-highlight {
+  background: rgba(255, 200, 50, 0.3);
+  color: var(--text-primary);
+  border-radius: 1px;
+}
+
+.ws-search-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+}

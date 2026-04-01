@@ -22,7 +22,11 @@ export interface PluginInfo {
 export interface PluginSettingDef {
   key: string
   label: string
+  /** Help text shown as a tooltip on hover */
+  description?: string
   type: 'boolean' | 'string' | 'number'
+  /** Placeholder text for string/number inputs */
+  placeholder?: string
   defaultValue: unknown
 }
 
