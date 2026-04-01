@@ -90,6 +90,7 @@ function flattenEntries(entries: FileEntry[], needsLoad?: Set<string>): FileEntr
 }
 
 // --- Tree Node ---
+// test
 
 const WorkspaceTreeNode: React.FC<{
   entry: FileEntry
