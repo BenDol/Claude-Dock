@@ -173,6 +173,7 @@ jobs:
       - name: Build app
         run: npx electron-vite build
         env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
           UPDATE_PROFILE: bleeding-edge
           PRODUCTION_BUILD: '1'
 
