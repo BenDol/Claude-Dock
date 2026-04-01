@@ -84,7 +84,8 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
 
   const isHorizontal = showPanel && (position === 'left' || position === 'right')
   const isVertical = showPanel && (position === 'top' || position === 'bottom')
-  const panelStyle: React.CSSProperties | undefined = !showPanel || !activePanel ? undefined : (
+  // Compute panel dimensions — needed even when hidden so it's ready when re-shown
+  const panelStyle: React.CSSProperties | undefined = !activePanel ? undefined : (
     (position === 'left' || position === 'right')
       ? { width: effectiveSize, minWidth: activePanel.minSize ?? 150, flexShrink: 0 }
       : { height: effectiveSize, minHeight: activePanel.minSize ?? 150, flexShrink: 0 }
@@ -94,7 +95,7 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
   const setPosition = usePanelStore((s) => s.setPosition)
   const [draggingPanel, setDraggingPanel] = useState(false)
   const [dropTarget, setDropTarget] = useState<PanelPosition | null>(null)
-  const PanelComponent = showPanel ? activePanel!.component : null
+  const PanelComponent = activePanel?.component ?? null
 
   const handleHeaderDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData('application/x-dock-panel', 'move')
@@ -133,8 +134,9 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     ? `dock-panel-layout dock-panel-layout-${position}`
     : 'dock-panel-layout'
 
-  const panelElement = showPanel && PanelComponent && (
-    <div className="dock-panel-area" ref={panelRef} style={panelStyle}>
+  // Always render the panel (keeps it mounted to preserve state), hide with display:none
+  const panelElement = PanelComponent && (
+    <div className="dock-panel-area" ref={panelRef} style={{ ...panelStyle, display: showPanel ? undefined : 'none' }}>
       <div
         className="dock-panel-header"
         draggable
