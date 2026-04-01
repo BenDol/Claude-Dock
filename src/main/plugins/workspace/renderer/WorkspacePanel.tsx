@@ -406,6 +406,12 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     return () => { api.workspace.watchStop(projectDir).catch(() => { /* ignore */ }) }
   }, [projectDir])
 
+  // Refs for values used in change handler to avoid re-registering on every state change
+  const expandedPathsRef = useRef(expandedPaths)
+  const hideIgnoredRef = useRef(hideIgnored)
+  useEffect(() => { expandedPathsRef.current = expandedPaths }, [expandedPaths])
+  useEffect(() => { hideIgnoredRef.current = hideIgnored }, [hideIgnored])
+
   // Handle filesystem change notifications — targeted updates for expanded dirs
   useEffect(() => {
     if (!projectDir) return
@@ -413,32 +419,23 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
+        const expanded = expandedPathsRef.current
+        const ignored = hideIgnoredRef.current
         // Find which parent directories were affected
         const affectedDirs = new Set<string>()
         for (const change of changes) {
           const parts = change.split('/')
-          parts.pop() // remove filename — get parent dir
-          affectedDirs.add(parts.join('/') || '') // '' = root
+          parts.pop()
+          affectedDirs.add(parts.join('/') || '')
         }
-        // For each affected dir that's currently expanded (or is root), refresh its children
-        let needsFullReload = false
-        for (const dir of affectedDirs) {
-          if (dir === '' || expandedPaths.has(dir)) {
-            // This dir is visible — need to update
-            if (dir === '') {
-              needsFullReload = true
-              break
-            }
-          }
-        }
-        if (needsFullReload || affectedDirs.has('')) {
-          // Root-level changes — full reload (still fast with depth 4)
+        if (affectedDirs.has('')) {
+          // Root-level changes — full reload
           loadTree()
         } else {
           // Targeted: re-read only the affected expanded directories
           for (const dir of affectedDirs) {
-            if (expandedPaths.has(dir)) {
-              api.workspace.readDir(projectDir, dir, hideIgnored).then((children) => {
+            if (expanded.has(dir)) {
+              api.workspace.readDir(projectDir, dir, ignored).then((children) => {
                 setTree((prev) => {
                   const update = (items: FileEntry[]): FileEntry[] =>
                     items.map((item) =>
@@ -454,7 +451,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
       }, 500)
     })
     return () => { cleanup(); if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current) }
-  }, [projectDir, loadTree, expandedPaths, hideIgnored])
+  }, [projectDir, loadTree])
 
   const handleToggleExpand = useCallback(async (entryPath: string) => {
     // If collapsing, just remove from expanded set

@@ -192,8 +192,9 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
     })
   }, [])
 
+  // Auto-expand only when the first event appears (panel was empty)
   useEffect(() => {
-    if (minimized && visibleEvents.length > prevCountRef.current) {
+    if (minimized && prevCountRef.current === 0 && visibleEvents.length > 0) {
       setMinimized(false)
     }
     prevCountRef.current = visibleEvents.length

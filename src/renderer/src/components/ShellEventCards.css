@@ -104,12 +104,15 @@
   gap: 1px;
   margin-left: auto;
   opacity: 0;
-  transition: opacity 0.15s;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s, width 0.15s;
   flex-shrink: 0;
 }
 
 .shell-event-card:hover .shell-event-actions {
   opacity: 1;
+  width: auto;
 }
 
 .shell-event-ignore-btn,

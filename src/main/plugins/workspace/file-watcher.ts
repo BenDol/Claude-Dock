@@ -4,7 +4,7 @@
  * Managed per-project — start/stop via IPC.
  */
 import * as fs from 'fs'
-import { BrowserWindow } from 'electron'
+import { webContents } from 'electron'
 import { getServices } from './services'
 
 const DEBOUNCE_MS = 400
@@ -39,7 +39,11 @@ export function startWatching(projectDir: string, webContentsId: number): void {
 
       const entry = watchers.get(key)
       if (!entry) return
-      entry.pending.add(filename.replace(/\\/g, '/'))
+
+      // Cap pending changes to prevent memory bloat (e.g., mass file operations)
+      if (entry.pending.size < 500) {
+        entry.pending.add(filename.replace(/\\/g, '/'))
+      }
 
       // Debounce: batch changes
       if (!entry.timer) {
@@ -48,16 +52,24 @@ export function startWatching(projectDir: string, webContentsId: number): void {
           const changes = [...entry.pending]
           entry.pending.clear()
           if (changes.length === 0) return
-          // Broadcast to all subscriber windows
+          // Broadcast to subscribers, pruning stale ones
+          const stale: number[] = []
           for (const wcId of entry.subscribers) {
             try {
-              const wc = BrowserWindow.getAllWindows()
-                .map((w) => w.webContents)
-                .find((wc) => wc.id === wcId)
+              const wc = webContents.fromId(wcId)
               if (wc && !wc.isDestroyed()) {
                 wc.send('workspace:changed', changes)
+              } else {
+                stale.push(wcId)
               }
-            } catch { /* ignore */ }
+            } catch { stale.push(wcId) }
+          }
+          // Clean up stale subscribers
+          for (const id of stale) entry.subscribers.delete(id)
+          // If all subscribers gone, stop the watcher
+          if (entry.subscribers.size === 0) {
+            entry.watcher.close()
+            watchers.delete(key)
           }
         }, DEBOUNCE_MS)
       }

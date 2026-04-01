@@ -93,7 +93,7 @@ export interface SymbolEntry {
 const SYMBOL_PATTERNS: Record<string, { pattern: RegExp; kind: SymbolEntry['kind'] }[]> = {
   java: [
     { pattern: /(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|static\s+|final\s+)*(?:class|interface|enum|record)\s+(\w+)/g, kind: 'class' },
-    { pattern: /(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:[\w<>\[\],\s]+)\s+(\w+)\s*\(/g, kind: 'method' },
+    { pattern: /(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:[\w<>\[\]]+)\s+(\w+)\s*\(/g, kind: 'method' },
   ],
   python: [
     { pattern: /^class\s+(\w+)/gm, kind: 'class' },
@@ -185,26 +185,29 @@ export async function buildSymbolIndex(projectDir: string): Promise<SymbolEntry[
         const patterns = SYMBOL_PATTERNS[lang]
         if (!patterns) continue
 
-        const lines = content.split('\n')
+        // Build line offset index once per file for O(1) offset→line lookups
+        const lineOffsets: number[] = [0]
+        for (let ci = 0; ci < content.length; ci++) {
+          if (content[ci] === '\n') lineOffsets.push(ci + 1)
+        }
+        const offsetToLine = (offset: number): { line: number; col: number } => {
+          // Binary search for the line containing this offset
+          let lo = 0, hi = lineOffsets.length - 1
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1
+            if (lineOffsets[mid] <= offset) lo = mid
+            else hi = mid - 1
+          }
+          return { line: lo + 1, col: offset - lineOffsets[lo] + 1 }
+        }
+
         for (const { pattern, kind } of patterns) {
           pattern.lastIndex = 0
           let m: RegExpExecArray | null
           while ((m = pattern.exec(content)) !== null) {
             const name = m[1]
             if (!name || name.length < 2) continue
-            // Find line number from offset
-            const offset = m.index
-            let line = 1
-            let col = 1
-            let pos = 0
-            for (let li = 0; li < lines.length; li++) {
-              if (pos + lines[li].length >= offset) {
-                line = li + 1
-                col = offset - pos + 1
-                break
-              }
-              pos += lines[li].length + 1 // +1 for \n
-            }
+            const { line, col } = offsetToLine(m.index)
             symbols.push({ name, filePath: relPath, line, column: col, kind })
           }
         }

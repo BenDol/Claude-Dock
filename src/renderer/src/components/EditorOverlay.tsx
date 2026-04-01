@@ -302,6 +302,7 @@ const EditorOverlay: React.FC = () => {
       }
 
       // 3. Register editor opener for cross-file Ctrl+click navigation
+      if (monaco.editor.registerEditorOpener) {
       monaco.editor.registerEditorOpener({
         openCodeEditor(_source: any, resource: any, selectionOrPosition: any) {
           try {
@@ -343,6 +344,7 @@ const EditorOverlay: React.FC = () => {
           } catch { return false }
         }
       })
+      }
 
       // 4. Build regex symbol index for non-TS languages (background)
       api.workspace.buildSymbolIndex(projDir).then((symbols) => {
