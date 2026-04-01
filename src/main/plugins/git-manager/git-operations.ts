@@ -89,6 +89,7 @@ function gitExecStdin(cwd: string, args: string[], stdin: string, timeout = 3000
       }
     })
     if (proc.stdin) {
+      proc.stdin.on('error', () => {}) // suppress EPIPE if process exits before stdin flush
       proc.stdin.write(stdin)
       proc.stdin.end()
     }
