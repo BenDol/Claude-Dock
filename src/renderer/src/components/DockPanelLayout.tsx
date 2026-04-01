@@ -77,20 +77,24 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     return () => clearTimeout(timer)
   }, [showPanel, position])
 
-  if (!showPanel) {
-    return <>{children}</>
-  }
+  // IMPORTANT: Always render the same DOM structure (div wrapper) regardless of
+  // panel visibility. Switching between Fragment and div causes React to unmount
+  // DockGrid which kills all terminal instances. Instead, just omit the panel
+  // elements when hidden — the layout div stays the same.
 
-  const isHorizontal = position === 'left' || position === 'right'
-  const panelStyle: React.CSSProperties = isHorizontal
-    ? { width: effectiveSize, minWidth: activePanel?.minSize ?? 150, flexShrink: 0 }
-    : { height: effectiveSize, minHeight: activePanel?.minSize ?? 150, flexShrink: 0 }
+  const isHorizontal = showPanel && (position === 'left' || position === 'right')
+  const isVertical = showPanel && (position === 'top' || position === 'bottom')
+  const panelStyle: React.CSSProperties | undefined = !showPanel || !activePanel ? undefined : (
+    (position === 'left' || position === 'right')
+      ? { width: effectiveSize, minWidth: activePanel.minSize ?? 150, flexShrink: 0 }
+      : { height: effectiveSize, minHeight: activePanel.minSize ?? 150, flexShrink: 0 }
+  )
 
   const hasEditorTabs = useEditorStore((s) => s.tabs.length > 0)
   const setPosition = usePanelStore((s) => s.setPosition)
   const [draggingPanel, setDraggingPanel] = useState(false)
   const [dropTarget, setDropTarget] = useState<PanelPosition | null>(null)
-  const PanelComponent = activePanel!.component
+  const PanelComponent = showPanel ? activePanel!.component : null
 
   const handleHeaderDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData('application/x-dock-panel', 'move')
@@ -122,7 +126,14 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }), [position, setPosition])
 
-  const panelElement = (
+  // Always render the same outer div structure — never switch between Fragment
+  // and div, because that causes React to unmount/remount DockGrid (killing terminals).
+  // When panel is hidden: just skip the panel/resize elements inside.
+  const layoutClass = showPanel
+    ? `dock-panel-layout dock-panel-layout-${position}`
+    : 'dock-panel-layout'
+
+  const panelElement = showPanel && PanelComponent && (
     <div className="dock-panel-area" ref={panelRef} style={panelStyle}>
       <div
         className="dock-panel-header"
@@ -142,27 +153,25 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     </div>
   )
 
-  const resizeHandle = (
+  const resizeHandle = showPanel && (
     <div
-      className={`dock-panel-resize ${isHorizontal ? 'dock-panel-resize-col' : 'dock-panel-resize-row'}`}
+      className={`dock-panel-resize ${isHorizontal ? 'dock-panel-resize-col' : isVertical ? 'dock-panel-resize-row' : ''}`}
       onMouseDown={handleResizeStart}
     />
   )
 
   return (
-    <div className={`dock-panel-layout dock-panel-layout-${position}`}>
-      {(position === 'left' || position === 'top') && (
+    <div className={layoutClass}>
+      {showPanel && (position === 'left' || position === 'top') && (
         <>{panelElement}{resizeHandle}</>
       )}
       <div className="dock-panel-grid-area" style={{ position: 'relative' }}>
         {children}
-        {/* Monaco editor overlay — covers terminal grid when files are open */}
         {hasEditorTabs && (
           <Suspense fallback={<div className="editor-overlay-loading">Loading editor...</div>}>
             <EditorOverlay />
           </Suspense>
         )}
-        {/* Drop zones for drag-to-edge repositioning */}
         {draggingPanel && (
           <>
             <div className={`dock-panel-dropzone dock-panel-dropzone-left${dropTarget === 'left' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('left')} />
@@ -172,7 +181,7 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
           </>
         )}
       </div>
-      {(position === 'right' || position === 'bottom') && (
+      {showPanel && (position === 'right' || position === 'bottom') && (
         <>{resizeHandle}{panelElement}</>
       )}
     </div>
