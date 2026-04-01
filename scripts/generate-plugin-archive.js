@@ -31,7 +31,9 @@ const BUILTIN_PLUGINS = [
   { id: 'git-sync', srcDir: 'git-sync', entry: 'git-sync-plugin.ts' },
   { id: 'git-manager', srcDir: 'git-manager', entry: 'git-manager-plugin.ts',
     rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' },
-  { id: 'cloud-integration', srcDir: 'cloud-integration', entry: 'cloud-integration-plugin.ts' }
+  { id: 'cloud-integration', srcDir: 'cloud-integration', entry: 'cloud-integration-plugin.ts' },
+  { id: 'test-runner', srcDir: 'test-runner', entry: 'test-runner-plugin.ts' },
+  { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts' }
 ]
 
 /**
