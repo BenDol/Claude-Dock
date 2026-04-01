@@ -381,7 +381,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     const gen = ++loadGenRef.current
     setLoading(true)
     try {
-      const result = await api.workspaceViewer.readTree(projectDir, 2, hideIgnored)
+      const result = await api.workspaceViewer.readTree(projectDir, 4, hideIgnored)
       if (gen !== loadGenRef.current) return // stale
       setTree(result)
       // Auto-expand top-level directories on first load only
@@ -538,29 +538,53 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     }
   }, [collapseAll, expandAll])
 
-  // Compute display tree (with compact mode) and auto-load missing dirs
+  // Compute display tree (with compact mode applied)
   const displayTree = useMemo(() => {
     if (!compact) return tree
+    return flattenEntries(tree)
+  }, [tree, compact])
+
+  // When compact mode is on, auto-load unloaded single-child directory chains
+  // so the flatten can fully resolve (e.g. server/src/main/java/com → one row).
+  // This runs as an effect that chases the chain until fully loaded.
+  const loadingChainsRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!compact) return
     const needsLoad = new Set<string>()
-    const result = flattenEntries(tree, needsLoad)
-    // Auto-load unloaded directories that compact mode exposed
-    if (needsLoad.size > 0) {
-      for (const dirPath of needsLoad) {
-        api.workspaceViewer.readDir(projectDir, dirPath, hideIgnored).then((children) => {
-          if (children.length === 0) return
-          setTree((prev) => {
-            const update = (items: FileEntry[]): FileEntry[] =>
-              items.map((item) =>
-                item.path === dirPath ? { ...item, children } :
-                item.children ? { ...item, children: update(item.children) } : item
-              )
-            return update(prev)
-          })
-        })
+    flattenEntries(tree, needsLoad)
+    // Filter out paths already being loaded to avoid duplicate requests
+    const toLoad: string[] = []
+    for (const p of needsLoad) {
+      if (!loadingChainsRef.current.has(p)) {
+        loadingChainsRef.current.add(p)
+        toLoad.push(p)
       }
     }
-    return result
-  }, [tree, compact, projectDir])
+    if (toLoad.length === 0) return
+    // Load all missing dirs in parallel
+    Promise.all(toLoad.map((dirPath) =>
+      api.workspaceViewer.readDir(projectDir, dirPath, hideIgnored).then((children) => ({ dirPath, children }))
+    )).then((results) => {
+      const updates = results.filter((r) => r.children.length > 0)
+      if (updates.length === 0) return
+      setTree((prev) => {
+        let updated = prev
+        for (const { dirPath, children } of updates) {
+          const apply = (items: FileEntry[]): FileEntry[] =>
+            items.map((item) =>
+              item.path === dirPath ? { ...item, children } :
+              item.children ? { ...item, children: apply(item.children) } : item
+            )
+          updated = apply(updated)
+        }
+        return updated
+      })
+      // Clear loading flags so next cycle can load further
+      for (const p of toLoad) loadingChainsRef.current.delete(p)
+    }).catch(() => {
+      for (const p of toLoad) loadingChainsRef.current.delete(p)
+    })
+  }, [tree, compact, projectDir, hideIgnored])
 
   // Build flat list of visible entries for keyboard navigation
   const visibleEntries = useMemo(() => {
