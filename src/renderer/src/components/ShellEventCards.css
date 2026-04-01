@@ -146,8 +146,8 @@
 .shell-event-filter-btn {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 5px;
+  gap: 2px;
+  padding: 1px 4px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
@@ -172,11 +172,6 @@
 .shell-event-filter-icon {
   font-size: 9px;
   flex-shrink: 0;
-}
-
-.shell-event-filter-label {
-  text-transform: capitalize;
-  white-space: nowrap;
 }
 
 .shell-event-filter-count {

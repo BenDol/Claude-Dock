@@ -274,7 +274,6 @@ const ShellEventCards: React.FC<ShellEventCardsProps> = ({ terminalId, sessionId
                 title={`${active ? 'Show all' : 'Filter to'} ${type.replace(/_/g, ' ')}`}
               >
                 <span className="shell-event-filter-icon" style={{ color }}>{icon}</span>
-                <span className="shell-event-filter-label">{type.replace(/_/g, ' ')}</span>
                 <span className="shell-event-filter-count">{count}</span>
               </button>
             )
