@@ -1,5 +1,6 @@
 import './workspace-viewer.css'
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import ReactDOM from 'react-dom'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { PanelProps } from '@dock-renderer/panel-registry'
 import { useEditorStore, isBinaryFile } from '@dock-renderer/stores/editor-store'
@@ -120,13 +121,13 @@ const WorkspaceTreeNode: React.FC<{
         onClick={(e) => entry.isDirectory ? onToggleExpand(entry.path) : onSelect(entry.path, e)}
         onDoubleClick={() => onDoubleClick(entry)}
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, entry) }}
-        draggable={!entry.isDirectory}
+        draggable
         onDragStart={(e) => {
           // Include all selected files in drag (or just this one if not selected)
           const paths = isSelected && selectedPaths.size > 1 ? [...selectedPaths] : [entry.path]
           e.dataTransfer.setData('text/plain', paths.join('\n'))
           e.dataTransfer.setData('application/x-ws-files', JSON.stringify(paths))
-          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.effectAllowed = 'copyMove'
         }}
         onDragOver={(e) => { if (entry.isDirectory) { e.preventDefault(); e.currentTarget.classList.add('ws-tree-item-drop-target') } }}
         onDragLeave={(e) => { e.currentTarget.classList.remove('ws-tree-item-drop-target') }}
@@ -322,6 +323,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [tree])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
   const [compact, setCompact] = useState(() => localStorage.getItem('ws-viewer-compact') !== 'false')
+  const [hideIgnored, setHideIgnored] = useState(() => localStorage.getItem('ws-viewer-hide-ignored') === 'true')
   const panelRootRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(1)
 
@@ -379,7 +381,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     const gen = ++loadGenRef.current
     setLoading(true)
     try {
-      const result = await api.workspaceViewer.readTree(projectDir, 2)
+      const result = await api.workspaceViewer.readTree(projectDir, 2, hideIgnored)
       if (gen !== loadGenRef.current) return // stale
       setTree(result)
       // Auto-expand top-level directories on first load only
@@ -391,7 +393,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
       if (gen === loadGenRef.current) setTree([])
     }
     if (gen === loadGenRef.current) setLoading(false)
-  }, [projectDir])
+  }, [projectDir, hideIgnored])
 
   useEffect(() => { loadTree() }, [loadTree])
 
@@ -431,7 +433,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     // initially loaded tree), fetch children via IPC.
     const needsLoad = !entry || (entry.isDirectory && !entry.children)
     if (needsLoad) {
-      const children = await api.workspaceViewer.readDir(projectDir, entryPath)
+      const children = await api.workspaceViewer.readDir(projectDir, entryPath, hideIgnored)
       if (children.length > 0 || entry) {
         setTree((prev) => {
           // If entry exists in tree, attach children to it
@@ -498,8 +500,8 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [openFileInEditor])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
-    const zoom = parseFloat(document.documentElement.style.zoom) || 1
-    setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom, entry })
+    // Context menu is portaled to document.body — use clientX/clientY directly.
+    setCtxMenu({ x: e.clientX, y: e.clientY, entry })
   }, [])
 
   const handleRename = useCallback(async (entryPath: string) => {
@@ -544,7 +546,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     // Auto-load unloaded directories that compact mode exposed
     if (needsLoad.size > 0) {
       for (const dirPath of needsLoad) {
-        api.workspaceViewer.readDir(projectDir, dirPath).then((children) => {
+        api.workspaceViewer.readDir(projectDir, dirPath, hideIgnored).then((children) => {
           if (children.length === 0) return
           setTree((prev) => {
             const update = (items: FileEntry[]): FileEntry[] =>
@@ -647,6 +649,16 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
             <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
           </svg>
         </button>
+        <button
+          className={`ws-panel-btn${hideIgnored ? ' ws-panel-btn-active' : ''}`}
+          onClick={() => { const next = !hideIgnored; setHideIgnored(next); localStorage.setItem('ws-viewer-hide-ignored', String(next)) }}
+          title={hideIgnored ? 'Showing tracked files only (click to show all)' : 'Showing all files (click to hide git-ignored)'}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+            {hideIgnored && <line x1="2" y1="2" x2="22" y2="22" />}
+          </svg>
+        </button>
         <button className="ws-panel-btn" onClick={loadTree} title="Refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></svg>
         </button>
@@ -669,7 +681,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
         ))}
         {tree.length === 0 && <div className="ws-panel-empty">No files found</div>}
       </div>
-      {ctxMenu && (
+      {ctxMenu && ReactDOM.createPortal(
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
@@ -678,7 +690,8 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
           onClose={() => setCtxMenu(null)}
           onRefresh={loadTree}
           onRename={handleRename}
-        />
+        />,
+        document.body
       )}
     </div>
   )

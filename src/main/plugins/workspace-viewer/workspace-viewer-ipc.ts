@@ -16,17 +16,16 @@ function safePath(projectDir: string, relativePath: string): string | null {
 }
 
 export function registerWorkspaceViewerIpc(): void {
-  ipcMain.handle(IPC.WS_VIEWER_READ_DIR, async (_event, projectDir: string, relativePath: string) => {
-    try { return readDirectory(projectDir, relativePath) } catch (err) {
+  ipcMain.handle(IPC.WS_VIEWER_READ_DIR, async (_event, projectDir: string, relativePath: string, hideIgnored?: boolean) => {
+    try { return readDirectory(projectDir, relativePath, hideIgnored ?? false) } catch (err) {
       getServices().logError('[workspace-viewer] readDir failed:', err); return []
     }
   })
 
-  ipcMain.handle(IPC.WS_VIEWER_READ_TREE, async (_event, projectDir: string, maxDepth?: number) => {
+  ipcMain.handle(IPC.WS_VIEWER_READ_TREE, async (_event, projectDir: string, maxDepth?: number, hideIgnored?: boolean) => {
     try {
-      // Cap maxDepth to prevent abuse
       const depth = Math.min(Math.max(maxDepth ?? 2, 1), 5)
-      return readTree(projectDir, depth)
+      return readTree(projectDir, depth, hideIgnored ?? false)
     } catch (err) {
       getServices().logError('[workspace-viewer] readTree failed:', err); return []
     }

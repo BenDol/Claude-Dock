@@ -40,6 +40,60 @@ const EditorOverlay: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Editor font size (zoom) — persisted to localStorage
+  const FONT_SIZE_KEY = 'editor-font-size'
+  const DEFAULT_FONT_SIZE = 13
+  const MIN_FONT_SIZE = 8
+  const MAX_FONT_SIZE = 32
+  const [fontSize, setFontSize] = useState(() => {
+    try {
+      const saved = localStorage.getItem(FONT_SIZE_KEY)
+      if (saved) {
+        const n = parseInt(saved, 10)
+        if (!isNaN(n) && n >= MIN_FONT_SIZE && n <= MAX_FONT_SIZE) return n
+      }
+    } catch { /* ignore */ }
+    return DEFAULT_FONT_SIZE
+  })
+
+  const applyFontSize = useCallback((size: number) => {
+    const clamped = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
+    setFontSize(clamped)
+    try { localStorage.setItem(FONT_SIZE_KEY, String(clamped)) } catch { /* ignore */ }
+    if (editorRef.current) {
+      editorRef.current.updateOptions({ fontSize: clamped })
+    }
+  }, [])
+
+  // Ctrl+MouseWheel and Ctrl++/- zoom for the editor
+  useEffect(() => {
+    const overlayEl = document.querySelector('.editor-overlay')
+    if (!overlayEl) return
+
+    const onWheel = (e: Event) => {
+      const we = e as WheelEvent
+      if (!(we.ctrlKey || we.metaKey)) return
+      we.preventDefault()
+      we.stopPropagation()
+      applyFontSize(fontSize + (we.deltaY < 0 ? 1 : -1))
+    }
+
+    const onKeyDown = (e: Event) => {
+      const ke = e as KeyboardEvent
+      if (!(ke.ctrlKey || ke.metaKey)) return
+      if (ke.key === '=' || ke.key === '+') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize + 1) }
+      else if (ke.key === '-') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize - 1) }
+      else if (ke.key === '0') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(DEFAULT_FONT_SIZE) }
+    }
+
+    overlayEl.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    overlayEl.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => {
+      overlayEl.removeEventListener('wheel', onWheel, { capture: true } as any)
+      overlayEl.removeEventListener('keydown', onKeyDown, { capture: true } as any)
+    }
+  }, [fontSize, applyFontSize])
+
   // Theme — observe data-theme attribute for live changes
   const [theme, setTheme] = useState(() =>
     document.documentElement.getAttribute('data-theme') !== 'light' ? 'vs-dark' : 'vs'
@@ -169,7 +223,7 @@ const EditorOverlay: React.FC = () => {
             onMount={handleEditorMount}
             loading={<div className="editor-loading">Loading editor...</div>}
             options={{
-              fontSize: 13,
+              fontSize,
               fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
               minimap: { enabled: true },
               scrollBeyondLastLine: false,

@@ -516,16 +516,18 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     <div
       className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`}
       data-terminal-id={terminalId}
-      onDragOver={(e) => {
+      onDragOverCapture={(e) => {
         if (e.dataTransfer.types.includes('application/x-ws-files')) {
           e.preventDefault()
+          e.stopPropagation()
           e.dataTransfer.dropEffect = 'copy'
         }
       }}
-      onDrop={(e) => {
+      onDropCapture={(e) => {
         const raw = e.dataTransfer.getData('application/x-ws-files')
         if (!raw) return
         e.preventDefault()
+        e.stopPropagation()
         try {
           const files = JSON.parse(raw) as string[]
           if (files.length > 0) {

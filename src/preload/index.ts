@@ -365,8 +365,8 @@ export interface DockApi {
     onStatus: (callback: (status: any) => void) => () => void
   }
   workspaceViewer: {
-    readDir: (projectDir: string, relativePath: string) => Promise<any[]>
-    readTree: (projectDir: string, maxDepth?: number) => Promise<any[]>
+    readDir: (projectDir: string, relativePath: string, hideIgnored?: boolean) => Promise<any[]>
+    readTree: (projectDir: string, maxDepth?: number, hideIgnored?: boolean) => Promise<any[]>
     openFile: (projectDir: string, relativePath: string) => Promise<void>
     openInExplorer: (projectDir: string, relativePath: string) => Promise<void>
     rename: (projectDir: string, relativePath: string, newName: string) => Promise<{ success: boolean; error?: string }>
@@ -795,8 +795,8 @@ const dockApi: DockApi = {
     }
   },
   workspaceViewer: {
-    readDir: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_DIR, projectDir, relativePath),
-    readTree: (projectDir, maxDepth?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_TREE, projectDir, maxDepth),
+    readDir: (projectDir, relativePath, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_DIR, projectDir, relativePath, hideIgnored),
+    readTree: (projectDir, maxDepth?, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_TREE, projectDir, maxDepth, hideIgnored),
     openFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_FILE, projectDir, relativePath),
     openInExplorer: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_IN_EXPLORER, projectDir, relativePath),
     rename: (projectDir, relativePath, newName) => ipcRenderer.invoke(IPC.WS_VIEWER_RENAME, projectDir, relativePath, newName),
