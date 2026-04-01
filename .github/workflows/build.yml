@@ -255,11 +255,12 @@ jobs:
               --title "Bleeding Edge Build" \
               --notes "Automated build from the latest commit on \`main\`."
 
-          # Write platform SHA file — when force deploy is active, append the run ID
-          # to ensure the SHA differs from the running app's __BUILD_SHA__, even if
-          # the commit hasn't changed. This forces the auto-updater to detect an update.
+          # Write platform SHA file — when force deploy is active, use a synthetic SHA
+          # that does NOT share a prefix with the real commit SHA. The updater uses
+          # startsWith() for prefix matching, so appending to the real SHA would still
+          # match. Instead, prefix with "force-" so neither prefix check can match.
           if [ "${{ inputs.force_full_build }}" = "true" ]; then
-            echo "${{ github.sha }}-force-${{ github.run_id }}" > "dist/${{ matrix.platform }}-sha.txt"
+            echo "force-${{ github.run_id }}-${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
           else
             echo "${{ github.sha }}" > "dist/${{ matrix.platform }}-sha.txt"
           fi
