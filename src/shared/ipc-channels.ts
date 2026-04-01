@@ -249,6 +249,17 @@ export const IPC = {
   NOTIFICATION_SHOW: 'notification:show',
   PLUGIN_WINDOW_STATE: 'plugin:windowState',
 
+  // Workspace Viewer
+  WS_VIEWER_READ_DIR: 'wsViewer:readDir',
+  WS_VIEWER_READ_TREE: 'wsViewer:readTree',
+  WS_VIEWER_OPEN_FILE: 'wsViewer:openFile',
+  WS_VIEWER_OPEN_IN_EXPLORER: 'wsViewer:openInExplorer',
+  WS_VIEWER_RENAME: 'wsViewer:rename',
+  WS_VIEWER_DELETE: 'wsViewer:delete',
+  WS_VIEWER_CREATE_FILE: 'wsViewer:createFile',
+  WS_VIEWER_CREATE_FOLDER: 'wsViewer:createFolder',
+  WS_VIEWER_MOVE_CLAUDE: 'wsViewer:moveClaude',
+
   // Test Runner
   TEST_RUNNER_OPEN: 'testRunner:open',
   TEST_RUNNER_DETECT: 'testRunner:detect',

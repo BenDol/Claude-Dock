@@ -364,6 +364,18 @@ export interface DockApi {
     onResults: (callback: (results: any) => void) => () => void
     onStatus: (callback: (status: any) => void) => () => void
   }
+  workspaceViewer: {
+    readDir: (projectDir: string, relativePath: string) => Promise<any[]>
+    readTree: (projectDir: string, maxDepth?: number) => Promise<any[]>
+    openFile: (projectDir: string, relativePath: string) => Promise<void>
+    openInExplorer: (projectDir: string, relativePath: string) => Promise<void>
+    rename: (projectDir: string, relativePath: string, newName: string) => Promise<{ success: boolean; error?: string }>
+    delete: (projectDir: string, relativePath: string) => Promise<{ success: boolean; error?: string }>
+    createFile: (projectDir: string, relativePath: string) => Promise<{ success: boolean; error?: string }>
+    createFolder: (projectDir: string, relativePath: string) => Promise<{ success: boolean; error?: string }>
+    moveClaude: (projectDir: string, sourcePath: string, targetDir: string) => Promise<{ success: boolean; error?: string }>
+    onChanged: (callback: (changes: string[]) => void) => () => void
+  }
 }
 
 const dockApi: DockApi = {
@@ -778,6 +790,22 @@ const dockApi: DockApi = {
       const handler = (_event: Electron.IpcRendererEvent, status: any) => callback(status)
       ipcRenderer.on('testRunner:status', handler)
       return () => ipcRenderer.removeListener('testRunner:status', handler)
+    }
+  },
+  workspaceViewer: {
+    readDir: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_DIR, projectDir, relativePath),
+    readTree: (projectDir, maxDepth?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_TREE, projectDir, maxDepth),
+    openFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_FILE, projectDir, relativePath),
+    openInExplorer: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_IN_EXPLORER, projectDir, relativePath),
+    rename: (projectDir, relativePath, newName) => ipcRenderer.invoke(IPC.WS_VIEWER_RENAME, projectDir, relativePath, newName),
+    delete: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_DELETE, projectDir, relativePath),
+    createFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FILE, projectDir, relativePath),
+    createFolder: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FOLDER, projectDir, relativePath),
+    moveClaude: (projectDir, sourcePath, targetDir) => ipcRenderer.invoke(IPC.WS_VIEWER_MOVE_CLAUDE, projectDir, sourcePath, targetDir),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
+      ipcRenderer.on('wsViewer:changed', handler)
+      return () => ipcRenderer.removeListener('wsViewer:changed', handler)
     }
   }
 }

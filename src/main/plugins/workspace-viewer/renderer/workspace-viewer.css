@@ -1,0 +1,241 @@
+/* Workspace Viewer Panel */
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ws-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.ws-panel-filter {
+  flex: 1;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: none;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  font-family: var(--term-font-family);
+  border-radius: 3px;
+  min-width: 0;
+}
+
+.ws-panel-filter::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.ws-panel-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ws-panel-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.ws-panel-tree {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.ws-panel-tree::-webkit-scrollbar {
+  width: 5px;
+}
+
+/* Tree items */
+.ws-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: var(--term-font-family);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.ws-tree-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.ws-tree-item-selected {
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
+}
+
+.ws-tree-item-drop-target {
+  background: var(--accent-color-15, rgba(122, 162, 247, 0.15));
+  outline: 1px dashed var(--accent-color, #7aa2f7);
+}
+
+.ws-tree-arrow {
+  font-size: 9px;
+  color: var(--text-secondary);
+  transition: transform 0.12s;
+  flex-shrink: 0;
+  width: 10px;
+  text-align: center;
+}
+
+.ws-tree-arrow-open {
+  transform: rotate(90deg);
+}
+
+.ws-tree-arrow-spacer {
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.ws-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ws-tree-size {
+  font-size: 9px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+/* Context menu */
+.ws-ctx-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 200;
+  min-width: 180px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ws-ctx-item {
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-ctx-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.ws-ctx-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+.ws-ctx-danger {
+  color: #f7768e;
+}
+
+.ws-ctx-claude {
+  color: var(--accent-color, #7aa2f7);
+}
+
+/* Empty state */
+.ws-panel-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+/* Loading */
+.ws-panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Move progress cards */
+.ws-panel-progress {
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.ws-move-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+}
+
+.ws-move-card-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-secondary);
+  border-top-color: var(--accent-color, #7aa2f7);
+  border-radius: 50%;
+  animation: ws-spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes ws-spin { to { transform: rotate(360deg); } }
+
+.ws-move-card-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.ws-move-card-cancel {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #f7768e22;
+  border: 1px solid #f7768e44;
+  color: #f7768e;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Rename inline input */
+.ws-tree-rename {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--term-font-family);
+  padding: 0 4px;
+  border: 1px solid var(--accent-color, #7aa2f7);
+  border-radius: 2px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  min-width: 0;
+}

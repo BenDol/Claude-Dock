@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, Suspense, Component, type ErrorInfo, type ReactNode } from 'react'
 import DockGrid from './components/DockGrid'
+import { DockPanelLayout } from './components/DockPanelLayout'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
 import SettingsModal from './components/SettingsModal'
@@ -891,7 +892,9 @@ function DockApp() {
       {terminals.length === 0 ? (
         <EmptyState onAddTerminal={handleAddTerminal} projectDir={projectDir} />
       ) : (
-        <DockGrid />
+        <DockPanelLayout>
+          <DockGrid />
+        </DockPanelLayout>
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {pendingTask && (
