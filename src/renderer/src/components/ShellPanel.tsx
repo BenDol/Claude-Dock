@@ -229,20 +229,6 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
     setTimeout(() => setLinked(false), 1500)
   }, [termRef, terminalId])
 
-  const canAdd = onSplitRight || onStackBelow
-
-  if (minimized) {
-    return (
-      <div
-        className={`shell-panel-minimized ${isInColumn ? 'shell-panel-minimized-h' : 'shell-panel-minimized-v'}`}
-        onClick={onToggleMinimize}
-        title="Restore shell panel"
-      >
-        <span className="shell-panel-minimized-label">{label || 'Shell'}</span>
-      </div>
-    )
-  }
-
   const handlePanelKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.ctrlKey && !e.shiftKey && e.key === 'f') {
       e.preventDefault()
@@ -256,6 +242,20 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
       focus()
     }
   }, [searchOpen, setSearchOpen, focus, searchAddonRef])
+
+  const canAdd = onSplitRight || onStackBelow
+
+  if (minimized) {
+    return (
+      <div
+        className={`shell-panel-minimized ${isInColumn ? 'shell-panel-minimized-h' : 'shell-panel-minimized-v'}`}
+        onClick={onToggleMinimize}
+        title="Restore shell panel"
+      >
+        <span className="shell-panel-minimized-label">{label || 'Shell'}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined} tabIndex={-1} onKeyDown={handlePanelKeyDown}>
