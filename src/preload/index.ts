@@ -374,6 +374,8 @@ export interface DockApi {
     createFile: (projectDir: string, relativePath: string) => Promise<{ success: boolean; error?: string }>
     createFolder: (projectDir: string, relativePath: string) => Promise<{ success: boolean; error?: string }>
     moveClaude: (projectDir: string, sourcePath: string, targetDir: string) => Promise<{ success: boolean; error?: string }>
+    readFile: (projectDir: string, relativePath: string) => Promise<{ content?: string; error?: string }>
+    writeFile: (projectDir: string, relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     onChanged: (callback: (changes: string[]) => void) => () => void
   }
 }
@@ -802,6 +804,8 @@ const dockApi: DockApi = {
     createFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FILE, projectDir, relativePath),
     createFolder: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_CREATE_FOLDER, projectDir, relativePath),
     moveClaude: (projectDir, sourcePath, targetDir) => ipcRenderer.invoke(IPC.WS_VIEWER_MOVE_CLAUDE, projectDir, sourcePath, targetDir),
+    readFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_FILE, projectDir, relativePath),
+    writeFile: (projectDir, relativePath, content) => ipcRenderer.invoke(IPC.WS_VIEWER_WRITE_FILE, projectDir, relativePath, content),
     onChanged: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, changes: string[]) => callback(changes)
       ipcRenderer.on('wsViewer:changed', handler)

@@ -1208,6 +1208,183 @@ body {
   background: var(--accent-color);
 }
 
+.dock-panel-drag-hint {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.4;
+  cursor: grab;
+  letter-spacing: -2px;
+  margin-left: auto;
+}
+
+.dock-panel-header[draggable] {
+  cursor: grab;
+}
+
+.dock-panel-header[draggable]:active {
+  cursor: grabbing;
+}
+
+/* Drop zones for drag-to-edge */
+.dock-panel-dropzone {
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.dock-panel-dropzone-left { left: 0; top: 0; width: 40px; height: 100%; }
+.dock-panel-dropzone-right { right: 0; top: 0; width: 40px; height: 100%; }
+.dock-panel-dropzone-top { left: 0; top: 0; width: 100%; height: 40px; }
+.dock-panel-dropzone-bottom { left: 0; bottom: 0; width: 100%; height: 40px; }
+
+.dock-panel-dropzone-active {
+  background: var(--accent-color);
+  opacity: 0.2;
+  border-radius: 4px;
+}
+
+/* Editor Overlay */
+.editor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+.editor-overlay-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.editor-tab-bar {
+  display: flex;
+  align-items: center;
+  height: var(--toolbar-height);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.editor-tab-bar::-webkit-scrollbar {
+  height: 3px;
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  height: 100%;
+  font-size: 11px;
+  cursor: pointer;
+  border-right: 1px solid var(--border-color);
+  white-space: nowrap;
+  color: var(--text-secondary);
+  transition: color 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+
+.editor-tab:hover {
+  background: var(--bg-tertiary);
+}
+
+.editor-tab-active {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-bottom: 2px solid var(--accent-color, #7aa2f7);
+}
+
+.editor-tab-name {
+  font-family: var(--term-font-family);
+}
+
+.editor-tab-dirty {
+  color: var(--accent-color, #7aa2f7);
+  font-size: 8px;
+}
+
+.editor-tab-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.editor-tab:hover .editor-tab-close,
+.editor-tab-active .editor-tab-close {
+  opacity: 1;
+}
+
+.editor-tab-close:hover {
+  color: var(--text-primary);
+  background: var(--hover-color, rgba(255,255,255,0.1));
+}
+
+.editor-tab-spacer {
+  flex: 1;
+}
+
+.editor-close-all {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 8px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+.editor-close-all:hover {
+  color: #f7768e;
+  background: var(--hover-color, rgba(255,255,255,0.1));
+}
+
+.editor-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.editor-saving {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.editor-save-error {
+  font-size: 10px;
+  color: #f7768e;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
 /* Grid */
 .dock-grid-container {
   flex: 1;

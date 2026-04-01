@@ -513,7 +513,29 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   }, [terminalId])
 
   return (
-    <div className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`} data-terminal-id={terminalId}>
+    <div
+      className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`}
+      data-terminal-id={terminalId}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('application/x-ws-files')) {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'copy'
+        }
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData('application/x-ws-files')
+        if (!raw) return
+        e.preventDefault()
+        try {
+          const files = JSON.parse(raw) as string[]
+          if (files.length > 0) {
+            const fileList = files.map((f) => `- ${f}`).join('\n')
+            const prompt = `Please read and reference the following file${files.length > 1 ? 's' : ''}:\n${fileList}`
+            getDockApi().terminal.write(terminalId, `\x1b[200~${prompt}\x1b[201~`)
+          }
+        } catch { /* ignore */ }
+      }}
+    >
       <div className="terminal-card-header">
         <div className="terminal-card-status">
           <span className={`status-dot ${!isAlive ? 'dead' : isActive ? 'active' : 'inactive'}`} />

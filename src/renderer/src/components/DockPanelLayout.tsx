@@ -8,9 +8,12 @@
  * Other plugins register panels via registerPanel() in their renderer index.ts.
  */
 import React, { useCallback, useRef, useEffect, useState, Suspense } from 'react'
-import { usePanelStore } from '../stores/panel-store'
+import { usePanelStore, type PanelPosition } from '../stores/panel-store'
 import { getPanel } from '../panel-registry'
 import { useDockStore } from '../stores/dock-store'
+import { useEditorStore } from '../stores/editor-store'
+
+const EditorOverlay = React.lazy(() => import('./EditorOverlay'))
 
 export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { activePanelId, position, size, visible, setSize } = usePanelStore()
@@ -83,12 +86,53 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     ? { width: effectiveSize, minWidth: activePanel?.minSize ?? 150, flexShrink: 0 }
     : { height: effectiveSize, minHeight: activePanel?.minSize ?? 150, flexShrink: 0 }
 
+  const hasEditorTabs = useEditorStore((s) => s.tabs.length > 0)
+  const setPosition = usePanelStore((s) => s.setPosition)
+  const [draggingPanel, setDraggingPanel] = useState(false)
+  const [dropTarget, setDropTarget] = useState<PanelPosition | null>(null)
   const PanelComponent = activePanel!.component
+
+  const handleHeaderDragStart = useCallback((e: React.DragEvent) => {
+    e.dataTransfer.setData('application/x-dock-panel', 'move')
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggingPanel(true)
+  }, [])
+
+  const handleHeaderDragEnd = useCallback(() => {
+    setDraggingPanel(false)
+    setDropTarget(null)
+  }, [])
+
+  const makeDropZoneHandlers = useCallback((edge: PanelPosition) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes('application/x-dock-panel')) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      setDropTarget(edge)
+    },
+    onDragLeave: () => setDropTarget((prev) => prev === edge ? null : prev),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      setDraggingPanel(false)
+      setDropTarget(null)
+      if (edge !== position) {
+        setPosition(edge)
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
+      }
+    }
+  }), [position, setPosition])
 
   const panelElement = (
     <div className="dock-panel-area" ref={panelRef} style={panelStyle}>
-      <div className="dock-panel-header">
+      <div
+        className="dock-panel-header"
+        draggable
+        onDragStart={handleHeaderDragStart}
+        onDragEnd={handleHeaderDragEnd}
+        title="Drag to move panel to a different edge"
+      >
         <span className="dock-panel-title">{activePanel!.title}</span>
+        <span className="dock-panel-drag-hint">&#8942;&#8942;</span>
       </div>
       <div className="dock-panel-body">
         <Suspense fallback={<div className="dock-panel-loading">Loading...</div>}>
@@ -110,8 +154,23 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
       {(position === 'left' || position === 'top') && (
         <>{panelElement}{resizeHandle}</>
       )}
-      <div className="dock-panel-grid-area">
+      <div className="dock-panel-grid-area" style={{ position: 'relative' }}>
         {children}
+        {/* Monaco editor overlay — covers terminal grid when files are open */}
+        {hasEditorTabs && (
+          <Suspense fallback={<div className="editor-overlay-loading">Loading editor...</div>}>
+            <EditorOverlay />
+          </Suspense>
+        )}
+        {/* Drop zones for drag-to-edge repositioning */}
+        {draggingPanel && (
+          <>
+            <div className={`dock-panel-dropzone dock-panel-dropzone-left${dropTarget === 'left' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('left')} />
+            <div className={`dock-panel-dropzone dock-panel-dropzone-right${dropTarget === 'right' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('right')} />
+            <div className={`dock-panel-dropzone dock-panel-dropzone-top${dropTarget === 'top' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('top')} />
+            <div className={`dock-panel-dropzone dock-panel-dropzone-bottom${dropTarget === 'bottom' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('bottom')} />
+          </>
+        )}
       </div>
       {(position === 'right' || position === 'bottom') && (
         <>{resizeHandle}{panelElement}</>

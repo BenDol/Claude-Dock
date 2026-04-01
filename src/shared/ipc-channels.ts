@@ -259,6 +259,8 @@ export const IPC = {
   WS_VIEWER_CREATE_FILE: 'wsViewer:createFile',
   WS_VIEWER_CREATE_FOLDER: 'wsViewer:createFolder',
   WS_VIEWER_MOVE_CLAUDE: 'wsViewer:moveClaude',
+  WS_VIEWER_READ_FILE: 'wsViewer:readFile',
+  WS_VIEWER_WRITE_FILE: 'wsViewer:writeFile',
 
   // Test Runner
   TEST_RUNNER_OPEN: 'testRunner:open',

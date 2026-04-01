@@ -2,6 +2,7 @@ import './workspace-viewer.css'
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { PanelProps } from '@dock-renderer/panel-registry'
+import { useEditorStore, isBinaryFile } from '@dock-renderer/stores/editor-store'
 
 interface FileEntry {
   name: string
@@ -63,22 +64,40 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}M`
 }
 
+/** Flatten single-child directory chains: a/b/c → "a/b/c" */
+function flattenEntries(entries: FileEntry[]): FileEntry[] {
+  return entries.map((entry) => {
+    if (!entry.isDirectory || !entry.children) return entry
+    let current = entry
+    let compactName = current.name
+    while (current.isDirectory && current.children && current.children.length === 1 && current.children[0].isDirectory) {
+      current = current.children[0]
+      compactName += '/' + current.name
+    }
+    return {
+      ...current,
+      name: compactName,
+      children: current.children ? flattenEntries(current.children) : undefined
+    }
+  })
+}
+
 // --- Tree Node ---
 
 const WorkspaceTreeNode: React.FC<{
   entry: FileEntry
   depth: number
   projectDir: string
-  selectedPath: string | null
+  selectedPaths: Set<string>
   expandedPaths: Set<string>
   filter: string
-  onSelect: (path: string) => void
+  onSelect: (path: string, e: React.MouseEvent) => void
   onToggleExpand: (path: string) => void
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void
   onDoubleClick: (entry: FileEntry) => void
-}> = ({ entry, depth, projectDir, selectedPath, expandedPaths, filter, onSelect, onToggleExpand, onContextMenu, onDoubleClick }) => {
+}> = ({ entry, depth, projectDir, selectedPaths, expandedPaths, filter, onSelect, onToggleExpand, onContextMenu, onDoubleClick }) => {
   const expanded = expandedPaths.has(entry.path)
-  const isSelected = selectedPath === entry.path
+  const isSelected = selectedPaths.has(entry.path)
 
   // Filter: if filter is set, skip items that don't match
   if (filter) {
@@ -93,11 +112,17 @@ const WorkspaceTreeNode: React.FC<{
       <div
         className={`ws-tree-item${isSelected ? ' ws-tree-item-selected' : ''}`}
         style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => entry.isDirectory ? onToggleExpand(entry.path) : onSelect(entry.path)}
+        onClick={(e) => entry.isDirectory ? onToggleExpand(entry.path) : onSelect(entry.path, e)}
         onDoubleClick={() => onDoubleClick(entry)}
         onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, entry) }}
         draggable={!entry.isDirectory}
-        onDragStart={(e) => { e.dataTransfer.setData('text/plain', entry.path); e.dataTransfer.effectAllowed = 'move' }}
+        onDragStart={(e) => {
+          // Include all selected files in drag (or just this one if not selected)
+          const paths = isSelected && selectedPaths.size > 1 ? [...selectedPaths] : [entry.path]
+          e.dataTransfer.setData('text/plain', paths.join('\n'))
+          e.dataTransfer.setData('application/x-ws-files', JSON.stringify(paths))
+          e.dataTransfer.effectAllowed = 'move'
+        }}
         onDragOver={(e) => { if (entry.isDirectory) { e.preventDefault(); e.currentTarget.classList.add('ws-tree-item-drop-target') } }}
         onDragLeave={(e) => { e.currentTarget.classList.remove('ws-tree-item-drop-target') }}
         onDrop={(e) => {
@@ -125,7 +150,7 @@ const WorkspaceTreeNode: React.FC<{
           entry={child}
           depth={depth + 1}
           projectDir={projectDir}
-          selectedPath={selectedPath}
+          selectedPaths={selectedPaths}
           expandedPaths={expandedPaths}
           filter={filter}
           onSelect={onSelect}
@@ -168,6 +193,8 @@ const ContextMenu: React.FC<{
     if (parseFloat(el.style.top) + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
   }, [])
 
+  const [claudeSub, setClaudeSub] = useState(false)
+
   return (
     <div className="ws-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       {!entry.isDirectory && (
@@ -208,29 +235,136 @@ const ContextMenu: React.FC<{
         }
         onClose()
       }}>Delete</div>
-      {!entry.isDirectory && (
-        <>
-          <div className="ws-ctx-separator" />
-          <div className="ws-ctx-item ws-ctx-claude" onClick={() => {
-            api.workspaceViewer.moveClaude(projectDir, entry.path, '')
-            onClose()
-          }}>Claude: Explain this file</div>
-        </>
-      )}
+      <div className="ws-ctx-separator" />
+      <div
+        className="ws-ctx-item ws-ctx-submenu-trigger"
+        onMouseEnter={() => setClaudeSub(true)}
+        onMouseLeave={() => setClaudeSub(false)}
+      >
+        <span className="ws-ctx-claude">Claude Actions</span>
+        <span className="ws-ctx-arrow">&#9656;</span>
+        {claudeSub && (
+          <div className="ws-ctx-submenu">
+            {!entry.isDirectory && (
+              <div className="ws-ctx-item" onClick={() => {
+                api.workspaceViewer.moveClaude(projectDir, entry.path, '__explain__')
+                onClose()
+              }}>Explain this file</div>
+            )}
+            {!entry.isDirectory && (
+              <div className="ws-ctx-item" onClick={() => {
+                api.workspaceViewer.moveClaude(projectDir, entry.path, '__tests__')
+                onClose()
+              }}>Write tests</div>
+            )}
+            <div className="ws-ctx-item" onClick={() => {
+              api.workspaceViewer.moveClaude(projectDir, entry.path, '__reference__')
+              onClose()
+            }}>Reference this</div>
+            {entry.isDirectory && (
+              <div className="ws-ctx-item" onClick={() => {
+                api.workspaceViewer.moveClaude(projectDir, entry.path, '__explain_module__')
+                onClose()
+              }}>Explain this module</div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 // --- Main Panel ---
 
+const ZOOM_KEY = 'ws-viewer-zoom'
+const MIN_ZOOM = 0.6
+const MAX_ZOOM = 1.8
+const ZOOM_STEP = 0.05
+
 const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
   const api = getDockApi()
   const [tree, setTree] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [lastClickedPath, setLastClickedPath] = useState<string | null>(null)
+  const expandStorageKey = `ws-expanded:${projectDir.replace(/\\/g, '/').toLowerCase()}`
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(expandStorageKey)
+      if (saved) return new Set(JSON.parse(saved))
+    } catch { /* ignore */ }
+    return new Set()
+  })
+  const allFilePaths = useRef<string[]>([])
+
+  // Persist expanded paths to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(expandStorageKey, JSON.stringify([...expandedPaths])) } catch { /* ignore */ }
+  }, [expandedPaths, expandStorageKey])
+
+  // Build flat path list for shift-click range selection
+  useEffect(() => {
+    const paths: string[] = []
+    const walk = (entries: FileEntry[]) => {
+      for (const e of entries) {
+        if (!e.isDirectory) paths.push(e.path)
+        if (e.children) walk(e.children)
+      }
+    }
+    walk(tree)
+    allFilePaths.current = paths
+  }, [tree])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
+  const [compact, setCompact] = useState(() => localStorage.getItem('ws-viewer-compact') !== 'false')
+  const panelRootRef = useRef<HTMLDivElement>(null)
+  const zoomRef = useRef(1)
+
+  // Zoom: Ctrl+MouseWheel and Ctrl++/- with persistence, defaults to dock's zoom
+  useEffect(() => {
+    const saved = localStorage.getItem(ZOOM_KEY)
+    if (saved) {
+      const z = parseFloat(saved)
+      zoomRef.current = (isNaN(z) || z < MIN_ZOOM || z > MAX_ZOOM) ? 1 : z
+    } else {
+      // Default to the dock's current CSS zoom (if set), otherwise 1
+      const dockZoom = parseFloat(document.documentElement.style.zoom) || 1
+      zoomRef.current = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, dockZoom))
+    }
+    if (panelRootRef.current) panelRootRef.current.style.zoom = String(zoomRef.current)
+
+    const applyZoom = (z: number) => {
+      zoomRef.current = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      if (panelRootRef.current) panelRootRef.current.style.zoom = String(zoomRef.current)
+      localStorage.setItem(ZOOM_KEY, String(zoomRef.current))
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      // Only handle if the event is inside our panel
+      if (!panelRootRef.current?.contains(e.target as Node)) return
+      e.preventDefault()
+      e.stopPropagation()
+      applyZoom(zoomRef.current + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      // Only handle if focus is inside our panel
+      if (!panelRootRef.current?.contains(document.activeElement) && !panelRootRef.current?.matches(':hover')) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopPropagation(); applyZoom(zoomRef.current + ZOOM_STEP) }
+      else if (e.key === '-') { e.preventDefault(); e.stopPropagation(); applyZoom(zoomRef.current - ZOOM_STEP) }
+      else if (e.key === '0') { e.preventDefault(); e.stopPropagation(); applyZoom(1) }
+    }
+
+    // Use capture phase so we intercept before the dock's zoom handler
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true } as any)
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+    }
+  }, [])
 
   const loadGenRef = useRef(0)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -299,9 +433,49 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     })
   }, [tree, projectDir])
 
-  const handleDoubleClick = useCallback((entry: FileEntry) => {
-    if (!entry.isDirectory) api.workspaceViewer.openFile(projectDir, entry.path)
+  const handleSelect = useCallback((filePath: string, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      // Toggle individual selection
+      setSelectedPaths((prev) => {
+        const next = new Set(prev)
+        if (next.has(filePath)) next.delete(filePath)
+        else next.add(filePath)
+        return next
+      })
+    } else if (e.shiftKey && lastClickedPath) {
+      // Range selection
+      const paths = allFilePaths.current
+      const from = paths.indexOf(lastClickedPath)
+      const to = paths.indexOf(filePath)
+      if (from >= 0 && to >= 0) {
+        const start = Math.min(from, to)
+        const end = Math.max(from, to)
+        setSelectedPaths(new Set(paths.slice(start, end + 1)))
+      }
+    } else {
+      // Single selection
+      setSelectedPaths(new Set([filePath]))
+    }
+    setLastClickedPath(filePath)
+  }, [lastClickedPath])
+
+  const openFileInEditor = useCallback(async (filePath: string) => {
+    if (isBinaryFile(filePath.split('/').pop() || '')) {
+      api.workspaceViewer.openFile(projectDir, filePath)
+      return
+    }
+    const result = await api.workspaceViewer.readFile(projectDir, filePath)
+    if (result.error) {
+      // Fallback to native on error (too large, binary, etc.)
+      api.workspaceViewer.openFile(projectDir, filePath)
+      return
+    }
+    useEditorStore.getState().openFile(projectDir, filePath, result.content!)
   }, [projectDir])
+
+  const handleDoubleClick = useCallback((entry: FileEntry) => {
+    if (!entry.isDirectory) openFileInEditor(entry.path)
+  }, [openFileInEditor])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
@@ -317,12 +491,90 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     }
   }, [projectDir, loadTree])
 
+  const collapseAll = useCallback(() => setExpandedPaths(new Set()), [])
+
+  const expandAll = useCallback(() => {
+    const allDirs = new Set<string>()
+    const walk = (entries: FileEntry[]) => {
+      for (const e of entries) {
+        if (e.isDirectory) { allDirs.add(e.path); if (e.children) walk(e.children) }
+      }
+    }
+    walk(tree)
+    setExpandedPaths(allDirs)
+  }, [tree])
+
+  // Build flat list of visible entries for keyboard navigation
+  const visibleEntries = useMemo(() => {
+    const list: FileEntry[] = []
+    const displayTree = compact ? flattenEntries(tree) : tree
+    const walk = (entries: FileEntry[]) => {
+      for (const e of entries) {
+        list.push(e)
+        if (e.isDirectory && expandedPaths.has(e.path) && e.children) walk(e.children)
+      }
+    }
+    walk(displayTree)
+    return list
+  }, [tree, expandedPaths, compact])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const focusedPath = lastClickedPath || (selectedPaths.size > 0 ? [...selectedPaths][0] : null)
+    if (!focusedPath && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      // Nothing focused — select first item
+      if (visibleEntries.length > 0) {
+        const first = visibleEntries[0]
+        setSelectedPaths(new Set([first.path]))
+        setLastClickedPath(first.path)
+      }
+      e.preventDefault()
+      return
+    }
+    if (!focusedPath) return
+
+    const idx = visibleEntries.findIndex((e) => e.path === focusedPath)
+    if (idx < 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const next = idx + 1 < visibleEntries.length ? visibleEntries[idx + 1] : null
+      if (next) {
+        setSelectedPaths(new Set([next.path]))
+        setLastClickedPath(next.path)
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const prev = idx - 1 >= 0 ? visibleEntries[idx - 1] : null
+      if (prev) {
+        setSelectedPaths(new Set([prev.path]))
+        setLastClickedPath(prev.path)
+      }
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      const entry = visibleEntries[idx]
+      if (entry.isDirectory && !expandedPaths.has(entry.path)) {
+        handleToggleExpand(entry.path)
+      }
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      const entry = visibleEntries[idx]
+      if (entry.isDirectory && expandedPaths.has(entry.path)) {
+        handleToggleExpand(entry.path)
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const entry = visibleEntries[idx]
+      if (entry.isDirectory) handleToggleExpand(entry.path)
+      else openFileInEditor(entry.path)
+    }
+  }, [lastClickedPath, selectedPaths, visibleEntries, expandedPaths, handleToggleExpand, projectDir])
+
   if (loading) {
-    return <div className="ws-panel"><div className="ws-panel-loading">Loading...</div></div>
+    return <div className="ws-panel" ref={panelRootRef}><div className="ws-panel-loading">Loading...</div></div>
   }
 
   return (
-    <div className="ws-panel">
+    <div className="ws-panel" ref={panelRootRef}>
       <div className="ws-panel-toolbar">
         <input
           className="ws-panel-filter"
@@ -331,21 +583,40 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
+        <button
+          className={`ws-panel-btn${compact ? ' ws-panel-btn-active' : ''}`}
+          onClick={() => { const next = !compact; setCompact(next); localStorage.setItem('ws-viewer-compact', String(next)) }}
+          title={compact ? 'Compact paths (on)' : 'Compact paths (off)'}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
+          </svg>
+        </button>
+        <button className="ws-panel-btn" onClick={collapseAll} title="Collapse all">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </button>
+        <button className="ws-panel-btn" onClick={expandAll} title="Expand all">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </button>
         <button className="ws-panel-btn" onClick={loadTree} title="Refresh">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" /></svg>
         </button>
       </div>
-      <div className="ws-panel-tree">
-        {tree.map((entry) => (
+      <div className="ws-panel-tree" tabIndex={0} onKeyDown={handleKeyDown}>
+        {(compact ? flattenEntries(tree) : tree).map((entry) => (
           <WorkspaceTreeNode
             key={entry.path}
             entry={entry}
             depth={0}
             projectDir={projectDir}
-            selectedPath={selectedPath}
+            selectedPaths={selectedPaths}
             expandedPaths={expandedPaths}
             filter={filter}
-            onSelect={setSelectedPath}
+            onSelect={handleSelect}
             onToggleExpand={handleToggleExpand}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}

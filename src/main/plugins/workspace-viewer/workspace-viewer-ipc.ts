@@ -121,6 +121,34 @@ export function registerWorkspaceViewerIpc(): void {
       return { success: false, error: err instanceof Error ? err.message : 'Move failed' }
     }
   })
+
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
+
+  ipcMain.handle(IPC.WS_VIEWER_READ_FILE, async (_event, projectDir: string, relativePath: string) => {
+    try {
+      const abs = safePath(projectDir, relativePath)
+      if (!abs) return { error: 'Invalid path' }
+      const stat = fs.statSync(abs)
+      if (stat.size > MAX_FILE_SIZE) return { error: `File too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max ${MAX_FILE_SIZE / 1024 / 1024}MB.` }
+      const content = fs.readFileSync(abs, 'utf-8')
+      return { content }
+    } catch (err) {
+      getServices().logError('[workspace-viewer] readFile failed:', err)
+      return { error: err instanceof Error ? err.message : 'Read failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.WS_VIEWER_WRITE_FILE, async (_event, projectDir: string, relativePath: string, content: string) => {
+    try {
+      const abs = safePath(projectDir, relativePath)
+      if (!abs) return { success: false, error: 'Invalid path' }
+      fs.writeFileSync(abs, content, 'utf-8')
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[workspace-viewer] writeFile failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Write failed' }
+    }
+  })
 }
 
 export function disposeWorkspaceViewerIpc(): void {
@@ -129,7 +157,8 @@ export function disposeWorkspaceViewerIpc(): void {
     IPC.WS_VIEWER_OPEN_FILE, IPC.WS_VIEWER_OPEN_IN_EXPLORER,
     IPC.WS_VIEWER_RENAME, IPC.WS_VIEWER_DELETE,
     IPC.WS_VIEWER_CREATE_FILE, IPC.WS_VIEWER_CREATE_FOLDER,
-    IPC.WS_VIEWER_MOVE_CLAUDE
+    IPC.WS_VIEWER_MOVE_CLAUDE,
+    IPC.WS_VIEWER_READ_FILE, IPC.WS_VIEWER_WRITE_FILE
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }
