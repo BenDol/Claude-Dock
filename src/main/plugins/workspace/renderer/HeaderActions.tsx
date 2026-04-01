@@ -1,5 +1,5 @@
 /**
- * Header actions for the workspace viewer panel — rendered in the
+ * Header actions for the workspace panel — rendered in the
  * DockPanelLayout header bar via the headerActions registration.
  */
 import React from 'react'

@@ -449,7 +449,7 @@ function DetachedEditorShell() {
 
   // Hydrate editor store from IPC (main process sends tab data after window loads)
   useEffect(() => {
-    const cleanup = getDockApi().workspaceViewer.onHydrateTabs((tabData: string) => {
+    const cleanup = getDockApi().workspace.onHydrateTabs((tabData: string) => {
       try {
         const tabs = JSON.parse(tabData)
         const { useEditorStore } = require('./stores/editor-store')

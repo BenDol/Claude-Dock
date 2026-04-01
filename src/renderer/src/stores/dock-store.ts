@@ -12,7 +12,6 @@ interface DockState {
   focusRegion: 'grid' | 'toolbar' | 'shell'
   nextTerminalNum: number
   unlockedTerminals: Set<string>
-  rcTerminals: Set<string>
   loadingTerminals: Set<string>
   /** Maps terminal ID → task type string for terminals running Claude tasks */
   claudeTaskTerminals: Map<string, ClaudeTaskRequest['type']>
@@ -56,7 +55,6 @@ interface DockState {
   setFocusedTerminal: (id: string | null) => void
   setFocusRegion: (region: 'grid' | 'toolbar' | 'shell') => void
   focusNextTerminal: () => void
-  setTerminalRC: (id: string, active: boolean) => void
   setTerminalLoading: (id: string, loading: boolean) => void
   setTerminalClaudeTask: (id: string, taskType: ClaudeTaskRequest['type'] | null) => void
   setTerminalClaudeFlags: (id: string, flags: string | null) => void
@@ -83,7 +81,6 @@ export const useDockStore = create<DockState>((set, get) => ({
   focusRegion: 'grid',
   nextTerminalNum: 1,
   unlockedTerminals: new Set<string>(),
-  rcTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
   claudeTaskTerminals: new Map<string, ClaudeTaskRequest['type']>(),
   claudeTaskFlags: new Map<string, string>(),
@@ -120,8 +117,6 @@ export const useDockStore = create<DockState>((set, get) => ({
             ? terminals[terminals.length - 1].id
             : null
           : state.focusedTerminalId
-      const rcTerminals = new Set(state.rcTerminals)
-      rcTerminals.delete(id)
       const unlockedTerminals = new Set(state.unlockedTerminals)
       unlockedTerminals.delete(id)
       const claudeTaskTerminals = new Map(state.claudeTaskTerminals)
@@ -134,7 +129,7 @@ export const useDockStore = create<DockState>((set, get) => ({
       pendingWorktrees.delete(id)
       const manualResumeIds = new Map(state.manualResumeIds)
       manualResumeIds.delete(id)
-      return { terminals, focusedTerminalId, rcTerminals, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
+      return { terminals, focusedTerminalId, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -176,14 +171,6 @@ export const useDockStore = create<DockState>((set, get) => ({
       const currentIdx = state.terminals.findIndex((t) => t.id === state.focusedTerminalId)
       const nextIdx = (currentIdx + 1) % state.terminals.length
       return { focusedTerminalId: state.terminals[nextIdx].id }
-    }),
-
-  setTerminalRC: (id, active) =>
-    set((state) => {
-      const next = new Set(state.rcTerminals)
-      if (active) next.add(id)
-      else next.delete(id)
-      return { rcTerminals: next }
     }),
 
   setTerminalLoading: (id, loading) =>

@@ -45,7 +45,7 @@ const pluginBuildShas: Record<string, string> = {
   'git-manager': getPluginBuildSha('src/main/plugins/git-manager'),
   'cloud-integration': getPluginBuildSha('src/main/plugins/cloud-integration'),
   'test-runner': getPluginBuildSha('src/main/plugins/test-runner'),
-  'workspace-viewer': getPluginBuildSha('src/main/plugins/workspace-viewer')
+  'workspace': getPluginBuildSha('src/main/plugins/workspace')
 }
 
 export default defineConfig({

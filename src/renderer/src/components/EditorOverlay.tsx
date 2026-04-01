@@ -120,7 +120,7 @@ const EditorOverlay: React.FC = () => {
     setSaveError(null)
     try {
       const api = getDockApi()
-      const result = await api.workspaceViewer.writeFile(activeTab.projectDir, activeTab.relativePath, activeTab.content)
+      const result = await api.workspace.writeFile(activeTab.projectDir, activeTab.relativePath, activeTab.content)
       if (result.success) {
         markSaved(activeTab.id, activeTab.content)
       } else {
@@ -208,7 +208,7 @@ const EditorOverlay: React.FC = () => {
     if (!removed) return
 
     const tabData = JSON.stringify([removed])
-    getDockApi().workspaceViewer.detachEditor(removed.projectDir, tabData).catch(() => {
+    getDockApi().workspace.detachEditor(removed.projectDir, tabData).catch(() => {
       // If detach fails, restore the tab
       useEditorStore.getState().openFile(removed.projectDir, removed.relativePath, removed.content)
     })

@@ -18,14 +18,14 @@ import { setServices as setCloudIntegrationServices } from './cloud-integration/
 import { createBundledServices as createCloudIntegrationServices } from './cloud-integration/bundled-services'
 import { setServices as setTestRunnerServices } from './test-runner/services'
 import { createBundledServices as createTestRunnerServices } from './test-runner/bundled-services'
-import { setServices as setWorkspaceViewerServices } from './workspace-viewer/services'
-import { createBundledServices as createWorkspaceViewerServices } from './workspace-viewer/bundled-services'
+import { setServices as setWorkspaceServices } from './workspace/services'
+import { createBundledServices as createWorkspaceServices } from './workspace/bundled-services'
 
 // Register service factories for built-in plugins
 registerServiceFactory('git-manager', createGitManagerServices, setGitManagerServices)
 registerServiceFactory('cloud-integration', createCloudIntegrationServices, setCloudIntegrationServices)
 registerServiceFactory('test-runner', createTestRunnerServices, setTestRunnerServices)
-registerServiceFactory('workspace-viewer', createWorkspaceViewerServices, setWorkspaceViewerServices)
+registerServiceFactory('workspace', createWorkspaceServices, setWorkspaceServices)
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.

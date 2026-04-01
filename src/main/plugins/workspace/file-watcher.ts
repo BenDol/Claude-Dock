@@ -28,12 +28,12 @@ export class ProjectFileWatcher {
         this.scheduleSend()
       })
       this.watcher.on('error', (err) => {
-        getServices().logError('[workspace-viewer] watcher error:', err)
+        getServices().logError('[workspace] watcher error:', err)
         this.stop()
       })
-      getServices().log(`[workspace-viewer] watching ${this.projectDir}`)
+      getServices().log(`[workspace] watching ${this.projectDir}`)
     } catch (err) {
-      getServices().logError('[workspace-viewer] failed to start watcher:', err)
+      getServices().logError('[workspace] failed to start watcher:', err)
     }
   }
 

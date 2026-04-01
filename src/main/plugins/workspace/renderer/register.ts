@@ -1,9 +1,9 @@
 /**
- * Renderer-side registration for the workspace-viewer plugin.
+ * Renderer-side registration for the workspace plugin.
  * Registers the dockable panel and toolbar toggle button.
  *
  * This file lives inside the plugin directory to maintain isolation.
- * It's re-exported from src/renderer/src/plugins/workspace-viewer/index.ts
+ * It's re-exported from src/renderer/src/plugins/workspace/index.ts
  * for auto-discovery by the renderer plugin glob.
  */
 import { lazy } from 'react'
@@ -14,11 +14,11 @@ import { usePanelStore } from '@dock-renderer/stores/panel-store'
 
 // Register the workspace viewer as a dockable panel
 registerPanel({
-  id: 'workspace-viewer',
-  pluginId: 'workspace-viewer',
+  id: 'workspace',
+  pluginId: 'workspace',
   title: 'Workspace',
   icon: React.createElement(FilesIcon),
-  component: lazy(() => import('./WorkspaceViewerPanel')),
+  component: lazy(() => import('./WorkspacePanel')),
   headerActions: lazy(() => import('./HeaderActions')),
   defaultPosition: 'left',
   defaultSize: 250,
@@ -28,15 +28,15 @@ registerPanel({
 
 // Register the toolbar toggle button
 registerToolbarAction({
-  id: 'workspace-viewer',
+  id: 'workspace',
   title: 'Workspace',
   icon: React.createElement(FilesIcon),
   onClick: () => {
     const store = usePanelStore.getState()
-    if (store.activePanelId === 'workspace-viewer' && store.visible) {
+    if (store.activePanelId === 'workspace' && store.visible) {
       store.setVisible(false)
     } else {
-      store.setActivePanel('workspace-viewer')
+      store.setActivePanel('workspace')
     }
   },
   order: 40

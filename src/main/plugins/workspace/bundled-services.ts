@@ -1,8 +1,8 @@
 import { DockManager } from '../../dock-manager'
 import { log, logError } from '../../logger'
-import type { WorkspaceViewerServices } from './services'
+import type { WorkspaceServices } from './services'
 
-export function createBundledServices(): WorkspaceViewerServices {
+export function createBundledServices(): WorkspaceServices {
   return {
     log,
     logError,

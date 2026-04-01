@@ -3,23 +3,23 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
 import { readDirectory, readTree, sanitizePath } from './file-scanner'
-import { loadPluginWindow } from '../plugin-renderer-utils'
+
 import { getServices } from './services'
 
 /** Resolve and validate a relative path within the project. Returns null if unsafe. */
 function safePath(projectDir: string, relativePath: string): string | null {
   const safe = sanitizePath(projectDir, relativePath)
   if (safe === null) {
-    getServices().logError(`[workspace-viewer] path traversal blocked: ${relativePath}`)
+    getServices().logError(`[workspace] path traversal blocked: ${relativePath}`)
     return null
   }
   return path.join(projectDir, safe)
 }
 
-export function registerWorkspaceViewerIpc(): void {
+export function registerWorkspaceIpc(): void {
   ipcMain.handle(IPC.WS_VIEWER_READ_DIR, async (_event, projectDir: string, relativePath: string, hideIgnored?: boolean) => {
     try { return readDirectory(projectDir, relativePath, hideIgnored ?? false) } catch (err) {
-      getServices().logError('[workspace-viewer] readDir failed:', err); return []
+      getServices().logError('[workspace] readDir failed:', err); return []
     }
   })
 
@@ -28,7 +28,7 @@ export function registerWorkspaceViewerIpc(): void {
       const depth = Math.min(Math.max(maxDepth ?? 2, 1), 5)
       return readTree(projectDir, depth, hideIgnored ?? false)
     } catch (err) {
-      getServices().logError('[workspace-viewer] readTree failed:', err); return []
+      getServices().logError('[workspace] readTree failed:', err); return []
     }
   })
 
@@ -38,7 +38,7 @@ export function registerWorkspaceViewerIpc(): void {
       if (!abs) return
       await shell.openPath(abs)
     } catch (err) {
-      getServices().logError('[workspace-viewer] openFile failed:', err)
+      getServices().logError('[workspace] openFile failed:', err)
     }
   })
 
@@ -48,7 +48,7 @@ export function registerWorkspaceViewerIpc(): void {
       if (!abs) return
       shell.showItemInFolder(abs)
     } catch (err) {
-      getServices().logError('[workspace-viewer] openInExplorer failed:', err)
+      getServices().logError('[workspace] openInExplorer failed:', err)
     }
   })
 
@@ -63,7 +63,7 @@ export function registerWorkspaceViewerIpc(): void {
       fs.renameSync(abs, newAbs)
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] rename failed:', err)
+      getServices().logError('[workspace] rename failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Rename failed' }
     }
   })
@@ -75,7 +75,7 @@ export function registerWorkspaceViewerIpc(): void {
       await shell.trashItem(abs)
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] delete failed:', err)
+      getServices().logError('[workspace] delete failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Delete failed' }
     }
   })
@@ -89,7 +89,7 @@ export function registerWorkspaceViewerIpc(): void {
       fs.writeFileSync(abs, '', 'utf-8')
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] createFile failed:', err)
+      getServices().logError('[workspace] createFile failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Create failed' }
     }
   })
@@ -102,7 +102,7 @@ export function registerWorkspaceViewerIpc(): void {
       fs.mkdirSync(abs, { recursive: true })
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] createFolder failed:', err)
+      getServices().logError('[workspace] createFolder failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Create failed' }
     }
   })
@@ -117,7 +117,7 @@ export function registerWorkspaceViewerIpc(): void {
       })
       return sent ? { success: true } : { success: false, error: 'No dock window found' }
     } catch (err) {
-      getServices().logError('[workspace-viewer] moveClaude failed:', err)
+      getServices().logError('[workspace] moveClaude failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Move failed' }
     }
   })
@@ -133,7 +133,7 @@ export function registerWorkspaceViewerIpc(): void {
       const content = fs.readFileSync(abs, 'utf-8')
       return { content }
     } catch (err) {
-      getServices().logError('[workspace-viewer] readFile failed:', err)
+      getServices().logError('[workspace] readFile failed:', err)
       return { error: err instanceof Error ? err.message : 'Read failed' }
     }
   })
@@ -145,7 +145,7 @@ export function registerWorkspaceViewerIpc(): void {
       fs.writeFileSync(abs, content, 'utf-8')
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] writeFile failed:', err)
+      getServices().logError('[workspace] writeFile failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Write failed' }
     }
   })
@@ -197,13 +197,13 @@ export function registerWorkspaceViewerIpc(): void {
 
       return { success: true }
     } catch (err) {
-      getServices().logError('[workspace-viewer] detach editor failed:', err)
+      getServices().logError('[workspace] detach editor failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Detach failed' }
     }
   })
 }
 
-export function disposeWorkspaceViewerIpc(): void {
+export function disposeWorkspaceIpc(): void {
   const channels = [
     IPC.WS_VIEWER_READ_DIR, IPC.WS_VIEWER_READ_TREE,
     IPC.WS_VIEWER_OPEN_FILE, IPC.WS_VIEWER_OPEN_IN_EXPLORER,

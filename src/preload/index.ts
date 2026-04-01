@@ -364,7 +364,7 @@ export interface DockApi {
     onResults: (callback: (results: any) => void) => () => void
     onStatus: (callback: (status: any) => void) => () => void
   }
-  workspaceViewer: {
+  workspace: {
     readDir: (projectDir: string, relativePath: string, hideIgnored?: boolean) => Promise<any[]>
     readTree: (projectDir: string, maxDepth?: number, hideIgnored?: boolean) => Promise<any[]>
     openFile: (projectDir: string, relativePath: string) => Promise<void>
@@ -796,7 +796,7 @@ const dockApi: DockApi = {
       return () => ipcRenderer.removeListener('testRunner:status', handler)
     }
   },
-  workspaceViewer: {
+  workspace: {
     readDir: (projectDir, relativePath, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_DIR, projectDir, relativePath, hideIgnored),
     readTree: (projectDir, maxDepth?, hideIgnored?) => ipcRenderer.invoke(IPC.WS_VIEWER_READ_TREE, projectDir, maxDepth, hideIgnored),
     openFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WS_VIEWER_OPEN_FILE, projectDir, relativePath),

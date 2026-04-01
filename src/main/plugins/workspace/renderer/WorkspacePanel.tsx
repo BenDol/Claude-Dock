@@ -1,4 +1,4 @@
-import './workspace-viewer.css'
+import './workspace.css'
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
@@ -137,7 +137,7 @@ const WorkspaceTreeNode: React.FC<{
           if (!entry.isDirectory) return
           const sourcePath = e.dataTransfer.getData('text/plain')
           if (sourcePath && sourcePath !== entry.path) {
-            getDockApi().workspaceViewer.moveClaude(projectDir, sourcePath, entry.path)
+            getDockApi().workspace.moveClaude(projectDir, sourcePath, entry.path)
           }
         }}
       >
@@ -204,11 +204,11 @@ const ContextMenu: React.FC<{
   return (
     <div className="ws-ctx-menu" ref={ref} style={{ left: x, top: y }}>
       {!entry.isDirectory && (
-        <div className="ws-ctx-item" onClick={() => { api.workspaceViewer.openFile(projectDir, entry.path); onClose() }}>
+        <div className="ws-ctx-item" onClick={() => { api.workspace.openFile(projectDir, entry.path); onClose() }}>
           Open
         </div>
       )}
-      <div className="ws-ctx-item" onClick={() => { api.workspaceViewer.openInExplorer(projectDir, entry.path); onClose() }}>
+      <div className="ws-ctx-item" onClick={() => { api.workspace.openInExplorer(projectDir, entry.path); onClose() }}>
         {entry.isDirectory ? 'Open in Explorer' : 'Reveal in Explorer'}
       </div>
       <div className="ws-ctx-separator" />
@@ -220,12 +220,12 @@ const ContextMenu: React.FC<{
         <>
           <div className="ws-ctx-item" onClick={async () => {
             const name = prompt('File name:')
-            if (name) { await api.workspaceViewer.createFile(projectDir, `${entry.path}/${name}`); onRefresh() }
+            if (name) { await api.workspace.createFile(projectDir, `${entry.path}/${name}`); onRefresh() }
             onClose()
           }}>New File</div>
           <div className="ws-ctx-item" onClick={async () => {
             const name = prompt('Folder name:')
-            if (name) { await api.workspaceViewer.createFolder(projectDir, `${entry.path}/${name}`); onRefresh() }
+            if (name) { await api.workspace.createFolder(projectDir, `${entry.path}/${name}`); onRefresh() }
             onClose()
           }}>New Folder</div>
           <div className="ws-ctx-separator" />
@@ -236,7 +236,7 @@ const ContextMenu: React.FC<{
       </div>
       <div className="ws-ctx-item ws-ctx-danger" onClick={async () => {
         if (confirm(`Delete "${entry.name}"? It will be moved to the recycle bin.`)) {
-          await api.workspaceViewer.delete(projectDir, entry.path)
+          await api.workspace.delete(projectDir, entry.path)
           onRefresh()
         }
         onClose()
@@ -253,23 +253,23 @@ const ContextMenu: React.FC<{
           <div className="ws-ctx-submenu">
             {!entry.isDirectory && (
               <div className="ws-ctx-item" onClick={() => {
-                api.workspaceViewer.moveClaude(projectDir, entry.path, '__explain__')
+                api.workspace.moveClaude(projectDir, entry.path, '__explain__')
                 onClose()
               }}>Explain this file</div>
             )}
             {!entry.isDirectory && (
               <div className="ws-ctx-item" onClick={() => {
-                api.workspaceViewer.moveClaude(projectDir, entry.path, '__tests__')
+                api.workspace.moveClaude(projectDir, entry.path, '__tests__')
                 onClose()
               }}>Write tests</div>
             )}
             <div className="ws-ctx-item" onClick={() => {
-              api.workspaceViewer.moveClaude(projectDir, entry.path, '__reference__')
+              api.workspace.moveClaude(projectDir, entry.path, '__reference__')
               onClose()
             }}>Reference this</div>
             {entry.isDirectory && (
               <div className="ws-ctx-item" onClick={() => {
-                api.workspaceViewer.moveClaude(projectDir, entry.path, '__explain_module__')
+                api.workspace.moveClaude(projectDir, entry.path, '__explain_module__')
                 onClose()
               }}>Explain this module</div>
             )}
@@ -287,7 +287,7 @@ const MIN_ZOOM = 0.6
 const MAX_ZOOM = 1.8
 const ZOOM_STEP = 0.05
 
-const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
+const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   const api = getDockApi()
   const [tree, setTree] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -381,7 +381,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     const gen = ++loadGenRef.current
     setLoading(true)
     try {
-      const result = await api.workspaceViewer.readTree(projectDir, 4, hideIgnored)
+      const result = await api.workspace.readTree(projectDir, 4, hideIgnored)
       if (gen !== loadGenRef.current) return // stale
       setTree(result)
       // Auto-expand top-level directories on first load only
@@ -400,7 +400,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
   // Watch for filesystem changes — debounce to avoid hammering on rapid edits
   useEffect(() => {
     if (!projectDir) return
-    const cleanup = api.workspaceViewer.onChanged(() => {
+    const cleanup = api.workspace.onChanged(() => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => { refreshTimerRef.current = null; loadTree() }, 500)
     })
@@ -433,7 +433,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     // initially loaded tree), fetch children via IPC.
     const needsLoad = !entry || (entry.isDirectory && !entry.children)
     if (needsLoad) {
-      const children = await api.workspaceViewer.readDir(projectDir, entryPath, hideIgnored)
+      const children = await api.workspace.readDir(projectDir, entryPath, hideIgnored)
       if (children.length > 0 || entry) {
         setTree((prev) => {
           // If entry exists in tree, attach children to it
@@ -483,13 +483,13 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   const openFileInEditor = useCallback(async (filePath: string) => {
     if (isBinaryFile(filePath.split('/').pop() || '')) {
-      api.workspaceViewer.openFile(projectDir, filePath)
+      api.workspace.openFile(projectDir, filePath)
       return
     }
-    const result = await api.workspaceViewer.readFile(projectDir, filePath)
+    const result = await api.workspace.readFile(projectDir, filePath)
     if (result.error) {
       // Fallback to native on error (too large, binary, etc.)
-      api.workspaceViewer.openFile(projectDir, filePath)
+      api.workspace.openFile(projectDir, filePath)
       return
     }
     useEditorStore.getState().openFile(projectDir, filePath, result.content!)
@@ -508,7 +508,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     const name = entryPath.split('/').pop() || ''
     const newName = prompt('New name:', name)
     if (newName && newName !== name) {
-      await api.workspaceViewer.rename(projectDir, entryPath, newName)
+      await api.workspace.rename(projectDir, entryPath, newName)
       loadTree()
     }
   }, [projectDir, loadTree])
@@ -563,7 +563,7 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
     if (toLoad.length === 0) return
     // Load all missing dirs in parallel
     Promise.all(toLoad.map((dirPath) =>
-      api.workspaceViewer.readDir(projectDir, dirPath, hideIgnored).then((children) => ({ dirPath, children }))
+      api.workspace.readDir(projectDir, dirPath, hideIgnored).then((children) => ({ dirPath, children }))
     )).then((results) => {
       const updates = results.filter((r) => r.children.length > 0)
       if (updates.length === 0) return
@@ -721,4 +721,4 @@ const WorkspaceViewerPanel: React.FC<PanelProps> = ({ projectDir }) => {
   )
 }
 
-export default WorkspaceViewerPanel
+export default WorkspacePanel
