@@ -96,10 +96,30 @@ jobs:
           # are framework code that requires a full app rebuild.
           # src/shared/* also triggers a full build since both app and
           # plugins depend on shared types.
+          # Plugins whose renderer is embedded in the main app bundle —
+          # changes to these always require a full app build.
+          FULL_BUILD_PLUGINS="workspace"
+
           PLUGINS_ONLY=true
           while IFS= read -r file; do
             case "$file" in
-              src/main/plugins/*/*) ;;
+              src/main/plugins/*/*)
+                # Check if this plugin requires a full build
+                PLUGIN_DIR=$(echo "$file" | sed 's|src/main/plugins/\([^/]*\)/.*|\1|')
+                for fbp in $FULL_BUILD_PLUGINS; do
+                  if [ "$PLUGIN_DIR" = "$fbp" ]; then
+                    echo "Plugin '$PLUGIN_DIR' requires full app build: $file"
+                    PLUGINS_ONLY=false
+                    break 2
+                  fi
+                done
+                ;;
+              src/renderer/src/plugins/*/*)
+                # Renderer plugin registration changes require full build
+                echo "Renderer plugin file changed: $file"
+                PLUGINS_ONLY=false
+                break
+                ;;
               scripts/generate-plugin-archive.js) ;;
               *)
                 echo "Non-plugin file changed: $file"

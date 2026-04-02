@@ -33,7 +33,9 @@ const BUILTIN_PLUGINS = [
     rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' },
   { id: 'cloud-integration', srcDir: 'cloud-integration', entry: 'cloud-integration-plugin.ts' },
   { id: 'test-runner', srcDir: 'test-runner', entry: 'test-runner-plugin.ts' },
-  { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts' }
+  // workspace renders inside the dock window (not its own BrowserWindow),
+  // so renderer changes require a full app update — cannot be hot-updated.
+  { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true }
 ]
 
 /**
@@ -156,18 +158,21 @@ function main() {
     const pluginStaging = path.join(STAGING_DIR, plugin.id)
     fs.mkdirSync(pluginStaging, { recursive: true })
 
-    // Build standalone bundle — if this fails (plugin has deep app dependencies),
-    // mark as requiresAppUpdate so the UI tells the user to update the full app.
+    // Build standalone bundle — skip for plugins marked requiresAppUpdate
     const outPath = path.join(pluginStaging, 'index.js')
-    let requiresAppUpdate = false
-    try {
-      buildStandalonePlugin(entryPath, outPath)
-      console.log(`  Built standalone bundle for ${plugin.id}`)
-    } catch {
-      console.log(`  ${plugin.id}: standalone build not possible — marking as requiresAppUpdate`)
-      // Write a placeholder so the staging dir has valid structure for hashing
-      fs.writeFileSync(outPath, `// Standalone build not available — update via full app update\nmodule.exports = {};\n`)
-      requiresAppUpdate = true
+    let requiresAppUpdate = !!plugin.requiresAppUpdate
+    if (requiresAppUpdate) {
+      console.log(`  ${plugin.id}: marked as requiresAppUpdate — skipping standalone build`)
+      fs.writeFileSync(outPath, `// Requires full app update — standalone build not applicable\nmodule.exports = {};\n`)
+    } else {
+      try {
+        buildStandalonePlugin(entryPath, outPath)
+        console.log(`  Built standalone bundle for ${plugin.id}`)
+      } catch {
+        console.log(`  ${plugin.id}: standalone build failed — marking as requiresAppUpdate`)
+        fs.writeFileSync(outPath, `// Standalone build not available — update via full app update\nmodule.exports = {};\n`)
+        requiresAppUpdate = true
+      }
     }
 
     // Build standalone renderer bundle if this plugin has a rendererEntry
