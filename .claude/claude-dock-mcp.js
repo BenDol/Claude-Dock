@@ -39,6 +39,38 @@ const shellOutputFile = path.join(dataDir, 'dock-shell-output.json')
 const MESSAGE_TTL = 3600000 // 1 hour
 const pendingEventsFile = path.join(dataDir, 'dock-pending-events.json')
 
+// ---------- Session binding ----------
+// Each MCP server process is spawned by a single Claude Code instance.
+// We latch onto the first session_id received and reject all shell operations
+// from different sessions. This prevents cross-session shell targeting.
+let boundSessionId = null
+
+/**
+ * Bind to a session ID. Returns true if the session matches (or is the first).
+ * Returns false if a different session tries to use this MCP server.
+ */
+function bindSession(sessionId) {
+  if (!sessionId) return false
+  if (!boundSessionId) {
+    boundSessionId = sessionId
+    return true
+  }
+  // Allow exact match or prefix match (same session, abbreviated ID)
+  return boundSessionId === sessionId || boundSessionId.startsWith(sessionId) || sessionId.startsWith(boundSessionId)
+}
+
+/**
+ * Check if a session_id matches the bound session. For shell operations,
+ * this enforces that only the owning Claude instance can target its own shells.
+ */
+function validateSessionBinding(sessionId) {
+  if (!sessionId) return { ok: false, error: 'Missing required parameter: session_id. You must provide your own session ID.' }
+  if (!bindSession(sessionId)) {
+    return { ok: false, error: `Session mismatch: this MCP server is bound to session ${boundSessionId.slice(0, 8)}. You provided ${sessionId.slice(0, 8)}. Each Claude instance can only control its own shells.` }
+  }
+  return { ok: true }
+}
+
 // JSON-RPC helpers
 
 /**
@@ -331,10 +363,11 @@ function handleMessage(msg) {
         {
           name: 'dock_run_in_shell',
           description:
-            'Run a command in the Claude Dock shell panel. The shell panel is a separate terminal ' +
-            'embedded in the dock window — use it for running tests, builds, git commands, or any ' +
+            'Run a command in YOUR Claude Dock shell panel. The shell panel is a separate terminal ' +
+            'embedded in your dock window — use it for running tests, builds, git commands, or any ' +
             'shell operation without interrupting your current conversation. The shell panel opens ' +
-            'automatically if not already open. The command runs in the project directory.',
+            'automatically if not already open. The command runs in the project directory. ' +
+            'You can ONLY target shells attached to your own terminal — cross-session targeting is blocked.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -348,7 +381,7 @@ function handleMessage(msg) {
               },
               session_id: {
                 type: 'string',
-                description: 'Your session ID. Routes the command to the shell panel of the specific terminal running this session.'
+                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
               },
               submit: {
                 type: 'boolean',
@@ -369,21 +402,22 @@ function handleMessage(msg) {
                 description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "split".'
               }
             },
-            required: ['command']
+            required: ['command', 'session_id']
           }
         },
         {
           name: 'dock_read_shell',
           description:
-            'Read the recent output from a Claude Dock shell panel. Use this after dock_run_in_shell ' +
+            'Read the recent output from YOUR Claude Dock shell panel. Use this after dock_run_in_shell ' +
             'to see the command output (test results, build output, etc.). Returns the last N lines ' +
-            'of shell output for the specified session (default 200).',
+            'of shell output for your session (default 200). ' +
+            'You can ONLY read shells attached to your own terminal.',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: {
                 type: 'string',
-                description: 'Your session ID. Reads the shell panel output associated with this terminal session.'
+                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
               },
               shell_id: {
                 type: 'string',
@@ -400,15 +434,16 @@ function handleMessage(msg) {
         {
           name: 'dock_list_shells',
           description:
-            'List all open shell panels for a session (or all sessions). Returns shell IDs, ' +
+            'List open shell panels for your session. Returns shell IDs, ' +
             'line counts, and last update times. Use this to discover available shells before ' +
-            'reading their output with dock_read_shell.',
+            'reading their output with dock_read_shell. ' +
+            'Only shows shells belonging to your own session.',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: {
                 type: 'string',
-                description: 'Your session ID. If provided, only lists shells for this session. If omitted, lists all sessions and their shells.'
+                description: 'YOUR session ID. Only lists shells for your session.'
               }
             },
             required: []
@@ -417,16 +452,17 @@ function handleMessage(msg) {
         {
           name: 'dock_check_shell_events',
           description:
-            'Check for structured events emitted by scripts running in the Dock shell panel. ' +
+            'Check for structured events emitted by scripts running in YOUR Dock shell panel. ' +
             'Events are embedded as ##DOCK_EVENT:type:payload## markers in the shell output. ' +
             'Use this to detect compile errors, hot swap results, server start/stop events, etc. ' +
-            'Returns only events, not the full shell output.',
+            'Returns only events, not the full shell output. ' +
+            'You can ONLY check events for shells attached to your own terminal.',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: {
                 type: 'string',
-                description: 'Your session ID to check events for.'
+                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
               },
               shell_id: {
                 type: 'string',
@@ -445,13 +481,14 @@ function handleMessage(msg) {
           description:
             'Clear a shell panel\'s terminal output, scrollback buffer, and log file. ' +
             'Use this before starting a new server or build to get a clean terminal. ' +
-            'The shell process keeps running — only the visible output is cleared.',
+            'The shell process keeps running — only the visible output is cleared. ' +
+            'You can ONLY clear shells attached to your own terminal.',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: {
                 type: 'string',
-                description: 'Your session ID. Used to find the shell panel.'
+                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
               },
               shell_id: {
                 type: 'string',
@@ -462,7 +499,7 @@ function handleMessage(msg) {
                 description: 'Absolute path to the project directory. Used to route to the correct dock window.'
               }
             },
-            required: ['shell_id']
+            required: ['session_id', 'shell_id']
           }
         }
       ]
@@ -530,6 +567,8 @@ function handleMessage(msg) {
 
       switch (toolName) {
         case 'dock_status': {
+          // Bind session on first dock_status call (typically the first tool call)
+          if (args.session_id) bindSession(args.session_id)
           const status = formatDockStatus(args.project_dir || null, args.session_id || null)
           return jsonRpcResponse(id, {
             content: [{ type: 'text', text: status }]
@@ -544,8 +583,17 @@ function handleMessage(msg) {
             })
           }
 
-          // Validate session_id + shell_id ownership: the shell must belong to the caller's terminal
-          if (session_id && shell_id && shell_id !== '-1') {
+          // Session binding: enforce that this MCP server only serves one Claude session
+          const sessionCheck = validateSessionBinding(session_id)
+          if (!sessionCheck.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: sessionCheck.error }],
+              isError: true
+            })
+          }
+
+          // Validate shell_id ownership: the shell must belong to the caller's terminal
+          if (shell_id && shell_id !== '-1') {
             const callerTerm = resolveTerminal(session_id, project_dir || null)
             if (callerTerm) {
               // shell_id format: "shell:<terminalId>:<index>" — extract the parent terminal ID
@@ -656,6 +704,18 @@ function handleMessage(msg) {
 
         case 'dock_list_shells': {
           const { session_id } = args
+
+          // Session binding: if session_id is provided, enforce binding
+          if (session_id) {
+            const listSessionCheck = validateSessionBinding(session_id)
+            if (!listSessionCheck.ok) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: listSessionCheck.error }],
+                isError: true
+              })
+            }
+          }
+
           try {
             const data = readShellOutput()
             if (Object.keys(data).length === 0) {
@@ -665,10 +725,12 @@ function handleMessage(msg) {
             }
 
             const sections = []
+            // When bound to a session, only show shells for that session
+            const filterSessionId = boundSessionId || session_id
 
             for (const [sid, entry] of Object.entries(data)) {
-              // Filter by session_id if provided
-              if (session_id && sid !== session_id && !sid.startsWith(session_id)) continue
+              // Filter by bound/provided session_id
+              if (filterSessionId && sid !== filterSessionId && !sid.startsWith(filterSessionId) && !filterSessionId.startsWith(sid)) continue
 
               const shells = entry.shells || {}
               const shellIds = Object.keys(shells)
@@ -705,9 +767,13 @@ function handleMessage(msg) {
         case 'dock_read_shell': {
           const { session_id, shell_id, lines: maxLines } = args
           const lineCount = Math.min(Math.max(1, parseInt(maxLines) || 200), 500)
-          if (!session_id) {
+
+          // Session binding: enforce that this MCP server only serves one Claude session
+          const readSessionCheck = validateSessionBinding(session_id)
+          if (!readSessionCheck.ok) {
             return jsonRpcResponse(id, {
-              content: [{ type: 'text', text: 'Missing required parameter: session_id.' }]
+              content: [{ type: 'text', text: readSessionCheck.error }],
+              isError: true
             })
           }
 
@@ -791,9 +857,13 @@ function handleMessage(msg) {
 
         case 'dock_check_shell_events': {
           const { session_id, shell_id, last_n } = args
-          if (!session_id) {
+
+          // Session binding: enforce that this MCP server only serves one Claude session
+          const eventsSessionCheck = validateSessionBinding(session_id)
+          if (!eventsSessionCheck.ok) {
             return jsonRpcResponse(id, {
-              content: [{ type: 'text', text: 'Missing required parameter: session_id.' }]
+              content: [{ type: 'text', text: eventsSessionCheck.error }],
+              isError: true
             })
           }
 
@@ -883,8 +953,17 @@ function handleMessage(msg) {
             })
           }
 
+          // Session binding: enforce that this MCP server only serves one Claude session
+          const clearSessionCheck = validateSessionBinding(session_id)
+          if (!clearSessionCheck.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: clearSessionCheck.error }],
+              isError: true
+            })
+          }
+
           // Validate shell_id belongs to the caller's session
-          if (session_id && clearShellId) {
+          {
             const callerTerm = resolveTerminal(session_id, project_dir || null)
             if (callerTerm) {
               const shellParts = clearShellId.split(':')

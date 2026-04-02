@@ -54,11 +54,43 @@ const DockGrid: React.FC = () => {
   useEffect(() => {
     if (terminals.length !== prevCountRef.current) {
       prevCountRef.current = terminals.length
-      // Staggered re-fits: grid layout needs time to settle after adding/removing a cell
-      setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 200)
-      setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 600)
+      // Staggered re-fits: grid layout needs time to settle after adding/removing a cell.
+      // RGL uses a 200ms CSS transition on width/height, so we bracket it with multiple
+      // refit events to catch both fast (no transition) and animated layout changes.
+      const timers = [
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 50),
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 250),
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 600),
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 1000)
+      ]
+      return () => timers.forEach(clearTimeout)
     }
   }, [terminals.length])
+
+  // Listen for CSS transition completions on grid items — this fires at exactly the
+  // right moment when width/height transitions finish after layout changes (add/remove
+  // terminal, drag reposition, column/row resize). Much more reliable than fixed timeouts.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    let pending: ReturnType<typeof setTimeout> | null = null
+    const handler = (e: TransitionEvent) => {
+      if (e.propertyName === 'width' || e.propertyName === 'height' || e.propertyName === 'transform') {
+        // Coalesce rapid transition events (width + height + transform can all end
+        // within the same frame) into a single refit dispatch
+        if (pending) clearTimeout(pending)
+        pending = setTimeout(() => {
+          pending = null
+          window.dispatchEvent(new Event('terminals-repositioned'))
+        }, 30)
+      }
+    }
+    el.addEventListener('transitionend', handler)
+    return () => {
+      el.removeEventListener('transitionend', handler)
+      if (pending) clearTimeout(pending)
+    }
+  }, [])
 
   const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
   const totalGap = gapSize * (rows - 1)

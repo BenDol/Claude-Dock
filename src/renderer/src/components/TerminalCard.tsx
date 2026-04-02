@@ -345,10 +345,9 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   useEffect(() => {
     if (!pendingShellCommand) return
     const { command: cmd, submit, targetTerminalId, shellType, targetShellId, shellLayout } = pendingShellCommand
-    // If a specific terminal is targeted, only that terminal handles it
-    // Otherwise fall back to the focused terminal
-    const isTarget = targetTerminalId ? targetTerminalId === terminalId : isFocused
-    if (!isTarget) return
+    // Only the explicitly targeted terminal handles the command.
+    // No focused-terminal fallback — prevents cross-session shell routing.
+    if (!targetTerminalId || targetTerminalId !== terminalId) return
     setPendingShellCommand(null)
 
     // "__first__" sentinel = reuse the default shell (shell:0), same as the old behavior.
@@ -427,7 +426,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
       setShellAreaMounted(true)
       setShellAreaOpen(true)
     }
-  }, [pendingShellCommand, isFocused, shellAreaOpen, terminalId, setPendingShellCommand])
+  }, [pendingShellCommand, shellAreaOpen, terminalId, setPendingShellCommand])
 
   const handleClose = useCallback(() => {
     const state = useDockStore.getState()

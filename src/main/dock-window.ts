@@ -260,6 +260,14 @@ export class DockWindow {
           const normCmd = cmd.projectDir.replace(/\\/g, '/').toLowerCase()
           if (normCmd !== normProjectDir && !normProjectDir.startsWith(normCmd + '/')) continue
 
+          // Require sessionId — commands without a session are rejected to prevent
+          // accidental routing to the focused terminal (cross-session isolation).
+          if (!cmd.sessionId && cmd.type !== 'clear') {
+            log(`[shell-command] rejected command without sessionId: ${cmd.command}`)
+            this.processedCommandIds.add(cmd.id)
+            continue
+          }
+
           this.processedCommandIds.add(cmd.id)
           changed = true
 
@@ -277,14 +285,15 @@ export class DockWindow {
 
             const submit = cmd.submit ?? true
             // Resolve sessionId to terminalId so the renderer routes to the right terminal
-            let targetTerminalId: string | null = null
-            if (cmd.sessionId) {
-              targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
+            const targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
+            if (!targetTerminalId) {
+              log(`[shell-command] rejected: session ${cmd.sessionId.slice(0, 8)} not found in this dock`)
+              continue
             }
             const shellType = cmd.shell || null
             const targetShellId = cmd.shellId || null
             const shellLayout = cmd.shellLayout || null
-            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId || 'focused'}, shell=${shellType || 'default'}, shellId=${targetShellId || 'default'}, layout=${shellLayout || 'default'})`)
+            log(`[shell-command] routing MCP command to shell: ${cmd.command} (submit=${submit}, target=${targetTerminalId}, shell=${shellType || 'default'}, shellId=${targetShellId || 'default'}, layout=${shellLayout || 'default'})`)
             this.window.webContents.send(IPC.SHELL_RUN_COMMAND, cmd.command, submit, targetTerminalId, shellType, targetShellId, shellLayout)
           }
         }
