@@ -35,6 +35,16 @@ self.MonacoEnvironment = {
 
 loader.config({ monaco: monacoEditor })
 
+// Safety net: suppress Monaco "Model not found" errors from crashing the renderer.
+// This happens when "Peek References" tries to resolve models for files that aren't
+// loaded as editor models (e.g., files in node_modules or outside the workspace).
+window.addEventListener('error', (event) => {
+  if (event.error?.message === 'Model not found') {
+    event.preventDefault()
+    console.warn('[EditorOverlay] Suppressed "Model not found" error — file not available for reference resolution')
+  }
+})
+
 const FONT_SIZE_KEY = 'editor-font-size'
 const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 8
@@ -377,6 +387,18 @@ const EditorOverlay: React.FC = () => {
         const uri = `file:///${f.filePath.replace(/\\/g, '/')}`
         const disposable = ts.typescriptDefaults.addExtraLib(f.content, uri)
         extraLibsRef.current.set(f.filePath, disposable)
+      }
+
+      // 2b. Create editor models so "Peek References" / "Find All References" can
+      // resolve file content. Standalone Monaco's text model service only resolves
+      // models that already exist — extraLib entries are invisible to it.
+      for (const f of files) {
+        try {
+          const fileUri = monaco.Uri.parse(`file:///${f.filePath.replace(/\\/g, '/')}`)
+          if (!monaco.editor.getModel(fileUri)) {
+            monaco.editor.createModel(f.content, undefined, fileUri)
+          }
+        } catch { /* skip files that fail */ }
       }
 
       // 3. Register editor opener for cross-file Ctrl+click navigation
