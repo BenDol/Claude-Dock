@@ -114,6 +114,31 @@ export function readTree(projectDir: string, maxDepth = 2, hideIgnored = false):
   return walk('', 0)
 }
 
+/** Async version of readTree that yields to the event loop between directories.
+ *  Use for background refreshes to avoid blocking the main process. */
+export async function readTreeAsync(projectDir: string, maxDepth = 2, hideIgnored = false): Promise<TreeNode[]> {
+  let totalEntries = 0
+  let dirCount = 0
+  const walk = async (relPath: string, depth: number): Promise<TreeNode[]> => {
+    if (depth > maxDepth || totalEntries >= MAX_ENTRIES) return []
+    // Yield every 10 directories to keep the main process responsive
+    if (++dirCount % 10 === 0) await new Promise((r) => setImmediate(r))
+    const entries = readDirectory(projectDir, relPath, hideIgnored)
+    const nodes: TreeNode[] = []
+    for (const entry of entries) {
+      if (totalEntries >= MAX_ENTRIES) break
+      totalEntries++
+      const node: TreeNode = { ...entry }
+      if (entry.isDirectory && depth < maxDepth) {
+        node.children = await walk(entry.path, depth + 1)
+      }
+      nodes.push(node)
+    }
+    return nodes
+  }
+  return walk('', 0)
+}
+
 // ── Tree cache ───────────────────────────────────────────────────────
 
 const CACHE_VERSION = 1

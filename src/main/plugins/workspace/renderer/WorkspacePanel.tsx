@@ -180,7 +180,8 @@ const ContextMenu: React.FC<{
   onClose: () => void
   onRefresh: () => void
   onRename: (path: string) => void
-}> = ({ x, y, entry, projectDir, onClose, onRefresh, onRename }) => {
+  onReloadDir: (path: string) => void
+}> = ({ x, y, entry, projectDir, onClose, onRefresh, onRename, onReloadDir }) => {
   const ref = useRef<HTMLDivElement>(null)
   const api = getDockApi()
 
@@ -220,28 +221,29 @@ const ContextMenu: React.FC<{
       <div className="ws-ctx-separator" />
       {entry.isDirectory && (
         <>
-          <div className="ws-ctx-item" onClick={async () => {
+          <div className="ws-ctx-item" onClick={() => {
             const name = prompt('File name:')
-            if (name) { await api.workspace.createFile(projectDir, `${entry.path}/${name}`); onRefresh() }
             onClose()
+            if (name) { api.workspace.createFile(projectDir, `${entry.path}/${name}`).then(() => onRefresh()) }
           }}>New File</div>
-          <div className="ws-ctx-item" onClick={async () => {
+          <div className="ws-ctx-item" onClick={() => {
             const name = prompt('Folder name:')
-            if (name) { await api.workspace.createFolder(projectDir, `${entry.path}/${name}`); onRefresh() }
             onClose()
+            if (name) { api.workspace.createFolder(projectDir, `${entry.path}/${name}`).then(() => onRefresh()) }
           }}>New Folder</div>
+          <div className="ws-ctx-item" onClick={() => { onReloadDir(entry.path); onClose() }}>
+            Reload
+          </div>
           <div className="ws-ctx-separator" />
         </>
       )}
       <div className="ws-ctx-item" onClick={() => { onRename(entry.path); onClose() }}>
         Rename
       </div>
-      <div className="ws-ctx-item ws-ctx-danger" onClick={async () => {
-        if (confirm(`Delete "${entry.name}"? It will be moved to the recycle bin.`)) {
-          await api.workspace.delete(projectDir, entry.path)
-          onRefresh()
-        }
+      <div className="ws-ctx-item ws-ctx-danger" onClick={() => {
+        const doDelete = confirm(`Delete "${entry.name}"? It will be moved to the recycle bin.`)
         onClose()
+        if (doDelete) { api.workspace.delete(projectDir, entry.path).then(() => onRefresh()) }
       }}>Delete</div>
       <div className="ws-ctx-separator" />
       <div
@@ -422,43 +424,61 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   useEffect(() => { expandedPathsRef.current = expandedPaths }, [expandedPaths])
   useEffect(() => { hideIgnoredRef.current = hideIgnored }, [hideIgnored])
 
-  // Handle filesystem change notifications — targeted updates for expanded dirs
+  // Handle filesystem change notifications — coalesce rapid changes
+  const pendingDirsRef = useRef(new Set<string>())
+  const lastRefreshRef = useRef(0)
+
   useEffect(() => {
     if (!projectDir) return
     const cleanup = api.workspace.onChanged((changes: string[]) => {
+      // Accumulate affected directories across multiple batches
+      for (const change of changes) {
+        const parts = change.split('/')
+        parts.pop()
+        pendingDirsRef.current.add(parts.join('/') || '')
+      }
+
+      // Debounce — reset timer on each batch
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+
+      // Throttle — don't refresh more than once every 2 seconds
+      const sinceLastRefresh = Date.now() - lastRefreshRef.current
+      const delay = sinceLastRefresh < 2000 ? 2000 : 800
+
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
+        lastRefreshRef.current = Date.now()
+        const dirs = [...pendingDirsRef.current]
+        pendingDirsRef.current.clear()
+
+        if (dirs.includes('')) {
+          loadTree()
+          return
+        }
+
+        // Targeted refresh — only visible expanded directories, max 5 at a time
         const expanded = expandedPathsRef.current
         const ignored = hideIgnoredRef.current
-        // Find which parent directories were affected
-        const affectedDirs = new Set<string>()
-        for (const change of changes) {
-          const parts = change.split('/')
-          parts.pop()
-          affectedDirs.add(parts.join('/') || '')
+        const toRefresh = dirs.filter((d) => expanded.has(d)).slice(0, 5)
+        if (toRefresh.length === 0) return
+
+        // Sequential refresh to avoid flooding the main process
+        let chain = Promise.resolve()
+        for (const dir of toRefresh) {
+          chain = chain.then(() =>
+            api.workspace.readDir(projectDir, dir, ignored).then((children) => {
+              setTree((prev) => {
+                const update = (items: FileEntry[]): FileEntry[] =>
+                  items.map((item) =>
+                    item.path === dir ? { ...item, children } :
+                    item.children ? { ...item, children: update(item.children) } : item
+                  )
+                return update(prev)
+              })
+            }).catch(() => { /* ignore */ })
+          )
         }
-        if (affectedDirs.has('')) {
-          // Root-level changes — full reload
-          loadTree()
-        } else {
-          // Targeted: re-read only the affected expanded directories
-          for (const dir of affectedDirs) {
-            if (expanded.has(dir)) {
-              api.workspace.readDir(projectDir, dir, ignored).then((children) => {
-                setTree((prev) => {
-                  const update = (items: FileEntry[]): FileEntry[] =>
-                    items.map((item) =>
-                      item.path === dir ? { ...item, children } :
-                      item.children ? { ...item, children: update(item.children) } : item
-                    )
-                  return update(prev)
-                })
-              }).catch(() => { /* ignore */ })
-            }
-          }
-        }
-      }, 500)
+      }, delay)
     })
     return () => { cleanup(); if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current) }
   }, [projectDir, loadTree])
@@ -815,6 +835,18 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
           onClose={() => setCtxMenu(null)}
           onRefresh={loadTree}
           onRename={handleRename}
+          onReloadDir={(dirPath: string) => {
+            api.workspace.readDir(projectDir, dirPath, hideIgnoredRef.current).then((children) => {
+              setTree((prev) => {
+                const update = (items: FileEntry[]): FileEntry[] =>
+                  items.map((item) =>
+                    item.path === dirPath ? { ...item, children } :
+                    item.children ? { ...item, children: update(item.children) } : item
+                  )
+                return update(prev)
+              })
+            }).catch(() => { /* ignore */ })
+          }}
         />,
         document.body
       )}

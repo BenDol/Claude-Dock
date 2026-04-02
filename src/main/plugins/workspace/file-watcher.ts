@@ -7,7 +7,9 @@ import * as fs from 'fs'
 import { webContents } from 'electron'
 import { getServices } from './services'
 
-const DEBOUNCE_MS = 400
+const DEBOUNCE_MS = 800
+const DEBOUNCE_MS_BURST = 2000 // longer debounce when many changes arrive rapidly
+const BURST_THRESHOLD = 10    // if this many changes arrive in one batch, use longer debounce
 const IGNORE_PATTERNS = new Set(['.git', 'node_modules', '.cache', '__pycache__', 'target', 'dist', 'build', '.gradle', '.idea', '.vscode', 'out', 'coverage'])
 
 /** Active watchers by normalized project dir */
@@ -45,8 +47,10 @@ export function startWatching(projectDir: string, webContentsId: number): void {
         entry.pending.add(filename.replace(/\\/g, '/'))
       }
 
-      // Debounce: batch changes
-      if (!entry.timer) {
+      // Adaptive debounce: use longer delay when many changes arrive (e.g., agent editing)
+      if (entry.timer) clearTimeout(entry.timer)
+      {
+        const delay = entry.pending.size > BURST_THRESHOLD ? DEBOUNCE_MS_BURST : DEBOUNCE_MS
         entry.timer = setTimeout(() => {
           entry.timer = null
           const changes = [...entry.pending]
@@ -71,7 +75,7 @@ export function startWatching(projectDir: string, webContentsId: number): void {
             entry.watcher.close()
             watchers.delete(key)
           }
-        }, DEBOUNCE_MS)
+        }, delay)
       }
     })
 

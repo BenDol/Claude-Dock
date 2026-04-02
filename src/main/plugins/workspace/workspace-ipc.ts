@@ -2,7 +2,7 @@ import { ipcMain, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
-import { readDirectory, readTree, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
+import { readDirectory, readTree, readTreeAsync, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
 
 import { getServices } from './services'
 
@@ -30,10 +30,10 @@ export function registerWorkspaceIpc(): void {
     // Try cache first — instant return, no filesystem scan
     const cached = loadTreeCache(projectDir, depth, hi)
     if (cached) {
-      // Return cache immediately, then refresh in background and notify renderer
+      // Return cache immediately, then refresh in background (async, non-blocking)
       setImmediate(async () => {
         try {
-          const fresh = readTree(projectDir, depth, hi)
+          const fresh = await readTreeAsync(projectDir, depth, hi)
           saveTreeCache(projectDir, fresh, depth, hi)
           // Send updated tree to renderer if the window is still alive
           try {
