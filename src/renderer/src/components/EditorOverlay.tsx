@@ -51,6 +51,12 @@ const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 32
 /** Minimum pixels of drag movement before we consider it a real drag (prevents accidental detach on click) */
 const MIN_DRAG_DISTANCE = 20
+/** Cap workspace models to prevent Monaco listener leak (each model adds listeners to shared emitters) */
+const MAX_WORKSPACE_MODELS = 80
+
+// Module-level flag: language services persist across EditorOverlay mount/unmount cycles
+// because Monaco's global state (models, extraLibs, providers) is never torn down.
+let langServicesInited = false
 
 const EditorOverlay: React.FC = () => {
   const tabs = useEditorStore((s) => s.tabs)
@@ -72,8 +78,9 @@ const EditorOverlay: React.FC = () => {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof MonacoNS | null>(null)
-  const langServicesInitRef = useRef(false)
   const extraLibsRef = useRef<Map<string, { dispose: () => void }>>(new Map())
+  // Track which tab paths have Monaco models so we can dispose them on close
+  const tabModelPathsRef = useRef(new Set<string>())
   const saveRef = useRef<() => void>(() => {})
   const tabBarRef = useRef<HTMLDivElement>(null)
   const dragStartPos = useRef<{ x: number; y: number } | null>(null)
@@ -347,9 +354,9 @@ const EditorOverlay: React.FC = () => {
       }
     })
 
-    // Initialize language services once
-    if (!langServicesInitRef.current && projectDir) {
-      langServicesInitRef.current = true
+    // Initialize language services once (module-level guard survives unmount/remount)
+    if (!langServicesInited && projectDir) {
+      langServicesInited = true
       initLanguageServices(monaco, projectDir)
     }
   }, [projectDir])
@@ -392,11 +399,16 @@ const EditorOverlay: React.FC = () => {
       // 2b. Create editor models so "Peek References" / "Find All References" can
       // resolve file content. Standalone Monaco's text model service only resolves
       // models that already exist — extraLib entries are invisible to it.
+      // Capped to prevent hitting Monaco's 200-listener limit on shared emitters
+      // (each TextModel adds listeners to LanguageSelection.onDidChange, etc.).
+      let modelCount = 0
       for (const f of files) {
+        if (modelCount >= MAX_WORKSPACE_MODELS) break
         try {
           const fileUri = monaco.Uri.parse(`file:///${f.filePath.replace(/\\/g, '/')}`)
           if (!monaco.editor.getModel(fileUri)) {
             monaco.editor.createModel(f.content, undefined, fileUri)
+            modelCount++
           }
         } catch { /* skip files that fail */ }
       }
@@ -479,6 +491,30 @@ const EditorOverlay: React.FC = () => {
     }
   }, [updateContent])
 
+  // Track active tab's path for model management
+  useEffect(() => {
+    if (activeTab) {
+      tabModelPathsRef.current.add(activeTab.relativePath)
+    }
+  }, [activeTab])
+
+  // Dispose Monaco models when tabs are closed — prevents orphaned models from
+  // accumulating listeners on shared emitters (LanguageSelection.onDidChange etc.)
+  useEffect(() => {
+    const monaco = monacoRef.current
+    if (!monaco) return
+    const currentPaths = new Set(tabs.map((t) => t.relativePath))
+    for (const path of tabModelPathsRef.current) {
+      if (!currentPaths.has(path)) {
+        try {
+          const uri = monaco.Uri.parse(path)
+          monaco.editor.getModel(uri)?.dispose()
+        } catch { /* ignore */ }
+      }
+    }
+    tabModelPathsRef.current = currentPaths
+  }, [tabs])
+
   if (tabs.length === 0) return null
 
   return (
@@ -528,12 +564,13 @@ const EditorOverlay: React.FC = () => {
       <div className="editor-body">
         {activeTab ? (
           <Editor
-            key={activeTab.id}
+            path={activeTab.relativePath}
             theme={theme}
             language={activeTab.language}
             defaultValue={activeTab.content}
             onChange={handleEditorChange}
             onMount={handleEditorMount}
+            saveViewState={true}
             loading={<div className="editor-loading">Loading editor...</div>}
             options={{
               fontSize,
