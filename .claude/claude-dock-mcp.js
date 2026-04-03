@@ -250,6 +250,61 @@ function readShellOutput() {
   }
 }
 
+/**
+ * Find a session entry in shell output data, supporting prefix matching.
+ */
+function findSessionEntry(shellData, sessionId) {
+  if (!shellData || !sessionId) return null
+  if (shellData[sessionId]) return shellData[sessionId]
+  return Object.values(shellData).find(e =>
+    e.sessionId && (e.sessionId.startsWith(sessionId) || sessionId.startsWith(e.sessionId))
+  ) || null
+}
+
+/**
+ * Poll the shell output file until a shell appears for the given session.
+ * Returns { shellId, logFile } if found, or null on timeout.
+ *
+ * @param {string} sessionId - The session to watch for
+ * @param {string|null} targetShellId - Specific shell ID to wait for, or null for any new shell
+ * @param {Set<string>} shellIdsBefore - Shell IDs that existed before the command was sent
+ * @param {number} timeoutMs - Maximum time to wait
+ */
+async function waitForShell(sessionId, targetShellId, shellIdsBefore, timeoutMs) {
+  const pollInterval = 150
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollInterval))
+    try {
+      const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
+      const entry = findSessionEntry(shellData, sessionId)
+      if (!entry || !entry.shells) continue
+
+      if (targetShellId) {
+        // Waiting for a specific shell
+        if (entry.shells[targetShellId]) {
+          return {
+            shellId: targetShellId,
+            logFile: entry.shells[targetShellId].logFile || null
+          }
+        }
+      } else {
+        // Waiting for any new shell (not in the before-set)
+        for (const sid of Object.keys(entry.shells)) {
+          if (!shellIdsBefore.has(sid)) {
+            return {
+              shellId: sid,
+              logFile: entry.shells[sid].logFile || null
+            }
+          }
+        }
+      }
+    } catch { /* file may not exist yet or be mid-write */ }
+  }
+  return null
+}
+
 function formatDockStatus(projectDir, sessionId) {
   const activity = readActivity()
   if (!activity || !activity.docks || Object.keys(activity.docks).length === 0) {
@@ -317,7 +372,7 @@ function formatDockStatus(projectDir, sessionId) {
 
 // ---------- MCP message handlers ----------
 
-function handleMessage(msg) {
+async function handleMessage(msg) {
   const { id, method, params } = msg
 
   switch (method) {
@@ -658,23 +713,36 @@ function handleMessage(msg) {
             let logFile = null
             let shellActive = false
             const creatingNewShell = !shell_id
+
+            // Snapshot shell IDs before the command, so we can detect new ones
+            let shellIdsBefore = new Set()
             if (session_id) {
               try {
                 const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
-                const sessionEntry = shellData[session_id] || Object.values(shellData).find(e => e.sessionId && e.sessionId.startsWith(session_id))
+                const sessionEntry = findSessionEntry(shellData, session_id)
                 if (sessionEntry && sessionEntry.shells) {
+                  shellIdsBefore = new Set(Object.keys(sessionEntry.shells))
                   const shellIds = Object.keys(sessionEntry.shells).sort()
-                  // For -1 (first shell), resolve to the first known shell
                   if (useFirstShell && !resolvedShellId) resolvedShellId = shellIds[0] || null
                   if (resolvedShellId && sessionEntry.shells[resolvedShellId]) {
                     logFile = sessionEntry.shells[resolvedShellId].logFile || null
-                    // Shell exists in the output file = it's open. Closed shells are
-                    // removed by the dock app (removeShellOutput). Don't use lastUpdate
-                    // age to determine liveness — idle shells are still active.
                     shellActive = true
                   }
                 }
               } catch { /* shell output file may not exist yet */ }
+            }
+
+            // For new shell creation or targeting existing shells, poll for the
+            // shell to appear in the output file. This avoids the race condition
+            // where dock_list_shells returns empty because the dock hasn't
+            // written the output yet (500ms command poll + 500ms output debounce).
+            if (session_id && !shellActive) {
+              const pollResult = await waitForShell(session_id, resolvedShellId, shellIdsBefore, 3000)
+              if (pollResult) {
+                resolvedShellId = pollResult.shellId
+                logFile = pollResult.logFile
+                shellActive = true
+              }
             }
 
             const parts = [`Command sent to dock shell: ${command}`]
@@ -717,7 +785,16 @@ function handleMessage(msg) {
           }
 
           try {
-            const data = readShellOutput()
+            // Retry a few times if the output file is empty -- a shell may have
+            // just been created and the dock hasn't written the output yet.
+            let data = readShellOutput()
+            if (Object.keys(data).length === 0) {
+              for (let retry = 0; retry < 3; retry++) {
+                await new Promise(r => setTimeout(r, 300))
+                data = readShellOutput()
+                if (Object.keys(data).length > 0) break
+              }
+            }
             if (Object.keys(data).length === 0) {
               return jsonRpcResponse(id, {
                 content: [{ type: 'text', text: 'No shell panels are currently open.' }]
@@ -1177,10 +1254,13 @@ rl.on('line', (line) => {
 
   try {
     const msg = JSON.parse(line)
-    const response = handleMessage(msg)
-    if (response) {
-      process.stdout.write(response + '\n')
-    }
+    handleMessage(msg).then(response => {
+      if (response) {
+        process.stdout.write(response + '\n')
+      }
+    }).catch(err => {
+      process.stdout.write(jsonRpcError(null, -32603, `Internal error: ${err.message}`) + '\n')
+    })
   } catch (err) {
     process.stdout.write(jsonRpcError(null, -32700, 'Parse error') + '\n')
   }

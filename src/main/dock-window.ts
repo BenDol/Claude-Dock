@@ -476,6 +476,7 @@ export class DockWindow {
 
   private trackShellOutput(shellId: string, data: string): void {
     const clean = DockWindow.stripAnsi(data)
+    const isNewShell = !this.shellOutputBuffers.has(shellId)
     const existing = this.shellOutputBuffers.get(shellId) || ''
     const combined = existing + clean
     this.shellOutputBuffers.set(
@@ -484,7 +485,13 @@ export class DockWindow {
         ? combined.slice(combined.length - DockWindow.MAX_SHELL_OUTPUT)
         : combined
     )
-    this.scheduleShellOutputSave()
+    // Save immediately for new shells so the MCP server can discover them
+    // without waiting for the debounce. Subsequent writes use the debounce.
+    if (isNewShell) {
+      this.saveShellOutput()
+    } else {
+      this.scheduleShellOutputSave()
+    }
   }
 
   private scheduleShellOutputSave(): void {
