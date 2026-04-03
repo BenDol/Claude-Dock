@@ -410,6 +410,19 @@ export class PtyManager {
     return null
   }
 
+  /**
+   * Return the first non-shell terminal ID. Used as a fallback when the
+   * session ID from the MCP command doesn't match any terminal (e.g. the
+   * MCP server was spawned by a different Claude instance).
+   */
+  findFirstAliveTerminal(): string | null {
+    for (const [id] of this.ptys) {
+      if (id.startsWith('shell:')) continue
+      return id
+    }
+    return null
+  }
+
   write(terminalId: string, data: string): void {
     if (this.ptys.has(terminalId)) {
       // On first user write, mark as interacted and persist session

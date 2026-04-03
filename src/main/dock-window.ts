@@ -284,11 +284,20 @@ export class DockWindow {
             }
 
             const submit = cmd.submit ?? true
-            // Resolve sessionId to terminalId so the renderer routes to the right terminal
-            const targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
+            // Resolve sessionId to terminalId so the renderer routes to the right terminal.
+            // If the exact session isn't found (e.g. MCP server spawned by a different
+            // Claude instance than the one shown in the dock), fall back to the first
+            // alive terminal in this dock — the projectDir match above already ensures
+            // we're in the right workspace.
+            let targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
             if (!targetTerminalId) {
-              log(`[shell-command] rejected: session ${cmd.sessionId.slice(0, 8)} not found in this dock`)
-              continue
+              targetTerminalId = this.ptyManager.findFirstAliveTerminal()
+              if (targetTerminalId) {
+                log(`[shell-command] session ${cmd.sessionId.slice(0, 8)} not found, falling back to terminal ${targetTerminalId}`)
+              } else {
+                log(`[shell-command] rejected: no alive terminals in this dock`)
+                continue
+              }
             }
             const shellType = cmd.shell || null
             const targetShellId = cmd.shellId || null
