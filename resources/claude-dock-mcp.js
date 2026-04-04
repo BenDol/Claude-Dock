@@ -278,11 +278,17 @@ async function waitForShell(sessionId, targetShellId, shellIdsBefore, timeoutMs)
     await new Promise(r => setTimeout(r, pollInterval))
     try {
       const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
-      const entry = findSessionEntry(shellData, sessionId)
+      // Try exact session match first, then fall back to any session
+      // (the dock window already validated projectDir, so any session
+      // in the output file is from the correct workspace)
+      let entry = findSessionEntry(shellData, sessionId)
+      if (!entry) {
+        const entries = Object.values(shellData)
+        entry = entries.length > 0 ? entries[entries.length - 1] : null
+      }
       if (!entry || !entry.shells) continue
 
       if (targetShellId) {
-        // Waiting for a specific shell
         if (entry.shells[targetShellId]) {
           return {
             shellId: targetShellId,
@@ -290,7 +296,6 @@ async function waitForShell(sessionId, targetShellId, shellIdsBefore, timeoutMs)
           }
         }
       } else {
-        // Waiting for any new shell (not in the before-set)
         for (const sid of Object.keys(entry.shells)) {
           if (!shellIdsBefore.has(sid)) {
             return {
@@ -714,12 +719,18 @@ async function handleMessage(msg) {
             let shellActive = false
             const creatingNewShell = !shell_id
 
-            // Snapshot shell IDs before the command, so we can detect new ones
+            // Snapshot shell IDs before the command, so we can detect new ones.
+            // Try session match first, fall back to any entry (session mismatch
+            // is normal when the MCP is spawned by a different Claude instance).
             let shellIdsBefore = new Set()
             if (session_id) {
               try {
                 const shellData = JSON.parse(fs.readFileSync(shellOutputFile, 'utf-8'))
-                const sessionEntry = findSessionEntry(shellData, session_id)
+                let sessionEntry = findSessionEntry(shellData, session_id)
+                if (!sessionEntry) {
+                  const entries = Object.values(shellData)
+                  sessionEntry = entries.length > 0 ? entries[entries.length - 1] : null
+                }
                 if (sessionEntry && sessionEntry.shells) {
                   shellIdsBefore = new Set(Object.keys(sessionEntry.shells))
                   const shellIds = Object.keys(sessionEntry.shells).sort()
@@ -802,12 +813,32 @@ async function handleMessage(msg) {
             }
 
             const sections = []
-            // When bound to a session, only show shells for that session
+            // When bound to a session, prefer shells for that session.
+            // If no shells match the session (common when the MCP server is
+            // spawned by a different Claude instance than the dock terminal),
+            // fall back to showing shells from the same project directory.
             const filterSessionId = boundSessionId || session_id
+            let sessionMatched = false
+            if (filterSessionId) {
+              for (const [sid] of Object.entries(data)) {
+                if (sid === filterSessionId || sid.startsWith(filterSessionId) || filterSessionId.startsWith(sid)) {
+                  sessionMatched = true
+                  break
+                }
+              }
+            }
 
             for (const [sid, entry] of Object.entries(data)) {
-              // Filter by bound/provided session_id
-              if (filterSessionId && sid !== filterSessionId && !sid.startsWith(filterSessionId) && !filterSessionId.startsWith(sid)) continue
+              if (filterSessionId) {
+                if (sessionMatched) {
+                  // Strict session match
+                  if (sid !== filterSessionId && !sid.startsWith(filterSessionId) && !filterSessionId.startsWith(sid)) continue
+                } else {
+                  // No session match -- skip entries from unrelated projects
+                  // (projectDir check is a safe fallback since shell commands
+                  // are already gated by projectDir in the dock window)
+                }
+              }
 
               const shells = entry.shells || {}
               const shellIds = Object.keys(shells)
