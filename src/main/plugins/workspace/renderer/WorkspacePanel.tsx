@@ -103,7 +103,10 @@ const WorkspaceTreeNode: React.FC<{
   onToggleExpand: (path: string) => void
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void
   onDoubleClick: (entry: FileEntry) => void
-}> = ({ entry, depth, projectDir, selectedPaths, expandedPaths, filter, onSelect, onToggleExpand, onContextMenu, onDoubleClick }) => {
+  inlineInput: { type: 'newFile' | 'newFolder' | 'rename'; path: string; defaultValue: string } | null
+  onInlineConfirm: (value: string) => void
+  onInlineCancel: () => void
+}> = ({ entry, depth, projectDir, selectedPaths, expandedPaths, filter, onSelect, onToggleExpand, onContextMenu, onDoubleClick, inlineInput, onInlineConfirm, onInlineCancel }) => {
   const expanded = expandedPaths.has(entry.path)
   const isSelected = selectedPaths.has(entry.path)
 
@@ -149,9 +152,20 @@ const WorkspaceTreeNode: React.FC<{
           <span className="ws-tree-arrow-spacer" />
         )}
         {entry.isDirectory ? <DirIcon open={expanded} /> : <FileIcon name={entry.name} />}
-        <span className="ws-tree-name">{entry.name}</span>
+        {inlineInput?.type === 'rename' && inlineInput.path === entry.path ? (
+          <InlineNameInput defaultValue={inlineInput.defaultValue} onConfirm={onInlineConfirm} onCancel={onInlineCancel} />
+        ) : (
+          <span className="ws-tree-name">{entry.name}</span>
+        )}
         {!entry.isDirectory && entry.size != null && <span className="ws-tree-size">{formatSize(entry.size)}</span>}
       </div>
+      {entry.isDirectory && expanded && inlineInput && (inlineInput.type === 'newFile' || inlineInput.type === 'newFolder') && inlineInput.path === entry.path && (
+        <div className="ws-tree-item" style={{ paddingLeft: 8 + (depth + 1) * 14 }}>
+          <span className="ws-tree-arrow-spacer" />
+          {inlineInput.type === 'newFolder' ? <DirIcon /> : <FileIcon name="" />}
+          <InlineNameInput defaultValue="" onConfirm={onInlineConfirm} onCancel={onInlineCancel} />
+        </div>
+      )}
       {entry.isDirectory && expanded && entry.children?.map((child) => (
         <WorkspaceTreeNode
           key={child.path}
@@ -165,6 +179,9 @@ const WorkspaceTreeNode: React.FC<{
           onToggleExpand={onToggleExpand}
           onContextMenu={onContextMenu}
           onDoubleClick={onDoubleClick}
+          inlineInput={inlineInput}
+          onInlineConfirm={onInlineConfirm}
+          onInlineCancel={onInlineCancel}
         />
       ))}
     </>
@@ -181,7 +198,9 @@ const ContextMenu: React.FC<{
   onRefresh: () => void
   onRename: (path: string) => void
   onReloadDir: (path: string) => void
-}> = ({ x, y, entry, projectDir, onClose, onRefresh, onRename, onReloadDir }) => {
+  onNewFile: (dirPath: string) => void
+  onNewFolder: (dirPath: string) => void
+}> = ({ x, y, entry, projectDir, onClose, onRefresh, onRename, onReloadDir, onNewFile, onNewFolder }) => {
   const ref = useRef<HTMLDivElement>(null)
   const api = getDockApi()
 
@@ -221,16 +240,8 @@ const ContextMenu: React.FC<{
       <div className="ws-ctx-separator" />
       {entry.isDirectory && (
         <>
-          <div className="ws-ctx-item" onClick={() => {
-            const name = prompt('File name:')
-            onClose()
-            if (name) { api.workspace.createFile(projectDir, `${entry.path}/${name}`).then(() => onRefresh()) }
-          }}>New File</div>
-          <div className="ws-ctx-item" onClick={() => {
-            const name = prompt('Folder name:')
-            onClose()
-            if (name) { api.workspace.createFolder(projectDir, `${entry.path}/${name}`).then(() => onRefresh()) }
-          }}>New Folder</div>
+          <div className="ws-ctx-item" onClick={() => { onClose(); onNewFile(entry.path) }}>New File</div>
+          <div className="ws-ctx-item" onClick={() => { onClose(); onNewFolder(entry.path) }}>New Folder</div>
           <div className="ws-ctx-item" onClick={() => { onReloadDir(entry.path); onClose() }}>
             Reload
           </div>
@@ -284,6 +295,42 @@ const ContextMenu: React.FC<{
   )
 }
 
+// --- Inline Name Input (replaces window.prompt which is unsupported in Electron) ---
+
+const InlineNameInput: React.FC<{
+  defaultValue: string
+  onConfirm: (value: string) => void
+  onCancel: () => void
+}> = ({ defaultValue, onConfirm, onCancel }) => {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!ref.current) return
+    ref.current.focus()
+    if (defaultValue) {
+      const dot = defaultValue.lastIndexOf('.')
+      ref.current.setSelectionRange(0, dot > 0 ? dot : defaultValue.length)
+    }
+  }, [])
+  return (
+    <input
+      ref={ref}
+      className="ws-inline-input"
+      defaultValue={defaultValue}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') onConfirm(e.currentTarget.value)
+        else if (e.key === 'Escape') onCancel()
+      }}
+      onBlur={(e) => {
+        const v = e.currentTarget.value.trim()
+        if (v && v !== defaultValue) onConfirm(v)
+        else onCancel()
+      }}
+      onClick={(e) => e.stopPropagation()}
+    />
+  )
+}
+
 // --- Main Panel ---
 
 const ZOOM_KEY = 'workspace-zoom'
@@ -326,6 +373,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     allFilePaths.current = paths
   }, [tree])
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
+  const [inlineInput, setInlineInput] = useState<{ type: 'newFile' | 'newFolder' | 'rename'; path: string; defaultValue: string } | null>(null)
   const [compact, setCompact] = useState(() => localStorage.getItem('workspace-compact') !== 'false')
   const [searchOpen, setSearchOpen] = useState(false)
   const [hideIgnored, setHideIgnored] = useState(() => localStorage.getItem('workspace-hide-ignored') === 'true')
@@ -581,14 +629,39 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     setCtxMenu({ x: e.clientX, y: e.clientY, entry })
   }, [])
 
-  const handleRename = useCallback(async (entryPath: string) => {
+  const handleRename = useCallback((entryPath: string) => {
     const name = entryPath.split('/').pop() || ''
-    const newName = prompt('New name:', name)
-    if (newName && newName !== name) {
-      await api.workspace.rename(projectDir, entryPath, newName)
+    setInlineInput({ type: 'rename', path: entryPath, defaultValue: name })
+  }, [])
+
+  const handleNewFile = useCallback((dirPath: string) => {
+    setExpandedPaths((prev) => { const next = new Set(prev); next.add(dirPath); return next })
+    setInlineInput({ type: 'newFile', path: dirPath, defaultValue: '' })
+  }, [])
+
+  const handleNewFolder = useCallback((dirPath: string) => {
+    setExpandedPaths((prev) => { const next = new Set(prev); next.add(dirPath); return next })
+    setInlineInput({ type: 'newFolder', path: dirPath, defaultValue: '' })
+  }, [])
+
+  const handleInlineConfirm = useCallback(async (value: string) => {
+    if (!inlineInput) { setInlineInput(null); return }
+    const trimmed = value.trim()
+    if (!trimmed) { setInlineInput(null); return }
+    if (inlineInput.type === 'rename') {
+      if (trimmed !== inlineInput.defaultValue) {
+        await api.workspace.rename(projectDir, inlineInput.path, trimmed)
+        loadTree()
+      }
+    } else if (inlineInput.type === 'newFile') {
+      await api.workspace.createFile(projectDir, `${inlineInput.path}/${trimmed}`)
+      loadTree()
+    } else if (inlineInput.type === 'newFolder') {
+      await api.workspace.createFolder(projectDir, `${inlineInput.path}/${trimmed}`)
       loadTree()
     }
-  }, [projectDir, loadTree])
+    setInlineInput(null)
+  }, [inlineInput, projectDir, loadTree])
 
   const collapseAll = useCallback(() => setExpandedPaths(new Set()), [])
 
@@ -822,6 +895,9 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
             onToggleExpand={handleToggleExpand}
             onContextMenu={handleContextMenu}
             onDoubleClick={handleDoubleClick}
+            inlineInput={inlineInput}
+            onInlineConfirm={handleInlineConfirm}
+            onInlineCancel={() => setInlineInput(null)}
           />
         ))}
         {tree.length === 0 && <div className="ws-panel-empty">No files found</div>}
@@ -835,6 +911,8 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
           onClose={() => setCtxMenu(null)}
           onRefresh={loadTree}
           onRename={handleRename}
+          onNewFile={handleNewFile}
+          onNewFolder={handleNewFolder}
           onReloadDir={(dirPath: string) => {
             api.workspace.readDir(projectDir, dirPath, hideIgnoredRef.current).then((children) => {
               setTree((prev) => {

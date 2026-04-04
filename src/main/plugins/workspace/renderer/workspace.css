@@ -144,6 +144,19 @@
   text-overflow: ellipsis;
 }
 
+.ws-inline-input {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-color, #7aa2f7);
+  outline: none;
+  font-size: inherit;
+  font-family: inherit;
+  padding: 0 4px;
+  flex: 1;
+  min-width: 60px;
+  border-radius: 2px;
+}
+
 .ws-tree-size {
   font-size: 9px;
   color: var(--text-secondary);
