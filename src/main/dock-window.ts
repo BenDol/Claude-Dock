@@ -34,8 +34,14 @@ export class DockWindow {
   /** Buffered shell panel output per shell ID, written to shared file for MCP access */
   private shellOutputBuffers = new Map<string, string>()
   private shellOutputSaveTimer: ReturnType<typeof setTimeout> | null = null
-  /** Tracks the last scanned line index per shell for event detection */
+  /** Tracks the total number of lines scanned per shell for event detection.
+   *  Unlike an array index, this counter increases monotonically and is compared
+   *  against the total line count (before truncation) to determine how many new
+   *  lines need scanning. This avoids the bug where slice(-500) truncation makes
+   *  array-index offsets invalid once output exceeds 500 lines. */
   private shellEventScanOffsets = new Map<string, number>()
+  /** Tracks total lines ever produced per shell (before slice(-500) truncation) */
+  private shellTotalLineCount = new Map<string, number>()
 
   constructor(id: string, projectDir: string) {
     this.id = id
@@ -334,6 +340,8 @@ export class DockWindow {
    */
   private removeShellOutput(shellId: string): void {
     this.shellOutputBuffers.delete(shellId)
+    this.shellEventScanOffsets.delete(shellId)
+    this.shellTotalLineCount.delete(shellId)
     try {
       const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
       let existing: Record<string, any> = {}
@@ -370,8 +378,9 @@ export class DockWindow {
     // 1. Clear in-memory output buffer
     this.shellOutputBuffers.delete(shellId)
 
-    // 2. Reset event scan offset so old lines aren't re-scanned
+    // 2. Reset event scan offset and total line count so old lines aren't re-scanned
     this.shellEventScanOffsets.delete(shellId)
+    this.shellTotalLineCount.delete(shellId)
 
     const userData = app.getPath('userData')
 
@@ -541,6 +550,8 @@ export class DockWindow {
       if (!sessionId) continue
 
       const lines = content.split(/\r?\n/).filter((l) => l.trim())
+      // Track total line count BEFORE truncation so event scan offsets stay valid
+      this.shellTotalLineCount.set(shellId, lines.length)
       const recentLines = lines.slice(-500)
 
       if (!existing[sessionId]) {
@@ -600,16 +611,24 @@ export class DockWindow {
       if (!entry.shells) continue
       for (const [shellId, shell] of Object.entries(entry.shells) as [string, any][]) {
         const lines: string[] = shell.lines || []
-        const lastOffset = this.shellEventScanOffsets.get(shellId) || 0
+        // Use total line count (before slice(-500) truncation) for offset tracking.
+        // The scan offset and total count are both monotonically increasing, so their
+        // difference tells us exactly how many new lines exist — regardless of whether
+        // the lines array was truncated.
+        const totalLines = this.shellTotalLineCount.get(shellId) || lines.length
+        const lastTotalScanned = this.shellEventScanOffsets.get(shellId) || 0
 
-        if (lastOffset >= lines.length) {
-          this.shellEventScanOffsets.set(shellId, lines.length)
+        const newLineCount = totalLines - lastTotalScanned
+        if (newLineCount <= 0) {
+          this.shellEventScanOffsets.set(shellId, totalLines)
           continue
         }
 
+        // Scan the newest lines from the (potentially truncated) array
+        const startIdx = Math.max(0, lines.length - newLineCount)
         // Join new lines into a single string so events split by terminal
         // line-wrapping are matched across the boundary
-        const newContent = lines.slice(lastOffset).join('')
+        const newContent = lines.slice(startIdx).join('')
         let match: RegExpExecArray | null
         while ((match = eventPattern.exec(newContent)) !== null) {
           let payload: any = match[2]
@@ -622,7 +641,7 @@ export class DockWindow {
             timestamp: Date.now()
           })
         }
-        this.shellEventScanOffsets.set(shellId, lines.length)
+        this.shellEventScanOffsets.set(shellId, totalLines)
       }
     }
 
