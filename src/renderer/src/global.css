@@ -2736,11 +2736,27 @@ label:hover .setting-scope-btn,
   border-radius: 4px;
 }
 
-.settings-add-dirs-path {
+.settings-add-dirs-path-wrap {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.settings-add-dirs-path {
   font-size: 11px;
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-add-dirs-resolved {
+  font-size: 9px;
+  color: var(--text-secondary);
+  opacity: 0.7;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

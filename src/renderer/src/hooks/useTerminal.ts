@@ -10,6 +10,22 @@ import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
 import { InputUndoManager } from '../lib/input-undo'
 
+/** Resolve a relative path against a base directory, handling `..` and `.` segments. */
+function resolveRelativePath(base: string, relative: string): string {
+  // Normalise separators to forward slashes
+  const norm = (p: string) => p.replace(/\\/g, '/')
+  const parts = [...norm(base).split('/'), ...norm(relative).split('/')]
+  const resolved: string[] = []
+  for (const seg of parts) {
+    if (seg === '.' || seg === '') continue
+    if (seg === '..') { resolved.pop(); continue }
+    resolved.push(seg)
+  }
+  // Preserve drive letter on Windows (e.g. C:)
+  const result = resolved.join('/')
+  return result
+}
+
 function matchesKeybind(e: KeyboardEvent, keybind: string): boolean {
   if (!keybind || keybind.startsWith('!')) return false
   const parts = keybind.split('+').map((p) => p.trim().toLowerCase())
@@ -277,8 +293,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           parts.push(`--permission-mode ${defaultPermissionMode}`)
         }
         if (additionalDirs && additionalDirs.length > 0) {
+          const baseDir = useDockStore.getState().projectDir
           for (const dir of additionalDirs) {
-            parts.push(`--add-dir "${dir}"`)
+            const resolved = dir.match(/^[a-zA-Z]:[\\/]|^\//) ? dir : resolveRelativePath(baseDir, dir)
+            parts.push(`--add-dir "${resolved}"`)
           }
         }
         flags = parts.length > 0 ? parts.join(' ') : undefined

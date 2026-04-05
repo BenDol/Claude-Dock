@@ -203,9 +203,28 @@ const SettingScope: React.FC<{
   )
 }
 
+/** Check if a path is absolute (Unix or Windows drive letter). */
+function isAbsolutePath(p: string): boolean {
+  return /^[a-zA-Z]:[\\/]|^\//.test(p)
+}
+
+/** Resolve a relative path against a base directory. */
+function resolveRelPath(base: string, relative: string): string {
+  const norm = (p: string) => p.replace(/\\/g, '/')
+  const parts = [...norm(base).split('/'), ...norm(relative).split('/')]
+  const resolved: string[] = []
+  for (const seg of parts) {
+    if (seg === '.' || seg === '') continue
+    if (seg === '..') { resolved.pop(); continue }
+    resolved.push(seg)
+  }
+  return resolved.join('/')
+}
+
 /** Editor for terminal.additionalDirs with scope selector (global/project/local) */
 const AdditionalDirsEditor: React.FC = () => {
   const dirs = useSettingsStore((s) => s.settings.terminal?.additionalDirs ?? [])
+  const projectDir = useDockStore((s) => s.projectDir)
   const [newDir, setNewDir] = useState('')
   const [scope, setScope] = useState<'global' | 'project' | 'local'>('project')
 
@@ -240,12 +259,19 @@ const AdditionalDirsEditor: React.FC = () => {
     <div className="settings-add-dirs">
       {dirs.length > 0 && (
         <div className="settings-add-dirs-list">
-          {dirs.map((dir) => (
-            <div key={dir} className="settings-add-dirs-item">
-              <code className="settings-add-dirs-path">{dir}</code>
-              <button className="settings-add-dirs-remove" onClick={() => removeDir(dir)} title="Remove">&times;</button>
-            </div>
-          ))}
+          {dirs.map((dir) => {
+            const isRelative = !isAbsolutePath(dir)
+            const resolved = isRelative && projectDir ? resolveRelPath(projectDir, dir) : null
+            return (
+              <div key={dir} className="settings-add-dirs-item">
+                <div className="settings-add-dirs-path-wrap">
+                  <code className="settings-add-dirs-path">{dir}</code>
+                  {resolved && <span className="settings-add-dirs-resolved" title={resolved}>&rarr; {resolved}</span>}
+                </div>
+                <button className="settings-add-dirs-remove" onClick={() => removeDir(dir)} title="Remove">&times;</button>
+              </div>
+            )
+          })}
         </div>
       )}
       <div className="settings-add-dirs-row">
@@ -255,7 +281,7 @@ const AdditionalDirsEditor: React.FC = () => {
           value={newDir}
           onChange={(e) => setNewDir(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') addDir() }}
-          placeholder="Path to directory..."
+          placeholder="Absolute or relative path (e.g. tools, ../other-project)"
         />
         <button className="settings-add-dirs-browse" onClick={browse} title="Browse...">...</button>
         <select
