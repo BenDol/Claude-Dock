@@ -130,6 +130,8 @@ export const IPC = {
   GIT_MGR_GET_FILE_BLOB: 'gitMgr:getFileBlob',
   GIT_MGR_GET_COMMIT_FILE_TREE: 'gitMgr:getCommitFileTree',
   GIT_MGR_GET_FILE_AT_COMMIT: 'gitMgr:getFileAtCommit',
+  GIT_MGR_GET_FILE_LOG: 'gitMgr:getFileLog',
+  GIT_MGR_OPEN_FILE_HISTORY: 'gitMgr:openFileHistory',
   GIT_MGR_GREP_COMMIT: 'gitMgr:grepCommit',
   GIT_MGR_OPEN_BASH: 'gitMgr:openBash',
   GIT_MGR_ADD_SUBMODULE: 'gitMgr:addSubmodule',

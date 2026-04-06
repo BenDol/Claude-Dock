@@ -5676,3 +5676,38 @@ div.gm-ftree-search-current {
 }
 .gm-pr-create-submit { background: var(--accent-color) !important; color: #fff !important; }
 .gm-pr-create-submit:disabled { opacity: 0.5; }
+
+/* ── File history ────────────────────────────────────────────── */
+.gm-fhist-list {
+  width: 340px; min-width: 200px; max-width: 500px;
+  border-right: 1px solid var(--border-color);
+  display: flex; flex-direction: column;
+  flex-shrink: 0;
+}
+.gm-fhist-header {
+  padding: 8px 12px; font-size: 11px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+}
+.gm-fhist-header strong { color: var(--text-primary); }
+.gm-fhist-scroll { flex: 1; overflow-y: auto; }
+.gm-fhist-row {
+  padding: 8px 12px; cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+}
+.gm-fhist-row:hover { background: var(--bg-secondary); }
+.gm-fhist-row-selected { background: var(--bg-tertiary); }
+.gm-fhist-row-selected:hover { background: var(--bg-tertiary); }
+.gm-fhist-subject {
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gm-fhist-meta {
+  display: flex; gap: 8px; font-size: 11px;
+  color: var(--text-secondary); margin-top: 3px;
+}
+.gm-fhist-hash { font-family: var(--font-mono); opacity: 0.7; }
+.gm-fhist-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-fhist-date { margin-left: auto; white-space: nowrap; opacity: 0.7; }
+.gm-fhist-empty {
+  padding: 24px 12px; text-align: center;
+  font-size: 12px; color: var(--text-secondary);
+}

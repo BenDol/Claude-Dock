@@ -31,6 +31,7 @@ import type { WriteTestsTask, ReferenceThisTask } from '../../../../shared/claud
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
 const standaloneCommitHash = params.get('commitHash') || ''
+const standaloneFileHistory = params.get('fileHistory') || ''
 
 /** Submodule entries with only dirty working trees (no new commits) are
  *  visual indicators, not stageable changes. This filters them from counts. */
@@ -4631,6 +4632,7 @@ const CommitFileListContextMenu: React.FC<{
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item" onClick={() => { onClose(); api.app.openInExplorer(projectDir + '/' + file.path) }}>Open file</div>
       <div className="gm-ctx-item" onClick={() => { onClose(); api.gitManager.showInFolder(projectDir, file.path) }}>Show in folder</div>
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.gitManager.openFileHistory(projectDir, file.path) }}>File history</div>
       <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item gm-ctx-submenu-trigger"
@@ -6065,6 +6067,7 @@ const FileContextMenu: React.FC<{
       <div className="gm-ctx-separator" />
       <div className="gm-ctx-item" onClick={doOpenFile}>Open file{count > 1 ? 's' : ''}{suffix}</div>
       <div className="gm-ctx-item" onClick={doShowInFolder}>Show in folder{count > 1 ? 's' : ''}{suffix}</div>
+      {count === 1 && <div className="gm-ctx-item" onClick={() => { onClose(); getDockApi().gitManager.openFileHistory(projectDir, file.path) }}>File history</div>}
       <div className="gm-ctx-separator" />
       <div
         className="gm-ctx-item gm-ctx-submenu-trigger"
@@ -11248,4 +11251,156 @@ const StandaloneCommitDetail: React.FC = () => {
   )
 }
 
-export default standaloneCommitHash ? StandaloneCommitDetail : GitManagerApp
+// --- Standalone file history window ---
+
+const StandaloneFileHistory: React.FC = () => {
+  const loadSettings = useSettingsStore((s) => s.load)
+  const api = getDockApi()
+  const [commits, setCommits] = useState<GitCommitInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedHash, setSelectedHash] = useState<string | null>(null)
+  const [detail, setDetail] = useState<GitCommitDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const selectGenRef = useRef(0)
+
+  useEffect(() => {
+    loadSettings().then(() => {
+      applyThemeToDocument(useSettingsStore.getState().settings)
+    })
+  }, [loadSettings])
+
+  useEffect(() => {
+    const ZOOM_KEY = 'gm-zoom'
+    const MIN_ZOOM = 0.5
+    const MAX_ZOOM = 2.0
+    const STEP = 0.1
+    const saved = localStorage.getItem(ZOOM_KEY)
+    let zoom = saved ? parseFloat(saved) : 1
+    if (isNaN(zoom) || zoom < MIN_ZOOM || zoom > MAX_ZOOM) zoom = 1
+    document.documentElement.style.zoom = String(zoom)
+    const applyZoom = (z: number) => {
+      zoom = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      document.documentElement.style.zoom = String(zoom)
+      localStorage.setItem(ZOOM_KEY, String(zoom))
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      applyZoom(zoom + (e.deltaY < 0 ? STEP : -STEP))
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + STEP) }
+      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - STEP) }
+      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown)
+    return () => { window.removeEventListener('wheel', onWheel); window.removeEventListener('keydown', onKeyDown) }
+  }, [])
+
+  // Load file commit history
+  useEffect(() => {
+    if (!standaloneFileHistory || !projectDir) return
+    setLoading(true)
+    api.gitManager.getFileLog(projectDir, standaloneFileHistory)
+      .then((data) => {
+        setCommits(data)
+        // Auto-select first commit
+        if (data.length > 0) setSelectedHash(data[0].hash)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load file history'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Load commit detail when selection changes
+  useEffect(() => {
+    if (!selectedHash || !projectDir) { setDetail(null); return }
+    const gen = ++selectGenRef.current
+    setDetailLoading(true)
+    api.gitManager.getCommitDetail(projectDir, selectedHash)
+      .then((d) => { if (gen === selectGenRef.current) setDetail(d) })
+      .catch(() => { if (gen === selectGenRef.current) setDetail(null) })
+      .finally(() => { if (gen === selectGenRef.current) setDetailLoading(false) })
+  }, [selectedHash])
+
+  const fileName = standaloneFileHistory.split('/').pop() || standaloneFileHistory
+
+  if (loading) return <div className="gm-app"><div className="gm-loading">Loading file history...</div></div>
+  if (error) return <div className="gm-app"><div className="gm-error-bar"><span>{error}</span></div></div>
+
+  return (
+    <div className="gm-app">
+      <div className="gm-titlebar" onDoubleClick={() => api.win.maximize()}>
+        <div className="gm-titlebar-left" style={{ userSelect: 'none' }}>
+          <GitIcon />
+          <span className="gm-titlebar-project">File History</span>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {standaloneFileHistory}
+          </span>
+        </div>
+        <div className="gm-titlebar-center" />
+        <div className="gm-titlebar-right">
+          <div className="toolbar-separator" />
+          <div className="gm-win-controls">
+            <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
+            <button className="win-btn win-maximize" onClick={() => api.win.maximize()}>&#9744;</button>
+            <button className="win-btn win-close" onClick={() => api.win.close()}>&#10005;</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Left panel: commit list */}
+        <div className="gm-fhist-list">
+          <div className="gm-fhist-header">
+            {commits.length} commit{commits.length !== 1 ? 's' : ''} for <strong>{fileName}</strong>
+          </div>
+          <div className="gm-fhist-scroll">
+            {commits.map((c) => (
+              <div
+                key={c.hash}
+                className={`gm-fhist-row${selectedHash === c.hash ? ' gm-fhist-row-selected' : ''}`}
+                onClick={() => setSelectedHash(c.hash)}
+              >
+                <div className="gm-fhist-subject">{c.subject}</div>
+                <div className="gm-fhist-meta">
+                  <span className="gm-fhist-hash">{c.shortHash}</span>
+                  <span className="gm-fhist-author">{c.author}</span>
+                  <span className="gm-fhist-date">{formatDate(c.date)}</span>
+                </div>
+              </div>
+            ))}
+            {commits.length === 0 && (
+              <div className="gm-fhist-empty">No commits found for this file</div>
+            )}
+          </div>
+        </div>
+        {/* Right panel: commit detail */}
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {detailLoading && <div className="gm-loading">Loading commit...</div>}
+          {detail && !detailLoading && (
+            <CommitDetailPanel
+              detail={detail}
+              projectDir={projectDir}
+              syntaxHL={true}
+              scrollToFileAndLine={{ filePath: standaloneFileHistory }}
+              onScrollToHandled={() => {}}
+              onClose={() => api.win.close()}
+              hideClose
+            />
+          )}
+          {!detail && !detailLoading && (
+            <div className="gm-loading" style={{ color: 'var(--text-secondary)' }}>Select a commit to view details</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default standaloneCommitHash
+  ? StandaloneCommitDetail
+  : standaloneFileHistory
+    ? StandaloneFileHistory
+    : GitManagerApp

@@ -169,6 +169,26 @@ export async function getLog(cwd: string, opts: GitLogOptions = {}): Promise<Git
   }
 }
 
+/** Get commit history for a specific file. Uses --follow to track renames. */
+export async function getFileLog(cwd: string, filePath: string, opts: GitLogOptions = {}): Promise<GitCommitInfo[]> {
+  const args = ['log', `--format=${LOG_FORMAT}`, '--follow']
+  args.push(`--max-count=${opts.maxCount ?? 200}`)
+  if (opts.skip) args.push(`--skip=${opts.skip}`)
+  if (opts.branch) {
+    args.push(opts.branch)
+  } else {
+    args.push('--all')
+  }
+  args.push('--', filePath)
+  try {
+    const { stdout } = await gitExec(cwd, args, 15000)
+    return parseLogOutput(stdout)
+  } catch (err) {
+    getServices().logError('[git-manager] getFileLog failed:', err)
+    return []
+  }
+}
+
 export async function getCommitCount(cwd: string): Promise<number> {
   try {
     const { stdout } = await gitExec(cwd, ['rev-list', '--all', '--count'], 5000)

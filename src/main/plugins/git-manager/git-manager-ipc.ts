@@ -24,8 +24,16 @@ export function registerGitManagerIpc(): void {
     return winManager.openCommitDetail(projectDir, commitHash)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_OPEN_FILE_HISTORY, (_event, projectDir: string, filePath: string) => {
+    return winManager.openFileHistory(projectDir, filePath)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_GET_LOG, async (_event, projectDir: string, opts?: GitLogOptions) => {
     return gitOps.getLog(projectDir, opts)
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_GET_FILE_LOG, async (_event, projectDir: string, filePath: string, opts?: GitLogOptions) => {
+    return gitOps.getFileLog(projectDir, filePath, opts)
   })
 
   ipcMain.handle(IPC.GIT_MGR_GET_COMMIT_COUNT, async (_event, projectDir: string) => {

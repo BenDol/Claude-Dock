@@ -15,6 +15,7 @@ export class GitManagerWindowManager {
   private static instance: GitManagerWindowManager
   private windows = new Map<string, BrowserWindow>()
   private commitDetailWindows = new Map<string, Set<BrowserWindow>>()
+  private fileHistoryWindows = new Map<string, Set<BrowserWindow>>()
   /** Tracks which windows are being force-closed (project close / plugin disable / app quit). */
   private forceClosing = new Set<string>()
 
@@ -127,13 +128,20 @@ export class GitManagerWindowManager {
     win.on('closed', () => {
       this.windows.delete(projectDir)
       this.forceClosing.delete(projectDir)
-      // Close all commit detail windows for this project
+      // Close all commit detail and file history windows for this project
       const detailWins = this.commitDetailWindows.get(projectDir)
       if (detailWins) {
         for (const dw of detailWins) {
           if (!dw.isDestroyed()) dw.close()
         }
         this.commitDetailWindows.delete(projectDir)
+      }
+      const histWins = this.fileHistoryWindows.get(projectDir)
+      if (histWins) {
+        for (const hw of histWins) {
+          if (!hw.isDestroyed()) hw.close()
+        }
+        this.fileHistoryWindows.delete(projectDir)
       }
       svc().broadcastPluginWindowState('git-manager', projectDir, false)
       svc().log(`[git-manager] window closed for ${projectDir}`)
@@ -195,6 +203,55 @@ export class GitManagerWindowManager {
     svc().log(`[git-manager] commit detail window opened for ${commitHash.slice(0, 8)}`)
   }
 
+  async openFileHistory(projectDir: string, filePath: string): Promise<void> {
+    const settings = svc().getSettings()
+    const isDark = settings.theme.mode === 'dark' ||
+      (settings.theme.mode === 'system')
+
+    const stateKey = STATE_KEY_PREFIX + projectDir
+    const gmState = svc().getWindowState(stateKey)
+    const baseW = gmState?.width ?? 1100
+    const baseH = gmState?.height ?? 750
+    const w = Math.round(baseW * 0.9)
+    const h = Math.round(baseH * 0.9)
+
+    const fileName = path.basename(filePath)
+    const win = new BrowserWindow({
+      width: Math.max(w, 700),
+      height: Math.max(h, 500),
+      minWidth: 700,
+      minHeight: 500,
+      frame: false,
+      title: `${fileName} - File History`,
+      backgroundColor: isDark ? '#0f0f14' : '#f5f5f5',
+      webPreferences: {
+        preload: svc().paths.preload,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false
+      }
+    })
+
+    if (!this.fileHistoryWindows.has(projectDir)) {
+      this.fileHistoryWindows.set(projectDir, new Set())
+    }
+    this.fileHistoryWindows.get(projectDir)!.add(win)
+
+    win.webContents.on('render-process-gone', (_event, details) => {
+      svc().log(`[git-manager] file history renderer gone for ${fileName}: reason=${details.reason} exitCode=${details.exitCode}`)
+    })
+
+    win.on('closed', () => {
+      this.fileHistoryWindows.get(projectDir)?.delete(win)
+      svc().log(`[git-manager] file history window closed for ${fileName}`)
+    })
+
+    const queryParam = `?gitManager=true&projectDir=${encodeURIComponent(projectDir)}&fileHistory=${encodeURIComponent(filePath)}`
+    await loadPluginWindow(win, svc().paths, queryParam)
+
+    svc().log(`[git-manager] file history window opened for ${fileName}`)
+  }
+
   getWindow(projectDir: string): BrowserWindow | null {
     const win = this.windows.get(projectDir)
     return win && !win.isDestroyed() ? win : null
@@ -227,5 +284,11 @@ export class GitManagerWindowManager {
       }
     }
     this.commitDetailWindows.clear()
+    for (const set of this.fileHistoryWindows.values()) {
+      for (const win of set) {
+        if (!win.isDestroyed()) win.destroy()
+      }
+    }
+    this.fileHistoryWindows.clear()
   }
 }
