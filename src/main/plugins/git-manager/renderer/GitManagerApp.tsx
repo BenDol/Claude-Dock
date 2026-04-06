@@ -1595,12 +1595,20 @@ const GitManagerApp: React.FC = () => {
               <button className="gm-breadcrumb-root" onClick={() => { wcBusyRef.current = false; resetRepoState(); setActiveDir(projectDir); setNavStack([]) }}>
                 {projectDir.split(/[/\\]/).pop()}
               </button>
-              {navStack.slice(1).map((entry, i) => (
-                <React.Fragment key={i}>
-                  <span className="gm-breadcrumb-sep">/</span>
-                  <span className="gm-breadcrumb-part">{entry.label}</span>
-                </React.Fragment>
-              ))}
+              {navStack.slice(1).map((entry, i) => {
+                const actualIdx = i + 1
+                return (
+                  <React.Fragment key={i}>
+                    <span className="gm-breadcrumb-sep">/</span>
+                    <button className="gm-breadcrumb-part" onClick={() => {
+                      wcBusyRef.current = false
+                      resetRepoState()
+                      setActiveDir(navStack[actualIdx].dir)
+                      setNavStack(navStack.slice(0, actualIdx))
+                    }}>{entry.label}</button>
+                  </React.Fragment>
+                )
+              })}
               <span className="gm-breadcrumb-sep">/</span>
               <span className="gm-breadcrumb-current">{activeDir.split(/[/\\]/).pop()}</span>
             </span>
