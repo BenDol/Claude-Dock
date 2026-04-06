@@ -953,6 +953,25 @@ const GitManagerApp: React.FC = () => {
         return
       }
       setNotGitRepo(false)
+      // Kick off submodule list immediately (returns from cache instantly).
+      // Fired BEFORE the main data Promise.all so cached submodules appear
+      // without waiting for commits/branches/status to load.
+      const subGen = ++submoduleGenRef.current
+      setSubmodulesLoading(true)
+      api.gitManager.getSubmoduleList(activeDir).then((basicList) => {
+        if (subGen !== submoduleGenRef.current) return
+        setSubmodules(basicList)
+        setSubmodulesLoading(false)
+        // Phase 2: enrich with branch/dirty details in background
+        api.gitManager.getSubmodules(activeDir).then((enriched) => {
+          if (subGen === submoduleGenRef.current) setSubmodules(enriched)
+        }).catch(() => { /* keep basic list */ })
+      }).catch(() => {
+        if (subGen === submoduleGenRef.current) {
+          setSubmodulesLoading(false)
+          setSubmodules([])
+        }
+      })
       const [logData, branchData, statusData, stashData, mergeData, commitCount, tagData] = await Promise.all([
         api.gitManager.getLog(activeDir, { maxCount: 200 }),
         api.gitManager.getBranches(activeDir),
@@ -970,27 +989,6 @@ const GitManagerApp: React.FC = () => {
       setStashes(stashData)
       setTags(tagData)
       setMergeState(mergeData)
-      // Two-phase submodule loading with cache:
-      // Phase 1: getSubmoduleList() returns cache instantly (or fetches if cold).
-      //          Items appear immediately and are clickable.
-      //          If cache was served, a background refresh pushes updates via event.
-      // Phase 2: getSubmodules() enriches with branch/dirty details in background.
-      const subGen = ++submoduleGenRef.current
-      setSubmodulesLoading(true)
-      api.gitManager.getSubmoduleList(activeDir).then((basicList) => {
-        if (subGen !== submoduleGenRef.current) return
-        setSubmodules(basicList)
-        setSubmodulesLoading(false)
-        // Phase 2: enrich with branch/dirty details
-        api.gitManager.getSubmodules(activeDir).then((enriched) => {
-          if (subGen === submoduleGenRef.current) setSubmodules(enriched)
-        }).catch(() => { /* keep basic list */ })
-      }).catch(() => {
-        if (subGen === submoduleGenRef.current) {
-          setSubmodulesLoading(false)
-          setSubmodules([])
-        }
-      })
       // Worktrees — also non-blocking, load after main data
       const wtGen = ++worktreeGenRef.current
       setWorktreesLoading(true)
