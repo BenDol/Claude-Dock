@@ -320,6 +320,10 @@ export function registerGitManagerIpc(): void {
     return gitOps.getSubmodules(projectDir)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GET_SUBMODULE_LIST, async (_event, projectDir: string) => {
+    return gitOps.getSubmoduleList(projectDir)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_REFRESH_SUBMODULE, async (_event, projectDir: string, subPath: string) => {
     return gitOps.refreshSingleSubmodule(projectDir, subPath)
   })

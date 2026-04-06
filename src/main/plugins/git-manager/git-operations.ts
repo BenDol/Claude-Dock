@@ -1711,8 +1711,10 @@ export async function refreshSingleSubmodule(cwd: string, subPath: string): Prom
 /**
  * Fast submodule list — just names, paths, hashes, and status.
  * Uses `git submodule status` with fallback to .gitmodules parsing.
+ * Exported so the renderer can show clickable items immediately while
+ * enrichSubmoduleDetails() runs in the background.
  */
-async function getSubmoduleList(cwd: string): Promise<GitSubmoduleInfo[]> {
+export async function getSubmoduleList(cwd: string): Promise<GitSubmoduleInfo[]> {
   const stdout = await new Promise<string>((resolve) => {
     execFile('git', ['submodule', 'status'], { cwd, timeout: 10000, maxBuffer: 10 * 1024 * 1024 }, (err, out) => {
       if (err) getServices().log('[git-manager] getSubmodules: git submodule status exited with error (output may still be usable):', err.message?.split('\n')[0])

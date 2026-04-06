@@ -970,16 +970,29 @@ const GitManagerApp: React.FC = () => {
       setStashes(stashData)
       setTags(tagData)
       setMergeState(mergeData)
-      // Submodules are slow — load them without blocking the UI
+      // Two-phase submodule loading:
+      // Phase 1: Fast list (names, paths, hashes) — items appear instantly and are clickable
+      // Phase 2: Full enrichment (branches, dirty status) — updates in background
       const subGen = ++submoduleGenRef.current
       setSubmodulesLoading(true)
-      api.gitManager.getSubmodules(activeDir).then((data) => {
-        if (subGen === submoduleGenRef.current) {
-          setSubmodules(data)
+      api.gitManager.getSubmoduleList(activeDir).then((basicList) => {
+        if (subGen !== submoduleGenRef.current) return
+        if (basicList.length > 0) {
+          setSubmodules(basicList)
+          setSubmodulesLoading(false)
+          // Phase 2: enrich with branch/dirty details
+          api.gitManager.getSubmodules(activeDir).then((enriched) => {
+            if (subGen === submoduleGenRef.current) setSubmodules(enriched)
+          }).catch(() => { /* keep basic list */ })
+        } else {
+          setSubmodules([])
           setSubmodulesLoading(false)
         }
       }).catch(() => {
-        if (subGen === submoduleGenRef.current) setSubmodulesLoading(false)
+        if (subGen === submoduleGenRef.current) {
+          setSubmodulesLoading(false)
+          setSubmodules([])
+        }
       })
       // Worktrees — also non-blocking, load after main data
       const wtGen = ++worktreeGenRef.current
