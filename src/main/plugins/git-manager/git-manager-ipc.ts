@@ -320,7 +320,21 @@ export function registerGitManagerIpc(): void {
     return gitOps.getSubmodules(projectDir)
   })
 
-  ipcMain.handle(IPC.GIT_MGR_GET_SUBMODULE_LIST, async (_event, projectDir: string) => {
+  ipcMain.handle(IPC.GIT_MGR_GET_SUBMODULE_LIST, async (event, projectDir: string) => {
+    // Cache-first: return cached list instantly, refresh in background
+    const cached = gitOps.getCachedSubmoduleList(projectDir)
+    if (cached) {
+      setImmediate(async () => {
+        try {
+          const fresh = await gitOps.getSubmoduleList(projectDir)
+          try {
+            const wc = event.sender
+            if (!wc.isDestroyed()) wc.send('gitManager:submoduleListRefreshed', fresh)
+          } catch { /* window gone */ }
+        } catch { /* ignore background refresh failure */ }
+      })
+      return cached
+    }
     return gitOps.getSubmoduleList(projectDir)
   })
 

@@ -3,6 +3,8 @@ import * as http from 'http'
 import * as https from 'https'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as crypto from 'crypto'
+import { app } from 'electron'
 import type {
   GitCommitInfo,
   GitBranchInfo,
@@ -1651,6 +1653,66 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
   }
 }
 
+// ── Submodule list cache (in-memory + disk) ─────────────────────────
+// Stale-while-revalidate: return cached list instantly, refresh in background.
+
+const submoduleListMemCache = new Map<string, GitSubmoduleInfo[]>()
+
+function subCacheKey(cwd: string): string {
+  return cwd.replace(/\\/g, '/').toLowerCase()
+}
+
+function subCacheDiskDir(): string {
+  try { return path.join(app.getPath('userData'), 'submodule-cache') } catch { return '' }
+}
+
+function subCacheDiskPath(cwd: string): string {
+  const hash = crypto.createHash('md5').update(subCacheKey(cwd)).digest('hex')
+  return path.join(subCacheDiskDir(), hash + '.json')
+}
+
+function saveSubmoduleListCache(cwd: string, list: GitSubmoduleInfo[]): void {
+  const key = subCacheKey(cwd)
+  submoduleListMemCache.set(key, list)
+  const dir = subCacheDiskDir()
+  if (!dir) return
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(subCacheDiskPath(cwd), JSON.stringify({ v: 1, ts: Date.now(), list }))
+  } catch { /* best-effort */ }
+}
+
+function loadSubmoduleListCache(cwd: string): GitSubmoduleInfo[] | null {
+  // In-memory first (instant)
+  const mem = submoduleListMemCache.get(subCacheKey(cwd))
+  if (mem) return mem
+  // Disk fallback (covers app restarts)
+  const dir = subCacheDiskDir()
+  if (!dir) return null
+  try {
+    const raw = JSON.parse(fs.readFileSync(subCacheDiskPath(cwd), 'utf-8'))
+    if (raw.v !== 1) return null
+    // Disk cache expires after 7 days
+    if (Date.now() - raw.ts > 7 * 24 * 60 * 60 * 1000) return null
+    const list = raw.list as GitSubmoduleInfo[]
+    submoduleListMemCache.set(subCacheKey(cwd), list) // promote to memory
+    return list
+  } catch { return null }
+}
+
+/** Return cached submodule list if available. Used by IPC for instant response. */
+export function getCachedSubmoduleList(cwd: string): GitSubmoduleInfo[] | null {
+  return loadSubmoduleListCache(cwd)
+}
+
+/** Clear submodule list cache (called after mutations: add, remove, sync, etc.) */
+export function invalidateSubmoduleCache(cwd: string): void {
+  submoduleListMemCache.delete(subCacheKey(cwd))
+  try { const p = subCacheDiskPath(cwd); if (fs.existsSync(p)) fs.unlinkSync(p) } catch { /* ignore */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+
 export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
   try {
     const base = await getSubmoduleList(cwd)
@@ -1660,11 +1722,6 @@ export async function getSubmodules(cwd: string): Promise<GitSubmoduleInfo[]> {
     getServices().logError('[git-manager] getSubmodules failed:', err)
     return []
   }
-}
-
-/** Invalidate submodule cache (no-op — kept for API compatibility with callers) */
-export function invalidateSubmoduleCache(_cwd: string): void {
-  // Cache was removed; the foreach optimization handles speed.
 }
 
 /**
@@ -1792,6 +1849,8 @@ export async function getSubmoduleList(cwd: string): Promise<GitSubmoduleInfo[]>
     }
   }
 
+  // Update cache with fresh list
+  saveSubmoduleListCache(cwd, submodules)
   return submodules
 }
 

@@ -970,24 +970,21 @@ const GitManagerApp: React.FC = () => {
       setStashes(stashData)
       setTags(tagData)
       setMergeState(mergeData)
-      // Two-phase submodule loading:
-      // Phase 1: Fast list (names, paths, hashes) — items appear instantly and are clickable
-      // Phase 2: Full enrichment (branches, dirty status) — updates in background
+      // Two-phase submodule loading with cache:
+      // Phase 1: getSubmoduleList() returns cache instantly (or fetches if cold).
+      //          Items appear immediately and are clickable.
+      //          If cache was served, a background refresh pushes updates via event.
+      // Phase 2: getSubmodules() enriches with branch/dirty details in background.
       const subGen = ++submoduleGenRef.current
       setSubmodulesLoading(true)
       api.gitManager.getSubmoduleList(activeDir).then((basicList) => {
         if (subGen !== submoduleGenRef.current) return
-        if (basicList.length > 0) {
-          setSubmodules(basicList)
-          setSubmodulesLoading(false)
-          // Phase 2: enrich with branch/dirty details
-          api.gitManager.getSubmodules(activeDir).then((enriched) => {
-            if (subGen === submoduleGenRef.current) setSubmodules(enriched)
-          }).catch(() => { /* keep basic list */ })
-        } else {
-          setSubmodules([])
-          setSubmodulesLoading(false)
-        }
+        setSubmodules(basicList)
+        setSubmodulesLoading(false)
+        // Phase 2: enrich with branch/dirty details
+        api.gitManager.getSubmodules(activeDir).then((enriched) => {
+          if (subGen === submoduleGenRef.current) setSubmodules(enriched)
+        }).catch(() => { /* keep basic list */ })
       }).catch(() => {
         if (subGen === submoduleGenRef.current) {
           setSubmodulesLoading(false)
@@ -1022,6 +1019,19 @@ const GitManagerApp: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to load git data')
     }
     setLoading(false)
+  }, [activeDir])
+
+  // Listen for background submodule list refresh (cache was served, fresh scan arrived)
+  useEffect(() => {
+    if (!activeDir) return
+    const cleanup = getDockApi().gitManager.onSubmoduleListRefreshed((freshList) => {
+      setSubmodules((prev) => {
+        // Only update if we haven't already been enriched (enriched entries have branch set)
+        const alreadyEnriched = prev.length > 0 && prev.some((s) => s.branch != null)
+        return alreadyEnriched ? prev : freshList
+      })
+    })
+    return cleanup
   }, [activeDir])
 
   // Targeted refresh functions — only fetch data that could have changed
