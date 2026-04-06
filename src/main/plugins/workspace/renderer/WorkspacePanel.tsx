@@ -841,7 +841,14 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   }, [lastClickedPath, selectedPaths, visibleEntries, expandedPaths, handleToggleExpand, projectDir])
 
   if (loading) {
-    return <div className="ws-panel" ref={panelRootRef}><div className="ws-panel-loading">Loading...</div></div>
+    return (
+      <div className="ws-panel" ref={panelRootRef}>
+        <div className="ws-panel-loading">
+          <div className="ws-panel-spinner" />
+          <span>Scanning workspace...</span>
+        </div>
+      </div>
+    )
   }
 
   return (

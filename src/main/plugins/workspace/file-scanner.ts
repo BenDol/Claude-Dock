@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
-import { execFileSync } from 'child_process'
+import { execFileSync, execFile } from 'child_process'
 import { app } from 'electron'
 
 export interface FileEntry {
@@ -89,6 +89,65 @@ export function readDirectory(projectDir: string, relativePath: string, hideIgno
   })
 }
 
+/** Async version of getGitIgnoredPaths — does not block the event loop. */
+function getGitIgnoredPathsAsync(projectDir: string, relativePaths: string[]): Promise<Set<string>> {
+  if (relativePaths.length === 0) return Promise.resolve(new Set())
+  return new Promise((resolve) => {
+    const child = execFile('git', ['check-ignore', '--stdin', '-z'], {
+      cwd: projectDir,
+      encoding: 'utf-8',
+      timeout: 5000
+    }, (_err, stdout) => {
+      if (!stdout) { resolve(new Set()); return }
+      resolve(new Set(stdout.split('\0').filter(Boolean)))
+    })
+    // Write paths to stdin
+    if (child.stdin) {
+      child.stdin.write(relativePaths.join('\0'))
+      child.stdin.end()
+    }
+  })
+}
+
+/** Async version of readDirectory — uses non-blocking FS and git operations. */
+async function readDirectoryAsync(projectDir: string, relativePath: string, hideIgnored = false): Promise<FileEntry[]> {
+  const safe = sanitizePath(projectDir, relativePath)
+  if (safe === null) return []
+  const absDir = safe ? path.join(projectDir, safe) : projectDir
+  let entries: fs.Dirent[]
+  try { entries = await fs.promises.readdir(absDir, { withFileTypes: true }) } catch { return [] }
+
+  const result: FileEntry[] = []
+  const relPaths: string[] = []
+  for (const entry of entries) {
+    const isDir = entry.isDirectory()
+    if (isDir && SKIP_DIRS.has(entry.name)) continue
+    const relPath = safe ? `${safe}/${entry.name}` : entry.name
+    relPaths.push(relPath)
+    const fe: FileEntry = { name: entry.name, path: relPath, isDirectory: isDir }
+    if (!isDir) {
+      try { fe.size = (await fs.promises.stat(path.join(absDir, entry.name))).size } catch { /* ignore */ }
+    }
+    result.push(fe)
+  }
+
+  if (hideIgnored && result.length > 0) {
+    const ignored = await getGitIgnoredPathsAsync(projectDir, relPaths)
+    if (ignored.size > 0) {
+      const filtered = result.filter((fe) => !ignored.has(fe.path))
+      return filtered.sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+    }
+  }
+
+  return result.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
 export interface TreeNode extends FileEntry {
   children?: TreeNode[]
 }
@@ -114,8 +173,8 @@ export function readTree(projectDir: string, maxDepth = 2, hideIgnored = false):
   return walk('', 0)
 }
 
-/** Async version of readTree that yields to the event loop between directories.
- *  Use for background refreshes to avoid blocking the main process. */
+/** Async version of readTree — fully non-blocking.
+ *  Uses async FS/git operations and yields between directories. */
 export async function readTreeAsync(projectDir: string, maxDepth = 2, hideIgnored = false): Promise<TreeNode[]> {
   let totalEntries = 0
   let dirCount = 0
@@ -123,7 +182,7 @@ export async function readTreeAsync(projectDir: string, maxDepth = 2, hideIgnore
     if (depth > maxDepth || totalEntries >= MAX_ENTRIES) return []
     // Yield every 10 directories to keep the main process responsive
     if (++dirCount % 10 === 0) await new Promise((r) => setImmediate(r))
-    const entries = readDirectory(projectDir, relPath, hideIgnored)
+    const entries = await readDirectoryAsync(projectDir, relPath, hideIgnored)
     const nodes: TreeNode[] = []
     for (const entry of entries) {
       if (totalEntries >= MAX_ENTRIES) break

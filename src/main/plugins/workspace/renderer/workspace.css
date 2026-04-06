@@ -251,12 +251,26 @@
 /* Loading */
 .ws-panel-loading {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 16px;
+  gap: 10px;
+  padding: 32px 16px;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.ws-panel-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--text-secondary);
+  border-radius: 50%;
+  animation: ws-spin 0.8s linear infinite;
+}
+
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Move progress cards */

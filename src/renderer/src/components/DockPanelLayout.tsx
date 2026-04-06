@@ -97,6 +97,13 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
   const [dropTarget, setDropTarget] = useState<PanelPosition | null>(null)
   const PanelComponent = activePanel?.component ?? null
 
+  // Defer panel mount until first shown — prevents heavy plugins (e.g. workspace
+  // file scanner) from running before the user actually opens the panel.
+  const [hasBeenVisible, setHasBeenVisible] = useState(showPanel)
+  useEffect(() => {
+    if (showPanel && !hasBeenVisible) setHasBeenVisible(true)
+  }, [showPanel, hasBeenVisible])
+
   const handleHeaderDragStart = useCallback((e: React.DragEvent) => {
     e.dataTransfer.setData('application/x-dock-panel', 'move')
     e.dataTransfer.effectAllowed = 'move'
@@ -134,8 +141,9 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     ? `dock-panel-layout dock-panel-layout-${position}`
     : 'dock-panel-layout'
 
-  // Always render the panel (keeps it mounted to preserve state), hide with display:none
-  const panelElement = PanelComponent && (
+  // Mount the panel only after it's been shown at least once (deferred activation).
+  // Once mounted, keep it alive (hidden via display:none) to preserve state.
+  const panelElement = PanelComponent && hasBeenVisible && (
     <div className="dock-panel-area" ref={panelRef} style={{ ...panelStyle, display: showPanel ? undefined : 'none' }}>
       <div
         className="dock-panel-header"

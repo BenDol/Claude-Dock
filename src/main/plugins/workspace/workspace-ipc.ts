@@ -2,7 +2,7 @@ import { ipcMain, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
-import { readDirectory, readTree, readTreeAsync, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
+import { readDirectory, readTreeAsync, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
 
 import { getServices } from './services'
 
@@ -45,9 +45,11 @@ export function registerWorkspaceIpc(): void {
       return cached
     }
 
-    // No cache — scan synchronously (first-ever load for this project)
+    // No cache — scan asynchronously to avoid blocking the main process.
+    // The async version yields to the event loop every 10 directories,
+    // keeping the UI responsive during first-ever project scans.
     try {
-      const tree = readTree(projectDir, depth, hi)
+      const tree = await readTreeAsync(projectDir, depth, hi)
       saveTreeCache(projectDir, tree, depth, hi)
       return tree
     } catch (err) {
