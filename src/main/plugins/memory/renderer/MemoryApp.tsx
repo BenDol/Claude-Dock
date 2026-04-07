@@ -122,7 +122,7 @@ export default function MemoryApp(): React.ReactElement {
     <div className="mem-app">
       {/* Titlebar */}
       <div className="mem-titlebar">
-        <h1>Memory Viewer</h1>
+        <h1>Memory</h1>
         {activeAdapterInfo && (
           <span style={{ fontSize: 11, color: 'var(--mem-text-muted)' }}>
             {activeAdapterInfo.name} v{activeAdapterInfo.version}

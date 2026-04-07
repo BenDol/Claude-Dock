@@ -8,9 +8,9 @@ export { setServices } from './services'
 
 export class MemoryPlugin implements DockPlugin {
   readonly id = 'memory'
-  readonly name = 'Memory Viewer'
+  readonly name = 'Memory'
   readonly description = 'View and inspect Claude memory tool storage (Claudest, etc.)'
-  readonly defaultEnabled = true
+  readonly defaultEnabled = false
   get version(): string {
     try { return require('electron').app.getVersion() } catch { return '0.0.0' }
   }
