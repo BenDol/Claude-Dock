@@ -21,7 +21,7 @@ declare const __DEV__: boolean
 
 // The Worker URL — replace with your deployed Cloudflare Worker
 const TELEMETRY_ENDPOINT = 'https://claude-dock-telemetry.dolb90.workers.dev/telemetry'
-const MAX_PAYLOAD_SIZE = 2048
+const MAX_PAYLOAD_SIZE = 4096
 
 export interface TelemetryPayload {
   deviceId: string
@@ -38,6 +38,19 @@ export interface TelemetryPayload {
     prTabUsed: boolean
     pluginCount: number
     linkedModeEnabled: boolean
+  }
+  plugins: {
+    enabled: string[]
+    disabled: string[]
+    windowOpens: Record<string, number>  // pluginId → open count this session
+  }
+  updates: {
+    appUpdateAvailable: string | null    // version found, or null
+    appUpdateDownloaded: boolean
+    appUpdateInstalled: boolean
+    pluginUpdatesAvailable: number       // count of updates found
+    pluginUpdatesInstalled: string[]     // plugin IDs successfully updated
+    pluginUpdatesFailed: string[]        // plugin IDs that failed
   }
   terminalCount: number
   dockCount: number
@@ -68,6 +81,15 @@ export class TelemetryCollector {
     prTabUsed: false,
     pluginCount: 0,
     linkedModeEnabled: false
+  }
+  private pluginWindowOpens: Record<string, number> = {}
+  private updateInfo = {
+    appUpdateAvailable: null as string | null,
+    appUpdateDownloaded: false,
+    appUpdateInstalled: false,
+    pluginUpdatesAvailable: 0,
+    pluginUpdatesInstalled: [] as string[],
+    pluginUpdatesFailed: [] as string[],
   }
   private terminalCount = 0
   private dockCount = 0
@@ -123,14 +145,64 @@ export class TelemetryCollector {
     this.dockCount++
   }
 
+  recordPluginWindowOpen(pluginId: string): void {
+    if (!this.isEnabled()) return
+    this.pluginWindowOpens[pluginId] = (this.pluginWindowOpens[pluginId] || 0) + 1
+  }
+
+  recordAppUpdateAvailable(version: string): void {
+    if (!this.isEnabled()) return
+    this.updateInfo.appUpdateAvailable = version
+  }
+
+  recordAppUpdateDownloaded(): void {
+    if (!this.isEnabled()) return
+    this.updateInfo.appUpdateDownloaded = true
+  }
+
+  recordAppUpdateInstalled(): void {
+    if (!this.isEnabled()) return
+    this.updateInfo.appUpdateInstalled = true
+  }
+
+  recordPluginUpdatesAvailable(count: number): void {
+    if (!this.isEnabled()) return
+    this.updateInfo.pluginUpdatesAvailable = count
+  }
+
+  recordPluginUpdateInstalled(pluginId: string): void {
+    if (!this.isEnabled()) return
+    if (!this.updateInfo.pluginUpdatesInstalled.includes(pluginId)) {
+      this.updateInfo.pluginUpdatesInstalled.push(pluginId)
+    }
+  }
+
+  recordPluginUpdateFailed(pluginId: string): void {
+    if (!this.isEnabled()) return
+    if (!this.updateInfo.pluginUpdatesFailed.includes(pluginId)) {
+      this.updateInfo.pluginUpdatesFailed.push(pluginId)
+    }
+  }
+
   // --- Persistence & sending ---
 
   /** Build the current payload snapshot */
   private buildPayload(): TelemetryPayload {
     // Read dynamic values at flush time
+    let enabledPlugins: string[] = []
+    let disabledPlugins: string[] = []
     try {
       const { PluginManager } = require('./plugins')
-      this.features.pluginCount = PluginManager.getInstance().getPluginInfoList().length
+      const pm = PluginManager.getInstance()
+      this.features.pluginCount = pm.getPluginInfoList().length
+      // Collect enabled/disabled per known project dirs
+      const allPlugins = pm.getPluginInfoList()
+      const seen = new Set<string>()
+      for (const p of allPlugins) {
+        // Use defaultEnabled as baseline (no project-specific context at flush)
+        if (p.defaultEnabled) { if (!seen.has(p.id)) { enabledPlugins.push(p.id); seen.add(p.id) } }
+        else { if (!seen.has(p.id)) { disabledPlugins.push(p.id); seen.add(p.id) } }
+      }
     } catch { /* ok */ }
     try {
       this.features.linkedModeEnabled = getSetting('linked')?.enabled ?? false
@@ -152,6 +224,12 @@ export class TelemetryCollector {
       crashCount: this.crashCount,
       crashTypes: [...this.crashTypes],
       features: { ...this.features },
+      plugins: {
+        enabled: enabledPlugins,
+        disabled: disabledPlugins,
+        windowOpens: { ...this.pluginWindowOpens }
+      },
+      updates: { ...this.updateInfo, pluginUpdatesInstalled: [...this.updateInfo.pluginUpdatesInstalled], pluginUpdatesFailed: [...this.updateInfo.pluginUpdatesFailed] },
       terminalCount: this.terminalCount,
       dockCount: this.dockCount,
       timestamp: new Date().toISOString()

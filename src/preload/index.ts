@@ -316,6 +316,7 @@ export interface DockApi {
   }
   telemetry: {
     setConsent: (consent: boolean) => Promise<void>
+    recordFeature: (key: string, value: unknown) => Promise<void>
   }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
@@ -734,7 +735,8 @@ const dockApi: DockApi = {
     getNewUrl: (projectDir, sourceBranch, targetBranch) => ipcRenderer.invoke(IPC.PR_GET_NEW_URL, projectDir, sourceBranch, targetBranch)
   },
   telemetry: {
-    setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent)
+    setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent),
+    recordFeature: (key: string, value: unknown) => ipcRenderer.invoke(IPC.TELEMETRY_RECORD_FEATURE, key, value)
   },
   notifications: {
     onShow: (callback) => {

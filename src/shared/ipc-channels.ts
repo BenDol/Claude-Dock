@@ -234,6 +234,7 @@ export const IPC = {
 
   // Telemetry
   TELEMETRY_SET_CONSENT: 'telemetry:setConsent',
+  TELEMETRY_RECORD_FEATURE: 'telemetry:recordFeature',
 
   // Usage / Anthropic API
   USAGE_FETCH: 'usage:fetch',

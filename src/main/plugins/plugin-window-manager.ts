@@ -59,6 +59,10 @@ export class PluginWindowManager {
 
     this.windows.set(k, win)
     broadcastPluginWindowState(manifest.id, projectDir, true)
+    try {
+      const { TelemetryCollector } = require('../telemetry')
+      TelemetryCollector.getInstance().recordPluginWindowOpen(manifest.id)
+    } catch { /* ok */ }
 
     // Log renderer crashes and freezes
     win.webContents.on('render-process-gone', (_event, details) => {

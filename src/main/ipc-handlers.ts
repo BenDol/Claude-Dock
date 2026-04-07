@@ -23,7 +23,7 @@ import { PluginUpdateService } from './plugins/plugin-updater'
 import { getOverrides as getPluginOverrides } from './plugins/plugin-update-store'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
-import { TelemetryCollector } from './telemetry'
+import { TelemetryCollector, type TelemetryPayload } from './telemetry'
 
 declare const __DEV__: boolean
 
@@ -515,7 +515,11 @@ export function registerIpcHandlers(): void {
       return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
     }
     try {
-      return await checkForUpdate(profile)
+      const result = await checkForUpdate(profile)
+      if (result.available) {
+        try { TelemetryCollector.getInstance().recordAppUpdateAvailable(result.version) } catch { /* ok */ }
+      }
+      return result
     } catch {
       return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
     }
@@ -532,6 +536,7 @@ export function registerIpcHandlers(): void {
         }
       })
       setDownloadedPath(filePath)
+      try { TelemetryCollector.getInstance().recordAppUpdateDownloaded() } catch { /* ok */ }
       return filePath
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Download failed')
@@ -780,7 +785,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.PLUGIN_UPDATE_CHECK, async () => {
     try {
       const profile = getSettings().updater?.profile || 'latest'
-      return await pluginUpdateService.checkForUpdates(profile)
+      const updates = await pluginUpdateService.checkForUpdates(profile)
+      try { TelemetryCollector.getInstance().recordPluginUpdatesAvailable(updates.length) } catch { /* ok */ }
+      return updates
     } catch (err) {
       logError('pluginUpdate:check failed:', err)
       return []
@@ -794,8 +801,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.PLUGIN_UPDATE_INSTALL, async (_event, pluginId: string) => {
     try {
       await pluginUpdateService.installUpdate(pluginId)
+      try { TelemetryCollector.getInstance().recordPluginUpdateInstalled(pluginId) } catch { /* ok */ }
       return { success: true }
     } catch (err) {
+      try { TelemetryCollector.getInstance().recordPluginUpdateFailed(pluginId) } catch { /* ok */ }
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
@@ -805,6 +814,12 @@ export function registerIpcHandlers(): void {
       const result = await pluginUpdateService.installAll()
       const pluginInfoList = PluginManager.getInstance().getPluginInfoList()
       const getName = (id: string) => pluginInfoList.find((p) => p.id === id)?.name || id
+
+      try {
+        const tc = TelemetryCollector.getInstance()
+        for (const id of result.success) tc.recordPluginUpdateInstalled(id)
+        for (const f of result.failed) tc.recordPluginUpdateFailed(f.pluginId)
+      } catch { /* ok */ }
 
       if (result.success.length > 0) {
         const names = result.success.map(getName)
@@ -874,6 +889,14 @@ export function registerIpcHandlers(): void {
       log(`[telemetry] consent set: ${consent}`)
     } catch (err) {
       logError('[telemetry] setConsent failed:', err)
+    }
+  })
+
+  ipcMain.handle(IPC.TELEMETRY_RECORD_FEATURE, (_event, key: string, value: unknown) => {
+    try {
+      TelemetryCollector.getInstance().recordFeature(key as keyof TelemetryPayload['features'], value)
+    } catch (err) {
+      logError('[telemetry] recordFeature failed:', err)
     }
   })
 
@@ -972,6 +995,8 @@ export function registerIpcHandlers(): void {
       throw new Error('Another update is already in progress')
     }
     try {
+      try { TelemetryCollector.getInstance().recordAppUpdateInstalled() } catch { /* ok */ }
+      try { TelemetryCollector.getInstance().flush() } catch { /* ok */ }
       installAndRestart()
     } catch (err) {
       releaseUpdateLock()

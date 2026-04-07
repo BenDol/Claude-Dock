@@ -748,6 +748,7 @@ const GitManagerApp: React.FC = () => {
     const handler = (e: Event) => {
       const runId = (e as CustomEvent).detail as number | undefined
       setActiveTab('ci')
+      getDockApi().telemetry.recordFeature('ciTabUsed', true).catch(() => {})
       if (runId) setPendingCiRunId(runId)
     }
     window.addEventListener('ci-navigate-run', handler)
@@ -759,6 +760,7 @@ const GitManagerApp: React.FC = () => {
     const api = getDockApi()
     return api.ci.onNavigateToRun((runId) => {
       setActiveTab('ci')
+      api.telemetry.recordFeature('ciTabUsed', true).catch(() => {})
       setPendingCiRunId(runId)
     })
   }, [])
@@ -1947,7 +1949,7 @@ const GitManagerApp: React.FC = () => {
             {enableCiTab && (
               <button
                 className={`gm-tab${activeTab === 'ci' ? ' gm-tab-active' : ''}`}
-                onClick={() => setActiveTab('ci')}
+                onClick={() => { setActiveTab('ci'); getDockApi().telemetry.recordFeature('ciTabUsed', true).catch(() => {}) }}
               >
                 CI
                 {ciStatus !== 'none' && (
@@ -1958,7 +1960,7 @@ const GitManagerApp: React.FC = () => {
             {enablePrTab && (
               <button
                 className={`gm-tab${activeTab === 'pr' ? ' gm-tab-active' : ''}`}
-                onClick={() => setActiveTab('pr')}
+                onClick={() => { setActiveTab('pr'); getDockApi().telemetry.recordFeature('prTabUsed', true).catch(() => {}) }}
               >
                 {repoProvider === 'gitlab' ? 'Merge Requests' : 'Pull Requests'}
               </button>

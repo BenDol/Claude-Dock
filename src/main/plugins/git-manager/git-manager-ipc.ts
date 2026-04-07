@@ -17,6 +17,12 @@ export function registerGitManagerIpc(): void {
   })
 
   ipcMain.handle(IPC.GIT_MGR_OPEN, (_event, projectDir: string) => {
+    try {
+      const { TelemetryCollector } = require('../../../telemetry')
+      const tc = TelemetryCollector.getInstance()
+      tc.recordFeature('gitManagerOpened', true)
+      tc.recordPluginWindowOpen('git-manager')
+    } catch { /* ok */ }
     return winManager.open(projectDir)
   })
 
