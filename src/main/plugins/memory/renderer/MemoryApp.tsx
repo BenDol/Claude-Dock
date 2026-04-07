@@ -181,7 +181,17 @@ export default function MemoryApp(): React.ReactElement {
         {/* Content */}
         <div className="mem-content">
           {noAdapters ? (
-            <NoAdaptersView />
+            <NoAdaptersView onInstalled={loadAdapters} />
+          ) : activeAdapterInfo && activeAdapterInfo.installed && !activeAdapterInfo.hasData ? (
+            <div className="mem-empty">
+              <div className="mem-empty-icon">{'\u{23F3}'}</div>
+              <div className="mem-empty-title">Waiting for Memory Data</div>
+              <div className="mem-empty-desc">
+                {activeAdapterInfo.name} is installed but no conversation database exists yet.<br />
+                Run a Claude session with the plugin active to create the database, then click Refresh.
+              </div>
+              <button className="mem-btn primary" onClick={loadAdapters} style={{ marginTop: 16 }}>Refresh</button>
+            </div>
           ) : activeView === 'dashboard' ? (
             <DashboardView adapterId={selectedAdapter} onSessionClick={navigateToSession} />
           ) : activeView === 'sessions' ? (
@@ -234,7 +244,7 @@ function sectionIcon(id: string): string {
 
 // ── No Adapters View ─────────────────────────────────────────────────────────
 
-function NoAdaptersView(): React.ReactElement {
+function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.ReactElement {
   const [installing, setInstalling] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
   const api = getDockApi()
@@ -250,11 +260,13 @@ function NoAdaptersView(): React.ReactElement {
           ? 'Claudest installed. Run a Claude session to populate the memory database, then reopen this window.'
           : `Install failed: ${r.error}`
       })
+      // Refresh parent adapter list so the UI transitions away from install view
+      if (r.success) onInstalled?.()
     } catch (err) {
       setResult({ success: false, message: `Error: ${err}` })
     }
     setInstalling(false)
-  }, [])
+  }, [onInstalled])
 
   return (
     <div className="mem-empty">
