@@ -1140,8 +1140,13 @@ export async function pullAdvanced(
   return (stdout + stderr).trim()
 }
 
-// Push/pull timeout: 5 minutes — LFS uploads of large files can take a while
+// Push/pull timeout for non-streaming operations (fetch, rename-push, tag-push)
 const REMOTE_OP_TIMEOUT = 300000
+
+// Activity timeout for streaming push: resets whenever git produces output.
+// Only triggers when the connection goes completely silent — a large push on
+// slow internet will keep resetting this as long as data is flowing.
+const PUSH_ACTIVITY_TIMEOUT = 120000 // 2 minutes of inactivity
 
 export interface PushProgress {
   phase: string      // e.g. 'Enumerating objects', 'Writing objects'
@@ -1159,20 +1164,37 @@ let activePushProcess: ChildProcess | null = null
 function gitPushStreaming(
   cwd: string,
   args: string[],
-  onProgress?: (progress: PushProgress) => void,
-  timeout = REMOTE_OP_TIMEOUT
+  onProgress?: (progress: PushProgress) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('git', args, { cwd, timeout: timeout as any })
+    const proc = spawn('git', args, { cwd })
     activePushProcess = proc
     let stdout = ''
     let stderr = ''
     let killed = false
 
-    proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    // Activity-based timeout: resets every time git produces output.
+    // A large push over slow internet keeps resetting as long as data flows.
+    // Only triggers when the connection goes completely silent.
+    let activityTimer: ReturnType<typeof setTimeout> | null = null
+    const resetActivityTimer = () => {
+      if (activityTimer) clearTimeout(activityTimer)
+      activityTimer = setTimeout(() => {
+        killed = true
+        proc.kill()
+        reject(new Error('git push timed out — no activity for 2 minutes'))
+      }, PUSH_ACTIVITY_TIMEOUT)
+    }
+    resetActivityTimer()
+
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString()
+      resetActivityTimer()
+    })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
+      resetActivityTimer()
 
       if (!onProgress) return
       // Parse git progress lines (they use \r for in-place updates)
@@ -1191,14 +1213,8 @@ function gitPushStreaming(
       }
     })
 
-    const timer = setTimeout(() => {
-      killed = true
-      proc.kill()
-      reject(new Error(`git push timed out after ${timeout / 1000}s`))
-    }, timeout)
-
     proc.on('close', (code) => {
-      clearTimeout(timer)
+      if (activityTimer) clearTimeout(activityTimer)
       activePushProcess = null
       if (killed) return
       if (code === 0) {
@@ -1210,7 +1226,7 @@ function gitPushStreaming(
     })
 
     proc.on('error', (err) => {
-      clearTimeout(timer)
+      if (activityTimer) clearTimeout(activityTimer)
       activePushProcess = null
       reject(err)
     })
