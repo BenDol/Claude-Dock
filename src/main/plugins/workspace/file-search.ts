@@ -301,7 +301,7 @@ function isPathSafe(projectDir: string, filePath: string): boolean {
 }
 
 /** Replace across files. If filePath is set, only replaces in that file. */
-export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
+export async function replaceInFiles(opts: ReplaceOptions): Promise<ReplaceResult> {
   if (!opts.query) return { replacements: 0, filesChanged: 0, errors: [] }
 
   const flags = opts.caseSensitive ? 'g' : 'gi'
@@ -337,7 +337,7 @@ export function replaceInFiles(opts: ReplaceOptions): ReplaceResult {
       errors.push(`${opts.filePath}: ${err instanceof Error ? err.message : 'Failed'}`)
     }
   } else {
-    const searchResult = searchFiles({
+    const searchResult = await searchFiles({
       query: opts.query,
       projectDir: opts.projectDir,
       caseSensitive: opts.caseSensitive,

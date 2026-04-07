@@ -552,6 +552,15 @@
   border-radius: 1px;
 }
 
+.ws-search-show-more {
+  padding: 3px 8px 3px 28px;
+  font-size: 11px;
+  color: var(--accent-primary, #58a6ff);
+  cursor: pointer;
+  opacity: 0.85;
+}
+.ws-search-show-more:hover { opacity: 1; text-decoration: underline; }
+
 .ws-search-empty {
   padding: 12px;
   text-align: center;

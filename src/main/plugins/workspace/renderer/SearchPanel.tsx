@@ -28,6 +28,9 @@ interface SearchPanelProps {
   onClose: () => void
 }
 
+const MATCHES_PER_FILE_INITIAL = 20
+const MATCHES_PER_FILE_INCREMENT = 50
+
 const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose }) => {
   const api = getDockApi()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -43,6 +46,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
   const [replacing, setReplacing] = useState(false)
   const [replaceMsg, setReplaceMsg] = useState<string | null>(null)
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  const [visibleMatchLimits, setVisibleMatchLimits] = useState<Map<string, number>>(new Map())
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchGenRef = useRef(0)
 
@@ -72,6 +76,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
       // Auto-expand first 5 files
       const first5 = [...new Set(r.matches.map((m: SearchMatch) => m.filePath))].slice(0, 5)
       setExpandedFiles(new Set(first5))
+      setVisibleMatchLimits(new Map())
     } catch { if (gen === searchGenRef.current) setResult(null) }
     if (gen === searchGenRef.current) setSearching(false)
   }, [projectDir, caseSensitive, wholeWord, regex, filePattern])
@@ -115,6 +120,15 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
       const next = new Set(prev)
       if (next.has(filePath)) next.delete(filePath)
       else next.add(filePath)
+      return next
+    })
+  }, [])
+
+  const showMoreMatches = useCallback((filePath: string, total: number) => {
+    setVisibleMatchLimits((prev) => {
+      const next = new Map(prev)
+      const current = prev.get(filePath) ?? MATCHES_PER_FILE_INITIAL
+      next.set(filePath, Math.min(current + MATCHES_PER_FILE_INCREMENT, total))
       return next
     })
   }, [])
@@ -261,6 +275,9 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
         )}
         {groupedMatches.map(({ filePath, matches }) => {
           const expanded = expandedFiles.has(filePath)
+          const visibleLimit = visibleMatchLimits.get(filePath) ?? MATCHES_PER_FILE_INITIAL
+          const visibleMatches = expanded ? matches.slice(0, visibleLimit) : []
+          const hasMore = expanded && matches.length > visibleLimit
           return (
             <div key={filePath} className="ws-search-file-group">
               <div className="ws-search-file-header" onClick={() => toggleFile(filePath)}>
@@ -273,7 +290,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
                   </button>
                 )}
               </div>
-              {expanded && matches.map((m, i) => (
+              {visibleMatches.map((m, i) => (
                 <div key={i} className="ws-search-match" onClick={() => openMatch(m)}>
                   <span className="ws-search-match-line">L{m.line}</span>
                   <span className="ws-search-match-text" dangerouslySetInnerHTML={{
@@ -281,6 +298,11 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
                   }} />
                 </div>
               ))}
+              {hasMore && (
+                <div className="ws-search-show-more" onClick={() => showMoreMatches(filePath, matches.length)}>
+                  Show {Math.min(MATCHES_PER_FILE_INCREMENT, matches.length - visibleLimit)} more ({matches.length - visibleLimit} remaining)
+                </div>
+              )}
             </div>
           )
         })}
@@ -299,11 +321,14 @@ function highlightMatch(text: string, query: string, caseSensitive: boolean, isR
     const escaped = isRegex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const flags = caseSensitive ? 'g' : 'gi'
     const re = new RegExp(escaped, flags)
-    // Split on matches, escape each part, wrap matches in <mark>
     const parts: string[] = []
     let lastIndex = 0
     let m: RegExpExecArray | null
+    let safety = 0
     while ((m = re.exec(text)) !== null) {
+      // Guard against zero-length matches causing infinite loops
+      if (m[0].length === 0) { re.lastIndex++; continue }
+      if (++safety > 1000) break
       if (m.index > lastIndex) parts.push(esc(text.slice(lastIndex, m.index)))
       parts.push(`<mark class="ws-search-highlight">${esc(m[0])}</mark>`)
       lastIndex = re.lastIndex
