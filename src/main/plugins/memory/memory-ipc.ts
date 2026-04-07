@@ -111,6 +111,17 @@ export function registerMemoryIpc(): void {
     // Force re-detect by disposing and re-checking
     if (allSucceeded) {
       try { adapter.dispose() } catch { /* ok */ }
+      // Verify the plugin is actually installed after running commands
+      const info = adapter.getInfo()
+      if (!info.installed) {
+        svc().log(`[memory] install commands succeeded but plugin not detected at expected paths`)
+        return {
+          success: false,
+          results,
+          error: 'Install commands completed but the plugin was not detected. Try installing manually in a terminal.'
+        }
+      }
+      svc().log(`[memory] adapter ${adapterId} installed successfully, hasData=${info.hasData}`)
     }
 
     return {

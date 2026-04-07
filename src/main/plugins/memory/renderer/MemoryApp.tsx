@@ -246,7 +246,7 @@ function sectionIcon(id: string): string {
 
 function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.ReactElement {
   const [installing, setInstalling] = useState(false)
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [result, setResult] = useState<{ success: boolean; message: string; details?: string[] } | null>(null)
   const api = getDockApi()
 
   const handleInstall = useCallback(async () => {
@@ -254,14 +254,18 @@ function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.Re
     setResult(null)
     try {
       const r = await api.memory.installAdapter('claudest')
-      setResult({
-        success: r.success,
-        message: r.success
-          ? 'Claudest installed. Run a Claude session to populate the memory database, then reopen this window.'
-          : `Install failed: ${r.error}`
-      })
-      // Refresh parent adapter list so the UI transitions away from install view
-      if (r.success) onInstalled?.()
+      if (r.success) {
+        setResult({ success: true, message: 'Claudest installed successfully.' })
+        onInstalled?.()
+      } else {
+        // Show command output details for debugging
+        const details = r.results?.filter((x: any) => x.error || x.output).map((x: any) => x.error || x.output) ?? []
+        setResult({
+          success: false,
+          message: r.error || 'Install failed',
+          details
+        })
+      }
     } catch (err) {
       setResult({ success: false, message: `Error: ${err}` })
     }
@@ -279,16 +283,23 @@ function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.Re
         {installing ? 'Installing Claudest...' : 'Install Claudest'}
       </button>
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--mem-text-muted)' }}>
-        Or install manually:
+        Or install manually in a terminal:
       </div>
       <div className="mem-code-block" style={{ marginTop: 8, fontSize: 11, textAlign: 'left', maxWidth: 420 }}>
         <div>claude /plugin marketplace add gupsammy/claudest</div>
         <div>claude /plugin install claude-memory@claudest</div>
       </div>
       {result && (
-        <div className={`mem-tag ${result.success ? 'success' : 'error'}`} style={{ marginTop: 12, padding: '8px 12px', fontSize: 12 }}>
-          {result.message}
-        </div>
+        <>
+          <div className={`mem-tag ${result.success ? 'success' : 'error'}`} style={{ marginTop: 12, padding: '8px 12px', fontSize: 12 }}>
+            {result.message}
+          </div>
+          {result.details && result.details.length > 0 && (
+            <div className="mem-code-block" style={{ marginTop: 8, fontSize: 10, textAlign: 'left', maxWidth: 420, opacity: 0.7 }}>
+              {result.details.map((d, i) => <div key={i}>{d}</div>)}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
