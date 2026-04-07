@@ -666,6 +666,86 @@ export class ClaudestAdapter implements MemoryAdapter {
     }
   }
 
+  // ── Configuration ──────────────────────────────────────────────────────────
+
+  private get configPath(): string {
+    return path.join(os.homedir(), CLAUDEST_DIR_NAME, 'config.json')
+  }
+
+  getConfig(): Record<string, unknown> {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        return JSON.parse(fs.readFileSync(this.configPath, 'utf-8'))
+      }
+    } catch { /* ignore */ }
+    return {}
+  }
+
+  setConfig(updates: Record<string, unknown>): { success: boolean; error?: string } {
+    try {
+      const existing = this.getConfig()
+      const merged = { ...existing, ...updates }
+      const dir = path.dirname(this.configPath)
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(this.configPath, JSON.stringify(merged, null, 2))
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Write failed' }
+    }
+  }
+
+  // ── Maintenance ───────────────────────────────────────────────────────────
+
+  getMaintenanceActions(): { id: string; label: string; description: string; dangerous?: boolean }[] {
+    return [
+      { id: 'import', label: 'Import Conversations', description: 'Import all conversation history from Claude sessions into the memory database' },
+      { id: 'sync', label: 'Sync Current Session', description: 'Force sync the current session to the database' },
+      { id: 'stats', label: 'Show Statistics', description: 'Display database statistics and counts' },
+      { id: 'backfill', label: 'Backfill Summaries', description: 'Generate context summaries for branches missing them' }
+    ]
+  }
+
+  async runMaintenance(action: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    const pluginDir = this.findPluginDir()
+    if (!pluginDir) return { success: false, error: 'Claudest plugin directory not found' }
+
+    const { execFile } = require('child_process') as typeof import('child_process')
+    const python = process.platform === 'win32' ? 'python3' : 'python3'
+
+    let script: string
+    let args: string[] = []
+
+    switch (action) {
+      case 'import':
+        script = path.join(pluginDir, 'hooks', 'import_conversations.py')
+        break
+      case 'sync':
+        script = path.join(pluginDir, 'hooks', 'sync_current.py')
+        break
+      case 'stats':
+        script = path.join(pluginDir, 'hooks', 'import_conversations.py')
+        args = ['--stats']
+        break
+      case 'backfill':
+        script = path.join(pluginDir, 'hooks', 'backfill_summaries.py')
+        break
+      default:
+        return { success: false, error: `Unknown action: ${action}` }
+    }
+
+    if (!fs.existsSync(script)) return { success: false, error: `Script not found: ${script}` }
+
+    return new Promise((resolve) => {
+      execFile(python, [script, ...args], { timeout: 120_000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: stderr || err.message, output: stdout })
+        } else {
+          resolve({ success: true, output: (stdout + stderr).trim() })
+        }
+      })
+    })
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   dispose(): void {

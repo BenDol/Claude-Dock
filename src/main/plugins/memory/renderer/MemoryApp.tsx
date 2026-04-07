@@ -20,7 +20,7 @@ import type {
 const params = new URLSearchParams(window.location.search)
 const projectDir = decodeURIComponent(params.get('projectDir') || '')
 
-type ViewId = 'dashboard' | 'sessions' | 'branches' | 'search' | 'tokens' | 'database' | 'adapters'
+type ViewId = 'dashboard' | 'sessions' | 'branches' | 'search' | 'tokens' | 'database' | 'adapters' | 'manage'
 
 // ── Utility Helpers ──────────────────────────────────────────────────────────
 
@@ -185,6 +185,13 @@ export default function MemoryApp(): React.ReactElement {
 
           <div className="mem-sidebar-section" style={{ marginTop: 'auto' }}>
             <button
+              className={`mem-sidebar-item ${activeView === 'manage' ? 'active' : ''}`}
+              onClick={() => setActiveView('manage')}
+            >
+              <span className="mem-sidebar-icon">{'\u{1F527}'}</span>
+              Manage
+            </button>
+            <button
               className={`mem-sidebar-item ${activeView === 'adapters' ? 'active' : ''}`}
               onClick={() => setActiveView('adapters')}
             >
@@ -199,19 +206,7 @@ export default function MemoryApp(): React.ReactElement {
           {noAdapters ? (
             <NoAdaptersView onInstalled={loadAdapters} />
           ) : activeAdapterInfo && activeAdapterInfo.installed && !activeAdapterInfo.hasData ? (
-            <div className="mem-empty">
-              <div className="mem-empty-icon">{'\u{23F3}'}</div>
-              <div className="mem-empty-title">Waiting for First Session</div>
-              <div className="mem-empty-desc" style={{ maxWidth: 480 }}>
-                {activeAdapterInfo.name} is installed and ready. Start a Claude Code session in any terminal
-                and the memory database will be created automatically.
-              </div>
-              <div className="mem-empty-desc" style={{ maxWidth: 480, marginTop: 8, fontSize: 12, color: 'var(--mem-text-muted)' }}>
-                Once populated, Claude will automatically recall relevant context from past conversations
-                at the start of each new session — no manual setup needed.
-              </div>
-              <button className="mem-btn primary" onClick={loadAdapters} style={{ marginTop: 16 }}>Refresh</button>
-            </div>
+            <SetupWizard adapterId={selectedAdapter} adapterInfo={activeAdapterInfo} onComplete={loadAdapters} />
           ) : activeView === 'dashboard' ? (
             <DashboardView adapterId={selectedAdapter} onSessionClick={navigateToSession} />
           ) : activeView === 'sessions' ? (
@@ -241,6 +236,8 @@ export default function MemoryApp(): React.ReactElement {
             <TokenView adapterId={selectedAdapter} />
           ) : activeView === 'database' ? (
             <DatabaseView adapterId={selectedAdapter} />
+          ) : activeView === 'manage' ? (
+            <ManageView adapterId={selectedAdapter} onRefresh={loadAdapters} />
           ) : activeView === 'adapters' ? (
             <AdaptersView adapters={adapters} onRefresh={loadAdapters} />
           ) : null}
@@ -1156,6 +1153,282 @@ function DatabaseView({ adapterId }: { adapterId?: string }): React.ReactElement
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Setup Wizard ─────────────────────────────────────────────────────────────
+
+const CAPABILITIES = [
+  { icon: '\u{1F504}', title: 'Automatic Context Injection', desc: 'Recalls relevant past conversations at the start of each session', skill: 'Built-in hook (SessionStart)' },
+  { icon: '\u{1F50D}', title: 'Recall Conversations', desc: 'Search and browse past sessions by keyword, project, or topic', skill: '/recall-conversations' },
+  { icon: '\u{1F4DD}', title: 'Extract Learnings', desc: 'Mine sessions for patterns and persist insights to CLAUDE.md memory files', skill: '/extract-learnings' },
+  { icon: '\u{1F4CA}', title: 'Token Insights', desc: 'Analyze token spending, cache hit rates, and workflow patterns with an interactive dashboard', skill: '/get-token-insights' },
+  { icon: '\u{1F5C3}', title: 'Manage Memory', desc: 'Sync, import, search, and get stats on the memory database', skill: '/manage-memory' }
+]
+
+function SetupWizard({ adapterId, adapterInfo, onComplete }: { adapterId?: string; adapterInfo: MemoryAdapterInfo; onComplete: () => void }): React.ReactElement {
+  const [step, setStep] = useState<'init' | 'importing' | 'config' | 'done'>('init')
+  const [importOutput, setImportOutput] = useState('')
+  const [importError, setImportError] = useState<string | null>(null)
+  const [config, setConfig] = useState<Record<string, unknown>>({})
+  const api = getDockApi()
+
+  const handleInitialize = useCallback(async () => {
+    setStep('importing')
+    setImportError(null)
+    try {
+      const result = await api.memory.runMaintenance('import', adapterId)
+      if (result.success) {
+        setImportOutput(result.output || 'Import complete')
+        // Load config for next step
+        const cfg = await api.memory.getAdapterConfig(adapterId)
+        setConfig(cfg)
+        setStep('config')
+      } else {
+        setImportError(result.error || 'Import failed')
+        setStep('init')
+      }
+    } catch (err) {
+      setImportError(String(err))
+      setStep('init')
+    }
+  }, [adapterId])
+
+  const handleSaveConfig = useCallback(async () => {
+    await api.memory.setAdapterConfig({
+      onboarding_completed: true,
+      auto_inject_context: config.auto_inject_context ?? true,
+      consolidation_reminder_enabled: config.consolidation_reminder_enabled ?? true
+    }, adapterId)
+    setStep('done')
+    onComplete()
+  }, [adapterId, config, onComplete])
+
+  if (step === 'importing') {
+    return (
+      <div className="mem-empty">
+        <div className="mem-spinner" style={{ width: 24, height: 24, marginBottom: 16 }} />
+        <div className="mem-empty-title">Importing Conversations</div>
+        <div className="mem-empty-desc">Scanning your Claude session history and building the memory database...</div>
+      </div>
+    )
+  }
+
+  if (step === 'config') {
+    return (
+      <div className="mem-empty" style={{ maxWidth: 520 }}>
+        <div className="mem-empty-icon">{'\u{2705}'}</div>
+        <div className="mem-empty-title">Database Initialized</div>
+        <div className="mem-empty-desc" style={{ marginBottom: 16 }}>{importOutput}</div>
+
+        <div className="mem-section-card" style={{ width: '100%', marginBottom: 16 }}>
+          <div className="mem-section-card-body">
+            <div className="mem-manage-toggle">
+              <label className="mem-toggle-label">
+                <input type="checkbox" checked={config.auto_inject_context !== false} onChange={(e) => setConfig({ ...config, auto_inject_context: e.target.checked })} />
+                <span>Auto-inject context on session start</span>
+              </label>
+              <div className="mem-toggle-desc">Claude will automatically recall relevant past conversations at the start of each new session</div>
+            </div>
+            <div className="mem-manage-toggle">
+              <label className="mem-toggle-label">
+                <input type="checkbox" checked={config.consolidation_reminder_enabled !== false} onChange={(e) => setConfig({ ...config, consolidation_reminder_enabled: e.target.checked })} />
+                <span>Consolidation reminders</span>
+              </label>
+              <div className="mem-toggle-desc">Periodically remind to run /extract-learnings to persist insights from recent sessions</div>
+            </div>
+          </div>
+        </div>
+
+        <button className="mem-btn primary" onClick={handleSaveConfig}>Complete Setup</button>
+      </div>
+    )
+  }
+
+  if (step === 'done') {
+    return (
+      <div className="mem-empty">
+        <div className="mem-empty-icon">{'\u{1F389}'}</div>
+        <div className="mem-empty-title">Setup Complete</div>
+        <div className="mem-empty-desc">Memory is active. Loading dashboard...</div>
+      </div>
+    )
+  }
+
+  // step === 'init'
+  return (
+    <div className="mem-empty" style={{ maxWidth: 560 }}>
+      <div className="mem-empty-icon">{'\u{1F9E0}'}</div>
+      <div className="mem-empty-title">Set Up {adapterInfo.name}</div>
+      <div className="mem-empty-desc" style={{ marginBottom: 16 }}>
+        {adapterInfo.name} is installed. Initialize the memory database to get started.
+      </div>
+
+      <button className="mem-btn primary" onClick={handleInitialize} style={{ marginBottom: 24 }}>
+        Initialize Memory Database
+      </button>
+
+      {importError && (
+        <div className="mem-tag error" style={{ padding: '8px 12px', fontSize: 12, marginBottom: 16 }}>
+          {importError}
+        </div>
+      )}
+
+      <div style={{ width: '100%', textAlign: 'left' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--mem-text-primary)' }}>What Claudest enables:</div>
+        {CAPABILITIES.map((cap) => (
+          <div key={cap.title} style={{ display: 'flex', gap: 10, marginBottom: 10, fontSize: 12, color: 'var(--mem-text-secondary)' }}>
+            <span style={{ flexShrink: 0, fontSize: 16 }}>{cap.icon}</span>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--mem-text-primary)', marginBottom: 2 }}>{cap.title}</div>
+              <div>{cap.desc}</div>
+              <div className="mem-mono" style={{ fontSize: 10, color: 'var(--mem-text-muted)', marginTop: 2 }}>{cap.skill}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 16, fontSize: 11, color: 'var(--mem-text-muted)' }}>
+        Or start a Claude Code session — the database will be created automatically on first use.
+      </div>
+    </div>
+  )
+}
+
+// ── Manage View ─────────────────────────────────────────────────────────────
+
+function ManageView({ adapterId, onRefresh }: { adapterId?: string; onRefresh: () => void }): React.ReactElement {
+  const [config, setConfig] = useState<Record<string, unknown>>({})
+  const [configLoading, setConfigLoading] = useState(true)
+  const [actionRunning, setActionRunning] = useState<string | null>(null)
+  const [actionResult, setActionResult] = useState<{ action: string; success: boolean; output?: string; error?: string } | null>(null)
+  const api = getDockApi()
+
+  useEffect(() => {
+    api.memory.getAdapterConfig(adapterId).then((cfg) => { setConfig(cfg); setConfigLoading(false) }).catch(() => setConfigLoading(false))
+  }, [adapterId])
+
+  const handleConfigToggle = useCallback(async (key: string, value: boolean) => {
+    const result = await api.memory.setAdapterConfig({ [key]: value }, adapterId)
+    if (result.success) setConfig((prev) => ({ ...prev, [key]: value }))
+  }, [adapterId])
+
+  const handleAction = useCallback(async (action: string) => {
+    setActionRunning(action)
+    setActionResult(null)
+    try {
+      const result = await api.memory.runMaintenance(action, adapterId)
+      setActionResult({ action, ...result })
+      if (result.success && (action === 'import' || action === 'sync')) onRefresh()
+    } catch (err) {
+      setActionResult({ action, success: false, error: String(err) })
+    }
+    setActionRunning(null)
+  }, [adapterId, onRefresh])
+
+  return (
+    <div>
+      <h2 className="mem-page-title">Manage Memory</h2>
+      <p className="mem-page-subtitle">Configure Claudest and run maintenance tasks</p>
+
+      {/* Configuration */}
+      <div className="mem-section-card" style={{ marginBottom: 16 }}>
+        <div className="mem-section-card-header">Configuration</div>
+        <div className="mem-section-card-body">
+          {configLoading ? (
+            <div className="mem-loading" style={{ padding: 12 }}><div className="mem-spinner" /> Loading...</div>
+          ) : (
+            <>
+              <div className="mem-manage-toggle">
+                <label className="mem-toggle-label">
+                  <input type="checkbox" checked={config.auto_inject_context !== false} onChange={(e) => handleConfigToggle('auto_inject_context', e.target.checked)} />
+                  <span>Auto-inject context on session start</span>
+                </label>
+                <div className="mem-toggle-desc">Automatically recall relevant past conversations at the start of each new session</div>
+              </div>
+              <div className="mem-manage-toggle">
+                <label className="mem-toggle-label">
+                  <input type="checkbox" checked={config.consolidation_reminder_enabled !== false} onChange={(e) => handleConfigToggle('consolidation_reminder_enabled', e.target.checked)} />
+                  <span>Consolidation reminders</span>
+                </label>
+                <div className="mem-toggle-desc">Remind to run /extract-learnings periodically to persist insights</div>
+              </div>
+              <div className="mem-manage-toggle">
+                <label className="mem-toggle-label">
+                  <input type="checkbox" checked={config.logging_enabled === true} onChange={(e) => handleConfigToggle('logging_enabled', e.target.checked)} />
+                  <span>Debug logging</span>
+                </label>
+                <div className="mem-toggle-desc">Enable detailed debug logging for Claudest hooks</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Maintenance Actions */}
+      <div className="mem-section-card" style={{ marginBottom: 16 }}>
+        <div className="mem-section-card-header">Maintenance</div>
+        <div className="mem-section-card-body">
+          <div className="mem-manage-actions">
+            <div className="mem-manage-action">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Import Conversations</div>
+                <div className="mem-toggle-desc">Scan all Claude session history and import into the memory database</div>
+              </div>
+              <button className="mem-btn" disabled={actionRunning !== null} onClick={() => handleAction('import')}>
+                {actionRunning === 'import' ? 'Running...' : 'Run'}
+              </button>
+            </div>
+            <div className="mem-manage-action">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Backfill Summaries</div>
+                <div className="mem-toggle-desc">Generate context summaries for branches that are missing them</div>
+              </div>
+              <button className="mem-btn" disabled={actionRunning !== null} onClick={() => handleAction('backfill')}>
+                {actionRunning === 'backfill' ? 'Running...' : 'Run'}
+              </button>
+            </div>
+            <div className="mem-manage-action">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Show Statistics</div>
+                <div className="mem-toggle-desc">Display database size, project counts, and session totals</div>
+              </div>
+              <button className="mem-btn" disabled={actionRunning !== null} onClick={() => handleAction('stats')}>
+                {actionRunning === 'stats' ? 'Running...' : 'Run'}
+              </button>
+            </div>
+          </div>
+          {actionResult && (
+            <div className={`mem-tag ${actionResult.success ? 'success' : 'error'}`} style={{ marginTop: 12, padding: '8px 12px', fontSize: 12, display: 'block' }}>
+              {actionResult.success ? 'Completed' : `Failed: ${actionResult.error}`}
+              {actionResult.output && (
+                <pre className="mem-code-block" style={{ marginTop: 8, fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto' }}>{actionResult.output}</pre>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Capabilities Reference */}
+      <div className="mem-section-card">
+        <div className="mem-section-card-header">Available Capabilities</div>
+        <div className="mem-section-card-body">
+          <div className="mem-toggle-desc" style={{ marginBottom: 12 }}>Skills and commands available in Claude Code when Claudest is active:</div>
+          {CAPABILITIES.map((cap) => (
+            <div key={cap.title} className="mem-manage-action" style={{ borderBottom: 'none', paddingBottom: 4 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>{cap.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{cap.title}</div>
+                  <div className="mem-toggle-desc">{cap.desc}</div>
+                </div>
+              </div>
+              <span className="mem-mono" style={{ fontSize: 11, color: 'var(--mem-text-muted)', whiteSpace: 'nowrap' }}>{cap.skill}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

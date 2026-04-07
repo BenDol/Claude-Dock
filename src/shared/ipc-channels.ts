@@ -295,6 +295,9 @@ export const IPC = {
   MEMORY_REFRESH: 'memory:refresh',
   MEMORY_INSTALL_ADAPTER: 'memory:installAdapter',
   MEMORY_UNINSTALL_ADAPTER: 'memory:uninstallAdapter',
+  MEMORY_GET_ADAPTER_CONFIG: 'memory:getAdapterConfig',
+  MEMORY_SET_ADAPTER_CONFIG: 'memory:setAdapterConfig',
+  MEMORY_RUN_MAINTENANCE: 'memory:runMaintenance',
 
   // Test Runner
   TEST_RUNNER_OPEN: 'testRunner:open',

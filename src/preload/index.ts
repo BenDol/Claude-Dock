@@ -393,6 +393,9 @@ export interface DockApi {
     refresh: (adapterId?: string) => Promise<{ success: boolean }>
     installAdapter: (adapterId: string) => Promise<{ success: boolean; results?: { cmd: string; success: boolean; output?: string; error?: string }[]; error?: string }>
     uninstallAdapter: (adapterId: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    getAdapterConfig: (adapterId?: string) => Promise<Record<string, unknown>>
+    setAdapterConfig: (updates: Record<string, unknown>, adapterId?: string) => Promise<{ success: boolean; error?: string }>
+    runMaintenance: (action: string, adapterId?: string) => Promise<{ success: boolean; output?: string; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   testRunner: {
@@ -854,6 +857,9 @@ const dockApi: DockApi = {
     refresh: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_REFRESH, adapterId),
     installAdapter: (adapterId) => ipcRenderer.invoke(IPC.MEMORY_INSTALL_ADAPTER, adapterId),
     uninstallAdapter: (adapterId) => ipcRenderer.invoke(IPC.MEMORY_UNINSTALL_ADAPTER, adapterId),
+    getAdapterConfig: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_ADAPTER_CONFIG, adapterId),
+    setAdapterConfig: (updates, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_SET_ADAPTER_CONFIG, updates, adapterId),
+    runMaintenance: (action, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_RUN_MAINTENANCE, action, adapterId),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('memory:reopen', handler)

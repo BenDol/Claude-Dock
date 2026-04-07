@@ -642,6 +642,27 @@ mark {
   border-radius: 2px;
 }
 
+/* ── Manage View ────────────────────────────────────────────────── */
+
+.mem-manage-toggle { padding: 8px 0; }
+.mem-manage-toggle + .mem-manage-toggle { border-top: 1px solid var(--mem-border-subtle); }
+.mem-toggle-label {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 500;
+}
+.mem-toggle-label input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--mem-accent); cursor: pointer;
+}
+.mem-toggle-desc {
+  font-size: 12px; color: var(--mem-text-muted); margin-top: 2px; line-height: 1.4;
+}
+.mem-manage-actions { display: flex; flex-direction: column; }
+.mem-manage-action {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 0; border-bottom: 1px solid var(--mem-border-subtle);
+}
+.mem-manage-action:last-child { border-bottom: none; }
+
 /* ── Responsive ─────────────────────────────────────────────────── */
 
 @media (max-width: 700px) {

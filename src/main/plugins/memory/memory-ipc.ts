@@ -294,6 +294,42 @@ export function registerMemoryIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.MEMORY_GET_ADAPTER_CONFIG, (_event, adapterId?: string) => {
+    const adapter = getActiveAdapter(adapterId) as any
+    if (!adapter?.getConfig) return {}
+    try {
+      return adapter.getConfig()
+    } catch (err) {
+      svc().logError('[memory] getAdapterConfig error:', err)
+      return {}
+    }
+  })
+
+  ipcMain.handle(IPC.MEMORY_SET_ADAPTER_CONFIG, (_event, updates: Record<string, unknown>, adapterId?: string) => {
+    const adapter = getActiveAdapter(adapterId) as any
+    if (!adapter?.setConfig) return { success: false, error: 'Adapter does not support config' }
+    try {
+      return adapter.setConfig(updates)
+    } catch (err) {
+      svc().logError('[memory] setAdapterConfig error:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Config update failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.MEMORY_RUN_MAINTENANCE, async (_event, action: string, adapterId?: string) => {
+    const adapter = getActiveAdapter(adapterId) as any
+    if (!adapter?.runMaintenance) return { success: false, error: 'Adapter does not support maintenance' }
+    svc().log(`[memory] running maintenance action: ${action}`)
+    try {
+      const result = await adapter.runMaintenance(action)
+      svc().log(`[memory] maintenance ${action}: success=${result.success}${result.output ? ' output=' + result.output.slice(0, 200) : ''}`)
+      return result
+    } catch (err) {
+      svc().logError(`[memory] maintenance ${action} error:`, err)
+      return { success: false, error: err instanceof Error ? err.message : 'Maintenance failed' }
+    }
+  })
+
   svc().log('[memory] IPC handlers registered')
 }
 
@@ -316,7 +352,10 @@ export function disposeMemoryIpc(): void {
     IPC.MEMORY_SEARCH,
     IPC.MEMORY_GET_CONTEXT_SUMMARY,
     IPC.MEMORY_GET_DB_INFO,
-    IPC.MEMORY_REFRESH
+    IPC.MEMORY_REFRESH,
+    IPC.MEMORY_GET_ADAPTER_CONFIG,
+    IPC.MEMORY_SET_ADAPTER_CONFIG,
+    IPC.MEMORY_RUN_MAINTENANCE
   ]
   for (const ch of channels) {
     ipcMain.removeHandler(ch)
