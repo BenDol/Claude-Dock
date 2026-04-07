@@ -248,14 +248,49 @@ function sectionIcon(id: string): string {
 // ── No Adapters View ─────────────────────────────────────────────────────────
 
 function NoAdaptersView(): React.ReactElement {
+  const [installing, setInstalling] = useState(false)
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
+  const api = getDockApi()
+
+  const handleInstall = useCallback(async () => {
+    setInstalling(true)
+    setResult(null)
+    try {
+      const r = await api.memory.installAdapter('claudest')
+      setResult({
+        success: r.success,
+        message: r.success
+          ? 'Claudest installed. Run a Claude session to populate the memory database, then reopen this window.'
+          : `Install failed: ${r.error}`
+      })
+    } catch (err) {
+      setResult({ success: false, message: `Error: ${err}` })
+    }
+    setInstalling(false)
+  }, [])
+
   return (
     <div className="mem-empty">
       <div className="mem-empty-icon">{'\u{1F9E0}'}</div>
       <div className="mem-empty-title">No Memory Tools Detected</div>
-      <div className="mem-empty-desc">
-        Install a Claude memory tool like Claudest to start viewing your conversation memory.
-        The memory viewer will automatically detect installed tools.
+      <div className="mem-empty-desc" style={{ marginBottom: 20 }}>
+        Install Claudest to start viewing your Claude conversation memory.
       </div>
+      <button className="mem-btn primary" onClick={handleInstall} disabled={installing}>
+        {installing ? 'Installing Claudest...' : 'Install Claudest'}
+      </button>
+      <div style={{ marginTop: 16, fontSize: 12, color: 'var(--mem-text-muted)' }}>
+        Or install manually:
+      </div>
+      <div className="mem-code-block" style={{ marginTop: 8, fontSize: 11, textAlign: 'left', maxWidth: 420 }}>
+        <div>claude /plugin marketplace add gupsammy/claudest</div>
+        <div>claude /plugin install claude-memory@claudest</div>
+      </div>
+      {result && (
+        <div className={`mem-tag ${result.success ? 'success' : 'error'}`} style={{ marginTop: 12, padding: '8px 12px', fontSize: 12 }}>
+          {result.message}
+        </div>
+      )}
     </div>
   )
 }
@@ -1078,6 +1113,57 @@ function DatabaseView({ adapterId }: { adapterId?: string }): React.ReactElement
 // ── Adapters View ────────────────────────────────────────────────────────────
 
 function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; onRefresh: () => void }): React.ReactElement {
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [actionResult, setActionResult] = useState<{ adapterId: string; success: boolean; message: string } | null>(null)
+  const api = getDockApi()
+
+  const handleEnable = useCallback(async (adapterId: string, enabled: boolean) => {
+    setActionLoading(adapterId)
+    setActionResult(null)
+    try {
+      const result = await api.memory.setAdapterEnabled(adapterId, enabled)
+      setActionResult({ adapterId, success: result.success, message: enabled ? 'Enabled' : 'Disabled' })
+      onRefresh()
+    } catch (err) {
+      setActionResult({ adapterId, success: false, message: String(err) })
+    }
+    setActionLoading(null)
+  }, [onRefresh])
+
+  const handleInstall = useCallback(async (adapterId: string) => {
+    setActionLoading(adapterId)
+    setActionResult(null)
+    try {
+      const result = await api.memory.installAdapter(adapterId)
+      setActionResult({
+        adapterId,
+        success: result.success,
+        message: result.success ? 'Installation complete. You may need to run a Claude session to create the memory database.' : `Install failed: ${result.error}`
+      })
+      onRefresh()
+    } catch (err) {
+      setActionResult({ adapterId, success: false, message: `Install error: ${err}` })
+    }
+    setActionLoading(null)
+  }, [onRefresh])
+
+  const handleUninstall = useCallback(async (adapterId: string) => {
+    setActionLoading(adapterId)
+    setActionResult(null)
+    try {
+      const result = await api.memory.uninstallAdapter(adapterId)
+      setActionResult({
+        adapterId,
+        success: result.success,
+        message: result.success ? 'Uninstalled. The conversation database at ~/.claude-memory/ is preserved.' : `Uninstall failed: ${result.error}`
+      })
+      onRefresh()
+    } catch (err) {
+      setActionResult({ adapterId, success: false, message: `Uninstall error: ${err}` })
+    }
+    setActionLoading(null)
+  }, [onRefresh])
+
   return (
     <div>
       <h2 className="mem-page-title">Memory Adapters</h2>
@@ -1095,26 +1181,89 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
         adapters.map(a => (
           <div key={a.id} className="mem-section-card" style={{ marginBottom: 12 }}>
             <div className="mem-section-card-body">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 600 }}>{a.name}</div>
                   <div style={{ fontSize: 12, color: 'var(--mem-text-secondary)' }}>v{a.version}</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span className={`mem-status-dot ${a.installed && a.enabled ? 'connected' : a.installed ? 'error' : 'disconnected'}`} />
-                  <span className={`mem-tag ${a.installed ? (a.enabled ? 'success' : 'warning') : 'neutral'}`}>
-                    {a.installed ? (a.enabled ? 'Active' : 'Disabled') : 'Not Installed'}
+                  <span className={`mem-tag ${a.installed && a.hasData ? (a.enabled ? 'success' : 'warning') : a.installed ? 'info' : 'neutral'}`}>
+                    {!a.installed ? 'Not Installed' : !a.hasData ? 'No Data' : a.enabled ? 'Active' : 'Disabled'}
                   </span>
                 </div>
               </div>
 
-              <div style={{ fontSize: 13, color: 'var(--mem-text-secondary)', marginBottom: 8 }}>{a.description}</div>
+              <div style={{ fontSize: 13, color: 'var(--mem-text-secondary)', marginBottom: 10 }}>{a.description}</div>
 
-              <div style={{ fontSize: 12, color: 'var(--mem-text-muted)' }}>
-                <div>Status: {a.statusMessage}</div>
-                {a.storePath && <div className="mem-mono" style={{ marginTop: 2 }}>Store: {a.storePath}</div>}
+              {/* Status details */}
+              <div style={{ fontSize: 12, color: 'var(--mem-text-muted)', marginBottom: 10 }}>
+                <div style={{ marginBottom: 2 }}>Status: {a.statusMessage}</div>
+                {a.storePath && <div className="mem-mono" style={{ marginBottom: 2 }}>Database: {a.storePath}</div>}
+                {a.pluginDir && <div className="mem-mono" style={{ marginBottom: 2 }}>Plugin: {a.pluginDir}</div>}
               </div>
 
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--mem-border-subtle)' }}>
+                {a.installed ? (
+                  <>
+                    {a.hasData && (
+                      <button
+                        className={`mem-btn ${a.enabled ? '' : 'primary'}`}
+                        disabled={actionLoading === a.id}
+                        onClick={() => handleEnable(a.id, !a.enabled)}
+                      >
+                        {actionLoading === a.id ? 'Working...' : a.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
+                    <button
+                      className="mem-btn"
+                      disabled={actionLoading === a.id}
+                      onClick={() => handleUninstall(a.id)}
+                      style={{ color: 'var(--mem-error)' }}
+                    >
+                      {actionLoading === a.id ? 'Working...' : 'Uninstall'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {a.canAutoInstall && (
+                      <button
+                        className="mem-btn primary"
+                        disabled={actionLoading === a.id}
+                        onClick={() => handleInstall(a.id)}
+                      >
+                        {actionLoading === a.id ? 'Installing...' : 'Install'}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Install commands (shown when not installed) */}
+              {!a.installed && a.installCommands.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--mem-text-muted)', marginBottom: 6 }}>MANUAL INSTALL</div>
+                  <div className="mem-code-block" style={{ fontSize: 11, padding: '8px 12px' }}>
+                    {a.installCommands.map((cmd, i) => (
+                      <div key={i}>{cmd}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action result feedback */}
+              {actionResult && actionResult.adapterId === a.id && (
+                <div
+                  className={`mem-tag ${actionResult.success ? 'success' : 'error'}`}
+                  style={{ marginTop: 10, padding: '6px 10px', fontSize: 12, display: 'block' }}
+                >
+                  {actionResult.message}
+                </div>
+              )}
+
+              {/* Available sections */}
               {a.sections.length > 0 && (
                 <div style={{ marginTop: 10, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                   {a.sections.map(s => <span key={s.id} className="mem-tag neutral">{s.label}</span>)}

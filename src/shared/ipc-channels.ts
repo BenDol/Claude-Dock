@@ -292,6 +292,8 @@ export const IPC = {
   MEMORY_GET_CONTEXT_SUMMARY: 'memory:getContextSummary',
   MEMORY_GET_DB_INFO: 'memory:getDbInfo',
   MEMORY_REFRESH: 'memory:refresh',
+  MEMORY_INSTALL_ADAPTER: 'memory:installAdapter',
+  MEMORY_UNINSTALL_ADAPTER: 'memory:uninstallAdapter',
 
   // Test Runner
   TEST_RUNNER_OPEN: 'testRunner:open',

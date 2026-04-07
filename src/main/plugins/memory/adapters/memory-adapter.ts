@@ -87,6 +87,14 @@ export interface MemoryAdapter {
     walSizeBytes: number
   } | null
 
+  // ── Install / Uninstall ─────────────────────────────────────────────────────
+
+  /**
+   * Returns shell commands needed to install this memory tool.
+   * The UI can display these or execute them directly.
+   */
+  getInstallCommands(): string[]
+
   /**
    * Close any open database connections. Called on plugin dispose.
    */

@@ -15,14 +15,22 @@ export interface MemoryAdapterInfo {
   version: string
   /** Whether the underlying tool is detected/installed on the system */
   installed: boolean
-  /** Whether the adapter is currently enabled for this project */
+  /** Whether the adapter is currently enabled */
   enabled: boolean
   /** Path to the memory store (e.g. DB file) — null if not found */
   storePath: string | null
+  /** Path to the plugin installation directory — null if not installed */
+  pluginDir: string | null
+  /** Whether the database/storage exists (separate from plugin installation) */
+  hasData: boolean
   /** Human-readable status message */
   statusMessage: string
   /** Sections/tabs this adapter provides for the viewer */
   sections: MemorySection[]
+  /** Instructions for installing this tool (shown when not installed) */
+  installCommands: string[]
+  /** Whether this adapter supports programmatic install via CLI */
+  canAutoInstall: boolean
 }
 
 export interface MemorySection {

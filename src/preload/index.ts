@@ -390,6 +390,8 @@ export interface DockApi {
     getContextSummary: (branchId: number, adapterId?: string) => Promise<MemoryContextSummaryParsed | null>
     getDbInfo: (adapterId?: string) => Promise<{ path: string; sizeBytes: number; tables: { name: string; rowCount: number }[]; walSizeBytes: number } | null>
     refresh: (adapterId?: string) => Promise<{ success: boolean }>
+    installAdapter: (adapterId: string) => Promise<{ success: boolean; results?: { cmd: string; success: boolean; output?: string; error?: string }[]; error?: string }>
+    uninstallAdapter: (adapterId: string) => Promise<{ success: boolean; output?: string; error?: string }>
     onReopen: (callback: () => void) => () => void
   }
   testRunner: {
@@ -848,6 +850,8 @@ const dockApi: DockApi = {
     getContextSummary: (branchId, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_CONTEXT_SUMMARY, branchId, adapterId),
     getDbInfo: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_DB_INFO, adapterId),
     refresh: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_REFRESH, adapterId),
+    installAdapter: (adapterId) => ipcRenderer.invoke(IPC.MEMORY_INSTALL_ADAPTER, adapterId),
+    uninstallAdapter: (adapterId) => ipcRenderer.invoke(IPC.MEMORY_UNINSTALL_ADAPTER, adapterId),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('memory:reopen', handler)

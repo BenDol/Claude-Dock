@@ -40,6 +40,21 @@ function getDatabase(): typeof import('better-sqlite3') {
 const CLAUDEST_DB_NAME = 'conversations.db'
 const CLAUDEST_DIR_NAME = '.claude-memory'
 
+/** Known locations where the claude-memory plugin could be installed */
+const PLUGIN_SEARCH_PATHS = [
+  // Marketplace install (most common)
+  path.join(os.homedir(), '.claude', 'plugins', 'marketplaces'),
+  // Direct plugin dir
+  path.join(os.homedir(), '.claude', 'plugins'),
+  // Repos clone location
+  path.join(os.homedir(), '.claude', 'plugins', 'repos')
+]
+
+const INSTALL_COMMANDS = [
+  'claude /plugin marketplace add gupsammy/claudest',
+  'claude /plugin install claude-memory@claudest'
+]
+
 const SECTIONS: MemorySection[] = [
   { id: 'dashboard', label: 'Dashboard', description: 'Overview of memory statistics and recent activity' },
   { id: 'sessions', label: 'Sessions', description: 'Browse conversation sessions' },
@@ -96,17 +111,26 @@ export class ClaudestAdapter implements MemoryAdapter {
   // ── Adapter Info ───────────────────────────────────────────────────────────
 
   getInfo(): MemoryAdapterInfo {
-    const installed = fs.existsSync(this.dbPath)
-    let statusMessage = 'Not installed'
+    const pluginDir = this.findPluginDir()
+    const hasData = fs.existsSync(this.dbPath)
+    const installed = pluginDir !== null
+    let statusMessage: string
     let storePath: string | null = null
 
-    if (installed) {
+    if (!installed && !hasData) {
+      statusMessage = 'Not installed — Claudest plugin not detected'
+    } else if (installed && !hasData) {
+      statusMessage = 'Plugin installed, but no conversation database found yet. Run a Claude session to populate.'
+    } else if (!installed && hasData) {
+      statusMessage = 'Database found, but Claudest plugin directory not detected'
+    } else {
+      // installed && hasData
       storePath = this.dbPath
       try {
         this.getDb()
         statusMessage = 'Connected'
       } catch (err) {
-        statusMessage = `Error: ${err instanceof Error ? err.message : String(err)}`
+        statusMessage = `Database error: ${err instanceof Error ? err.message : String(err)}`
       }
     }
 
@@ -116,10 +140,14 @@ export class ClaudestAdapter implements MemoryAdapter {
       description: 'Searchable conversation memory with SQLite storage, full-text search, and context injection',
       version: this.getClaudestVersion(),
       installed,
-      enabled: installed, // Auto-enable if installed
+      enabled: hasData, // Functionally enabled when there's data to read
       storePath,
+      pluginDir,
+      hasData,
       statusMessage,
-      sections: SECTIONS
+      sections: hasData ? SECTIONS : [],
+      installCommands: INSTALL_COMMANDS,
+      canAutoInstall: true
     }
   }
 
@@ -133,15 +161,67 @@ export class ClaudestAdapter implements MemoryAdapter {
     }
   }
 
-  private getClaudestVersion(): string {
+  /** Scan known locations for the claude-memory plugin directory. */
+  private findPluginDir(): string | null {
+    // Check direct install first
+    const directPath = path.join(os.homedir(), '.claude', 'plugins', 'claude-memory')
+    if (this.isClaudestPluginDir(directPath)) return directPath
+
+    // Search marketplace directories recursively (one level deep)
+    for (const searchPath of PLUGIN_SEARCH_PATHS) {
+      if (!fs.existsSync(searchPath)) continue
+      try {
+        const entries = fs.readdirSync(searchPath, { withFileTypes: true })
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue
+          const candidateDirect = path.join(searchPath, entry.name, 'claude-memory')
+          if (this.isClaudestPluginDir(candidateDirect)) return candidateDirect
+
+          // Also check plugins/ subdirectory (marketplace layout)
+          const candidateNested = path.join(searchPath, entry.name, 'plugins', 'claude-memory')
+          if (this.isClaudestPluginDir(candidateNested)) return candidateNested
+        }
+      } catch { /* permission errors, etc. */ }
+    }
+
+    return null
+  }
+
+  /** Check if a directory looks like a valid claude-memory plugin installation. */
+  private isClaudestPluginDir(dir: string): boolean {
     try {
-      const pluginJsonPath = path.join(os.homedir(), '.claude', 'plugins', 'claude-memory', 'plugin.json')
-      if (fs.existsSync(pluginJsonPath)) {
-        const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8'))
-        return pluginJson.version || 'unknown'
-      }
-    } catch { /* ignore */ }
+      if (!fs.existsSync(dir)) return false
+      // Must have hooks/ directory or .claude-plugin/ directory
+      return fs.existsSync(path.join(dir, 'hooks')) ||
+             fs.existsSync(path.join(dir, '.claude-plugin'))
+    } catch {
+      return false
+    }
+  }
+
+  private getClaudestVersion(): string {
+    const pluginDir = this.findPluginDir()
+    if (!pluginDir) return 'unknown'
+
+    // Try .claude-plugin/plugin.json first (standard location)
+    const candidates = [
+      path.join(pluginDir, '.claude-plugin', 'plugin.json'),
+      path.join(pluginDir, 'plugin.json')
+    ]
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate)) {
+          const pluginJson = JSON.parse(fs.readFileSync(candidate, 'utf-8'))
+          if (pluginJson.version) return pluginJson.version
+        }
+      } catch { /* ignore */ }
+    }
     return 'unknown'
+  }
+
+  /** Get installation commands for display or execution. */
+  getInstallCommands(): string[] {
+    return INSTALL_COMMANDS
   }
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
