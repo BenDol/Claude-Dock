@@ -33,6 +33,8 @@ const BUILTIN_PLUGINS = [
     rendererEntry: 'src/main/plugins/git-manager/renderer/standalone-entry.tsx' },
   { id: 'cloud-integration', srcDir: 'cloud-integration', entry: 'cloud-integration-plugin.ts' },
   { id: 'test-runner', srcDir: 'test-runner', entry: 'test-runner-plugin.ts' },
+  { id: 'memory', srcDir: 'memory', entry: 'memory-plugin.ts',
+    rendererEntry: 'src/main/plugins/memory/renderer/standalone-entry.tsx' },
   // workspace renders inside the dock window (not its own BrowserWindow),
   // so renderer changes require a full app update — cannot be hot-updated.
   { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true }
