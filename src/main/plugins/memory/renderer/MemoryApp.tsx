@@ -2,7 +2,6 @@ import './memory.css'
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import { useSettingsStore } from '@dock-renderer/stores/settings-store'
-import { applyThemeToDocument } from '@dock-renderer/lib/theme'
 import type {
   MemoryAdapterInfo,
   MemoryDashboardStats,
@@ -77,22 +76,10 @@ export default function MemoryApp(): React.ReactElement {
 
   const api = getDockApi()
 
-  // Theme
+  // Theme — load() fetches settings, applies theme, and listens for changes
   const settings = useSettingsStore((s) => s.settings)
-  useEffect(() => {
-    api.settings.get().then((s) => {
-      useSettingsStore.getState().setSettings(s)
-      applyThemeToDocument(s.theme.mode)
-      document.documentElement.setAttribute('data-theme',
-        s.theme.mode === 'dark' ? 'dark' : s.theme.mode === 'light' ? 'light' : 'dark')
-    })
-    return api.settings.onChange((s) => {
-      useSettingsStore.getState().setSettings(s)
-      applyThemeToDocument(s.theme.mode)
-      document.documentElement.setAttribute('data-theme',
-        s.theme.mode === 'dark' ? 'dark' : s.theme.mode === 'light' ? 'light' : 'dark')
-    })
-  }, [])
+  const loadSettings = useSettingsStore((s) => s.load)
+  useEffect(() => { loadSettings() }, [loadSettings])
 
   // Load adapters
   const loadAdapters = useCallback(async () => {
