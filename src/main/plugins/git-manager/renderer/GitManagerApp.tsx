@@ -3755,7 +3755,8 @@ const FileTreeNodeView: React.FC<{
   depth: number
   selectedPath: string | null
   onSelect: (path: string) => void
-}> = ({ node, depth, selectedPath, onSelect }) => {
+  onContextMenu?: (e: React.MouseEvent, path: string) => void
+}> = ({ node, depth, selectedPath, onSelect, onContextMenu }) => {
   const [collapsed, setCollapsed] = usePersistedCollapsed(`ftree:${node.path}`)
   const sortedChildren = useMemo(() => {
     const entries = [...node.children.values()]
@@ -3771,6 +3772,7 @@ const FileTreeNodeView: React.FC<{
         className={`gm-ftree-item gm-ftree-file${selectedPath === node.path ? ' gm-ftree-item-active' : ''}`}
         style={{ paddingLeft: 12 + depth * 16 }}
         onClick={() => onSelect(node.path)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, node.path) }}
         title={node.path}
       >
         <FileTypeIcon name={node.name} />
@@ -3791,7 +3793,7 @@ const FileTreeNodeView: React.FC<{
         <span className="gm-ftree-name">{node.name}</span>
       </div>
       {!collapsed && sortedChildren.map((child) => (
-        <FileTreeNodeView key={child.name} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+        <FileTreeNodeView key={child.name} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} onContextMenu={onContextMenu} />
       ))}
     </>
   )
@@ -3818,6 +3820,7 @@ const CommitFileTreeView: React.FC<{
   const grepGenRef = useRef(0)
   const sidebarRef = useRef<HTMLDivElement>(null)
   const lineRef = useRef<HTMLDivElement>(null)
+  const [ftreeCtx, setFtreeCtx] = useState<{ x: number; y: number; path: string } | null>(null)
   const [fileSearch, setFileSearch] = useState('')
   const [fileSearchOpen, setFileSearchOpen] = useState(false)
   const [fileSearchIdx, setFileSearchIdx] = useState(0)
@@ -3946,6 +3949,11 @@ const CommitFileTreeView: React.FC<{
 
   const contentLines = fileContent?.split('\n') || []
 
+  const handleFtreeContext = useCallback((e: React.MouseEvent, filePath: string) => {
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    setFtreeCtx({ x: e.clientX / zoom, y: e.clientY / zoom, path: filePath })
+  }, [])
+
   if (loading) return <div className="gm-loading" style={{ padding: 16 }}>Loading file tree...</div>
 
   return (
@@ -4014,7 +4022,7 @@ const CommitFileTreeView: React.FC<{
               if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
               return a.name.localeCompare(b.name)
             }).map((node) => (
-              <FileTreeNodeView key={node.name} node={node} depth={0} selectedPath={selectedFile} onSelect={(p) => { setSelectedFile(p); setSelectedLine(null) }} />
+              <FileTreeNodeView key={node.name} node={node} depth={0} selectedPath={selectedFile} onSelect={(p) => { setSelectedFile(p); setSelectedLine(null) }} onContextMenu={handleFtreeContext} />
             ))}
             {filteredFiles.length === 0 && <div className="gm-ftree-empty">{filter ? 'No matches' : 'No files'}</div>}
           </div>
@@ -4139,9 +4147,72 @@ const CommitFileTreeView: React.FC<{
           <div className="gm-ftree-placeholder">Unable to load file content</div>
         )}
       </div>
+      {ftreeCtx && (
+        <FileTreeContextMenu
+          x={ftreeCtx.x} y={ftreeCtx.y}
+          filePath={ftreeCtx.path}
+          projectDir={projectDir}
+          onClose={() => setFtreeCtx(null)}
+        />
+      )}
     </div>
   )
 })
+
+const FileTreeContextMenu: React.FC<{
+  x: number; y: number; filePath: string; projectDir: string; onClose: () => void
+}> = ({ x, y, filePath, projectDir, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null)
+  const api = getDockApi()
+  const [copySubmenu, setCopySubmenu] = useState(false)
+  const fileName = filePath.split('/').pop() || filePath
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const vw = window.innerWidth / zoom
+    const vh = window.innerHeight / zoom
+    if (x + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
+    if (y + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
+  }, [])
+
+  return (
+    <div className="gm-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.app.openInExplorer(projectDir + '/' + filePath) }}>Open file</div>
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.gitManager.showInFolder(projectDir, filePath) }}>Show in folder</div>
+      <div className="gm-ctx-item" onClick={() => { onClose(); api.gitManager.openFileHistory(projectDir, filePath) }}>File history</div>
+      <div className="gm-ctx-separator" />
+      <div
+        className="gm-ctx-item gm-ctx-submenu-trigger"
+        onMouseEnter={() => setCopySubmenu(true)}
+        onMouseLeave={() => setCopySubmenu(false)}
+      >
+        <span>Copy path</span>
+        <span className="gm-ctx-arrow">&#9656;</span>
+        {copySubmenu && (
+          <div className="gm-ctx-submenu" ref={adjustSubmenuRef}>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(filePath); onClose() }}>
+              Relative: {filePath}
+            </div>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(projectDir + '/' + filePath); onClose() }}>
+              Full path
+            </div>
+            <div className="gm-ctx-item" onClick={() => { navigator.clipboard.writeText(fileName); onClose() }}>
+              Filename: {fileName}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
