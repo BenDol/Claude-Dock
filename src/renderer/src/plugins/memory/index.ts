@@ -39,14 +39,5 @@ registerToolbarAction({
   title: 'Memory',
   icon: React.createElement(BrainIcon),
   onClick: (projectDir) => getDockApi().memory.open(projectDir),
-  order: 55,
-  getStatusDot: async () => {
-    try {
-      const adapters = await getDockApi().memory.getAdapters()
-      const hasAvailable = adapters.some(a => a.installed && a.enabled)
-      return hasAvailable ? 'success' : null
-    } catch {
-      return null
-    }
-  }
+  order: 55
 })
