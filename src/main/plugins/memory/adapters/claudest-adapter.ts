@@ -131,15 +131,32 @@ export class ClaudestAdapter implements MemoryAdapter {
   private getDb(): import('better-sqlite3').Database {
     if (this.db) return this.db
 
-    const Db = getDatabase()
-    const db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
+    if (!this.dbPath || !fs.existsSync(this.dbPath)) {
+      throw new Error(`Database file not found: ${this.dbPath}`)
+    }
+
+    let Db: typeof import('better-sqlite3')
+    try {
+      Db = getDatabase()
+    } catch (err) {
+      throw new Error(`Failed to load database driver: ${err instanceof Error ? err.message : err}`)
+    }
+
+    let db: import('better-sqlite3').Database
+    try {
+      db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
+    } catch (err) {
+      throw new Error(`Failed to open database: ${err instanceof Error ? err.message : err}`)
+    }
+
     try {
       // Enable WAL mode reading without blocking Claudest's writes
       db.pragma('journal_mode = WAL')
     } catch {
-      try { db.close() } catch { /* ignore */ }
-      throw new Error('Failed to configure database')
+      // WAL pragma can fail on locked/corrupt DBs — connection is still usable
+      // for reads in most cases, so continue rather than throwing
     }
+
     this.db = db
     return this.db
   }
