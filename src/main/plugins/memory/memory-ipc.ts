@@ -88,11 +88,11 @@ export function registerMemoryIpc(): void {
     svc().log(`[memory] installing adapter ${adapterId}...`)
 
     // Execute install commands sequentially.
-    // Claude CLI plugin commands look like: claude /plugin marketplace add gupsammy/claudest
+    // Claude CLI plugin commands look like: claude plugin marketplace add gupsammy/claudest
     // We split on spaces and pass as args, but we need to handle the /plugin prefix.
     const results: { cmd: string; success: boolean; output?: string; error?: string }[] = []
     for (const cmd of commands) {
-      // Parse: "claude /plugin install claude-memory@claudest" -> ["claude", "/plugin", "install", "claude-memory@claudest"]
+      // Parse: "claude plugin install claude-memory@claudest" -> ["claude", "/plugin", "install", "claude-memory@claudest"]
       const parts = cmd.split(/\s+/)
       if (parts.length < 2 || parts[0] !== 'claude') {
         results.push({ cmd, success: false, error: 'Invalid command format' })
@@ -142,7 +142,7 @@ export function registerMemoryIpc(): void {
 
     // For claudest, uninstall via CLI
     if (adapterId === 'claudest') {
-      const result = await runClaudeCli(['/plugin', 'uninstall', 'claude-memory'])
+      const result = await runClaudeCli(['plugin', 'uninstall', 'claude-memory'])
       return result
     }
 

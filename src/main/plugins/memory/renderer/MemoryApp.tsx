@@ -1,5 +1,5 @@
 import './memory.css'
-import React, { useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import { useSettingsStore } from '@dock-renderer/stores/settings-store'
 import type {
@@ -81,23 +81,29 @@ export default function MemoryApp(): React.ReactElement {
   const loadSettings = useSettingsStore((s) => s.load)
   useEffect(() => { loadSettings() }, [loadSettings])
 
-  // Load adapters
+  // Load adapters — use ref for selectedAdapter to avoid dependency loop
+  const selectedAdapterRef = useRef(selectedAdapter)
+  useEffect(() => { selectedAdapterRef.current = selectedAdapter }, [selectedAdapter])
+
   const loadAdapters = useCallback(async () => {
     try {
       const result = await api.memory.getAdapters()
       setAdapters(result)
-      if (!selectedAdapter && result.length > 0) {
+      if (!selectedAdapterRef.current && result.length > 0) {
         const available = result.find(a => a.installed && a.enabled)
         if (available) setSelectedAdapter(available.id)
       }
     } catch { /* ignore */ }
     setLoading(false)
-  }, [selectedAdapter])
+  }, [])
 
   useEffect(() => { loadAdapters() }, [])
 
-  // Reopen handler
-  useEffect(() => api.memory.onReopen(() => loadAdapters()), [])
+  // Reopen handler — must return cleanup to avoid listener leak
+  useEffect(() => {
+    const cleanup = api.memory.onReopen(() => loadAdapters())
+    return cleanup
+  }, [loadAdapters])
 
   const activeAdapterInfo = useMemo(() => adapters.find(a => a.id === selectedAdapter), [adapters, selectedAdapter])
 
@@ -286,8 +292,8 @@ function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.Re
         Or install manually in a terminal:
       </div>
       <div className="mem-code-block" style={{ marginTop: 8, fontSize: 11, textAlign: 'left', maxWidth: 420 }}>
-        <div>claude /plugin marketplace add gupsammy/claudest</div>
-        <div>claude /plugin install claude-memory@claudest</div>
+        <div>claude plugin marketplace add gupsammy/claudest</div>
+        <div>claude plugin install claude-memory@claudest</div>
       </div>
       {result && (
         <>

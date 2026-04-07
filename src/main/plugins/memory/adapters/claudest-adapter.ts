@@ -51,8 +51,8 @@ const PLUGIN_SEARCH_PATHS = [
 ]
 
 const INSTALL_COMMANDS = [
-  'claude /plugin marketplace add gupsammy/claudest',
-  'claude /plugin install claude-memory@claudest'
+  'claude plugin marketplace add gupsammy/claudest',
+  'claude plugin install claude-memory@claudest'
 ]
 
 const SECTIONS: MemorySection[] = [
@@ -81,9 +81,15 @@ export class ClaudestAdapter implements MemoryAdapter {
     if (this.db) return this.db
 
     const Db = getDatabase()
-    this.db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
-    // Enable WAL mode reading without blocking Claudest's writes
-    this.db.pragma('journal_mode = WAL')
+    const db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
+    try {
+      // Enable WAL mode reading without blocking Claudest's writes
+      db.pragma('journal_mode = WAL')
+    } catch {
+      try { db.close() } catch { /* ignore */ }
+      throw new Error('Failed to configure database')
+    }
+    this.db = db
     return this.db
   }
 
