@@ -60,7 +60,7 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
+  padding-left: 16px;
   height: 38px;
   background: var(--mem-surface);
   border-bottom: 1px solid var(--mem-border);
