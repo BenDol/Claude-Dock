@@ -1485,6 +1485,7 @@ function ManageView({ adapterId, onRefresh }: { adapterId?: string; onRefresh: (
 function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; onRefresh: () => void }): React.ReactElement {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [actionResult, setActionResult] = useState<{ adapterId: string; success: boolean; message: string } | null>(null)
+  const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null)
   const api = getDockApi()
 
   const handleEnable = useCallback(async (adapterId: string, enabled: boolean) => {
@@ -1492,7 +1493,13 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
     setActionResult(null)
     try {
       const result = await api.memory.setAdapterEnabled(adapterId, enabled)
-      setActionResult({ adapterId, success: result.success, message: enabled ? 'Enabled' : 'Disabled' })
+      setActionResult({
+        adapterId,
+        success: result.success,
+        message: result.success
+          ? (enabled ? 'Plugin enabled in Claude Code' : 'Plugin disabled in Claude Code')
+          : (result.error || 'Failed')
+      })
       onRefresh()
     } catch (err) {
       setActionResult({ adapterId, success: false, message: String(err) })
@@ -1518,6 +1525,7 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
   }, [onRefresh])
 
   const handleUninstall = useCallback(async (adapterId: string) => {
+    setConfirmUninstall(null)
     setActionLoading(adapterId)
     setActionResult(null)
     try {
@@ -1525,7 +1533,7 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
       setActionResult({
         adapterId,
         success: result.success,
-        message: result.success ? 'Uninstalled. The conversation database at ~/.claude-memory/ is preserved.' : `Uninstall failed: ${result.error}`
+        message: result.success ? 'Uninstalled. Plugin and conversation database have been removed.' : `Uninstall failed: ${result.error}`
       })
       onRefresh()
     } catch (err) {
@@ -1591,18 +1599,31 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
                         className={`mem-btn ${a.enabled ? '' : 'primary'}`}
                         disabled={actionLoading === a.id}
                         onClick={() => handleEnable(a.id, !a.enabled)}
+                        title={a.enabled ? 'Disable plugin in Claude Code (keeps data)' : 'Enable plugin in Claude Code'}
                       >
-                        {actionLoading === a.id ? 'Working...' : a.enabled ? 'Disable' : 'Enable'}
+                        {actionLoading === a.id ? 'Working...' : a.enabled ? 'Disable Plugin' : 'Enable Plugin'}
                       </button>
                     )}
-                    <button
-                      className="mem-btn"
-                      disabled={actionLoading === a.id}
-                      onClick={() => handleUninstall(a.id)}
-                      style={{ color: 'var(--mem-error)' }}
-                    >
-                      {actionLoading === a.id ? 'Working...' : 'Uninstall'}
-                    </button>
+                    {confirmUninstall === a.id ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--mem-error-soft)', borderRadius: 'var(--mem-radius-sm)' }}>
+                        <span style={{ fontSize: 12, color: 'var(--mem-error)' }}>This will remove the plugin and delete all conversation data. Continue?</span>
+                        <button className="mem-btn" style={{ color: 'var(--mem-error)', fontSize: 11 }} onClick={() => handleUninstall(a.id)}>
+                          Yes, Uninstall
+                        </button>
+                        <button className="mem-btn" style={{ fontSize: 11 }} onClick={() => setConfirmUninstall(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="mem-btn"
+                        disabled={actionLoading === a.id}
+                        onClick={() => setConfirmUninstall(a.id)}
+                        style={{ color: 'var(--mem-error)' }}
+                      >
+                        {actionLoading === a.id ? 'Working...' : 'Uninstall'}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>

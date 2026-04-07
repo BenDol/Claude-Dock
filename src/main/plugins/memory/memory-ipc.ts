@@ -63,14 +63,20 @@ export function registerMemoryIpc(): void {
     return getAllAdapterInfos()
   })
 
-  ipcMain.handle(IPC.MEMORY_SET_ADAPTER_ENABLED, (_event, adapterId: string, enabled: boolean) => {
+  ipcMain.handle(IPC.MEMORY_SET_ADAPTER_ENABLED, async (_event, adapterId: string, enabled: boolean) => {
     const adapter = getAdapter(adapterId)
     if (!adapter) return { success: false, error: 'Adapter not found' }
+
+    // For Claudest, use the Claude CLI to enable/disable the plugin in Claude Code
+    if (adapterId === 'claudest') {
+      const cmd = enabled ? 'enable' : 'disable'
+      const result = await runClaudeCli(['plugin', cmd, 'claude-memory'])
+      if (!result.success) return result
+    }
 
     setAdapterEnabled(adapterId, enabled)
 
     if (!enabled) {
-      // Close DB connection when disabled
       try { adapter.dispose() } catch { /* ok */ }
     }
 
@@ -140,9 +146,23 @@ export function registerMemoryIpc(): void {
     // Close DB connection first
     try { adapter.dispose() } catch { /* ok */ }
 
-    // For claudest, uninstall via CLI
+    // For claudest, uninstall plugin then remove database
     if (adapterId === 'claudest') {
       const result = await runClaudeCli(['plugin', 'uninstall', 'claude-memory'])
+      if (!result.success) return result
+
+      // Remove the memory database directory
+      const dbDir = require('path').join(require('os').homedir(), '.claude-memory')
+      try {
+        if (require('fs').existsSync(dbDir)) {
+          require('fs').rmSync(dbDir, { recursive: true, force: true })
+          svc().log(`[memory] removed database directory: ${dbDir}`)
+        }
+      } catch (err) {
+        svc().logError(`[memory] failed to remove database directory:`, err)
+        // Plugin was uninstalled, DB removal is best-effort
+      }
+
       return result
     }
 
