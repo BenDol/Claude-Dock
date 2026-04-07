@@ -1379,6 +1379,33 @@ function ManageView({ adapterId, onRefresh }: { adapterId?: string; onRefresh: (
       <h2 className="mem-page-title">Manage Memory</h2>
       <p className="mem-page-subtitle">Configure Claudest and run maintenance tasks</p>
 
+      {/* Onboarding banner */}
+      {!configLoading && !config.onboarding_completed && (
+        <div className="mem-section-card" style={{ marginBottom: 16, borderColor: 'var(--mem-accent)' }}>
+          <div className="mem-section-card-body" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24, flexShrink: 0 }}>{'\u{26A0}'}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 2 }}>Claudest needs to be configured</div>
+              <div className="mem-toggle-desc">Context injection and consolidation reminders are inactive until onboarding is completed. Enable recommended defaults to activate all features.</div>
+            </div>
+            <button className="mem-btn primary" style={{ whiteSpace: 'nowrap' }} onClick={async () => {
+              const defaults = {
+                onboarding_completed: true,
+                onboarding_version: 2,
+                auto_inject_context: true,
+                consolidation_reminder_enabled: true,
+                consolidation_min_hours: 24,
+                consolidation_min_sessions: 5,
+                max_context_sessions: 2,
+                logging_enabled: false
+              }
+              const result = await api.memory.setAdapterConfig(defaults, adapterId)
+              if (result.success) setConfig((prev) => ({ ...prev, ...defaults }))
+            }}>Enable Recommended Defaults</button>
+          </div>
+        </div>
+      )}
+
       {/* Configuration */}
       <div className="mem-section-card" style={{ marginBottom: 16 }}>
         <div className="mem-section-card-header">Configuration</div>
@@ -1387,6 +1414,23 @@ function ManageView({ adapterId, onRefresh }: { adapterId?: string; onRefresh: (
             <div className="mem-loading" style={{ padding: 12 }}><div className="mem-spinner" /> Loading...</div>
           ) : (
             <>
+              <div className="mem-manage-toggle">
+                <label className="mem-toggle-label">
+                  <input type="checkbox" checked={config.onboarding_completed === true} onChange={async (e) => {
+                    const val = e.target.checked
+                    if (val) {
+                      // Enable with recommended defaults
+                      const defaults = { onboarding_completed: true, onboarding_version: 2, auto_inject_context: true, consolidation_reminder_enabled: true }
+                      const result = await api.memory.setAdapterConfig(defaults, adapterId)
+                      if (result.success) setConfig((prev) => ({ ...prev, ...defaults }))
+                    } else {
+                      handleConfigToggle('onboarding_completed', false)
+                    }
+                  }} />
+                  <span>Onboarding completed</span>
+                </label>
+                <div className="mem-toggle-desc">Required for all Claudest features to activate. Disabling this pauses context injection and consolidation reminders.</div>
+              </div>
               <div className="mem-manage-toggle">
                 <label className="mem-toggle-label">
                   <input type="checkbox" checked={config.auto_inject_context !== false} onChange={(e) => handleConfigToggle('auto_inject_context', e.target.checked)} />
