@@ -181,7 +181,7 @@ export default function MemoryApp(): React.ReactElement {
           )}
         </div>
         <div className="mem-titlebar-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <button className="mem-titlebar-btn" onClick={() => api.memory.refresh(selectedAdapter).then(() => loadAdapters())} title="Refresh">
+          <button className="mem-titlebar-btn mem-toolbar-action" onClick={() => api.memory.refresh(selectedAdapter).then(() => loadAdapters())} title="Refresh">
             &#x21bb;
           </button>
           <div className="mem-titlebar-separator" />

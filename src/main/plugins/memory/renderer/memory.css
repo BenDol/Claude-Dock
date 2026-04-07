@@ -77,7 +77,7 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 
 .mem-titlebar-controls {
   display: flex;
-  gap: 4px;
+  align-self: stretch;
   margin-left: auto;
   -webkit-app-region: no-drag;
 }
@@ -87,16 +87,25 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
   border: none;
   color: var(--mem-text-secondary);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--mem-radius-sm);
-  font-size: 12px;
+  width: 46px;
+  height: 100%;
+  font-size: 13px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
 }
 .mem-titlebar-btn:hover { background: var(--mem-surface-hover); color: var(--mem-text); }
-.mem-titlebar-btn.close:hover { background: var(--mem-error-soft); color: var(--mem-error); }
+.mem-titlebar-btn.close:hover { background: #e81123; color: white; }
 .mem-titlebar-left { display: flex; align-items: center; gap: 12px; }
-.mem-titlebar-separator { width: 1px; align-self: stretch; background: var(--mem-border); margin: 0 4px; }
+.mem-titlebar-separator { width: 1px; align-self: stretch; background: var(--mem-border); }
+.mem-titlebar-btn.mem-toolbar-action {
+  width: auto;
+  padding: 4px 8px;
+  border-radius: var(--mem-radius-sm);
+  font-size: 14px;
+  margin: 0 4px;
+}
 
 .mem-body {
   display: flex;
