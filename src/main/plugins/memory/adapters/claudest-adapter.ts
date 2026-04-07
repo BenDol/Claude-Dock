@@ -29,11 +29,33 @@ import type {
   MemoryMessageListOptions
 } from '../../../../shared/memory-types'
 
-// Lazy-load better-sqlite3 to avoid hard crash if the native module isn't rebuilt
+// Lazy-load better-sqlite3 to avoid hard crash if the native module isn't rebuilt.
+// We resolve the native binding path explicitly because the `bindings` package
+// uses stack trace sniffing to find the caller's directory, which fails when
+// running from a standalone plugin override bundle (stack frames have no filename).
 let Database: typeof import('better-sqlite3')
+let nativeBindingPath: string | undefined
+
+/** Find the better_sqlite3.node binary by searching known locations. */
+function findNativeBinding(): string | undefined {
+  const candidates = [
+    // Standard node_modules location (dev mode)
+    path.join(__dirname, '..', '..', '..', '..', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+    // Packaged app (asar unpacked)
+    path.join(__dirname, '..', '..', '..', '..', '..', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+    // Relative to process resources
+    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
+  ]
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return candidate } catch { /* ignore */ }
+  }
+  return undefined
+}
+
 function getDatabase(): typeof import('better-sqlite3') {
   if (!Database) {
     Database = require('better-sqlite3')
+    nativeBindingPath = findNativeBinding()
   }
   return Database
 }
@@ -144,7 +166,11 @@ export class ClaudestAdapter implements MemoryAdapter {
 
     let db: import('better-sqlite3').Database
     try {
-      db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
+      // Use explicit nativeBinding path to bypass the `bindings` package's
+      // stack-trace sniffing, which crashes in standalone plugin override bundles.
+      const opts: any = { readonly: true, fileMustExist: true }
+      if (nativeBindingPath) opts.nativeBinding = nativeBindingPath
+      db = new Db(this.dbPath, opts)
     } catch (err) {
       throw new Error(`Failed to open database: ${err instanceof Error ? err.message : err}`)
     }
