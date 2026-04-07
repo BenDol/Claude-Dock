@@ -97,8 +97,8 @@ export default function MemoryApp(): React.ReactElement {
   // Zoom: Ctrl+MouseWheel and Ctrl++/- with persistence
   useEffect(() => {
     const ZOOM_KEY = 'memory-zoom'
-    const MIN_ZOOM = 0.5
-    const MAX_ZOOM = 2.0
+    const MIN_ZOOM = 0.6
+    const MAX_ZOOM = 1.6
     const STEP = 0.1
     const saved = localStorage.getItem(ZOOM_KEY)
     let zoom = saved ? parseFloat(saved) : 1

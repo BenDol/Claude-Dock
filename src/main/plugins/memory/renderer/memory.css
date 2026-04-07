@@ -43,11 +43,13 @@
 
 /* ── Layout ─────────────────────────────────────────────────────── */
 
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+
 .mem-app {
   font-family: var(--mem-font);
   background: var(--mem-bg);
   color: var(--mem-text);
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -99,6 +101,7 @@
 .mem-body {
   display: flex;
   flex: 1;
+  min-height: 0; /* allow flex children to shrink below content size */
   overflow: hidden;
 }
 
@@ -111,8 +114,12 @@
   border-right: 1px solid var(--mem-border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
+.mem-sidebar::-webkit-scrollbar { width: 4px; }
+.mem-sidebar::-webkit-scrollbar-track { background: transparent; }
+.mem-sidebar::-webkit-scrollbar-thumb { background: var(--mem-border); border-radius: 2px; }
 
 .mem-sidebar-section {
   padding: 12px 8px 4px;
@@ -245,9 +252,13 @@
   background: var(--mem-surface);
   border: 1px solid var(--mem-border-subtle);
   border-radius: var(--mem-radius);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   margin-bottom: 20px;
 }
+.mem-table-wrapper::-webkit-scrollbar { height: 6px; }
+.mem-table-wrapper::-webkit-scrollbar-track { background: transparent; }
+.mem-table-wrapper::-webkit-scrollbar-thumb { background: var(--mem-border); border-radius: 3px; }
 
 .mem-table {
   width: 100%;

@@ -38,24 +38,41 @@ let nativeBindingPath: string | undefined
 
 /** Find the better_sqlite3.node binary by searching known locations. */
 function findNativeBinding(): string | undefined {
-  const candidates = [
-    // Standard node_modules location (dev mode)
-    path.join(__dirname, '..', '..', '..', '..', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
-    // Packaged app (asar unpacked)
-    path.join(__dirname, '..', '..', '..', '..', '..', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
-    // Relative to process resources
-    path.join(process.resourcesPath || '', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
-  ]
+  const bindingName = 'better_sqlite3.node'
+  const candidates: string[] = []
+
+  // Try to resolve from the module itself first
+  try {
+    const modPath = require.resolve('better-sqlite3')
+    const modDir = path.dirname(modPath)
+    candidates.push(path.join(modDir, '..', 'build', 'Release', bindingName))
+    candidates.push(path.join(modDir, 'build', 'Release', bindingName))
+  } catch { /* not resolvable */ }
+
+  // Standard node_modules location (dev mode)
+  candidates.push(path.join(__dirname, '..', '..', '..', '..', 'node_modules', 'better-sqlite3', 'build', 'Release', bindingName))
+  // Packaged app (asar unpacked) — relative to __dirname
+  candidates.push(path.join(__dirname, '..', '..', '..', '..', '..', 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', bindingName))
+  // Packaged app — relative to process.resourcesPath
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'better-sqlite3', 'build', 'Release', bindingName))
+  }
+
   for (const candidate of candidates) {
-    try { if (fs.existsSync(candidate)) return candidate } catch { /* ignore */ }
+    try {
+      const resolved = path.resolve(candidate)
+      if (fs.existsSync(resolved)) return resolved
+    } catch { /* ignore */ }
   }
   return undefined
 }
 
 function getDatabase(): typeof import('better-sqlite3') {
   if (!Database) {
+    // Resolve native binding BEFORE requiring better-sqlite3, so it's ready
+    // for the nativeBinding option when constructing Database instances.
+    if (!nativeBindingPath) nativeBindingPath = findNativeBinding()
     Database = require('better-sqlite3')
-    nativeBindingPath = findNativeBinding()
   }
   return Database
 }
