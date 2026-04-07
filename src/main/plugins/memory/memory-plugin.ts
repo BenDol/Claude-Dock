@@ -9,7 +9,7 @@ export { setServices } from './services'
 export class MemoryPlugin implements DockPlugin {
   readonly id = 'memory'
   readonly name = 'Memory'
-  readonly description = 'View and inspect Claude memory tool storage (Claudest, etc.)'
+  readonly description = 'Persistent memory for Claude — browse sessions, search conversations, and track how Claude recalls context across sessions'
   readonly defaultEnabled = false
   get version(): string {
     try { return require('electron').app.getVersion() } catch { return '0.0.0' }

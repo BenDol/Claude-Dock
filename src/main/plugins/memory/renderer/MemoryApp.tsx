@@ -191,10 +191,14 @@ export default function MemoryApp(): React.ReactElement {
           ) : activeAdapterInfo && activeAdapterInfo.installed && !activeAdapterInfo.hasData ? (
             <div className="mem-empty">
               <div className="mem-empty-icon">{'\u{23F3}'}</div>
-              <div className="mem-empty-title">Waiting for Memory Data</div>
-              <div className="mem-empty-desc">
-                {activeAdapterInfo.name} is installed but no conversation database exists yet.<br />
-                Run a Claude session with the plugin active to create the database, then click Refresh.
+              <div className="mem-empty-title">Waiting for First Session</div>
+              <div className="mem-empty-desc" style={{ maxWidth: 480 }}>
+                {activeAdapterInfo.name} is installed and ready. Start a Claude Code session in any terminal
+                and the memory database will be created automatically.
+              </div>
+              <div className="mem-empty-desc" style={{ maxWidth: 480, marginTop: 8, fontSize: 12, color: 'var(--mem-text-muted)' }}>
+                Once populated, Claude will automatically recall relevant context from past conversations
+                at the start of each new session — no manual setup needed.
               </div>
               <button className="mem-btn primary" onClick={loadAdapters} style={{ marginTop: 16 }}>Refresh</button>
             </div>
@@ -281,10 +285,30 @@ function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.Re
   return (
     <div className="mem-empty">
       <div className="mem-empty-icon">{'\u{1F9E0}'}</div>
-      <div className="mem-empty-title">No Memory Tools Detected</div>
-      <div className="mem-empty-desc" style={{ marginBottom: 20 }}>
-        Install Claudest to start viewing your Claude conversation memory.
+      <div className="mem-empty-title">Enhance Claude with Persistent Memory</div>
+      <div className="mem-empty-desc" style={{ marginBottom: 12, maxWidth: 480 }}>
+        By default, Claude starts every session with a blank slate. <strong>Claudest</strong> changes that.
       </div>
+
+      <div className="mem-features" style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20, maxWidth: 480, textAlign: 'left' }}>
+        <div className="mem-feature-item" style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--mem-text-secondary)' }}>
+          <span style={{ color: 'var(--mem-accent)', flexShrink: 0 }}>{'\u{1F504}'}</span>
+          <span><strong>Automatic recall</strong> — Claude automatically retrieves relevant context from past conversations at the start of each session</span>
+        </div>
+        <div className="mem-feature-item" style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--mem-text-secondary)' }}>
+          <span style={{ color: 'var(--mem-accent)', flexShrink: 0 }}>{'\u{1F4BE}'}</span>
+          <span><strong>Persistent decisions</strong> — Architecture choices, naming conventions, and project context carry over between sessions</span>
+        </div>
+        <div className="mem-feature-item" style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--mem-text-secondary)' }}>
+          <span style={{ color: 'var(--mem-accent)', flexShrink: 0 }}>{'\u{1F50D}'}</span>
+          <span><strong>Full-text search</strong> — Search across all your past conversations and branch context summaries</span>
+        </div>
+        <div className="mem-feature-item" style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--mem-text-secondary)' }}>
+          <span style={{ color: 'var(--mem-accent)', flexShrink: 0 }}>{'\u{1F4CA}'}</span>
+          <span><strong>Usage insights</strong> — Track token spending, session patterns, and project activity over time</span>
+        </div>
+      </div>
+
       <button className="mem-btn primary" onClick={handleInstall} disabled={installing}>
         {installing ? 'Installing Claudest...' : 'Install Claudest'}
       </button>
@@ -293,7 +317,7 @@ function NoAdaptersView({ onInstalled }: { onInstalled?: () => void }): React.Re
       </div>
       <div className="mem-code-block" style={{ marginTop: 8, fontSize: 11, textAlign: 'left', maxWidth: 420 }}>
         <div>claude plugin marketplace add gupsammy/claudest</div>
-        <div>claude plugin install claude-memory@claudest</div>
+        <div>claude plugin install claude-memory@Claudest</div>
       </div>
       {result && (
         <>
@@ -1212,6 +1236,14 @@ function AdaptersView({ adapters, onRefresh }: { adapters: MemoryAdapterInfo[]; 
               </div>
 
               <div style={{ fontSize: 13, color: 'var(--mem-text-secondary)', marginBottom: 10 }}>{a.description}</div>
+
+              {/* How it works */}
+              {a.id === 'claudest' && (
+                <div style={{ fontSize: 12, color: 'var(--mem-text-muted)', marginBottom: 10, padding: '8px 10px', background: 'var(--mem-bg-elevated)', borderRadius: 6, lineHeight: 1.5 }}>
+                  <strong style={{ color: 'var(--mem-text-secondary)' }}>How it works:</strong> Claudest hooks into Claude Code as a plugin. After each session, it stores conversation summaries and context in a local SQLite database.
+                  At the start of a new session, it automatically injects relevant past context — so Claude remembers your project decisions, coding patterns, and prior discussions without you needing to re-explain them.
+                </div>
+              )}
 
               {/* Status details */}
               <div style={{ fontSize: 12, color: 'var(--mem-text-muted)', marginBottom: 10 }}>

@@ -92,7 +92,7 @@ export function registerMemoryIpc(): void {
     // We split on spaces and pass as args, but we need to handle the /plugin prefix.
     const results: { cmd: string; success: boolean; output?: string; error?: string }[] = []
     for (const cmd of commands) {
-      // Parse: "claude plugin install claude-memory@claudest" -> ["claude", "/plugin", "install", "claude-memory@claudest"]
+      // Parse: "claude plugin install claude-memory@Claudest" -> ["claude", "plugin", "install", "claude-memory@Claudest"]
       const parts = cmd.split(/\s+/)
       if (parts.length < 2 || parts[0] !== 'claude') {
         results.push({ cmd, success: false, error: 'Invalid command format' })

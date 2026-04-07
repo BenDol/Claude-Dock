@@ -52,7 +52,7 @@ const PLUGIN_SEARCH_PATHS = [
 
 const INSTALL_COMMANDS = [
   'claude plugin marketplace add gupsammy/claudest',
-  'claude plugin install claude-memory@claudest'
+  'claude plugin install claude-memory@Claudest'
 ]
 
 const SECTIONS: MemorySection[] = [
@@ -143,7 +143,7 @@ export class ClaudestAdapter implements MemoryAdapter {
     return {
       id: this.id,
       name: this.name,
-      description: 'Searchable conversation memory with SQLite storage, full-text search, and context injection',
+      description: 'Gives Claude persistent memory across sessions. Automatically recalls relevant past conversations, decisions, and context so Claude remembers what you discussed — even weeks later.',
       version: this.getClaudestVersion(),
       installed,
       enabled: hasData, // Functionally enabled when there's data to read
