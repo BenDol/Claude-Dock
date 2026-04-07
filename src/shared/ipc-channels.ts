@@ -275,6 +275,24 @@ export const IPC = {
   WORKSPACE_READ_FILE: 'workspace:readFile',
   WORKSPACE_WRITE_FILE: 'workspace:writeFile',
 
+  // Memory Plugin
+  MEMORY_OPEN: 'memory:open',
+  MEMORY_GET_ADAPTERS: 'memory:getAdapters',
+  MEMORY_SET_ADAPTER_ENABLED: 'memory:setAdapterEnabled',
+  MEMORY_GET_DASHBOARD: 'memory:getDashboard',
+  MEMORY_GET_PROJECTS: 'memory:getProjects',
+  MEMORY_GET_SESSIONS: 'memory:getSessions',
+  MEMORY_GET_SESSION: 'memory:getSession',
+  MEMORY_GET_BRANCHES: 'memory:getBranches',
+  MEMORY_GET_BRANCH: 'memory:getBranch',
+  MEMORY_GET_MESSAGES: 'memory:getMessages',
+  MEMORY_GET_TOKEN_SNAPSHOTS: 'memory:getTokenSnapshots',
+  MEMORY_GET_IMPORT_LOG: 'memory:getImportLog',
+  MEMORY_SEARCH: 'memory:search',
+  MEMORY_GET_CONTEXT_SUMMARY: 'memory:getContextSummary',
+  MEMORY_GET_DB_INFO: 'memory:getDbInfo',
+  MEMORY_REFRESH: 'memory:refresh',
+
   // Test Runner
   TEST_RUNNER_OPEN: 'testRunner:open',
   TEST_RUNNER_DETECT: 'testRunner:detect',

@@ -29,6 +29,22 @@ import type {
   CloudWorkloadDetail,
   CloudSetupStatus
 } from '../shared/cloud-types'
+import type {
+  MemoryAdapterInfo,
+  MemoryDashboardStats,
+  MemoryProject,
+  MemorySession,
+  MemoryBranch,
+  MemoryMessage,
+  MemoryTokenSnapshot,
+  MemoryImportLogEntry,
+  MemorySearchResult,
+  MemoryContextSummaryParsed,
+  MemorySessionListOptions,
+  MemoryBranchListOptions,
+  MemorySearchOptions,
+  MemoryMessageListOptions
+} from '../shared/memory-types'
 
 export interface UpdateInfo {
   available: boolean
@@ -356,6 +372,25 @@ export interface DockApi {
     reportCrash: (type: string, message: string, stack: string) => Promise<void>
     openDevTools: () => Promise<void>
     openLogs: () => Promise<void>
+  }
+  memory: {
+    open: (projectDir: string) => Promise<void>
+    getAdapters: () => Promise<MemoryAdapterInfo[]>
+    setAdapterEnabled: (adapterId: string, enabled: boolean) => Promise<{ success: boolean }>
+    getDashboard: (adapterId?: string) => Promise<MemoryDashboardStats | null>
+    getProjects: (adapterId?: string) => Promise<MemoryProject[]>
+    getSessions: (opts?: MemorySessionListOptions, adapterId?: string) => Promise<MemorySession[]>
+    getSession: (sessionId: number, adapterId?: string) => Promise<MemorySession | null>
+    getBranches: (opts?: MemoryBranchListOptions, adapterId?: string) => Promise<MemoryBranch[]>
+    getBranch: (branchId: number, adapterId?: string) => Promise<MemoryBranch | null>
+    getMessages: (opts: MemoryMessageListOptions, adapterId?: string) => Promise<MemoryMessage[]>
+    getTokenSnapshots: (sessionId?: number, adapterId?: string) => Promise<MemoryTokenSnapshot[]>
+    getImportLog: (adapterId?: string) => Promise<MemoryImportLogEntry[]>
+    search: (opts: MemorySearchOptions, adapterId?: string) => Promise<MemorySearchResult[]>
+    getContextSummary: (branchId: number, adapterId?: string) => Promise<MemoryContextSummaryParsed | null>
+    getDbInfo: (adapterId?: string) => Promise<{ path: string; sizeBytes: number; tables: { name: string; rowCount: number }[]; walSizeBytes: number } | null>
+    refresh: (adapterId?: string) => Promise<{ success: boolean }>
+    onReopen: (callback: () => void) => () => void
   }
   testRunner: {
     open: (projectDir: string) => Promise<void>
@@ -795,6 +830,29 @@ const dockApi: DockApi = {
     reportCrash: (type: string, message: string, stack: string) => ipcRenderer.invoke(IPC.DEBUG_REPORT_CRASH, type, message, stack),
     openDevTools: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_DEVTOOLS),
     openLogs: () => ipcRenderer.invoke(IPC.DEBUG_OPEN_LOGS)
+  },
+  memory: {
+    open: (projectDir) => ipcRenderer.invoke(IPC.MEMORY_OPEN, projectDir),
+    getAdapters: () => ipcRenderer.invoke(IPC.MEMORY_GET_ADAPTERS),
+    setAdapterEnabled: (adapterId, enabled) => ipcRenderer.invoke(IPC.MEMORY_SET_ADAPTER_ENABLED, adapterId, enabled),
+    getDashboard: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_DASHBOARD, adapterId),
+    getProjects: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_PROJECTS, adapterId),
+    getSessions: (opts?, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_SESSIONS, opts, adapterId),
+    getSession: (sessionId, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_SESSION, sessionId, adapterId),
+    getBranches: (opts?, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_BRANCHES, opts, adapterId),
+    getBranch: (branchId, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_BRANCH, branchId, adapterId),
+    getMessages: (opts, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_MESSAGES, opts, adapterId),
+    getTokenSnapshots: (sessionId?, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_TOKEN_SNAPSHOTS, sessionId, adapterId),
+    getImportLog: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_IMPORT_LOG, adapterId),
+    search: (opts, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_SEARCH, opts, adapterId),
+    getContextSummary: (branchId, adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_CONTEXT_SUMMARY, branchId, adapterId),
+    getDbInfo: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_GET_DB_INFO, adapterId),
+    refresh: (adapterId?) => ipcRenderer.invoke(IPC.MEMORY_REFRESH, adapterId),
+    onReopen: (callback) => {
+      const handler = () => callback()
+      ipcRenderer.on('memory:reopen', handler)
+      return () => ipcRenderer.removeListener('memory:reopen', handler)
+    }
   },
   testRunner: {
     open: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_OPEN, projectDir),

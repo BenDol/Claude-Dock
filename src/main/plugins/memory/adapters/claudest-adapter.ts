@@ -1,0 +1,588 @@
+/**
+ * Claudest Memory Adapter
+ *
+ * Reads from ~/.claude-memory/conversations.db (SQLite with WAL mode).
+ * This adapter is strictly read-only — it inspects the Claudest database
+ * but never writes to it. Uses better-sqlite3 for synchronous, fast queries.
+ */
+
+import * as path from 'path'
+import * as fs from 'fs'
+import * as os from 'os'
+import type { MemoryAdapter } from './memory-adapter'
+import type {
+  MemoryAdapterInfo,
+  MemorySection,
+  MemoryDashboardStats,
+  MemoryProject,
+  MemorySession,
+  MemoryBranch,
+  MemoryMessage,
+  MemoryTokenSnapshot,
+  MemoryImportLogEntry,
+  MemorySearchResult,
+  MemoryContextSummaryParsed,
+  MemorySessionListOptions,
+  MemoryBranchListOptions,
+  MemorySearchOptions,
+  MemoryMessageListOptions
+} from '../../../../shared/memory-types'
+
+// Lazy-load better-sqlite3 to avoid hard crash if the native module isn't rebuilt
+let Database: typeof import('better-sqlite3')
+function getDatabase(): typeof import('better-sqlite3') {
+  if (!Database) {
+    Database = require('better-sqlite3')
+  }
+  return Database
+}
+
+const CLAUDEST_DB_NAME = 'conversations.db'
+const CLAUDEST_DIR_NAME = '.claude-memory'
+
+const SECTIONS: MemorySection[] = [
+  { id: 'dashboard', label: 'Dashboard', description: 'Overview of memory statistics and recent activity' },
+  { id: 'sessions', label: 'Sessions', description: 'Browse conversation sessions' },
+  { id: 'branches', label: 'Branches', description: 'View conversation branches and context summaries' },
+  { id: 'search', label: 'Search', description: 'Full-text search across all conversations' },
+  { id: 'tokens', label: 'Token Usage', description: 'Token spending analytics and patterns' },
+  { id: 'database', label: 'Database', description: 'Raw database info and import log' }
+]
+
+export class ClaudestAdapter implements MemoryAdapter {
+  readonly id = 'claudest'
+  readonly name = 'Claudest'
+
+  private db: import('better-sqlite3').Database | null = null
+  private dbPath: string
+
+  constructor() {
+    this.dbPath = path.join(os.homedir(), CLAUDEST_DIR_NAME, CLAUDEST_DB_NAME)
+  }
+
+  // ── Connection Management ──────────────────────────────────────────────────
+
+  private getDb(): import('better-sqlite3').Database {
+    if (this.db) return this.db
+
+    const Db = getDatabase()
+    this.db = new Db(this.dbPath, { readonly: true, fileMustExist: true })
+    // Enable WAL mode reading without blocking Claudest's writes
+    this.db.pragma('journal_mode = WAL')
+    return this.db
+  }
+
+  private closeDb(): void {
+    if (this.db) {
+      try { this.db.close() } catch { /* ignore */ }
+      this.db = null
+    }
+  }
+
+  /**
+   * Check if a table exists in the database.
+   */
+  private tableExists(name: string): boolean {
+    try {
+      const row = this.getDb().prepare(
+        "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name=?"
+      ).get(name) as { cnt: number } | undefined
+      return (row?.cnt ?? 0) > 0
+    } catch {
+      return false
+    }
+  }
+
+  // ── Adapter Info ───────────────────────────────────────────────────────────
+
+  getInfo(): MemoryAdapterInfo {
+    const installed = fs.existsSync(this.dbPath)
+    let statusMessage = 'Not installed'
+    let storePath: string | null = null
+
+    if (installed) {
+      storePath = this.dbPath
+      try {
+        this.getDb()
+        statusMessage = 'Connected'
+      } catch (err) {
+        statusMessage = `Error: ${err instanceof Error ? err.message : String(err)}`
+      }
+    }
+
+    return {
+      id: this.id,
+      name: this.name,
+      description: 'Searchable conversation memory with SQLite storage, full-text search, and context injection',
+      version: this.getClaudestVersion(),
+      installed,
+      enabled: installed, // Auto-enable if installed
+      storePath,
+      statusMessage,
+      sections: SECTIONS
+    }
+  }
+
+  isAvailable(): boolean {
+    if (!fs.existsSync(this.dbPath)) return false
+    try {
+      this.getDb()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private getClaudestVersion(): string {
+    try {
+      const pluginJsonPath = path.join(os.homedir(), '.claude', 'plugins', 'claude-memory', 'plugin.json')
+      if (fs.existsSync(pluginJsonPath)) {
+        const pluginJson = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8'))
+        return pluginJson.version || 'unknown'
+      }
+    } catch { /* ignore */ }
+    return 'unknown'
+  }
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────
+
+  getDashboard(): MemoryDashboardStats {
+    const db = this.getDb()
+
+    const counts = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM projects) as totalProjects,
+        (SELECT COUNT(*) FROM sessions) as totalSessions,
+        (SELECT COUNT(*) FROM branches) as totalBranches,
+        (SELECT COUNT(*) FROM messages) as totalMessages
+    `).get() as any
+
+    // Token aggregates
+    let tokenStats = { totalTokensIn: 0, totalTokensOut: 0, totalCacheRead: 0, totalCacheCreation: 0, totalToolUses: 0, totalLinesModified: 0, averageSessionDuration: 0 }
+    if (this.tableExists('token_snapshots')) {
+      const ts = db.prepare(`
+        SELECT
+          COALESCE(SUM(input_tokens), 0) as totalTokensIn,
+          COALESCE(SUM(output_tokens), 0) as totalTokensOut,
+          COALESCE(SUM(cache_read_tokens), 0) as totalCacheRead,
+          COALESCE(SUM(cache_creation_tokens), 0) as totalCacheCreation,
+          COALESCE(SUM(tool_use_count), 0) as totalToolUses,
+          COALESCE(SUM(lines_modified), 0) as totalLinesModified,
+          COALESCE(AVG(duration), 0) as averageSessionDuration
+        FROM token_snapshots
+      `).get() as any
+      tokenStats = ts
+    }
+
+    // Recent sessions
+    const recentSessions = this.getSessions({ limit: 10, orderBy: 'recent' })
+
+    // Project breakdown
+    const projectBreakdown = db.prepare(`
+      SELECT p.name as project,
+             COUNT(DISTINCT s.id) as sessions,
+             COUNT(DISTINCT m.id) as messages
+      FROM projects p
+      LEFT JOIN sessions s ON s.project_id = p.id
+      LEFT JOIN branches b ON b.session_id = s.id
+      LEFT JOIN branch_messages bm ON bm.branch_id = b.id
+      LEFT JOIN messages m ON bm.message_id = m.id
+      GROUP BY p.id
+      ORDER BY sessions DESC
+    `).all() as any[]
+
+    // Daily activity (last 30 days)
+    const dailyActivity = db.prepare(`
+      SELECT DATE(b.started_at) as date,
+             COUNT(DISTINCT s.id) as sessions,
+             COUNT(DISTINCT m.id) as messages
+      FROM branches b
+      JOIN sessions s ON b.session_id = s.id
+      LEFT JOIN branch_messages bm ON bm.branch_id = b.id
+      LEFT JOIN messages m ON bm.message_id = m.id
+      WHERE b.started_at >= datetime('now', '-30 days')
+      GROUP BY DATE(b.started_at)
+      ORDER BY date DESC
+    `).all() as any[]
+
+    return {
+      totalProjects: counts.totalProjects,
+      totalSessions: counts.totalSessions,
+      totalBranches: counts.totalBranches,
+      totalMessages: counts.totalMessages,
+      totalTokensIn: tokenStats.totalTokensIn,
+      totalTokensOut: tokenStats.totalTokensOut,
+      totalCacheRead: tokenStats.totalCacheRead,
+      totalCacheCreation: tokenStats.totalCacheCreation,
+      totalToolUses: tokenStats.totalToolUses,
+      totalLinesModified: tokenStats.totalLinesModified,
+      averageSessionDuration: tokenStats.averageSessionDuration,
+      recentSessions,
+      projectBreakdown,
+      dailyActivity
+    }
+  }
+
+  // ── Projects ───────────────────────────────────────────────────────────────
+
+  getProjects(): MemoryProject[] {
+    return this.getDb().prepare(`
+      SELECT id, path, key, name, created_at as createdAt
+      FROM projects
+      ORDER BY created_at DESC
+    `).all() as MemoryProject[]
+  }
+
+  // ── Sessions ───────────────────────────────────────────────────────────────
+
+  getSessions(opts?: MemorySessionListOptions): MemorySession[] {
+    const limit = opts?.limit ?? 50
+    const offset = opts?.offset ?? 0
+    const orderBy = opts?.orderBy === 'oldest' ? 'ASC' : 'DESC'
+
+    let where = ''
+    const params: unknown[] = []
+    if (opts?.projectId != null) {
+      where = 'WHERE s.project_id = ?'
+      params.push(opts.projectId)
+    }
+
+    params.push(limit, offset)
+
+    return this.getDb().prepare(`
+      SELECT s.id, s.uuid, s.project_id as projectId,
+             p.name as projectName,
+             s.git_branch as gitBranch,
+             s.cwd, s.parent_session_id as parentSessionId,
+             s.created_at as createdAt,
+             (SELECT COUNT(*) FROM branches WHERE session_id = s.id) as branchCount
+      FROM sessions s
+      LEFT JOIN projects p ON s.project_id = p.id
+      ${where}
+      ORDER BY s.created_at ${orderBy}
+      LIMIT ? OFFSET ?
+    `).all(...params) as MemorySession[]
+  }
+
+  getSession(sessionId: number): MemorySession | null {
+    return this.getDb().prepare(`
+      SELECT s.id, s.uuid, s.project_id as projectId,
+             p.name as projectName,
+             s.git_branch as gitBranch,
+             s.cwd, s.parent_session_id as parentSessionId,
+             s.created_at as createdAt,
+             (SELECT COUNT(*) FROM branches WHERE session_id = s.id) as branchCount
+      FROM sessions s
+      LEFT JOIN projects p ON s.project_id = p.id
+      WHERE s.id = ?
+    `).get(sessionId) as MemorySession | null
+  }
+
+  // ── Branches ───────────────────────────────────────────────────────────────
+
+  getBranches(opts?: MemoryBranchListOptions): MemoryBranch[] {
+    const limit = opts?.limit ?? 50
+    const offset = opts?.offset ?? 0
+
+    const conditions: string[] = []
+    const params: unknown[] = []
+
+    if (opts?.sessionId != null) {
+      conditions.push('b.session_id = ?')
+      params.push(opts.sessionId)
+    }
+    if (opts?.activeOnly) {
+      conditions.push('b.is_active = 1')
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+    params.push(limit, offset)
+
+    return this.getDb().prepare(`
+      SELECT b.id, b.session_id as sessionId,
+             s.uuid as sessionUuid,
+             b.leaf_uuid as leafUuid,
+             b.fork_point_uuid as forkPointUuid,
+             b.is_active as isActive,
+             b.started_at as startedAt,
+             b.ended_at as endedAt,
+             b.files_modified as filesModified,
+             b.commits,
+             b.tool_counts as toolCounts,
+             b.context_summary as contextSummary,
+             b.context_summary_json as contextSummaryJson,
+             b.summary_version as summaryVersion,
+             (SELECT COUNT(*) FROM branch_messages WHERE branch_id = b.id) as messageCount,
+             COALESCE(
+               CAST(json_extract(b.context_summary_json, '$.metadata.exchange_count') AS INTEGER),
+               0
+             ) as exchangeCount
+      FROM branches b
+      JOIN sessions s ON b.session_id = s.id
+      ${where}
+      ORDER BY b.started_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params) as MemoryBranch[]
+  }
+
+  getBranch(branchId: number): MemoryBranch | null {
+    return this.getDb().prepare(`
+      SELECT b.id, b.session_id as sessionId,
+             s.uuid as sessionUuid,
+             b.leaf_uuid as leafUuid,
+             b.fork_point_uuid as forkPointUuid,
+             b.is_active as isActive,
+             b.started_at as startedAt,
+             b.ended_at as endedAt,
+             b.files_modified as filesModified,
+             b.commits,
+             b.tool_counts as toolCounts,
+             b.context_summary as contextSummary,
+             b.context_summary_json as contextSummaryJson,
+             b.summary_version as summaryVersion,
+             (SELECT COUNT(*) FROM branch_messages WHERE branch_id = b.id) as messageCount,
+             COALESCE(
+               CAST(json_extract(b.context_summary_json, '$.metadata.exchange_count') AS INTEGER),
+               0
+             ) as exchangeCount
+      FROM branches b
+      JOIN sessions s ON b.session_id = s.id
+      WHERE b.id = ?
+    `).get(branchId) as MemoryBranch | null
+  }
+
+  // ── Messages ───────────────────────────────────────────────────────────────
+
+  getMessages(opts: MemoryMessageListOptions): MemoryMessage[] {
+    const limit = opts.limit ?? 200
+    const offset = opts.offset ?? 0
+
+    const notifFilter = opts.excludeNotifications ? 'AND COALESCE(m.is_notification, 0) = 0' : ''
+
+    return this.getDb().prepare(`
+      SELECT m.id, m.uuid, m.parent_uuid as parentUuid,
+             m.role, m.content,
+             m.tool_summary as toolSummary,
+             COALESCE(m.has_tool_use, 0) as hasToolUse,
+             COALESCE(m.has_thinking, 0) as hasThinking,
+             COALESCE(m.is_notification, 0) as isNotification,
+             m.timestamp
+      FROM branch_messages bm
+      JOIN messages m ON bm.message_id = m.id
+      WHERE bm.branch_id = ? ${notifFilter}
+      ORDER BY m.timestamp ASC
+      LIMIT ? OFFSET ?
+    `).all(opts.branchId, limit, offset) as MemoryMessage[]
+  }
+
+  // ── Token Snapshots ────────────────────────────────────────────────────────
+
+  getTokenSnapshots(sessionId?: number): MemoryTokenSnapshot[] {
+    if (!this.tableExists('token_snapshots')) return []
+
+    if (sessionId != null) {
+      return this.getDb().prepare(`
+        SELECT ts.id, ts.session_id as sessionId,
+               s.uuid as sessionUuid,
+               ts.input_tokens as inputTokens,
+               ts.output_tokens as outputTokens,
+               ts.cache_creation_tokens as cacheCreationTokens,
+               ts.cache_read_tokens as cacheReadTokens,
+               ts.tool_use_count as toolUseCount,
+               ts.duration,
+               ts.lines_modified as linesModified,
+               ts.timestamp
+        FROM token_snapshots ts
+        JOIN sessions s ON ts.session_id = s.id
+        WHERE ts.session_id = ?
+        ORDER BY ts.timestamp DESC
+      `).all(sessionId) as MemoryTokenSnapshot[]
+    }
+
+    return this.getDb().prepare(`
+      SELECT ts.id, ts.session_id as sessionId,
+             s.uuid as sessionUuid,
+             ts.input_tokens as inputTokens,
+             ts.output_tokens as outputTokens,
+             ts.cache_creation_tokens as cacheCreationTokens,
+             ts.cache_read_tokens as cacheReadTokens,
+             ts.tool_use_count as toolUseCount,
+             ts.duration,
+             ts.lines_modified as linesModified,
+             ts.timestamp
+      FROM token_snapshots ts
+      JOIN sessions s ON ts.session_id = s.id
+      ORDER BY ts.timestamp DESC
+      LIMIT 500
+    `).all() as MemoryTokenSnapshot[]
+  }
+
+  // ── Import Log ─────────────────────────────────────────────────────────────
+
+  getImportLog(): MemoryImportLogEntry[] {
+    if (!this.tableExists('import_log')) return []
+
+    return this.getDb().prepare(`
+      SELECT id, path, file_hash as fileHash,
+             imported_at as importedAt,
+             message_count as messageCount
+      FROM import_log
+      ORDER BY imported_at DESC
+      LIMIT 100
+    `).all() as MemoryImportLogEntry[]
+  }
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+
+  search(opts: MemorySearchOptions): MemorySearchResult[] {
+    const limit = opts.limit ?? 20
+    // Sanitize query: strip FTS operators to prevent injection
+    const sanitized = opts.query.replace(/[*"(){}[\]^~:]/g, ' ').trim()
+    if (!sanitized) return []
+
+    const conditions: string[] = ['b.is_active = 1']
+    const params: unknown[] = [sanitized]
+
+    if (opts.projectName) {
+      conditions.push('p.name = ?')
+      params.push(opts.projectName)
+    }
+    if (opts.before) {
+      conditions.push('b.started_at <= ?')
+      params.push(opts.before)
+    }
+    if (opts.after) {
+      conditions.push('b.started_at >= ?')
+      params.push(opts.after)
+    }
+
+    params.push(limit)
+
+    // Try FTS5 first, fall back to LIKE
+    try {
+      if (this.tableExists('branches_fts')) {
+        return this.getDb().prepare(`
+          SELECT b.id as branchId,
+                 s.id as sessionId,
+                 s.uuid as sessionUuid,
+                 b.started_at as startedAt,
+                 b.ended_at as endedAt,
+                 p.name as projectName,
+                 s.git_branch as gitBranch,
+                 b.files_modified as filesModified,
+                 b.commits,
+                 snippet(branches_fts, 0, '<mark>', '</mark>', '...', 40) as snippet,
+                 bm25(branches_fts) as rank
+          FROM branches_fts
+          JOIN branches b ON branches_fts.rowid = b.id
+          JOIN sessions s ON b.session_id = s.id
+          JOIN projects p ON s.project_id = p.id
+          WHERE branches_fts MATCH ? AND ${conditions.join(' AND ')}
+          ORDER BY bm25(branches_fts)
+          LIMIT ?
+        `).all(...params) as MemorySearchResult[]
+      }
+    } catch {
+      // FTS5 not available — fall through to LIKE
+    }
+
+    // LIKE fallback
+    const likeParam = `%${sanitized}%`
+    const likeConditions = conditions.map(c => c === 'b.is_active = 1' ? c : c)
+    const likeParams = [likeParam, ...params.slice(1)]
+
+    return this.getDb().prepare(`
+      SELECT b.id as branchId,
+             s.id as sessionId,
+             s.uuid as sessionUuid,
+             b.started_at as startedAt,
+             b.ended_at as endedAt,
+             p.name as projectName,
+             s.git_branch as gitBranch,
+             b.files_modified as filesModified,
+             b.commits,
+             SUBSTR(b.aggregated_content, 1, 200) as snippet,
+             0 as rank
+      FROM branches b
+      JOIN sessions s ON b.session_id = s.id
+      JOIN projects p ON s.project_id = p.id
+      WHERE b.aggregated_content LIKE ? AND ${likeConditions.join(' AND ')}
+      ORDER BY b.started_at DESC
+      LIMIT ?
+    `).all(...likeParams) as MemorySearchResult[]
+  }
+
+  // ── Context Summaries ──────────────────────────────────────────────────────
+
+  getContextSummary(branchId: number): MemoryContextSummaryParsed | null {
+    const row = this.getDb().prepare(`
+      SELECT context_summary_json FROM branches WHERE id = ?
+    `).get(branchId) as { context_summary_json: string | null } | undefined
+
+    if (!row?.context_summary_json) return null
+
+    try {
+      const raw = JSON.parse(row.context_summary_json)
+      return {
+        version: raw.version ?? 1,
+        topic: raw.topic ?? '',
+        disposition: raw.disposition ?? 'COMPLETED',
+        markers: raw.markers ?? [],
+        firstExchanges: raw.first_exchanges ?? [],
+        lastExchanges: raw.last_exchanges ?? [],
+        metadata: {
+          exchangeCount: raw.metadata?.exchange_count ?? 0,
+          filesModified: raw.metadata?.files_modified ?? null,
+          commits: raw.metadata?.commits ?? null,
+          toolCounts: raw.metadata?.tool_counts ?? null,
+          startedAt: raw.metadata?.started_at ?? '',
+          endedAt: raw.metadata?.ended_at ?? '',
+          gitBranch: raw.metadata?.git_branch ?? ''
+        }
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // ── Database Info ──────────────────────────────────────────────────────────
+
+  getDbInfo(): { path: string; sizeBytes: number; tables: { name: string; rowCount: number }[]; walSizeBytes: number } | null {
+    if (!fs.existsSync(this.dbPath)) return null
+
+    try {
+      const stat = fs.statSync(this.dbPath)
+      const walPath = this.dbPath + '-wal'
+      const walSize = fs.existsSync(walPath) ? fs.statSync(walPath).size : 0
+
+      const tables = this.getDb().prepare(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
+        ORDER BY name
+      `).all() as { name: string }[]
+
+      const tableInfo = tables.map((t) => {
+        try {
+          const row = this.getDb().prepare(`SELECT COUNT(*) as cnt FROM "${t.name}"`).get() as { cnt: number }
+          return { name: t.name, rowCount: row.cnt }
+        } catch {
+          return { name: t.name, rowCount: -1 }
+        }
+      })
+
+      return {
+        path: this.dbPath,
+        sizeBytes: stat.size,
+        tables: tableInfo,
+        walSizeBytes: walSize
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+  dispose(): void {
+    this.closeDb()
+  }
+}
