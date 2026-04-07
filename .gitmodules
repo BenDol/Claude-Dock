@@ -2,9 +2,9 @@
 	path = telemetry
 	url = https://github.com/BenDol/Claude-Dock-Telemetry.git
 	update = none
-	dirty = ignore
+	ignore = all
 [submodule "crashes"]
 	path = crashes
 	url = https://github.com/BenDol/Claude-Dock-Crashes.git
 	update = none
-	dirty = ignore
+	ignore = all
