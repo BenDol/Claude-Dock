@@ -295,7 +295,8 @@ export function registerMemoryIpc(): void {
   })
 
   ipcMain.handle(IPC.MEMORY_GET_ADAPTER_CONFIG, (_event, adapterId?: string) => {
-    const adapter = getActiveAdapter(adapterId) as any
+    // Use getAdapter (not getActiveAdapter) — config must work even without a database
+    const adapter = (adapterId ? getAdapter(adapterId) : getAdapter('claudest')) as any
     if (!adapter?.getConfig) return {}
     try {
       return adapter.getConfig()
@@ -306,7 +307,7 @@ export function registerMemoryIpc(): void {
   })
 
   ipcMain.handle(IPC.MEMORY_SET_ADAPTER_CONFIG, (_event, updates: Record<string, unknown>, adapterId?: string) => {
-    const adapter = getActiveAdapter(adapterId) as any
+    const adapter = (adapterId ? getAdapter(adapterId) : getAdapter('claudest')) as any
     if (!adapter?.setConfig) return { success: false, error: 'Adapter does not support config' }
     try {
       return adapter.setConfig(updates)
@@ -317,7 +318,8 @@ export function registerMemoryIpc(): void {
   })
 
   ipcMain.handle(IPC.MEMORY_RUN_MAINTENANCE, async (_event, action: string, adapterId?: string) => {
-    const adapter = getActiveAdapter(adapterId) as any
+    // Use getAdapter (not getActiveAdapter) — maintenance must work even without a database (e.g. initial import)
+    const adapter = (adapterId ? getAdapter(adapterId) : getAdapter('claudest')) as any
     if (!adapter?.runMaintenance) return { success: false, error: 'Adapter does not support maintenance' }
     svc().log(`[memory] running maintenance action: ${action}`)
     try {
