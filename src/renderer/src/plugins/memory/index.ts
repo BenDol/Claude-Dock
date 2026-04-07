@@ -40,16 +40,6 @@ registerToolbarAction({
   icon: React.createElement(BrainIcon),
   onClick: (projectDir) => getDockApi().memory.open(projectDir),
   order: 55,
-  getBadge: async () => {
-    try {
-      const adapters = await getDockApi().memory.getAdapters()
-      const available = adapters.filter(a => a.installed)
-      if (available.length === 0) return null
-      return available.length
-    } catch {
-      return null
-    }
-  },
   getStatusDot: async () => {
     try {
       const adapters = await getDockApi().memory.getAdapters()

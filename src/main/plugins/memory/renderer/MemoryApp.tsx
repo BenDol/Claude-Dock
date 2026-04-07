@@ -161,16 +161,26 @@ export default function MemoryApp(): React.ReactElement {
           {/* Navigation */}
           <div className="mem-sidebar-section">
             <div className="mem-sidebar-label">Views</div>
-            {(activeAdapterInfo?.sections ?? []).map((section) => (
+            {(activeAdapterInfo?.sections ?? []).length > 0 ? (
+              (activeAdapterInfo?.sections ?? []).map((section) => (
+                <button
+                  key={section.id}
+                  className={`mem-sidebar-item ${activeView === section.id ? 'active' : ''}`}
+                  onClick={() => { setActiveView(section.id as ViewId); setSelectedSessionId(null); setSelectedBranchId(null) }}
+                >
+                  <span className="mem-sidebar-icon">{sectionIcon(section.id)}</span>
+                  {section.label}
+                </button>
+              ))
+            ) : (
               <button
-                key={section.id}
-                className={`mem-sidebar-item ${activeView === section.id ? 'active' : ''}`}
-                onClick={() => { setActiveView(section.id as ViewId); setSelectedSessionId(null); setSelectedBranchId(null) }}
+                className={`mem-sidebar-item ${activeView === 'dashboard' ? 'active' : ''}`}
+                onClick={() => { setActiveView('dashboard'); setSelectedSessionId(null); setSelectedBranchId(null) }}
               >
-                <span className="mem-sidebar-icon">{sectionIcon(section.id)}</span>
-                {section.label}
+                <span className="mem-sidebar-icon">{sectionIcon('dashboard')}</span>
+                Dashboard
               </button>
-            ))}
+            )}
           </div>
 
           <div className="mem-sidebar-section" style={{ marginTop: 'auto' }}>
