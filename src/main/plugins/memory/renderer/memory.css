@@ -93,6 +93,8 @@
 }
 .mem-titlebar-btn:hover { background: var(--mem-surface-hover); color: var(--mem-text); }
 .mem-titlebar-btn.close:hover { background: var(--mem-error-soft); color: var(--mem-error); }
+.mem-titlebar-left { display: flex; align-items: center; gap: 12px; }
+.mem-titlebar-separator { width: 1px; height: 16px; background: var(--mem-border); margin: 0 4px; }
 
 .mem-body {
   display: flex;
