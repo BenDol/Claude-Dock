@@ -363,9 +363,9 @@ export class ClaudestAdapter implements MemoryAdapter {
           COALESCE(SUM(output_tokens), 0) as totalTokensOut,
           COALESCE(SUM(cache_read_tokens), 0) as totalCacheRead,
           COALESCE(SUM(cache_creation_tokens), 0) as totalCacheCreation,
-          COALESCE(SUM(tool_use_count), 0) as totalToolUses,
-          COALESCE(SUM(lines_modified), 0) as totalLinesModified,
-          COALESCE(AVG(duration), 0) as averageSessionDuration
+          COALESCE(SUM(user_message_count + assistant_message_count), 0) as totalToolUses,
+          COALESCE(SUM(lines_added + lines_removed), 0) as totalLinesModified,
+          COALESCE(AVG(duration_minutes), 0) as averageSessionDuration
         FROM token_snapshots
       `).get() as any
       tokenStats = ts
@@ -451,12 +451,12 @@ export class ClaudestAdapter implements MemoryAdapter {
              p.name as projectName,
              s.git_branch as gitBranch,
              s.cwd, s.parent_session_id as parentSessionId,
-             s.created_at as createdAt,
+             s.imported_at as createdAt,
              (SELECT COUNT(*) FROM branches WHERE session_id = s.id) as branchCount
       FROM sessions s
       LEFT JOIN projects p ON s.project_id = p.id
       ${where}
-      ORDER BY s.created_at ${orderBy}
+      ORDER BY s.imported_at ${orderBy}
       LIMIT ? OFFSET ?
     `).all(...params) as MemorySession[]
   }
@@ -467,7 +467,7 @@ export class ClaudestAdapter implements MemoryAdapter {
              p.name as projectName,
              s.git_branch as gitBranch,
              s.cwd, s.parent_session_id as parentSessionId,
-             s.created_at as createdAt,
+             s.imported_at as createdAt,
              (SELECT COUNT(*) FROM branches WHERE session_id = s.id) as branchCount
       FROM sessions s
       LEFT JOIN projects p ON s.project_id = p.id
@@ -579,37 +579,37 @@ export class ClaudestAdapter implements MemoryAdapter {
 
     if (sessionId != null) {
       return this.getDb().prepare(`
-        SELECT ts.id, ts.session_id as sessionId,
-               s.uuid as sessionUuid,
+        SELECT ts.id, s.id as sessionId,
+               ts.session_uuid as sessionUuid,
                ts.input_tokens as inputTokens,
                ts.output_tokens as outputTokens,
                ts.cache_creation_tokens as cacheCreationTokens,
                ts.cache_read_tokens as cacheReadTokens,
-               ts.tool_use_count as toolUseCount,
-               ts.duration,
-               ts.lines_modified as linesModified,
-               ts.timestamp
+               COALESCE(ts.user_message_count + ts.assistant_message_count, 0) as toolUseCount,
+               ts.duration_minutes as duration,
+               COALESCE(ts.lines_added + ts.lines_removed, 0) as linesModified,
+               ts.start_time as timestamp
         FROM token_snapshots ts
-        JOIN sessions s ON ts.session_id = s.id
-        WHERE ts.session_id = ?
-        ORDER BY ts.timestamp DESC
+        LEFT JOIN sessions s ON ts.session_uuid = s.uuid
+        WHERE s.id = ?
+        ORDER BY ts.start_time DESC
       `).all(sessionId) as MemoryTokenSnapshot[]
     }
 
     return this.getDb().prepare(`
-      SELECT ts.id, ts.session_id as sessionId,
-             s.uuid as sessionUuid,
+      SELECT ts.id, s.id as sessionId,
+             ts.session_uuid as sessionUuid,
              ts.input_tokens as inputTokens,
              ts.output_tokens as outputTokens,
              ts.cache_creation_tokens as cacheCreationTokens,
              ts.cache_read_tokens as cacheReadTokens,
-             ts.tool_use_count as toolUseCount,
-             ts.duration,
-             ts.lines_modified as linesModified,
-             ts.timestamp
+             COALESCE(ts.user_message_count + ts.assistant_message_count, 0) as toolUseCount,
+             ts.duration_minutes as duration,
+             COALESCE(ts.lines_added + ts.lines_removed, 0) as linesModified,
+             ts.start_time as timestamp
       FROM token_snapshots ts
-      JOIN sessions s ON ts.session_id = s.id
-      ORDER BY ts.timestamp DESC
+      LEFT JOIN sessions s ON ts.session_uuid = s.uuid
+      ORDER BY ts.start_time DESC
       LIMIT 500
     `).all() as MemoryTokenSnapshot[]
   }
@@ -620,9 +620,9 @@ export class ClaudestAdapter implements MemoryAdapter {
     if (!this.tableExists('import_log')) return []
 
     return this.getDb().prepare(`
-      SELECT id, path, file_hash as fileHash,
+      SELECT id, file_path as path, file_hash as fileHash,
              imported_at as importedAt,
-             message_count as messageCount
+             messages_imported as messageCount
       FROM import_log
       ORDER BY imported_at DESC
       LIMIT 100
