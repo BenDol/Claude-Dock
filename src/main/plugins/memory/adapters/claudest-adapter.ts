@@ -9,6 +9,7 @@
 import * as path from 'path'
 import * as fs from 'fs'
 import * as os from 'os'
+import { execFileSync } from 'child_process'
 import type { MemoryAdapter } from './memory-adapter'
 import type {
   MemoryAdapterInfo,
@@ -63,6 +64,56 @@ const SECTIONS: MemorySection[] = [
   { id: 'tokens', label: 'Token Usage', description: 'Token spending analytics and patterns' },
   { id: 'database', label: 'Database', description: 'Raw database info and import log' }
 ]
+
+// ── Python environment ──────────────────────────────────────────────────────
+// Resolve a working Python binary and maintain an isolated venv for scripts.
+
+const VENV_DIR = path.join(os.homedir(), CLAUDEST_DIR_NAME, '.venv')
+
+/** Find a working Python >= 3 binary on the system. */
+function findSystemPython(): string | null {
+  // On Windows: 'python' is usually the real install, 'py' is the launcher,
+  // 'python3' is often the broken Microsoft Store alias.
+  const candidates = process.platform === 'win32'
+    ? ['python', 'py', 'python3']
+    : ['python3', 'python']
+
+  for (const cmd of candidates) {
+    try {
+      const ver = execFileSync(cmd, ['--version'], { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+      // Verify it's Python 3+
+      if (/Python 3\.\d+/.test(ver)) return cmd
+    } catch { /* not found or broken alias */ }
+  }
+  return null
+}
+
+/** Ensure the isolated venv exists. Creates it if missing. Returns venv Python path. */
+function ensureVenv(): string | null {
+  const venvPython = process.platform === 'win32'
+    ? path.join(VENV_DIR, 'Scripts', 'python.exe')
+    : path.join(VENV_DIR, 'bin', 'python3')
+
+  // Already set up
+  if (fs.existsSync(venvPython)) return venvPython
+
+  const systemPython = findSystemPython()
+  if (!systemPython) return null
+
+  try {
+    // Create venv (stdlib only — no pip needed since Claudest uses only stdlib)
+    const memDir = path.join(os.homedir(), CLAUDEST_DIR_NAME)
+    if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true })
+    execFileSync(systemPython, ['-m', 'venv', '--without-pip', VENV_DIR], { timeout: 30_000, stdio: 'pipe' })
+    if (fs.existsSync(venvPython)) return venvPython
+  } catch { /* venv creation failed */ }
+  return null
+}
+
+/** Get the Python binary to use. Prefers venv, falls back to system Python. */
+function getPython(): string {
+  return ensureVenv() || findSystemPython() || 'python'
+}
 
 export class ClaudestAdapter implements MemoryAdapter {
   readonly id = 'claudest'
@@ -710,7 +761,7 @@ export class ClaudestAdapter implements MemoryAdapter {
     if (!pluginDir) return { success: false, error: 'Claudest plugin directory not found' }
 
     const { execFile } = require('child_process') as typeof import('child_process')
-    const python = process.platform === 'win32' ? 'python3' : 'python3'
+    const python = getPython()
 
     let script: string
     let args: string[] = []
