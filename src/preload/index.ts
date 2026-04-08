@@ -230,7 +230,7 @@ export interface DockApi {
     stashDrop: (projectDir: string, index: number) => Promise<{ success: boolean; error?: string }>
     getSubmodules: (projectDir: string) => Promise<GitSubmoduleInfo[]>
     getSubmoduleList: (projectDir: string) => Promise<GitSubmoduleInfo[]>
-    onSubmoduleListRefreshed: (callback: (list: GitSubmoduleInfo[]) => void) => () => void
+    onSubmoduleListRefreshed: (callback: (projectDir: string, list: GitSubmoduleInfo[]) => void) => () => void
     refreshSubmodule: (projectDir: string, subPath: string) => Promise<Partial<GitSubmoduleInfo> | null>
     generateCommitMsg: (projectDir: string) => Promise<{ success: boolean; message?: string; error?: string }>
     reset: (projectDir: string, hash: string, mode: string) => Promise<{ success: boolean; error?: string }>
@@ -634,7 +634,7 @@ const dockApi: DockApi = {
     getSubmodules: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SUBMODULES, projectDir),
     getSubmoduleList: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GET_SUBMODULE_LIST, projectDir),
     onSubmoduleListRefreshed: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, list: GitSubmoduleInfo[]) => callback(list)
+      const handler = (_event: Electron.IpcRendererEvent, projectDir: string, list: GitSubmoduleInfo[]) => callback(projectDir, list)
       ipcRenderer.on('gitManager:submoduleListRefreshed', handler)
       return () => ipcRenderer.removeListener('gitManager:submoduleListRefreshed', handler)
     },

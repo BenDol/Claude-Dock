@@ -343,7 +343,7 @@ export function registerGitManagerIpc(): void {
           const fresh = await gitOps.getSubmoduleList(projectDir)
           try {
             const wc = event.sender
-            if (!wc.isDestroyed()) wc.send('gitManager:submoduleListRefreshed', fresh)
+            if (!wc.isDestroyed()) wc.send('gitManager:submoduleListRefreshed', projectDir, fresh)
           } catch { /* window gone */ }
         } catch { /* ignore background refresh failure */ }
       })

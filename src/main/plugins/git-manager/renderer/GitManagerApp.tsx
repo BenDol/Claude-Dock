@@ -1025,7 +1025,9 @@ const GitManagerApp: React.FC = () => {
   // Listen for background submodule list refresh (cache was served, fresh scan arrived)
   useEffect(() => {
     if (!activeDir) return
-    const cleanup = getDockApi().gitManager.onSubmoduleListRefreshed((freshList) => {
+    const cleanup = getDockApi().gitManager.onSubmoduleListRefreshed((projectDir, freshList) => {
+      // Ignore stale events from a directory we've already navigated away from
+      if (projectDir !== activeDir) return
       setSubmodules((prev) => {
         // Only update if we haven't already been enriched (enriched entries have branch set)
         const alreadyEnriched = prev.length > 0 && prev.some((s) => s.branch != null)
@@ -1545,8 +1547,9 @@ const GitManagerApp: React.FC = () => {
         if (entry.subPath) {
           const subPathToRefresh = entry.subPath
           const parentDir = entry.dir
+          const subGen = submoduleGenRef.current
           getDockApi().gitManager.refreshSubmodule(parentDir, subPathToRefresh).then((patch) => {
-            if (patch) {
+            if (patch && subGen === submoduleGenRef.current) {
               setSubmodules((subs) =>
                 subs.map((s) => s.path === subPathToRefresh ? { ...s, ...patch } : s)
               )
