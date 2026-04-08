@@ -6,6 +6,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { loader } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import type * as MonacoNS from 'monaco-editor'
+import { marked } from 'marked'
+import hljs from 'highlight.js'
 import { useEditorStore, isBinaryFile } from '../stores/editor-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useDockStore } from '../stores/dock-store'
@@ -60,31 +62,37 @@ let langServicesInited = false
 
 // ── Markdown Preview ─────────────────────────────────────────────────────────
 
-let markedInstance: any = null
-function getMarked(): any {
-  if (!markedInstance) {
-    const { marked } = require('marked')
-    const hljs = require('highlight.js')
-    marked.setOptions({
-      gfm: true,
-      breaks: true,
-      highlight(code: string, lang: string) {
+let markedConfigured = false
+function ensureMarkedConfigured(): void {
+  if (markedConfigured) return
+  markedConfigured = true
+  marked.setOptions({
+    gfm: true,
+    breaks: true
+  })
+  // Use marked.use() for the highlight extension (v14+ API)
+  marked.use({
+    renderer: {
+      code(token: any) {
+        const code = typeof token === 'string' ? token : (token?.text ?? '')
+        const lang = typeof token === 'string' ? '' : (token?.lang ?? '')
+        let highlighted = code
         if (lang && hljs.getLanguage(lang)) {
-          try { return hljs.highlight(code, { language: lang }).value } catch { /* fallback */ }
+          try { highlighted = hljs.highlight(code, { language: lang }).value } catch { /* fallback */ }
+        } else {
+          try { highlighted = hljs.highlightAuto(code).value } catch { /* fallback */ }
         }
-        try { return hljs.highlightAuto(code).value } catch { /* fallback */ }
-        return code
+        return `<pre><code class="hljs${lang ? ` language-${lang}` : ''}">${highlighted}</code></pre>`
       }
-    })
-    markedInstance = marked
-  }
-  return markedInstance
+    }
+  })
 }
 
 const MarkdownPreview: React.FC<{ content: string }> = React.memo(({ content }) => {
   const html = useMemo(() => {
     try {
-      return getMarked().parse(content) as string
+      ensureMarkedConfigured()
+      return marked.parse(content) as string
     } catch {
       return '<p>Failed to render markdown</p>'
     }
