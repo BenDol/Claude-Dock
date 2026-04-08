@@ -2,7 +2,7 @@
  * EditorOverlay — Monaco Editor with tab bar, rendered over the terminal grid.
  * Lazy-loaded via React.lazy() from DockPanelLayout.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { loader } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import type * as MonacoNS from 'monaco-editor'
@@ -58,6 +58,47 @@ const MAX_WORKSPACE_MODELS = 80
 // because Monaco's global state (models, extraLibs, providers) is never torn down.
 let langServicesInited = false
 
+// ── Markdown Preview ─────────────────────────────────────────────────────────
+
+let markedInstance: any = null
+function getMarked(): any {
+  if (!markedInstance) {
+    const { marked } = require('marked')
+    const hljs = require('highlight.js')
+    marked.setOptions({
+      gfm: true,
+      breaks: true,
+      highlight(code: string, lang: string) {
+        if (lang && hljs.getLanguage(lang)) {
+          try { return hljs.highlight(code, { language: lang }).value } catch { /* fallback */ }
+        }
+        try { return hljs.highlightAuto(code).value } catch { /* fallback */ }
+        return code
+      }
+    })
+    markedInstance = marked
+  }
+  return markedInstance
+}
+
+const MarkdownPreview: React.FC<{ content: string }> = React.memo(({ content }) => {
+  const html = useMemo(() => {
+    try {
+      return getMarked().parse(content) as string
+    } catch {
+      return '<p>Failed to render markdown</p>'
+    }
+  }, [content])
+
+  return (
+    <div className="editor-preview-panel">
+      <div className="editor-preview-content" dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
+  )
+})
+
+// ── Editor ───────────────────────────────────────────────────────────────────
+
 const EditorOverlay: React.FC = () => {
   const tabs = useEditorStore((s) => s.tabs)
   const activeTabId = useEditorStore((s) => s.activeTabId)
@@ -86,6 +127,7 @@ const EditorOverlay: React.FC = () => {
   const dragStartPos = useRef<{ x: number; y: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [previewMode, setPreviewMode] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const [fontSize, setFontSize] = useState(() => {
     try {
@@ -309,6 +351,12 @@ const EditorOverlay: React.FC = () => {
         e.preventDefault()
         const { activeTabId: id } = useEditorStore.getState()
         if (id) handleCloseTab(id)
+      }
+      // Ctrl+Shift+V = toggle markdown preview
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
+        e.preventDefault()
+        const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId)
+        if (tab?.language === 'markdown') setPreviewMode((p) => !p)
       }
       // Alt+Left = navigate back, Alt+Right = navigate forward
       if (e.altKey && e.key === 'ArrowLeft') {
@@ -553,6 +601,15 @@ const EditorOverlay: React.FC = () => {
           )
         })}
         <div className="editor-tab-spacer" />
+        {activeTab?.language === 'markdown' && (
+          <button
+            className={`editor-nav-btn editor-preview-btn${previewMode ? ' editor-preview-btn-active' : ''}`}
+            onClick={() => setPreviewMode((p) => !p)}
+            title={previewMode ? 'Show source (Ctrl+Shift+V)' : 'Preview markdown (Ctrl+Shift+V)'}
+          >
+            {previewMode ? '\u{2328}' : '\u{1F441}'}
+          </button>
+        )}
         <button className="editor-nav-btn" onClick={handleNavBack} disabled={navBackCount === 0} title="Go Back (Alt+Left / Mouse4)">&#8592;</button>
         <button className="editor-nav-btn" onClick={handleNavForward} disabled={navForwardCount === 0} title="Go Forward (Alt+Right / Mouse5)">&#8594;</button>
         {saving && <span className="editor-saving">Saving...</span>}
@@ -563,32 +620,36 @@ const EditorOverlay: React.FC = () => {
       {/* Editor body */}
       <div className="editor-body">
         {activeTab ? (
-          <Editor
-            path={activeTab.relativePath}
-            theme={theme}
-            language={activeTab.language}
-            defaultValue={activeTab.content}
-            onChange={handleEditorChange}
-            onMount={handleEditorMount}
-            saveViewState={true}
-            loading={<div className="editor-loading">Loading editor...</div>}
-            options={{
-              fontSize,
-              fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
-              minimap: { enabled: true },
-              scrollBeyondLastLine: false,
-              wordWrap: 'off',
-              tabSize: 2,
-              renderWhitespace: 'selection',
-              bracketPairColorization: { enabled: true },
-              autoIndent: 'full',
-              formatOnPaste: false,
-              formatOnType: false,
-              smoothScrolling: true,
-              cursorBlinking: 'smooth',
-              padding: { top: 8 }
-            }}
-          />
+          previewMode && activeTab.language === 'markdown' ? (
+            <MarkdownPreview content={activeTab.content} />
+          ) : (
+            <Editor
+              path={activeTab.relativePath}
+              theme={theme}
+              language={activeTab.language}
+              defaultValue={activeTab.content}
+              onChange={handleEditorChange}
+              onMount={handleEditorMount}
+              saveViewState={true}
+              loading={<div className="editor-loading">Loading editor...</div>}
+              options={{
+                fontSize,
+                fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace",
+                minimap: { enabled: true },
+                scrollBeyondLastLine: false,
+                wordWrap: 'off',
+                tabSize: 2,
+                renderWhitespace: 'selection',
+                bracketPairColorization: { enabled: true },
+                autoIndent: 'full',
+                formatOnPaste: false,
+                formatOnType: false,
+                smoothScrolling: true,
+                cursorBlinking: 'smooth',
+                padding: { top: 8 }
+              }}
+            />
+          )
         ) : (
           <div className="editor-loading">Select a tab to edit</div>
         )}

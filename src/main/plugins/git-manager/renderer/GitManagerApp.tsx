@@ -1146,18 +1146,14 @@ const GitManagerApp: React.FC = () => {
     return () => { if (timer) clearInterval(timer) }
   }, [activeDir, refresh])
 
-  // Refresh when the toolbar button re-opens an already-open window
-  // Also reset to the main repo if we were navigated into a submodule
+  // Refresh when the toolbar button re-opens an already-open window.
+  // Stay in the current submodule/worktree — don't reset navigation.
   useEffect(() => {
     return getDockApi().gitManager.onReopen(() => {
       wcBusyRef.current = false
-      if (activeDir !== projectDir) {
-        setActiveDir(projectDir)
-        setNavStack([])
-      }
       refresh()
     })
-  }, [refresh, activeDir, projectDir])
+  }, [refresh])
 
   const selectCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectCommitGen = useRef(0)
@@ -1660,8 +1656,8 @@ const GitManagerApp: React.FC = () => {
           <button className="gm-toolbar-btn" onClick={() => api.app.openInExplorer(activeDir)} title="Open in Explorer">
             <OpenFolderIcon />
           </button>
-          <SettingsDropdown projectDir={activeDir} />
-          <NotificationPanel projectDir={activeDir} provider={repoProvider} />
+          <SettingsDropdown projectDir={projectDir} />
+          <NotificationPanel projectDir={projectDir} provider={repoProvider} />
           <div className="toolbar-separator" />
           <div className="gm-win-controls">
             <button className="win-btn win-minimize" onClick={() => api.win.minimize()}>&#x2015;</button>
@@ -2127,6 +2123,7 @@ const GitManagerApp: React.FC = () => {
                 status={status}
                 stashes={stashes}
                 projectDir={activeDir}
+                settingsDir={projectDir}
                 syntaxHL={syntaxHL}
                 active={activeTab === 'changes'}
                 navigateTo={wcNavigateTo}
@@ -5144,6 +5141,7 @@ const WorkingChanges: React.FC<{
   status: GitStatusResult | null
   stashes: GitStashEntry[]
   projectDir: string
+  settingsDir: string
   syntaxHL: boolean
   active?: boolean
   navigateTo?: { path: string; staged: boolean; lineNumber?: number } | null
@@ -5156,7 +5154,7 @@ const WorkingChanges: React.FC<{
   onBusyChange?: (busy: boolean) => void
   onPushStateChange?: (pushing: boolean) => void
   pushCancelledRef?: React.RefObject<boolean>
-}> = React.memo(({ status: parentStatus, stashes, projectDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange, onPushStateChange, pushCancelledRef }) => {
+}> = React.memo(({ status: parentStatus, stashes, projectDir, settingsDir, syntaxHL, active, navigateTo, onNavigateHandled, onRefresh, onError, onConfirm, onCommitted, onStatusRefreshed, onBusyChange, onPushStateChange, pushCancelledRef }) => {
   const [localStatus, setLocalStatus] = useState<GitStatusResult | null>(null)
   const status = localStatus || parentStatus
   const [commitMsg, setCommitMsg] = useState(() => {
@@ -5244,7 +5242,7 @@ const WorkingChanges: React.FC<{
       }
     }
 
-    api.plugins.getSetting(projectDir, 'git-manager', 'changesRefreshSeconds').then((val) => {
+    api.plugins.getSetting(settingsDir, 'git-manager', 'changesRefreshSeconds').then((val) => {
       seconds = typeof val === 'number' ? val : 5
       if (seconds <= 0) return
       timer = setInterval(poll, seconds * 1000)
@@ -5255,7 +5253,7 @@ const WorkingChanges: React.FC<{
       if (timer) clearInterval(timer)
       window.removeEventListener('focus', onFocus)
     }
-  }, [projectDir, refreshStatus])
+  }, [projectDir, settingsDir, refreshStatus])
 
   // Persist commit message to localStorage
   useEffect(() => {
@@ -5266,9 +5264,9 @@ const WorkingChanges: React.FC<{
 
   // Load auto-generate setting on mount (default: true per plugin schema)
   useEffect(() => {
-    getDockApi().plugins.getSetting(projectDir, 'git-manager', 'autoGenerateCommitMsg')
+    getDockApi().plugins.getSetting(settingsDir, 'git-manager', 'autoGenerateCommitMsg')
       .then((val) => { setAutoGen(typeof val === 'boolean' ? val : true) })
-  }, [projectDir])
+  }, [settingsDir])
 
   // Load diffs for all selected files (multi-select aware)
   useEffect(() => {
