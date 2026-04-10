@@ -16,7 +16,10 @@ import type {
 import type { CiSetupStatus } from '../../../../shared/ci-types'
 
 interface IssuesPanelProps {
+  /** The repo currently being viewed in git-manager (may be a submodule of rootProjectDir). */
   projectDir: string
+  /** The dock's top-level root project — same as projectDir unless the user has navigated into a submodule. */
+  rootProjectDir: string
   active?: boolean
 }
 
@@ -69,8 +72,42 @@ function pickContrastTextColor(hex?: string): string {
 // Main Panel
 // ============================================================================
 
-export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
+export default function IssuesPanel({ projectDir, rootProjectDir, active }: IssuesPanelProps) {
   const api = getDockApi()
+
+  // Whether the current view is a submodule (i.e. activeDir differs from the dock's root).
+  const isSubmodule = projectDir !== rootProjectDir
+
+  // Mode state — for submodules, `useParent=true` means the Issues tab operates against
+  // the parent repo's tracker instead of the submodule's own. For non-submodule views
+  // this is always false and the banner is never shown.
+  const [useParent, setUseParent] = useState(false)
+  const [parentSettingLoaded, setParentSettingLoaded] = useState(false)
+
+  // Load the parent's setting to determine the default mode when we're in a submodule
+  useEffect(() => {
+    if (!isSubmodule) {
+      setParentSettingLoaded(true)
+      setUseParent(false)
+      return
+    }
+    let cancelled = false
+    api.plugins.getSetting(rootProjectDir, 'git-manager', 'forceParentIssueTracker')
+      .then((v) => {
+        if (cancelled) return
+        setUseParent(v === true)
+        setParentSettingLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setParentSettingLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [isSubmodule, rootProjectDir])
+
+  // The projectDir that all issue IPC calls use. Switches at runtime when the user
+  // toggles the banner.
+  const effectiveProjectDir = useParent ? rootProjectDir : projectDir
 
   const [status, setStatus] = useState<PanelStatus>('loading')
   const [errorMsg, setErrorMsg] = useState('')
@@ -93,15 +130,22 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Check availability on mount / project change
+  // Check availability on mount / effective-project change.
+  // We intentionally delay until the parent setting has loaded so the first fetch goes
+  // to the correct target and we don't briefly query the wrong repo.
   useEffect(() => {
+    if (!parentSettingLoaded) return
     let cancelled = false
     async function init() {
       setStatus('loading')
-      const cached = issueAvailabilityCache.get(projectDir)
+      setIssues([])
+      setSelectedId(null)
+      setViewMode('list')
+
+      const cached = issueAvailabilityCache.get(effectiveProjectDir)
       if (cached) {
         if (!cached.available) {
-          const s = await api.issues.getSetupStatus(projectDir)
+          const s = await api.issues.getSetupStatus(effectiveProjectDir)
           if (cancelled) return
           setSetup(s)
           setStatus(s.ready ? 'ready' : 'setup')
@@ -114,17 +158,17 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
       }
 
       try {
-        const result = await api.issues.checkAvailable(projectDir)
+        const result = await api.issues.checkAvailable(effectiveProjectDir)
         if (cancelled) return
         if (!result) {
-          issueAvailabilityCache.set(projectDir, { available: false })
-          const s = await api.issues.getSetupStatus(projectDir)
+          issueAvailabilityCache.set(effectiveProjectDir, { available: false })
+          const s = await api.issues.getSetupStatus(effectiveProjectDir)
           if (cancelled) return
           setSetup(s)
           setStatus(s.ready ? 'ready' : 'setup')
           return
         }
-        issueAvailabilityCache.set(projectDir, { available: true, providerKey: result })
+        issueAvailabilityCache.set(effectiveProjectDir, { available: true, providerKey: result })
         setProviderKey(result as 'github' | 'gitlab')
         setStatus('ready')
       } catch (err) {
@@ -136,32 +180,32 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
     }
     init()
     return () => { cancelled = true }
-  }, [projectDir])
+  }, [effectiveProjectDir, parentSettingLoaded])
 
   // Fetch current user once we're ready
   useEffect(() => {
     if (status !== 'ready') return
     let cancelled = false
-    api.issues.getCurrentUser(projectDir).then((u) => {
+    api.issues.getCurrentUser(effectiveProjectDir).then((u) => {
       if (!cancelled) setCurrentUser(u)
     }).catch((err) => {
       console.warn('[issues] getCurrentUser failed:', err)
     })
     return () => { cancelled = true }
-  }, [status, projectDir])
+  }, [status, effectiveProjectDir])
 
   const loadIssues = useCallback(async () => {
     if (status !== 'ready') return
     setLoading(true)
     try {
       const state = filter === 'all' ? 'all' : filter
-      const result = await api.issues.list(projectDir, state)
+      const result = await api.issues.list(effectiveProjectDir, state)
       setIssues(result)
     } catch (err) {
       console.warn('[issues] list failed:', err)
     }
     setLoading(false)
-  }, [status, filter, projectDir])
+  }, [status, filter, effectiveProjectDir])
 
   useEffect(() => {
     loadIssues()
@@ -190,7 +234,7 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
   // Start / stop polling when tab becomes active
   useEffect(() => {
     if (!active || status !== 'ready') return
-    api.issues.startPolling(projectDir).catch((err) => {
+    api.issues.startPolling(effectiveProjectDir).catch((err) => {
       console.warn('[issues] startPolling failed:', err)
     })
     const poll = () => {
@@ -203,22 +247,22 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
     poll()
     return () => {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
-      api.issues.stopPolling(projectDir).catch(() => { /* ok */ })
+      api.issues.stopPolling(effectiveProjectDir).catch(() => { /* ok */ })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, status, loadIssues])
+  }, [active, status, loadIssues, effectiveProjectDir])
 
   // Load full issue when selection changes
   const refreshSelected = useCallback(async (id: number) => {
     setSelectedLoading(true)
     try {
-      const fresh = await api.issues.get(projectDir, id)
+      const fresh = await api.issues.get(effectiveProjectDir, id)
       setSelectedIssue(fresh)
     } catch (err) {
       console.warn('[issues] get failed:', err)
     }
     setSelectedLoading(false)
-  }, [projectDir])
+  }, [effectiveProjectDir])
 
   useEffect(() => {
     if (selectedId == null) {
@@ -263,8 +307,16 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
   if (status === 'error') {
     return (
       <div className="gm-issues-panel">
+        {isSubmodule && (
+          <ParentModeBanner
+            useParent={useParent}
+            onToggle={() => setUseParent((v) => !v)}
+            rootProjectDir={rootProjectDir}
+            projectDir={projectDir}
+          />
+        )}
         <div className="gm-loading">{errorMsg || 'Error'}</div>
-        <button className="gm-small-btn" onClick={() => { issueAvailabilityCache.delete(projectDir); setStatus('loading') }}>
+        <button className="gm-small-btn" onClick={() => { issueAvailabilityCache.delete(effectiveProjectDir); setStatus('loading') }}>
           Retry
         </button>
       </div>
@@ -273,7 +325,15 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
 
   if (status === 'setup' && setup) {
     return (
-      <div className="gm-issues-panel">
+      <div className="gm-issues-panel gm-issues-setup-wrap">
+        {isSubmodule && (
+          <ParentModeBanner
+            useParent={useParent}
+            onToggle={() => setUseParent((v) => !v)}
+            rootProjectDir={rootProjectDir}
+            projectDir={projectDir}
+          />
+        )}
         <div className="gm-pr-setup">
           <div className="gm-pr-setup-title">Setup Required</div>
           <div className="gm-pr-setup-provider">{setup.providerName}</div>
@@ -288,7 +348,7 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
                 <button
                   className="gm-small-btn"
                   onClick={async () => {
-                    await api.issues.runSetupAction(projectDir, step.actionId!)
+                    await api.issues.runSetupAction(effectiveProjectDir, step.actionId!)
                   }}
                 >
                   {step.actionLabel || 'Run'}
@@ -297,8 +357,8 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
             </div>
           ))}
           <button className="gm-small-btn" onClick={async () => {
-            issueAvailabilityCache.delete(projectDir)
-            const s = await api.issues.getSetupStatus(projectDir)
+            issueAvailabilityCache.delete(effectiveProjectDir)
+            const s = await api.issues.getSetupStatus(effectiveProjectDir)
             setSetup(s)
             if (s.ready) setStatus('ready')
           }}>Recheck</button>
@@ -312,70 +372,80 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
 
   return (
     <div className={`gm-issues-panel gm-issues-view-${viewMode}`}>
-      {showList && (
-        <div className="gm-issues-list-wrap">
-          <div className="gm-issues-header">
-            <div className="gm-pr-filters">
-              {(['open', 'closed', 'all'] as const).map((f) => (
-                <button
-                  key={f}
-                  className={`gm-pr-filter${filter === f ? ' gm-pr-filter-active' : ''}`}
-                  onClick={() => setFilter(f)}
-                >
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              className="gm-issues-search"
-              placeholder="Search issues..."
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-            />
-            <div className="gm-pr-header-right">
-              <button className="gm-small-btn" onClick={loadIssues} disabled={loading} title="Refresh">
-                {loading ? '…' : '\u21BB'}
-              </button>
-              <button className="gm-small-btn" onClick={() => setShowProfiles(true)} title="Configure Claude behavior profiles">
-                Profiles
-              </button>
-              <button className="gm-small-btn gm-pr-create-btn" onClick={() => setShowCreate(true)}>
-                + New Issue
-              </button>
-            </div>
-          </div>
-
-          <IssueList
-            issues={filtered}
-            selectedId={selectedId}
-            onSelect={openIssue}
-            loading={loading}
-          />
-        </div>
-      )}
-
-      {showDetail && selectedId != null && (
-        <IssueDetailPanel
-          key={selectedId}
+      {isSubmodule && (
+        <ParentModeBanner
+          useParent={useParent}
+          onToggle={() => setUseParent((v) => !v)}
+          rootProjectDir={rootProjectDir}
           projectDir={projectDir}
-          issueId={selectedId}
-          issue={selectedIssue}
-          loading={selectedLoading}
-          viewMode={viewMode}
-          onClose={closeDetail}
-          onEnterFull={enterFull}
-          onExitFull={exitFull}
-          onRefresh={() => refreshSelected(selectedId)}
-          currentUser={currentUser}
-          providerKey={providerKey}
-          onListChanged={loadIssues}
         />
       )}
+      <div className="gm-issues-body">
+        {showList && (
+          <div className="gm-issues-list-wrap">
+            <div className="gm-issues-header">
+              <div className="gm-pr-filters">
+                {(['open', 'closed', 'all'] as const).map((f) => (
+                  <button
+                    key={f}
+                    className={`gm-pr-filter${filter === f ? ' gm-pr-filter-active' : ''}`}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                className="gm-issues-search"
+                placeholder="Search issues..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+              <div className="gm-pr-header-right">
+                <button className="gm-small-btn" onClick={loadIssues} disabled={loading} title="Refresh">
+                  {loading ? '…' : '\u21BB'}
+                </button>
+                <button className="gm-small-btn" onClick={() => setShowProfiles(true)} title="Configure Claude behavior profiles">
+                  Profiles
+                </button>
+                <button className="gm-small-btn gm-pr-create-btn" onClick={() => setShowCreate(true)}>
+                  + New Issue
+                </button>
+              </div>
+            </div>
+
+            <IssueList
+              issues={filtered}
+              selectedId={selectedId}
+              onSelect={openIssue}
+              loading={loading}
+            />
+          </div>
+        )}
+
+        {showDetail && selectedId != null && (
+          <IssueDetailPanel
+            key={`${effectiveProjectDir}:${selectedId}`}
+            projectDir={effectiveProjectDir}
+            issueId={selectedId}
+            issue={selectedIssue}
+            loading={selectedLoading}
+            viewMode={viewMode}
+            onClose={closeDetail}
+            onEnterFull={enterFull}
+            onExitFull={exitFull}
+            onRefresh={() => refreshSelected(selectedId)}
+            currentUser={currentUser}
+            providerKey={providerKey}
+            onListChanged={loadIssues}
+          />
+        )}
+      </div>
 
       {showCreate && (
         <CreateIssueDialog
-          projectDir={projectDir}
+          projectDir={effectiveProjectDir}
           onClose={() => setShowCreate(false)}
           onCreated={(issue) => {
             setShowCreate(false)
@@ -387,10 +457,58 @@ export default function IssuesPanel({ projectDir, active }: IssuesPanelProps) {
 
       {showProfiles && (
         <IssueTypeProfilesDialog
-          projectDir={projectDir}
+          projectDir={effectiveProjectDir}
           onClose={() => setShowProfiles(false)}
         />
       )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Parent Mode Banner
+// ============================================================================
+
+function ParentModeBanner({
+  useParent,
+  onToggle,
+  rootProjectDir,
+  projectDir
+}: {
+  useParent: boolean
+  onToggle: () => void
+  rootProjectDir: string
+  projectDir: string
+}) {
+  const rootName = rootProjectDir.split(/[/\\]/).pop() || rootProjectDir
+  const subName = projectDir.split(/[/\\]/).pop() || projectDir
+  return (
+    <div className={`gm-issues-parent-banner ${useParent ? 'gm-issues-parent-banner-active' : ''}`}>
+      <span className="gm-issues-parent-banner-icon">{useParent ? '⬆' : '◆'}</span>
+      <div className="gm-issues-parent-banner-text">
+        {useParent ? (
+          <>
+            Showing <strong>{rootName}</strong>'s issue tracker (parent repository)
+            <span className="gm-issues-parent-banner-sub">
+              Submodule: <em>{subName}</em>
+            </span>
+          </>
+        ) : (
+          <>
+            Showing <strong>{subName}</strong>'s own issue tracker (submodule)
+            <span className="gm-issues-parent-banner-sub">
+              Parent: <em>{rootName}</em>
+            </span>
+          </>
+        )}
+      </div>
+      <button
+        className="gm-small-btn"
+        onClick={onToggle}
+        title={useParent ? `Switch to ${subName}'s own tracker` : `Switch to parent (${rootName}) tracker`}
+      >
+        Switch to {useParent ? 'submodule' : 'parent'}
+      </button>
     </div>
   )
 }

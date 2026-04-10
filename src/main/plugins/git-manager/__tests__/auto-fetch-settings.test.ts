@@ -72,8 +72,8 @@ describe('GitManagerPlugin settings schema', () => {
   })
 
   it('has all expected settings registered', () => {
-    // v1 baseline: 6 settings + 3 new Issues-tab settings = 9
-    expect(plugin.settingsSchema.length).toBe(9)
+    // v1 baseline: 6 settings + 4 Issues-tab settings = 10
+    expect(plugin.settingsSchema.length).toBe(10)
   })
 
   it('has enableIssuesTab boolean setting defaulting false', () => {
@@ -88,5 +88,12 @@ describe('GitManagerPlugin settings schema', () => {
     expect(setting).toBeDefined()
     expect(setting!.type).toBe('string')
     expect(setting!.defaultValue).toBe('')
+  })
+
+  it('has forceParentIssueTracker boolean setting defaulting false', () => {
+    const setting = plugin.settingsSchema.find((s) => s.key === 'forceParentIssueTracker')
+    expect(setting).toBeDefined()
+    expect(setting!.type).toBe('boolean')
+    expect(setting!.defaultValue).toBe(false)
   })
 })

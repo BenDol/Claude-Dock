@@ -5728,9 +5728,16 @@ div.gm-ftree-search-current {
 
 .gm-issues-panel {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   background: var(--bg-primary);
+  overflow: hidden;
+}
+.gm-issues-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 .gm-issues-view-list .gm-issues-list-wrap { flex: 1; }
@@ -5739,6 +5746,47 @@ div.gm-ftree-search-current {
 .gm-issues-view-full .gm-issue-detail { flex: 1; min-width: 0; }
 
 .gm-issues-list-wrap { display: flex; flex-direction: column; min-height: 0; }
+.gm-issues-setup-wrap { align-items: stretch; }
+
+/* Parent-mode banner (shown only when viewing a submodule) */
+.gm-issues-parent-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-secondary));
+  border-bottom: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-secondary);
+  font-size: 12px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.gm-issues-parent-banner-active {
+  background: color-mix(in srgb, var(--accent-color) 16%, var(--bg-secondary));
+  border-left-color: var(--accent-color);
+}
+.gm-issues-parent-banner-icon {
+  font-size: 14px;
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+.gm-issues-parent-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gm-issues-parent-banner-text strong { color: var(--text-primary); }
+.gm-issues-parent-banner-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.gm-issues-parent-banner-sub em { font-style: normal; opacity: 0.85; }
+.gm-issues-parent-banner > button { flex-shrink: 0; }
 
 .gm-issues-header {
   display: flex; align-items: center; gap: 8px;

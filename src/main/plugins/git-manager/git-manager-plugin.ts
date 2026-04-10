@@ -71,6 +71,13 @@ export class GitManagerPlugin implements DockPlugin {
       defaultValue: true
     },
     {
+      key: 'forceParentIssueTracker',
+      label: 'Submodules use parent issue tracker',
+      description: 'When viewing a submodule, default the Issues tab to this (parent) repository\'s issue tracker. You can still toggle to the submodule\'s own tracker from the banner at the top of the tab.',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
       key: 'issueTypeProfilesJson',
       label: 'Issue type profiles (JSON)',
       description: 'Advanced: JSON overrides for label→behavior mapping used by Solve with Claude. Leave empty for defaults.',

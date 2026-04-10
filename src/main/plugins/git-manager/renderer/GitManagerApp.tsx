@@ -2172,7 +2172,12 @@ const GitManagerApp: React.FC = () => {
           {enableIssuesTab && (
             <div style={{ display: activeTab === 'issues' ? 'contents' : 'none' }}>
               <React.Suspense fallback={<div className="gm-loading">Loading...</div>}>
-                <IssuesPanel key={activeDir} projectDir={activeDir} active={activeTab === 'issues'} />
+                <IssuesPanel
+                  key={activeDir}
+                  projectDir={activeDir}
+                  rootProjectDir={projectDir}
+                  active={activeTab === 'issues'}
+                />
               </React.Suspense>
             </div>
           )}
@@ -10014,6 +10019,7 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'enablePrTab', label: 'Show Pull/Merge Requests tab', type: 'boolean', default: false },
   { key: 'enableIssuesTab', label: 'Show Issues tab', type: 'boolean', default: false },
   { key: 'enableIssueNotifications', label: 'Issue notifications', type: 'boolean', default: true },
+  { key: 'forceParentIssueTracker', label: 'Submodules use parent issue tracker', type: 'boolean', default: false },
   { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
     { value: 'started', label: 'Started' },
     { value: 'success', label: 'Success' },
