@@ -1,3 +1,5 @@
+import type { IssueBehavior, IssueCommentPreview, IssueState } from './issue-types'
+
 export interface ClaudeTaskBase {
   context?: string // optional user instructions
   /** The directory the task was triggered from (may differ from dock projectDir for submodules). */
@@ -36,7 +38,37 @@ export interface MergeResolveTask extends ClaudeTaskBase {
   instructions: string
 }
 
-export type ClaudeTaskRequest = CiFixTask | WriteTestsTask | ReferenceThisTask | MergeResolveTask
+export interface IssueFixTask extends ClaudeTaskBase {
+  type: 'issue-fix'
+  issueId: number
+  issueTitle: string
+  issueUrl: string
+  issueBody: string
+  issueState: IssueState
+  labels: string[]
+  assignees: string[]
+  author: string
+  commentsPreview: IssueCommentPreview[]
+  provider: 'github' | 'gitlab'
+  providerCli: 'gh' | 'glab'
+  selectedBehavior: IssueBehavior
+  behaviorSource: 'label' | 'default'
+  /** Prerendered human-readable instruction block for selectedBehavior. Computed in main, used by renderer prompt builder. */
+  behaviorDescription: string
+  promptAddendum?: string
+  defaultBranch: string
+  /** True if the issue body already contains an "## Agent Resolution" section. */
+  hasExistingAgentResolution: boolean
+  /** Unique id for this run — included in Agent Resolution so multiple runs are distinguishable. */
+  runId: string
+}
+
+export type ClaudeTaskRequest =
+  | CiFixTask
+  | WriteTestsTask
+  | ReferenceThisTask
+  | MergeResolveTask
+  | IssueFixTask
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions'
 
@@ -73,6 +105,11 @@ const MERGE_RESOLVE_PERMISSIONS: TaskPermissions = {
   permissionMode: 'acceptEdits'
 }
 
+const ISSUE_FIX_PERMISSIONS: TaskPermissions = {
+  allowedTools: ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep'],
+  permissionMode: 'acceptEdits'
+}
+
 export function getTaskMeta(task: ClaudeTaskRequest): TaskMeta {
   switch (task.type) {
     case 'ci-fix':
@@ -83,6 +120,10 @@ export function getTaskMeta(task: ClaudeTaskRequest): TaskMeta {
       return { label: 'Reference This', ephemeral: false, defaultPermissions: REFERENCE_THIS_PERMISSIONS }
     case 'merge-resolve':
       return { label: 'Resolve Merge Conflict', defaultPermissions: MERGE_RESOLVE_PERMISSIONS }
+    case 'issue-fix':
+      // No completionMarker: Claude writes the Agent Resolution back to the issue body itself
+      // via gh/glab CLI, so the dock does not need to parse stdout.
+      return { label: 'Solve Issue', defaultPermissions: ISSUE_FIX_PERMISSIONS }
   }
 }
 

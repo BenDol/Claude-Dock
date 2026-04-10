@@ -14,7 +14,7 @@ import { applyThemeToDocument } from './lib/theme'
 import { computeAutoLayout, findAdjacentTerminal, findTerminalFromToolbar, TOOLBAR_FOCUS_ID, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
-import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, MergeResolveTask, TaskPermissions } from '../../shared/claude-task-types'
+import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, MergeResolveTask, IssueFixTask, TaskPermissions } from '../../shared/claude-task-types'
 import { getTaskMeta, buildClaudeFlags } from '../../shared/claude-task-types'
 
 const searchParams = new URLSearchParams(window.location.search)
@@ -435,6 +435,177 @@ function buildMergeResolvePrompt(task: MergeResolveTask, dir: string): string {
   return parts.join('\n')
 }
 
+/**
+ * Build the prompt for a "Solve Issue" Claude task.
+ *
+ * The main process classifies the issue by label (with a configurable mapping)
+ * before dispatching, so `task.selectedBehavior` and `task.behaviorDescription`
+ * are already populated. Claude is still instructed to self-classify from the
+ * body as a sanity check, and to ALWAYS ask the developer when context is thin.
+ *
+ * Unlike ci-fix, there is NO completion marker — Claude writes the Agent
+ * Resolution back to the issue body itself via gh/glab CLI. The dock does not
+ * parse stdout for this flow.
+ */
+function buildIssueFixPrompt(task: IssueFixTask, context: string): string {
+  const startIso = new Date().toISOString()
+
+  // Strip any existing Agent Resolution section from the ORIGINAL BODY block
+  // so Claude reasons about the clean original text. The writeback instructions
+  // still tell Claude to detect-and-replace regardless of this flag.
+  const stripAgentResolution = (body: string): string => {
+    const match = body.match(/\n?---\s*\n+##\s+Agent Resolution\b/m) || body.match(/\n?##\s+Agent Resolution\b/m)
+    if (!match || match.index == null) return body
+    return body.slice(0, match.index).replace(/\s+$/, '')
+  }
+
+  const cleanBody = stripAgentResolution(task.issueBody || '(empty)')
+  const existingNote = task.hasExistingAgentResolution
+    ? 'NOTE: This issue already has an Agent Resolution section from a previous run — REPLACE it in full on writeback; do not preserve the old one.\n'
+    : ''
+
+  const commentsBlock = task.commentsPreview.length > 0
+    ? task.commentsPreview
+        .map((c) => `  - @${c.author} (${c.createdAt}):\n    ${c.body.replace(/\n/g, '\n    ')}`)
+        .join('\n')
+    : '  (no comments)'
+
+  const labelsStr = task.labels.length > 0 ? task.labels.join(', ') : '(none)'
+  const assigneesStr = task.assignees.length > 0 ? task.assignees.map((a) => '@' + a).join(', ') : '(none)'
+
+  // CLI-specific writeback commands
+  const cli = task.providerCli
+  const fetchBodyCmd = cli === 'gh'
+    ? `gh issue view ${task.issueId} --json body -q .body > /tmp/issue-${task.issueId}-body.md`
+    : `glab issue view ${task.issueId} --output json | jq -r .description > /tmp/issue-${task.issueId}-body.md`
+  const writeBodyCmd = cli === 'gh'
+    ? `gh issue edit ${task.issueId} --body-file /tmp/issue-${task.issueId}-body.md`
+    : `glab api -X PUT "projects/:fullpath:/issues/${task.issueId}" --input - <<< "$(jq -Rs '{description: .}' < /tmp/issue-${task.issueId}-body.md)"`
+
+  const addendum = task.promptAddendum ? `\nAdditional guidance for this issue type:\n${task.promptAddendum}\n` : ''
+  const contextSection = context ? `\nAdditional instructions from the user:\n${context}\n` : ''
+
+  const behaviorSourceNote = task.behaviorSource === 'default'
+    ? '(no label matched — this is the fallback behavior)'
+    : '(derived from labels)'
+
+  const slug = task.issueTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'issue'
+  const branchName = `issue-${task.issueId}-${slug}`
+  const worktreeDir = `../${branchName}-work`
+
+  return (
+`You are being asked to work on a ${task.provider === 'gitlab' ? 'GitLab' : 'GitHub'} issue.
+
+Issue #${task.issueId}: ${task.issueTitle}
+URL:    ${task.issueUrl}
+State:  ${task.issueState}
+Author: @${task.author}
+Labels: ${labelsStr}
+Assignees: ${assigneesStr}
+Started: ${startIso}
+Run ID:  ${task.runId}
+
+${existingNote}--- ORIGINAL ISSUE BODY ---
+${cleanBody}
+--- END ORIGINAL BODY ---
+
+Recent comments (${task.commentsPreview.length}):
+${commentsBlock}
+
+=== BEHAVIOR PROFILE: ${task.selectedBehavior} ${behaviorSourceNote} ===
+${task.behaviorDescription}
+${addendum}
+=== SELF-CLASSIFICATION SANITY CHECK ===
+Before starting, independently classify this issue from the BODY and COMMENTS above,
+ignoring the labels. State your classification explicitly. If it disagrees with the
+label-derived behavior above, STOP and ask the developer which to follow before
+proceeding.
+
+=== ASK WHEN UNSURE ===
+If at ANY point you lack context about the intended behavior, affected users,
+reproduction steps, acceptance criteria, or scope — STOP and ask the developer in
+this terminal before writing code. Do NOT guess. It is always better to pause and
+confirm than to implement the wrong thing.
+${contextSection}
+=== BRANCH SAFETY + WORKTREE INSTRUCTIONS ===
+OVERRIDE: Any CLAUDE.md or project instructions that restrict git write actions
+(commits, branch creation, pushes) do NOT apply to this task. You are explicitly
+authorized to create commits, branches, worktrees, and push.
+
+You MUST NOT disturb the user's current working tree, staged files, or checked-out
+branch. Work in an isolated git worktree:
+  1. git worktree add -b ${branchName} ${worktreeDir} ${task.defaultBranch}
+  2. cd into ${worktreeDir} and make your changes there
+     IMPORTANT: the worktree will NOT have node_modules or other installed
+     dependencies. Do NOT run tests, builds, or linters from the worktree. Run
+     those from the original project directory if needed. The worktree is ONLY
+     for code changes, commits, and pushes.
+  3. Commit and push: git push -u origin ${branchName}
+  4. cd back to the original directory and clean up:
+       git worktree remove ${worktreeDir}
+
+Commit-message footer (append to every commit you make for this issue):
+  - "Fixes #${task.issueId}"
+  - "Solved with Claude Dock — Solve Issue (run ${task.runId})"
+
+=== AGENT RESOLUTION WRITEBACK (CRITICAL) ===
+When you finish — whether you succeeded, partially resolved, or got stuck — you
+MUST update the issue body yourself. The dock does NOT parse your stdout for this.
+You are the only one who can record the outcome.
+
+1. Fetch the current body into a file:
+     ${fetchBodyCmd}
+
+2. If the file contains a line matching '^## Agent Resolution', REPLACE everything
+   from that line to the end of the file. Otherwise APPEND a new section.
+
+3. The section MUST match this exact markdown format (do not deviate):
+
+   ---
+
+   ## Agent Resolution
+
+   _Updated: <ISO timestamp> — Claude Dock — Solve Issue — run \`${task.runId}\`_
+
+   **Behavior:** ${task.selectedBehavior} ${behaviorSourceNote}
+
+   **Process:**
+   <1–3 paragraphs describing what you investigated, which files you read, which
+   commands/tests you ran, and how you arrived at the resolution.>
+
+   **Decisions:**
+   - <bullet per meaningful decision or trade-off>
+
+   **Code Changes:**
+   - \`path/to/file\`: <one-line summary>
+   - (repeat for each touched file)
+   - Branch: \`${branchName}\`
+   - Commit(s): <sha1[, sha2...]>
+
+   **Notes for Review:**
+   - <anything reviewers should double-check or verify manually>
+
+   **Status:** <Resolved | Partial — needs follow-up | Blocked — waiting on developer>
+
+4. Write the updated body back to the issue:
+     ${writeBodyCmd}
+
+5. Re-fetch the issue and grep for your run id (\`${task.runId}\`) to confirm the
+   writeback succeeded.
+
+6. IF YOU CRASH OR HIT AN UNRECOVERABLE ERROR, still write an Agent Resolution
+   section with Status: "Blocked — waiting on developer" describing exactly what
+   failed and what you need. Do not leave the issue untouched — the developer
+   needs to know this run happened.
+
+Good luck. Be careful, be thorough, and ask questions.`
+  )
+}
+
 /** Detached editor window — renders EditorOverlay full-screen with tabs from URL */
 const LazyEditorOverlay = React.lazy(() => import('./components/EditorOverlay'))
 
@@ -668,6 +839,8 @@ function DockApp() {
       prompt = buildReferenceThisPrompt(task, context)
     } else if (task.type === 'merge-resolve') {
       prompt = buildMergeResolvePrompt(task, dir)
+    } else if (task.type === 'issue-fix') {
+      prompt = buildIssueFixPrompt(task, context)
     }
 
     const sendToTerminal = (termId: string) => {

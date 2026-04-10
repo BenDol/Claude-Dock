@@ -18,6 +18,19 @@ import type {
 } from '../shared/git-manager-types'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
 import type { ClaudeTaskRequest } from '../shared/claude-task-types'
+import type {
+  Issue,
+  IssueState,
+  IssueStateReason,
+  IssueCreateRequest,
+  IssueUpdateRequest,
+  IssueActionResult,
+  IssueComment,
+  IssueLabel,
+  IssueUser,
+  IssueMilestone,
+  IssueTypeProfiles
+} from '../shared/issue-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 import type {
   CloudProviderId,
@@ -313,6 +326,34 @@ export interface DockApi {
     create: (projectDir: string, request: import('../shared/pr-types').PrCreateRequest) => Promise<import('../shared/pr-types').PrCreateResult>
     getDefaultBranch: (projectDir: string) => Promise<string>
     getNewUrl: (projectDir: string, sourceBranch: string, targetBranch: string) => Promise<string | null>
+  }
+  issues: {
+    checkAvailable: (projectDir: string) => Promise<string | false>
+    getSetupStatus: (projectDir: string) => Promise<CiSetupStatus>
+    runSetupAction: (projectDir: string, actionId: string, data?: Record<string, string>) => Promise<{ success: boolean; error?: string }>
+    list: (projectDir: string, state?: IssueState | 'all') => Promise<Issue[]>
+    get: (projectDir: string, id: number) => Promise<Issue | null>
+    create: (projectDir: string, request: IssueCreateRequest) => Promise<IssueActionResult>
+    update: (projectDir: string, id: number, request: IssueUpdateRequest) => Promise<IssueActionResult>
+    setState: (projectDir: string, id: number, state: IssueState, reason?: IssueStateReason) => Promise<IssueActionResult>
+    addLabel: (projectDir: string, id: number, labels: string[]) => Promise<IssueActionResult>
+    removeLabel: (projectDir: string, id: number, labels: string[]) => Promise<IssueActionResult>
+    listLabels: (projectDir: string) => Promise<IssueLabel[]>
+    addAssignee: (projectDir: string, id: number, logins: string[]) => Promise<IssueActionResult>
+    removeAssignee: (projectDir: string, id: number, logins: string[]) => Promise<IssueActionResult>
+    listAssignees: (projectDir: string) => Promise<IssueUser[]>
+    listMilestones: (projectDir: string) => Promise<IssueMilestone[]>
+    setMilestone: (projectDir: string, id: number, milestone: number | string | null) => Promise<IssueActionResult>
+    listComments: (projectDir: string, issueId: number) => Promise<IssueComment[]>
+    addComment: (projectDir: string, issueId: number, body: string) => Promise<IssueComment | null>
+    updateComment: (projectDir: string, issueId: number, commentId: number | string, body: string) => Promise<IssueComment | null>
+    deleteComment: (projectDir: string, issueId: number, commentId: number | string) => Promise<boolean>
+    getCurrentUser: (projectDir: string) => Promise<IssueUser | null>
+    fixWithClaude: (projectDir: string, data: { issueId: number; force?: boolean }) => Promise<{ success: boolean; alreadyRunning?: boolean; startedAt?: number; runId?: string; behavior?: string; behaviorSource?: string; error?: string }>
+    startPolling: (projectDir: string) => Promise<void>
+    stopPolling: (projectDir: string) => Promise<void>
+    getTypeProfiles: (projectDir: string) => Promise<IssueTypeProfiles>
+    setTypeProfiles: (projectDir: string, profiles: IssueTypeProfiles) => Promise<{ success: boolean; json?: string; error?: string }>
   }
   telemetry: {
     setConsent: (consent: boolean) => Promise<void>
@@ -736,6 +777,34 @@ const dockApi: DockApi = {
     create: (projectDir, request) => ipcRenderer.invoke(IPC.PR_CREATE, projectDir, request),
     getDefaultBranch: (projectDir) => ipcRenderer.invoke(IPC.PR_GET_DEFAULT_BRANCH, projectDir),
     getNewUrl: (projectDir, sourceBranch, targetBranch) => ipcRenderer.invoke(IPC.PR_GET_NEW_URL, projectDir, sourceBranch, targetBranch)
+  },
+  issues: {
+    checkAvailable: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_CHECK_AVAILABLE, projectDir),
+    getSetupStatus: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_GET_SETUP_STATUS, projectDir),
+    runSetupAction: (projectDir, actionId, data) => ipcRenderer.invoke(IPC.ISSUE_RUN_SETUP_ACTION, projectDir, actionId, data),
+    list: (projectDir, state) => ipcRenderer.invoke(IPC.ISSUE_LIST, projectDir, state),
+    get: (projectDir, id) => ipcRenderer.invoke(IPC.ISSUE_GET, projectDir, id),
+    create: (projectDir, request) => ipcRenderer.invoke(IPC.ISSUE_CREATE, projectDir, request),
+    update: (projectDir, id, request) => ipcRenderer.invoke(IPC.ISSUE_UPDATE, projectDir, id, request),
+    setState: (projectDir, id, state, reason) => ipcRenderer.invoke(IPC.ISSUE_SET_STATE, projectDir, id, state, reason),
+    addLabel: (projectDir, id, labels) => ipcRenderer.invoke(IPC.ISSUE_ADD_LABEL, projectDir, id, labels),
+    removeLabel: (projectDir, id, labels) => ipcRenderer.invoke(IPC.ISSUE_REMOVE_LABEL, projectDir, id, labels),
+    listLabels: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_LIST_LABELS, projectDir),
+    addAssignee: (projectDir, id, logins) => ipcRenderer.invoke(IPC.ISSUE_ADD_ASSIGNEE, projectDir, id, logins),
+    removeAssignee: (projectDir, id, logins) => ipcRenderer.invoke(IPC.ISSUE_REMOVE_ASSIGNEE, projectDir, id, logins),
+    listAssignees: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_LIST_ASSIGNEES, projectDir),
+    listMilestones: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_LIST_MILESTONES, projectDir),
+    setMilestone: (projectDir, id, milestone) => ipcRenderer.invoke(IPC.ISSUE_SET_MILESTONE, projectDir, id, milestone),
+    listComments: (projectDir, issueId) => ipcRenderer.invoke(IPC.ISSUE_LIST_COMMENTS, projectDir, issueId),
+    addComment: (projectDir, issueId, body) => ipcRenderer.invoke(IPC.ISSUE_ADD_COMMENT, projectDir, issueId, body),
+    updateComment: (projectDir, issueId, commentId, body) => ipcRenderer.invoke(IPC.ISSUE_UPDATE_COMMENT, projectDir, issueId, commentId, body),
+    deleteComment: (projectDir, issueId, commentId) => ipcRenderer.invoke(IPC.ISSUE_DELETE_COMMENT, projectDir, issueId, commentId),
+    getCurrentUser: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_GET_CURRENT_USER, projectDir),
+    fixWithClaude: (projectDir, data) => ipcRenderer.invoke(IPC.ISSUE_FIX_WITH_CLAUDE, projectDir, data),
+    startPolling: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_START_POLLING, projectDir),
+    stopPolling: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_STOP_POLLING, projectDir),
+    getTypeProfiles: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_GET_TYPE_PROFILES, projectDir),
+    setTypeProfiles: (projectDir, profiles) => ipcRenderer.invoke(IPC.ISSUE_SET_TYPE_PROFILES, projectDir, profiles)
   },
   telemetry: {
     setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent),

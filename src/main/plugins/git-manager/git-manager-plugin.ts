@@ -4,6 +4,7 @@ import type { PluginSettingDef } from '../../../shared/plugin-types'
 import { registerGitManagerIpc, disposeGitManagerIpc } from './git-manager-ipc'
 import { GitManagerWindowManager } from './git-manager-window'
 import { disposeCi, stopCiPollingForProject } from './ci/ci-ipc'
+import { registerIssueIpc, disposeIssueIpc, stopIssuePollingForProject } from './issues/issue-ipc'
 import { getServices } from './services'
 
 // Re-export setServices so standalone builds can receive service injection from the host app
@@ -56,6 +57,27 @@ export class GitManagerPlugin implements DockPlugin {
       defaultValue: false
     },
     {
+      key: 'enableIssuesTab',
+      label: 'Issues tab',
+      description: 'Show the Issues tab for viewing and editing GitHub/GitLab issues',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
+      key: 'enableIssueNotifications',
+      label: 'Issue notifications',
+      description: 'Notify when issues are assigned to you or receive new comments',
+      type: 'boolean',
+      defaultValue: true
+    },
+    {
+      key: 'issueTypeProfilesJson',
+      label: 'Issue type profiles (JSON)',
+      description: 'Advanced: JSON overrides for label→behavior mapping used by Solve with Claude. Leave empty for defaults.',
+      type: 'string',
+      defaultValue: ''
+    },
+    {
       key: 'showActionNotifications',
       label: 'CI notifications',
       description: 'Show desktop notifications when CI runs complete',
@@ -66,17 +88,20 @@ export class GitManagerPlugin implements DockPlugin {
 
   register(bus: PluginEventBus): void {
     registerGitManagerIpc()
+    registerIssueIpc()
 
-    // Close git manager window and stop CI polling when the dock for that project closes
+    // Close git manager window and stop polling when the dock for that project closes
     bus.on('project:postClose', this.id, ({ projectDir }) => {
       stopCiPollingForProject(projectDir)
+      stopIssuePollingForProject(projectDir)
       GitManagerWindowManager.getInstance().close(projectDir)
     })
 
-    // Close git manager window and stop CI polling when this plugin is disabled for a project
+    // Close git manager window and stop polling when this plugin is disabled for a project
     bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
       if (pluginId === this.id) {
         stopCiPollingForProject(projectDir)
+        stopIssuePollingForProject(projectDir)
         GitManagerWindowManager.getInstance().close(projectDir)
       }
     })
@@ -86,6 +111,7 @@ export class GitManagerPlugin implements DockPlugin {
 
   dispose(): void {
     disposeCi()
+    disposeIssueIpc()
     disposeGitManagerIpc()
     GitManagerWindowManager.getInstance().closeAll()
   }

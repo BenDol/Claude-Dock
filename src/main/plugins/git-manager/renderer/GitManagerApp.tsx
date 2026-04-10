@@ -25,6 +25,7 @@ import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
 import type { CiLogSearchMatch, CiSearchProgress } from './CiPanel'
 const PrPanel = React.lazy(() => import('./PrPanel'))
+const IssuesPanel = React.lazy(() => import('./IssuesPanel'))
 import type { DockNotification, NotificationAction } from '../../../../shared/ci-types'
 import type { WriteTestsTask, ReferenceThisTask } from '../../../../shared/claude-task-types'
 
@@ -617,9 +618,10 @@ const GitManagerApp: React.FC = () => {
   const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
   const [mergeState, setMergeState] = useState<GitMergeState | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts' | 'ci' | 'pr'>('log')
+  const [activeTab, setActiveTab] = useState<'log' | 'changes' | 'conflicts' | 'ci' | 'pr' | 'issues'>('log')
   const [enableCiTab, setEnableCiTab] = useState(false)
   const [enablePrTab, setEnablePrTab] = useState(false)
+  const [enableIssuesTab, setEnableIssuesTab] = useState(false)
   const [ciStatus, setCiStatus] = useState<'success' | 'failure' | 'in_progress' | 'none'>('none')
   const [wcBusy, setWcBusy] = useState(false)
   const wcBusyRef = useRef(false)
@@ -687,6 +689,9 @@ const GitManagerApp: React.FC = () => {
     api.plugins.getSetting(projectDir, 'git-manager', 'enablePrTab')
       .then((v) => setEnablePrTab(v === true))
       .catch(() => {})
+    api.plugins.getSetting(projectDir, 'git-manager', 'enableIssuesTab')
+      .then((v) => setEnableIssuesTab(v === true))
+      .catch(() => {})
     api.plugins.getSetting(projectDir, 'git-manager', 'syntaxHighlighting')
       .then((v) => setSyntaxHL(typeof v === 'boolean' ? v : true))
       .catch(() => {})
@@ -707,6 +712,10 @@ const GitManagerApp: React.FC = () => {
         const enabled = !!value
         setEnablePrTab(enabled)
         if (!enabled) setActiveTab((t) => t === 'pr' ? 'log' : t)
+      } else if (key === 'enableIssuesTab') {
+        const enabled = !!value
+        setEnableIssuesTab(enabled)
+        if (!enabled) setActiveTab((t) => t === 'issues' ? 'log' : t)
       } else if (key === 'syntaxHighlighting') {
         setSyntaxHL(!!value)
       } else if (key === 'escToHide') {
@@ -1964,6 +1973,14 @@ const GitManagerApp: React.FC = () => {
                 {repoProvider === 'gitlab' ? 'Merge Requests' : 'Pull Requests'}
               </button>
             )}
+            {enableIssuesTab && (
+              <button
+                className={`gm-tab${activeTab === 'issues' ? ' gm-tab-active' : ''}`}
+                onClick={() => { setActiveTab('issues'); getDockApi().telemetry.recordFeature('issuesTabUsed', true).catch(() => {}) }}
+              >
+                Issues
+              </button>
+            )}
             <span className="gm-tabs-spacer" />
             <div className="gm-search-bar">
               <SearchIcon />
@@ -2149,6 +2166,13 @@ const GitManagerApp: React.FC = () => {
             <div style={{ display: activeTab === 'pr' ? 'contents' : 'none' }}>
               <React.Suspense fallback={<div className="gm-loading">Loading...</div>}>
                 <PrPanel key={activeDir} projectDir={activeDir} provider={repoProvider} currentBranch={currentBranch?.name} active={activeTab === 'pr'} />
+              </React.Suspense>
+            </div>
+          )}
+          {enableIssuesTab && (
+            <div style={{ display: activeTab === 'issues' ? 'contents' : 'none' }}>
+              <React.Suspense fallback={<div className="gm-loading">Loading...</div>}>
+                <IssuesPanel key={activeDir} projectDir={activeDir} active={activeTab === 'issues'} />
               </React.Suspense>
             </div>
           )}
@@ -9988,6 +10012,8 @@ const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' 
   { key: 'syntaxHighlighting', label: 'Syntax highlighting in diffs', type: 'boolean', default: true },
   { key: 'enableCiTab', label: 'Show CI tab', type: 'boolean', default: false },
   { key: 'enablePrTab', label: 'Show Pull/Merge Requests tab', type: 'boolean', default: false },
+  { key: 'enableIssuesTab', label: 'Show Issues tab', type: 'boolean', default: false },
+  { key: 'enableIssueNotifications', label: 'Issue notifications', type: 'boolean', default: true },
   { key: 'ciNotificationTypes', label: 'CI notifications', type: 'multiselect', default: ['started', 'success', 'failure'], options: [
     { value: 'started', label: 'Started' },
     { value: 'success', label: 'Success' },

@@ -9,7 +9,8 @@ vi.mock('../services', () => ({
 }))
 
 vi.mock('../git-manager-ipc', () => ({
-  registerGitManagerIpc: () => {}
+  registerGitManagerIpc: () => {},
+  disposeGitManagerIpc: () => {}
 }))
 
 vi.mock('../git-manager-window', () => ({
@@ -19,6 +20,17 @@ vi.mock('../git-manager-window', () => ({
       closeAll: () => {}
     })
   }
+}))
+
+vi.mock('../ci/ci-ipc', () => ({
+  disposeCi: () => {},
+  stopCiPollingForProject: () => {}
+}))
+
+vi.mock('../issues/issue-ipc', () => ({
+  registerIssueIpc: () => {},
+  disposeIssueIpc: () => {},
+  stopIssuePollingForProject: () => {}
 }))
 
 import { GitManagerPlugin } from '../git-manager-plugin'
@@ -59,7 +71,22 @@ describe('GitManagerPlugin settings schema', () => {
     expect(plugin.lazyLoad).toBe(true)
   })
 
-  it('has 6 settings total', () => {
-    expect(plugin.settingsSchema.length).toBe(6)
+  it('has all expected settings registered', () => {
+    // v1 baseline: 6 settings + 3 new Issues-tab settings = 9
+    expect(plugin.settingsSchema.length).toBe(9)
+  })
+
+  it('has enableIssuesTab boolean setting defaulting false', () => {
+    const setting = plugin.settingsSchema.find((s) => s.key === 'enableIssuesTab')
+    expect(setting).toBeDefined()
+    expect(setting!.type).toBe('boolean')
+    expect(setting!.defaultValue).toBe(false)
+  })
+
+  it('has issueTypeProfilesJson string setting defaulting to empty (use shipped defaults)', () => {
+    const setting = plugin.settingsSchema.find((s) => s.key === 'issueTypeProfilesJson')
+    expect(setting).toBeDefined()
+    expect(setting!.type).toBe('string')
+    expect(setting!.defaultValue).toBe('')
   })
 })
