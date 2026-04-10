@@ -129,6 +129,7 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
   const [showProfiles, setShowProfiles] = useState(false)
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const detailPaneRef = useRef<HTMLDivElement | null>(null)
 
   // Check availability on mount / effective-project change.
   // We intentionally delay until the parent setting has loaded so the first fetch goes
@@ -425,21 +426,36 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
         )}
 
         {showDetail && selectedId != null && (
-          <IssueDetailPanel
-            key={`${effectiveProjectDir}:${selectedId}`}
-            projectDir={effectiveProjectDir}
-            issueId={selectedId}
-            issue={selectedIssue}
-            loading={selectedLoading}
-            viewMode={viewMode}
-            onClose={closeDetail}
-            onEnterFull={enterFull}
-            onExitFull={exitFull}
-            onRefresh={() => refreshSelected(selectedId)}
-            currentUser={currentUser}
-            providerKey={providerKey}
-            onListChanged={loadIssues}
-          />
+          <>
+            {viewMode === 'split' && (
+              <IssueResizeHandle
+                targetRef={detailPaneRef}
+                min={320}
+                max={900}
+                storageKey="gm-issue-detail-width"
+              />
+            )}
+            <div
+              className={`gm-issue-detail-pane gm-issue-detail-pane--${viewMode}`}
+              ref={detailPaneRef}
+            >
+              <IssueDetailPanel
+                key={`${effectiveProjectDir}:${selectedId}`}
+                projectDir={effectiveProjectDir}
+                issueId={selectedId}
+                issue={selectedIssue}
+                loading={selectedLoading}
+                viewMode={viewMode}
+                onClose={closeDetail}
+                onEnterFull={enterFull}
+                onExitFull={exitFull}
+                onRefresh={() => refreshSelected(selectedId)}
+                currentUser={currentUser}
+                providerKey={providerKey}
+                onListChanged={loadIssues}
+              />
+            </div>
+          </>
         )}
       </div>
 
@@ -511,6 +527,66 @@ function ParentModeBanner({
       </button>
     </div>
   )
+}
+
+// ============================================================================
+// Resize Handle (modeled on CiResizeHandle)
+// ============================================================================
+
+function IssueResizeHandle({
+  targetRef,
+  min,
+  max,
+  storageKey
+}: {
+  targetRef: React.RefObject<HTMLDivElement | null>
+  min: number
+  max: number
+  storageKey: string
+}) {
+  // Restore saved width on mount
+  useEffect(() => {
+    if (!targetRef.current) return
+    const saved = localStorage.getItem(storageKey)
+    if (saved) {
+      const w = parseInt(saved, 10)
+      if (!Number.isNaN(w) && w >= min && w <= max) {
+        targetRef.current.style.width = `${w}px`
+      }
+    }
+  }, [storageKey, targetRef, min, max])
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const el = targetRef.current
+    if (!el) return
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const startX = e.clientX
+    const startW = el.getBoundingClientRect().width / zoom
+
+    const onMove = (ev: MouseEvent) => {
+      // Dragging left (clientX decreases) widens the right-side pane.
+      const delta = (startX - ev.clientX) / zoom
+      const newW = Math.min(max, Math.max(min, startW + delta))
+      el.style.width = `${newW}px`
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (el) {
+        const z = parseFloat(document.documentElement.style.zoom) || 1
+        localStorage.setItem(storageKey, String(Math.round(el.getBoundingClientRect().width / z)))
+      }
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [targetRef, min, max, storageKey])
+
+  return <div className="gm-issue-resize-handle" onMouseDown={handleMouseDown} />
 }
 
 // ============================================================================

@@ -5741,12 +5741,48 @@ div.gm-ftree-search-current {
   overflow: hidden;
 }
 .gm-issues-view-list .gm-issues-list-wrap { flex: 1; }
-.gm-issues-view-split .gm-issues-list-wrap { flex: 0 0 42%; min-width: 320px; border-right: 1px solid var(--border-color); }
-.gm-issues-view-split .gm-issue-detail { flex: 1; min-width: 0; }
-.gm-issues-view-full .gm-issue-detail { flex: 1; min-width: 0; }
+.gm-issues-view-split .gm-issues-list-wrap { flex: 1 1 auto; min-width: 280px; }
+.gm-issues-view-full .gm-issues-list-wrap { display: none; }
 
 .gm-issues-list-wrap { display: flex; flex-direction: column; min-height: 0; }
 .gm-issues-setup-wrap { align-items: stretch; }
+
+/* Detail pane wrapper — fixed/resizable in split view, full-width in full view. */
+.gm-issue-detail-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+.gm-issue-detail-pane--split {
+  flex-shrink: 0;
+  width: 460px;
+  border-left: 1px solid var(--border-color);
+}
+.gm-issue-detail-pane--full {
+  flex: 1;
+  /* Override any inline width set by the split-view resize handle */
+  width: auto !important;
+}
+.gm-issue-detail-pane > .gm-issue-detail {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Resize handle between the list and the detail pane (split view only) */
+.gm-issue-resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 2;
+}
+.gm-issue-resize-handle:hover,
+.gm-issue-resize-handle:active {
+  background: var(--accent-color);
+}
 
 /* Parent-mode banner (shown only when viewing a submodule) */
 .gm-issues-parent-banner {
