@@ -4,6 +4,7 @@ import { DockPanelLayout } from './components/DockPanelLayout'
 import Toolbar from './components/Toolbar'
 import EmptyState from './components/EmptyState'
 import SettingsModal from './components/SettingsModal'
+import BugReportModal from './components/BugReportModal'
 import Launcher from './components/Launcher'
 import ToastContainer from './components/ToastContainer'
 import PluginUpdaterModal from './components/PluginUpdaterModal'
@@ -667,6 +668,7 @@ function DockApp() {
   const autoSpawn = useSettingsStore((s) => s.settings.behavior.autoSpawnFirstTerminal)
 
   const [showSettings, setShowSettings] = useState<{ tab?: string; section?: string } | false>(false)
+  const [showBugReport, setShowBugReport] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
   const [isResumingSession, setIsResumingSession] = useState(false)
@@ -1118,6 +1120,7 @@ function DockApp() {
         onRestoreLastClosed={handleRestoreLastClosed}
         onAddTerminalWithSession={handleAddTerminalWithSession}
         onOpenSettings={(opts) => setShowSettings(opts || {})}
+        onOpenBugReport={() => setShowBugReport(true)}
       />
       {terminals.length === 0 ? (
         <EmptyState onAddTerminal={handleAddTerminal} projectDir={projectDir} />
@@ -1127,6 +1130,7 @@ function DockApp() {
         </DockPanelLayout>
       )}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} initialTab={(showSettings as any).tab} initialSection={(showSettings as any).section} />}
+      {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} />}
       {pendingTask && (
         <TerminalPicker
           taskLabel={getTaskMeta(pendingTask).label}

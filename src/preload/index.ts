@@ -17,6 +17,7 @@ import type {
   GitSearchResponse
 } from '../shared/git-manager-types'
 import type { CiWorkflow, CiWorkflowRun, CiJob, CiSetupStatus, DockNotification } from '../shared/ci-types'
+import type { BugReportInput, BugReportResult } from '../shared/bug-report-types'
 import type { ClaudeTaskRequest } from '../shared/claude-task-types'
 import type {
   Issue,
@@ -358,6 +359,9 @@ export interface DockApi {
   telemetry: {
     setConsent: (consent: boolean) => Promise<void>
     recordFeature: (key: string, value: unknown) => Promise<void>
+  }
+  bugReport: {
+    submit: (data: BugReportInput) => Promise<BugReportResult>
   }
   notifications: {
     onShow: (callback: (notification: DockNotification) => void) => () => void
@@ -809,6 +813,9 @@ const dockApi: DockApi = {
   telemetry: {
     setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent),
     recordFeature: (key: string, value: unknown) => ipcRenderer.invoke(IPC.TELEMETRY_RECORD_FEATURE, key, value)
+  },
+  bugReport: {
+    submit: (data) => ipcRenderer.invoke(IPC.BUG_REPORT_SUBMIT, data)
   },
   notifications: {
     onShow: (callback) => {

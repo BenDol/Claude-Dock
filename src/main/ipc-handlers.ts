@@ -14,6 +14,8 @@ import { detectClaudeCli, installClaudeCli, getClaudeVersion, detectGit, install
 import { isMcpInstalled, installMcp, uninstallMcp, setLinkedEnabled, setMessagingEnabled } from './linked-mode'
 import { registerContextMenu, unregisterContextMenu, isContextMenuRegistered } from './context-menu-integration'
 import { CrashReporter } from './crash-reporter'
+import { BugReporter } from './bug-reporter'
+import type { BugReportInput } from '../shared/bug-report-types'
 import { ActivityTracker } from './activity-tracker'
 import * as usageService from './usage-service'
 import { PluginManager, getPluginsDir } from './plugins'
@@ -961,6 +963,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.DEBUG_OPEN_LOGS, () => {
     shell.openPath(getLogDir())
+  })
+
+  ipcMain.handle(IPC.BUG_REPORT_SUBMIT, async (_event, input: BugReportInput) => {
+    try {
+      return await BugReporter.getInstance().submit(input)
+    } catch (err) {
+      logError('[bug-reporter] submit handler failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.DEBUG_OPEN_DEVTOOLS, (event) => {

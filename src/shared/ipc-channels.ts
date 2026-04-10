@@ -81,6 +81,7 @@ export const IPC = {
   DEBUG_REPORT_CRASH: 'debug:reportCrash',
   DEBUG_OPEN_DEVTOOLS: 'debug:openDevTools',
   DEBUG_OPEN_LOGS: 'debug:openLogs',
+  BUG_REPORT_SUBMIT: 'bugReport:submit',
 
   // Git Manager
   GIT_MGR_IS_REPO: 'gitMgr:isRepo',

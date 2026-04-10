@@ -18,6 +18,7 @@ interface ToolbarProps {
   onRestoreLastClosed: () => void
   onAddTerminalWithSession: (sessionId: string) => void
   onOpenSettings: (opts?: { tab?: string; section?: string }) => void
+  onOpenBugReport: () => void
 }
 
 const McpStatusIcon: React.FC = () => (
@@ -75,6 +76,21 @@ const SettingsIcon: React.FC = () => (
   </svg>
 )
 
+const BugIcon: React.FC = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 2l1.5 1.5" />
+    <path d="M16 2l-1.5 1.5" />
+    <rect x="7" y="6" width="10" height="14" rx="5" />
+    <path d="M12 6v14" />
+    <path d="M7 11H3" />
+    <path d="M21 11h-4" />
+    <path d="M7 16H4" />
+    <path d="M20 16h-3" />
+    <path d="M7 6L4 4" />
+    <path d="M17 6l3-2" />
+  </svg>
+)
+
 const FolderIcon: React.FC = () => (
   <svg
     width="14"
@@ -91,7 +107,7 @@ const FolderIcon: React.FC = () => (
 )
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreLastClosed, onAddTerminalWithSession, onOpenSettings }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreLastClosed, onAddTerminalWithSession, onOpenSettings, onOpenBugReport }) => {
   const toolbarRef = useRef<HTMLDivElement>(null)
   useToolbarNavigation(toolbarRef)
 
@@ -389,6 +405,9 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
         <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-btn-badge-wrap" onClick={onOpenSettings} title="Settings (Ctrl+,)">
           <SettingsIcon />
           {hasPluginUpdates && <span className="toolbar-update-dot" />}
+        </button>
+        <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon" onClick={onOpenBugReport} title="Report a bug">
+          <BugIcon />
         </button>
         <ClaudeUsageButton />
         <div className="toolbar-separator" />
