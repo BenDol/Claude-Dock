@@ -381,6 +381,11 @@ export interface DockApi {
     send: (projectDir: string, task: ClaudeTaskRequest) => Promise<boolean>
     onTask: (callback: (task: ClaudeTaskRequest) => void) => () => void
   }
+  filePaste: {
+    checkClipboard: () => Promise<{ files: string[]; image: boolean }>
+    copyToTemp: (filePaths: string[]) => Promise<{ tempPaths: string[]; errors: string[] }>
+    saveImage: () => Promise<{ tempPath: string } | null>
+  }
   pluginUpdater: {
     check: () => Promise<PluginUpdateEntry[]>
     getAvailable: () => Promise<PluginUpdateEntry[]>
@@ -857,6 +862,11 @@ const dockApi: DockApi = {
       ipcRenderer.on('claude:task', handler)
       return () => ipcRenderer.removeListener('claude:task', handler)
     }
+  },
+  filePaste: {
+    checkClipboard: () => ipcRenderer.invoke(IPC.CLIPBOARD_CHECK_FILES),
+    copyToTemp: (filePaths: string[]) => ipcRenderer.invoke(IPC.CLIPBOARD_COPY_TO_TEMP, filePaths),
+    saveImage: () => ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE),
   },
   pluginUpdater: {
     check: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_CHECK),

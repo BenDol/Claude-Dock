@@ -2550,6 +2550,166 @@ body {
   background: var(--hover-color);
 }
 
+/* File Paste Compose Overlay */
+.file-paste-compose {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  z-index: 50;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: file-paste-slide-up 0.15s ease-out;
+}
+
+@keyframes file-paste-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.file-paste-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-paste-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.file-paste-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 3px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.file-paste-close:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
+}
+
+.file-paste-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.file-paste-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-primary);
+  max-width: 220px;
+}
+
+.file-paste-chip-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.file-paste-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-paste-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 1px;
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.file-paste-chip-remove:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
+}
+
+.file-paste-context {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 6px 8px;
+  resize: none;
+  outline: none;
+  line-height: 1.4;
+}
+
+.file-paste-context:focus {
+  border-color: var(--accent-color);
+}
+
+.file-paste-context::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.file-paste-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.file-paste-cancel {
+  font-family: inherit;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.file-paste-cancel:hover {
+  color: var(--text-primary);
+  background: var(--hover-color);
+}
+
+.file-paste-submit {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-color);
+  border: 1px solid var(--accent-color);
+  border-radius: 4px;
+  color: #fff;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.file-paste-submit:hover {
+  filter: brightness(1.1);
+}
+
 /* Empty State */
 .empty-state {
   flex: 1;

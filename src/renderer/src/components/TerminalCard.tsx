@@ -516,25 +516,39 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
       className={`terminal-card ${isFocused ? 'focused' : ''} ${!isAlive ? 'exited' : ''}`}
       data-terminal-id={terminalId}
       onDragOverCapture={(e) => {
-        if (e.dataTransfer.types.includes('application/x-ws-files')) {
+        if (e.dataTransfer.types.includes('application/x-ws-files') || e.dataTransfer.types.includes('Files')) {
           e.preventDefault()
           e.stopPropagation()
           e.dataTransfer.dropEffect = 'copy'
         }
       }}
       onDropCapture={(e) => {
+        // Workspace panel file drag (internal)
         const raw = e.dataTransfer.getData('application/x-ws-files')
-        if (!raw) return
-        e.preventDefault()
-        e.stopPropagation()
-        try {
-          const files = JSON.parse(raw) as string[]
-          if (files.length > 0) {
-            const fileList = files.map((f) => `- ${f}`).join('\n')
-            const prompt = `Please read and reference the following file${files.length > 1 ? 's' : ''}:\n${fileList}`
-            getDockApi().terminal.write(terminalId, `\x1b[200~${prompt}\x1b[201~`)
+        if (raw) {
+          e.preventDefault()
+          e.stopPropagation()
+          try {
+            const files = JSON.parse(raw) as string[]
+            if (files.length > 0) {
+              const fileList = files.map((f) => `- ${f}`).join('\n')
+              const prompt = `Please read and reference the following file${files.length > 1 ? 's' : ''}:\n${fileList}`
+              getDockApi().terminal.write(terminalId, `\x1b[200~${prompt}\x1b[201~`)
+            }
+          } catch { /* ignore */ }
+          return
+        }
+        // Native file drop from Explorer/Finder — trigger compose overlay
+        if (e.dataTransfer.files.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          const paths = Array.from(e.dataTransfer.files).map((f) => (f as File & { path: string }).path).filter(Boolean)
+          if (paths.length > 0) {
+            window.dispatchEvent(new CustomEvent('file-paste-trigger', {
+              detail: { terminalId, files: paths },
+            }))
           }
-        } catch { /* ignore */ }
+        }
       }}
     >
       <div className="terminal-card-header">

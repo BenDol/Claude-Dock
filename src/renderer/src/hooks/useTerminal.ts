@@ -226,6 +226,47 @@ function registerFilePathLinks(term: Terminal): void {
   })
 }
 
+type FilePasteData = {
+  files: { name: string; path: string }[]
+  image?: { tempPath: string }
+  terminalId: string
+}
+
+/** Paste plain text to the terminal (standard paste fallback). */
+function pasteText(api: ReturnType<typeof getDockApi>, terminalId: string): void {
+  navigator.clipboard.readText().then((text) => {
+    if (text) api.terminal.write(terminalId, text)
+  }).catch(() => { /* clipboard access denied — ignore */ })
+}
+
+/** Check clipboard for files/images before falling back to normal text paste. */
+function handlePasteWithFileCheck(
+  api: ReturnType<typeof getDockApi>,
+  terminalId: string,
+  filePasteRef: { current: (data: FilePasteData | null) => void }
+): void {
+  api.filePaste.checkClipboard().then(async (result) => {
+    if (result.files.length > 0) {
+      const fileInfos = result.files.map((f) => ({
+        name: f.replace(/.*[/\\]/, ''),
+        path: f,
+      }))
+      filePasteRef.current({ files: fileInfos, terminalId })
+    } else if (result.image) {
+      const saved = await api.filePaste.saveImage()
+      if (saved) {
+        filePasteRef.current({ files: [], image: { tempPath: saved.tempPath }, terminalId })
+      } else {
+        pasteText(api, terminalId)
+      }
+    } else {
+      pasteText(api, terminalId)
+    }
+  }).catch(() => {
+    pasteText(api, terminalId)
+  })
+}
+
 interface UseTerminalOptions {
   terminalId: string
   onTitleChange?: (title: string) => void
@@ -251,6 +292,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const [autoScrollActive, setAutoScrollActive] = useState(false)
   const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+
+  // File paste interception state
+  const [filePasteData, setFilePasteData] = useState<{
+    files: { name: string; path: string }[]
+    image?: { tempPath: string }
+    terminalId: string
+  } | null>(null)
+  const filePasteRef = useRef(setFilePasteData)
+  filePasteRef.current = setFilePasteData
 
   const settings = useSettingsStore((s) => s.settings)
   // Granular selectors for the settings effect to avoid re-fitting on unrelated changes
@@ -611,12 +661,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           return false
         }
 
-        // Ctrl+Shift+V: paste
+        // Ctrl+Shift+V: paste (with file interception)
         if (e.ctrlKey && e.shiftKey && e.key === 'V') {
           e.preventDefault()
-          navigator.clipboard.readText().then((text) => {
-            api.terminal.write(terminalId, text)
-          })
+          handlePasteWithFileCheck(api, terminalId, filePasteRef)
           return false
         }
 
@@ -627,19 +675,17 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           return false
         }
 
-        // Ctrl+V: paste
+        // Ctrl+V: paste (with file interception)
         if (e.ctrlKey && !e.shiftKey && e.key === 'v') {
           e.preventDefault()
-          navigator.clipboard.readText().then((text) => {
-            api.terminal.write(terminalId, text)
-          })
+          handlePasteWithFileCheck(api, terminalId, filePasteRef)
           return false
         }
 
         return true
       })
 
-      // Right-click context menu: paste
+      // Right-click context menu: copy selection or paste (with file interception)
       container.addEventListener('contextmenu', (e) => {
         e.preventDefault()
         const sel = term.getSelection()
@@ -647,9 +693,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           navigator.clipboard.writeText(sel)
           term.clearSelection()
         } else {
-          navigator.clipboard.readText().then((text) => {
-            api.terminal.write(terminalId, text)
-          })
+          handlePasteWithFileCheck(api, terminalId, filePasteRef)
         }
       })
 
@@ -825,5 +869,57 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     setAutoScrollActive(false)
   }, [])
 
-  return { initTerminal, fit, forceFit, resizePoke, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll }
+  // Submit file paste: copy files to temp, construct prompt, write to PTY
+  const submitFilePaste = useCallback(async (data: FilePasteData, contextText: string) => {
+    const api = getDockApi()
+    const tempPaths: string[] = []
+
+    if (data.files.length > 0) {
+      const result = await api.filePaste.copyToTemp(data.files.map((f) => f.path))
+      tempPaths.push(...result.tempPaths)
+      if (result.errors.length > 0) {
+        console.warn('[file-paste] copy errors:', result.errors)
+      }
+    }
+    if (data.image) {
+      tempPaths.push(data.image.tempPath)
+    }
+
+    if (tempPaths.length === 0) {
+      setFilePasteData(null)
+      return
+    }
+
+    const fileList = tempPaths.map((p) => `- ${p.replace(/\\/g, '/')}`).join('\n')
+    let prompt = `I've placed file(s) for you to work with:\n${fileList}`
+    if (contextText.trim()) {
+      prompt += `\n\n${contextText.trim()}`
+    }
+
+    // Bracketed paste + Escape + Enter — same pattern as App.tsx sendToTerminal
+    const paste = `\x1b[200~${prompt}\x1b[201~`
+    api.terminal.write(data.terminalId, paste)
+    setTimeout(() => api.terminal.write(data.terminalId, '\x1b'), 400)
+    setTimeout(() => api.terminal.write(data.terminalId, '\r'), 700)
+
+    setFilePasteData(null)
+  }, [])
+
+  // Listen for file-paste-trigger events from drag-and-drop (dispatched by TerminalCard)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.terminalId === terminalId && detail?.files?.length > 0) {
+        const fileInfos = (detail.files as string[]).map((f) => ({
+          name: f.replace(/.*[/\\]/, ''),
+          path: f,
+        }))
+        setFilePasteData({ files: fileInfos, terminalId })
+      }
+    }
+    window.addEventListener('file-paste-trigger', handler)
+    return () => window.removeEventListener('file-paste-trigger', handler)
+  }, [terminalId])
+
+  return { initTerminal, fit, forceFit, resizePoke, focus, termRef, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp: scrollBtnVisible, autoScroll: autoScrollActive, scrollToBottom, enableAutoScroll, disableAutoScroll, filePasteData, setFilePasteData, submitFilePaste }
 }

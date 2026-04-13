@@ -240,6 +240,11 @@ export const IPC = {
   // Claude Tasks
   CLAUDE_SEND_TASK: 'claude:sendTask',
 
+  // File Paste
+  CLIPBOARD_CHECK_FILES: 'clipboard:checkFiles',
+  CLIPBOARD_COPY_TO_TEMP: 'clipboard:copyToTemp',
+  CLIPBOARD_SAVE_IMAGE: 'clipboard:saveImage',
+
   // Plugin windows
   PLUGIN_GET_OPEN_WINDOWS: 'plugin:getOpenWindows',
 

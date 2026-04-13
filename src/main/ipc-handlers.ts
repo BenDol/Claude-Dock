@@ -26,6 +26,7 @@ import { getOverrides as getPluginOverrides } from './plugins/plugin-update-stor
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
 import { TelemetryCollector, type TelemetryPayload } from './telemetry'
+import { getClipboardFiles, copyFilesToTemp, saveClipboardImageToTemp } from './clipboard-files'
 
 declare const __DEV__: boolean
 
@@ -1049,6 +1050,19 @@ export function registerIpcHandlers(): void {
       releaseUpdateLock()
       throw new Error(err instanceof Error ? err.message : 'Install failed')
     }
+  })
+
+  // File Paste
+  ipcMain.handle(IPC.CLIPBOARD_CHECK_FILES, () => {
+    return getClipboardFiles()
+  })
+
+  ipcMain.handle(IPC.CLIPBOARD_COPY_TO_TEMP, async (_event, filePaths: string[]) => {
+    return copyFilesToTemp(filePaths)
+  })
+
+  ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE, async () => {
+    return saveClipboardImageToTemp()
   })
 }
 

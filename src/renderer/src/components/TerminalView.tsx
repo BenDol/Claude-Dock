@@ -5,6 +5,7 @@ import { useResizeObserver } from '../hooks/useResizeObserver'
 import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
+import FilePasteCompose from './FilePasteCompose'
 
 interface TerminalViewProps {
   terminalId: string
@@ -135,7 +136,7 @@ const TerminalSearchBar: React.FC<{
 }
 
 const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) => {
-  const { initTerminal, fit, forceFit, resizePoke, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll } = useTerminal({ terminalId })
+  const { initTerminal, fit, forceFit, resizePoke, focus, searchAddonRef, searchOpen, setSearchOpen, gotDataRef, scrolledUp, scrollToBottom, autoScroll, enableAutoScroll, disableAutoScroll, filePasteData, setFilePasteData, submitFilePaste } = useTerminal({ terminalId })
   const [loading, setLoading] = useState(true)
   const mountTimeRef = useRef(Date.now())
   const setTerminalLoading = useDockStore((s) => s.setTerminalLoading)
@@ -267,6 +268,22 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
             <polyline points="2,2 20,10 38,2" />
           </svg>
         </button>
+      )}
+      {filePasteData && (
+        <FilePasteCompose
+          data={filePasteData}
+          onSubmit={(ctx) => submitFilePaste(filePasteData, ctx)}
+          onCancel={() => { setFilePasteData(null); focus() }}
+          onRemoveFile={(idx) => {
+            const newFiles = filePasteData.files.filter((_, i) => i !== idx)
+            if (newFiles.length === 0 && !filePasteData.image) {
+              setFilePasteData(null)
+              focus()
+            } else {
+              setFilePasteData({ ...filePasteData, files: newFiles })
+            }
+          }}
+        />
       )}
     </div>
   )

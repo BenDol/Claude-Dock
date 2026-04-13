@@ -15,6 +15,7 @@ import { getSetting, setSettings } from './settings-store'
 import { updateJumpList } from './recent-store'
 import { enrichPathWithKnownDirs } from './claude-cli'
 import { loadPendingProject, cleanStaleLock } from './pending-project'
+import { cleanOldPastedFiles } from './clipboard-files'
 import { refreshContextMenuIfNeeded, autoRegisterContextMenuOnce } from './context-menu-integration'
 import { TelemetryCollector, checkInstallerConsent } from './telemetry'
 import { CrashReporter } from './crash-reporter'
@@ -165,6 +166,7 @@ if (!gotLock) {
     }, 1000)
 
     cleanStaleLock()
+    try { cleanOldPastedFiles() } catch (e) { log(`[file-paste] cleanup error: ${e}`) }
 
     const manager = DockManager.getInstance()
     const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv) || loadPendingProject()
