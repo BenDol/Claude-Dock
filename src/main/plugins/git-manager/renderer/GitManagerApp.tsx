@@ -1734,9 +1734,18 @@ const GitManagerApp: React.FC = () => {
               {status.conflicts.length} unresolved conflict{status.conflicts.length > 1 ? 's' : ''}
             </span>
           </div>
-          <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
-            Resolve...
-          </button>
+          <div className="gm-merge-bar-actions">
+            <button className="gm-merge-bar-btn gm-merge-bar-abort" onClick={async () => {
+              const r = await api.gitManager.abortMerge(activeDir)
+              if (!r.success) handleSmartError(`Abort failed: ${r.error || 'Unknown error'}`)
+              refresh()
+            }}>
+              Abort
+            </button>
+            <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
+              Resolve...
+            </button>
+          </div>
         </div>
       )}
 
