@@ -474,6 +474,18 @@ const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => 
 
   const api = getDockApi()
   const folderName = projectDir.split(/[/\\]/).pop() || projectDir
+  const [branch, setBranch] = useState<string | null>(null)
+
+  // Fetch current git branch on mount + poll every 10s
+  useEffect(() => {
+    let cancelled = false
+    const fetchBranch = () => {
+      api.git.getBranch(projectDir).then((b) => { if (!cancelled) setBranch(b) })
+    }
+    fetchBranch()
+    const timer = setInterval(fetchBranch, 10_000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [projectDir])
 
   // Load recents when opened
   useEffect(() => {
@@ -549,6 +561,7 @@ const WorkspaceDropdown: React.FC<{ projectDir: string }> = ({ projectDir }) => 
         title={projectDir}
       >
         {folderName}
+        {branch && <span className="ws-branch">{branch}</span>}
         <span className="ws-dropdown-arrow">{'\u25BE'}</span>
       </button>
       {open && !promptPath && (

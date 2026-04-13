@@ -5204,6 +5204,7 @@ const WorkingChanges: React.FC<{
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [autoGen, setAutoGen] = useState(false)
+  const [llmDownloadProgress, setLlmDownloadProgress] = useState<number | null>(null)
   const userEditedMsgRef = useRef(false)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [gitignoreModal, setGitignoreModal] = useState<{ pattern: string; hasTracked: boolean } | null>(null)
@@ -5305,6 +5306,13 @@ const WorkingChanges: React.FC<{
     getDockApi().plugins.getSetting(settingsDir, 'git-manager', 'autoGenerateCommitMsg')
       .then((val) => { setAutoGen(typeof val === 'boolean' ? val : true) })
   }, [settingsDir])
+
+  // Listen for LLM model download progress
+  useEffect(() => {
+    return getDockApi().llm.onDownloadProgress((progress) => {
+      setLlmDownloadProgress(progress >= 100 ? null : progress)
+    })
+  }, [])
 
   // Load diffs for all selected files (multi-select aware)
   useEffect(() => {
@@ -5832,8 +5840,12 @@ const WorkingChanges: React.FC<{
             {generating && !commitMsg && (
               <div className="gm-commit-generating-overlay">
                 <span className="gm-toolbar-spinner" />
-                <span>Generating commit message from your staged changes...</span>
-                <span className="gm-commit-generating-tip">Pro Tip: You can commit & push now, it'll queue until generation finishes.</span>
+                <span>{llmDownloadProgress != null
+                  ? `Downloading local LLM model... ${llmDownloadProgress}%`
+                  : 'Generating commit message from your staged changes...'}</span>
+                {llmDownloadProgress == null && (
+                  <span className="gm-commit-generating-tip">Pro Tip: You can commit & push now, it'll queue until generation finishes.</span>
+                )}
               </div>
             )}
             <textarea
@@ -10020,6 +10032,7 @@ const EditRemoteModal: React.FC<{
 const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' | 'multiselect'; default?: unknown; options?: { value: string; label: string }[] }[] = [
   { key: 'escToHide', label: 'Press Esc to hide window', type: 'boolean', default: true },
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
+  { key: 'enableClaude', label: 'Use Claude for commit messages (cloud)', type: 'boolean', default: false },
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
   { key: 'changesRefreshSeconds', label: 'Working changes auto-refresh (seconds, 0 to disable)', type: 'number', default: 5 },

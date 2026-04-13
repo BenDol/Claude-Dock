@@ -165,6 +165,12 @@ export interface DockApi {
     check: () => Promise<GitStatus>
     install: () => Promise<GitInstallResult>
     clone: (url: string, destDir: string) => Promise<{ success: boolean; clonedPath?: string; error?: string }>
+    getBranch: (projectDir: string) => Promise<string | null>
+  }
+  llm: {
+    status: () => Promise<{ modelAvailable: boolean; serverRunning: boolean; downloading: boolean; downloadProgress: number }>
+    download: () => Promise<{ success: boolean; error?: string }>
+    onDownloadProgress: (callback: (progress: number) => void) => () => void
   }
   claude: {
     checkInstall: () => Promise<ClaudeCliStatus>
@@ -590,7 +596,17 @@ const dockApi: DockApi = {
   git: {
     check: () => ipcRenderer.invoke(IPC.GIT_CHECK),
     install: () => ipcRenderer.invoke(IPC.GIT_INSTALL),
-    clone: (url, destDir) => ipcRenderer.invoke(IPC.GIT_CLONE, url, destDir)
+    clone: (url, destDir) => ipcRenderer.invoke(IPC.GIT_CLONE, url, destDir),
+    getBranch: (projectDir) => ipcRenderer.invoke(IPC.GIT_GET_BRANCH, projectDir)
+  },
+  llm: {
+    status: () => ipcRenderer.invoke(IPC.LLM_STATUS),
+    download: () => ipcRenderer.invoke(IPC.LLM_DOWNLOAD),
+    onDownloadProgress: (callback) => {
+      const handler = (_event: unknown, progress: number) => callback(progress)
+      ipcRenderer.on(IPC.LLM_DOWNLOAD_PROGRESS, handler)
+      return () => ipcRenderer.removeListener(IPC.LLM_DOWNLOAD_PROGRESS, handler)
+    }
   },
   claude: {
     checkInstall: () => ipcRenderer.invoke(IPC.CLAUDE_CHECK_INSTALL),

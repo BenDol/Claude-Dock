@@ -70,6 +70,12 @@
       "target": [
         "nsis",
         "portable"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/llm/win/llama-server.exe",
+          "to": "llm/llama-server.exe"
+        }
       ]
     },
     "nsis": {
@@ -92,12 +98,24 @@
             "universal"
           ]
         }
+      ],
+      "extraResources": [
+        {
+          "from": "resources/llm/mac/llama-server",
+          "to": "llm/llama-server"
+        }
       ]
     },
     "linux": {
       "icon": "assets/icon.png",
       "target": [
         "AppImage"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/llm/linux/llama-server",
+          "to": "llm/llama-server"
+        }
       ]
     }
   }

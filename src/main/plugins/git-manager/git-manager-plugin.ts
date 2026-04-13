@@ -28,6 +28,13 @@ export class GitManagerPlugin implements DockPlugin {
       defaultValue: true
     },
     {
+      key: 'enableClaude',
+      label: 'Use Claude for commit messages',
+      description: 'Also use Claude (CLI or API) alongside the local LLM for commit message generation. Races both and uses whichever responds first.',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
       key: 'autoFetchAll',
       label: 'Auto fetch all',
       description: 'Run git fetch --all when opening and on a recurring interval',

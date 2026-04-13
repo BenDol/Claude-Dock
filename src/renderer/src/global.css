@@ -180,6 +180,15 @@ body {
   border-color: var(--border-color);
 }
 
+.ws-branch {
+  font-weight: 400;
+  font-size: calc(var(--toolbar-font-size) - 1px);
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+}
+
 .ws-dropdown-arrow {
   font-size: 9px;
   color: var(--text-secondary);

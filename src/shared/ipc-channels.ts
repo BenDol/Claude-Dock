@@ -50,6 +50,12 @@ export const IPC = {
   GIT_CHECK: 'git:check',
   GIT_INSTALL: 'git:install',
   GIT_CLONE: 'git:clone',
+  GIT_GET_BRANCH: 'git:getBranch',
+
+  // Local LLM (app-level service)
+  LLM_STATUS: 'llm:status',
+  LLM_DOWNLOAD: 'llm:download',
+  LLM_DOWNLOAD_PROGRESS: 'llm:downloadProgress',
   CLAUDE_CHECK_INSTALL: 'claude:checkInstall',
   CLAUDE_INSTALL: 'claude:install',
   CLAUDE_VERSION: 'claude:version',

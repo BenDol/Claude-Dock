@@ -1,5 +1,4 @@
 import { execFile, spawn, type ChildProcess } from 'child_process'
-import * as http from 'http'
 import * as https from 'https'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1460,78 +1459,14 @@ function cleanCommitMessage(raw: string): string {
   return lines.join('\n').trim()
 }
 
-function ollamaRequest(path: string, body?: object, timeout = 30000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: '127.0.0.1',
-      port: 11434,
-      path,
-      method: body ? 'POST' : 'GET',
-      headers: body ? { 'Content-Type': 'application/json' } : {}
-    }, (res) => {
-      let data = ''
-      res.on('data', (chunk) => data += chunk)
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)) }
-        catch { reject(new Error('Invalid JSON from Ollama')) }
-      })
-    })
-    req.on('error', () => reject(new Error('ollama_unavailable')))
-    req.setTimeout(timeout, () => { req.destroy(); reject(new Error('Ollama request timed out')) })
-    if (body) req.write(JSON.stringify(body))
-    req.end()
-  })
-}
-
-// Cache Ollama model to avoid /api/tags call every time
-let cachedOllamaModel: string | null = null
-let ollamaModelCacheTime = 0
-const OLLAMA_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-// Track Ollama availability to skip it fast when down
-let ollamaUnavailableUntil = 0
-const OLLAMA_BACKOFF = 60 * 1000 // 1 minute backoff after failure
-
-async function pickOllamaModel(): Promise<string> {
-  if (cachedOllamaModel && Date.now() - ollamaModelCacheTime < OLLAMA_CACHE_TTL) {
-    return cachedOllamaModel
-  }
-  const data = await ollamaRequest('/api/tags', undefined, 3000)
-  const models: { name: string }[] = data?.models || []
-  if (models.length === 0) {
-    throw new Error('No Ollama models installed. Run: ollama pull llama3.2')
-  }
-  const preferred = ['qwen2.5-coder', 'deepseek-coder', 'codellama', 'llama3.2', 'llama3.1', 'phi', 'gemma']
-  for (const pref of preferred) {
-    const match = models.find((m) => m.name.startsWith(pref))
-    if (match) { cachedOllamaModel = match.name; ollamaModelCacheTime = Date.now(); return match.name }
-  }
-  cachedOllamaModel = models[0].name
-  ollamaModelCacheTime = Date.now()
-  return cachedOllamaModel
-}
-
-async function generateViaOllama(stat: string, diff: string): Promise<string> {
-  if (Date.now() < ollamaUnavailableUntil) throw new Error('ollama_unavailable')
-  try {
-    const model = await pickOllamaModel()
-    const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
-    const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
-    const result = await ollamaRequest('/api/generate', {
-      model,
-      prompt,
-      stream: false,
-      options: { temperature: 0.3, num_predict: 200 }
-    }, 15000)
-    const msg = cleanCommitMessage(result?.response || '')
-    if (!msg) throw new Error('Empty response from Ollama')
-    return msg
-  } catch (err) {
-    if (err instanceof Error && err.message === 'ollama_unavailable') {
-      ollamaUnavailableUntil = Date.now() + OLLAMA_BACKOFF
-    }
-    throw err
-  }
+async function generateViaLocalLlm(stat: string, diff: string): Promise<string> {
+  const { LocalLlmManager } = await import('../../local-llm')
+  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
+  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
+  const raw = await LocalLlmManager.getInstance().generate(prompt)
+  const msg = cleanCommitMessage(raw)
+  if (!msg) throw new Error('Empty response from local LLM')
+  return msg
 }
 
 async function generateViaClaude(stat: string, diff: string): Promise<string> {
@@ -1656,25 +1591,27 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
   getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars, dataFiles=${dataFiles.length}`)
   const t0 = Date.now()
 
-  // Race all available providers — use whichever responds first
-  const ollamaSkipped = Date.now() < ollamaUnavailableUntil
+  // Race available providers — local LLM is always primary
   const providers: Promise<string>[] = []
 
-  if (!ollamaSkipped) {
-    providers.push(generateViaOllama(stat, diff).then((r) => {
-      getServices().log(`[git-manager] Ollama responded in ${Date.now() - t0}ms`)
-      return r
-    }))
-  }
-  providers.push(generateViaClaude(stat, diff).then((r) => {
-    getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
+  providers.push(generateViaLocalLlm(stat, diff).then((r) => {
+    getServices().log(`[git-manager] Local LLM responded in ${Date.now() - t0}ms`)
     return r
   }))
-  if (process.env.ANTHROPIC_API_KEY) {
-    providers.push(generateViaAnthropicAPI(stat, diff).then((r) => {
-      getServices().log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
+
+  // Claude is optional (off by default)
+  const claudeEnabled = getServices().getPluginSetting(cwd, 'git-manager', 'enableClaude') as boolean
+  if (claudeEnabled) {
+    providers.push(generateViaClaude(stat, diff).then((r) => {
+      getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
       return r
     }))
+    if (process.env.ANTHROPIC_API_KEY) {
+      providers.push(generateViaAnthropicAPI(stat, diff).then((r) => {
+        getServices().log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
+        return r
+      }))
+    }
   }
 
   // Promise.any resolves with the first successful result
@@ -1684,7 +1621,8 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     const errors = agg instanceof AggregateError ? agg.errors : [agg]
     for (const e of errors) getServices().log(`[git-manager] provider failed: ${e instanceof Error ? e.message : e}`)
     throw new Error(
-      'Could not generate commit message. Ensure the Claude CLI is installed, Ollama is running, or ANTHROPIC_API_KEY is set.'
+      'Could not generate commit message. The local LLM model may need to be downloaded.' +
+      (claudeEnabled ? '' : ' You can also enable Claude in Git Manager settings.')
     )
   }
 }

@@ -605,6 +605,42 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  ipcMain.handle(IPC.GIT_GET_BRANCH, async (_event, projectDir: string) => {
+    try {
+      const branch = await new Promise<string | null>((resolve) => {
+        execFile('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: projectDir, timeout: 5000 }, (err, stdout) => {
+          if (err) resolve(null)
+          else resolve(stdout.trim() || null)
+        })
+      })
+      return branch
+    } catch {
+      return null
+    }
+  })
+
+  // -- Local LLM --
+
+  ipcMain.handle(IPC.LLM_STATUS, async () => {
+    try {
+      const { LocalLlmManager } = await import('./local-llm')
+      return LocalLlmManager.getInstance().getStatus()
+    } catch {
+      return { modelAvailable: false, serverRunning: false, downloading: false, downloadProgress: 0 }
+    }
+  })
+
+  ipcMain.handle(IPC.LLM_DOWNLOAD, async () => {
+    try {
+      const { LocalLlmManager } = await import('./local-llm')
+      await LocalLlmManager.getInstance().downloadModel()
+      return { success: true }
+    } catch (err) {
+      logError('[llm] Model download failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Download failed' }
+    }
+  })
+
   ipcMain.handle(IPC.CLAUDE_CHECK_INSTALL, async () => {
     try {
       const status = await detectClaudeCli()
