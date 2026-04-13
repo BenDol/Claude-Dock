@@ -1588,6 +1588,7 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
 
   // Claude is optional (off by default)
   const claudeEnabled = getServices().getPluginSetting(cwd, 'git-manager', 'enableClaude') as boolean
+  getServices().log(`[git-manager] commit msg providers: cwd=${cwd} claudeEnabled=${claudeEnabled}`)
   if (claudeEnabled) {
     providers.push(generateViaClaude(stat, diff).then((r) => {
       getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
