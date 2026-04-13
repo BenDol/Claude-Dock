@@ -503,7 +503,9 @@ export class LocalLlmManager {
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens: 200,
-      stream: false
+      stream: false,
+      frequency_penalty: 1.2,
+      presence_penalty: 0.6
     })
 
     const response = await new Promise<string>((resolve, reject) => {

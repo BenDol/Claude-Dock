@@ -9,6 +9,7 @@ import Launcher from './components/Launcher'
 import ToastContainer from './components/ToastContainer'
 import PluginUpdaterModal from './components/PluginUpdaterModal'
 import { useDockStore } from './stores/dock-store'
+import { useEditorStore } from './stores/editor-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
@@ -621,19 +622,30 @@ function DetachedEditorShell() {
 
   // Pull tab data from main process when mounted (renderer pulls, not push — avoids race condition)
   useEffect(() => {
-    getDockApi().workspace.getDetachedTabs().then((tabData) => {
-      if (!tabData) return
-      try {
-        const tabs = JSON.parse(tabData)
-        const { useEditorStore } = require('./stores/editor-store')
-        const store = useEditorStore.getState()
-        for (const tab of tabs) {
-          if (tab.projectDir && tab.relativePath && tab.content != null) {
-            store.openFile(tab.projectDir, tab.relativePath, tab.content)
-          }
+    const api = getDockApi()
+    // Retry a few times — the main process sets pendingTabData before loadURL,
+    // but the renderer's useEffect may fire before the IPC handler is ready
+    let attempts = 0
+    const tryLoad = () => {
+      api.workspace.getDetachedTabs().then((tabData) => {
+        if (!tabData) {
+          if (++attempts < 5) setTimeout(tryLoad, 200)
+          return
         }
-      } catch { /* ignore malformed data */ }
-    }).catch(() => { /* ignore */ })
+        try {
+          const tabs = JSON.parse(tabData)
+          const store = useEditorStore.getState()
+          for (const tab of tabs) {
+            if (tab.projectDir && tab.relativePath && tab.content != null) {
+              store.openFile(tab.projectDir, tab.relativePath, tab.content)
+            }
+          }
+        } catch { /* ignore malformed data */ }
+      }).catch(() => {
+        if (++attempts < 5) setTimeout(tryLoad, 200)
+      })
+    }
+    tryLoad()
   }, [])
 
   return (

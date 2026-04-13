@@ -1439,14 +1439,29 @@ function cleanCommitMessage(raw: string): string {
     .replace(/^["']|["']$/g, '')
     .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
+
+  // Strip LLM repetition: if the first non-empty line appears again later, truncate there
   const lines = msg.split('\n')
-  // Enforce lowercase after conventional commit prefix (e.g. "fix: Resolve" → "fix: resolve")
-  lines[0] = lines[0].replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
-  // Ensure first line is under 72 chars
-  if (lines[0].length > 72) {
-    lines[0] = lines[0].slice(0, 72).replace(/\s+\S*$/, '')
+  const firstLine = lines[0]?.trim()
+  if (firstLine) {
+    let cutIdx = -1
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === firstLine) { cutIdx = i; break }
+    }
+    if (cutIdx > 0) {
+      // Keep everything before the first repetition, drop trailing blank lines
+      msg = lines.slice(0, cutIdx).join('\n').replace(/\n+$/, '')
+    }
   }
-  return lines.join('\n').trim()
+
+  const cleaned = msg.split('\n')
+  // Enforce lowercase after conventional commit prefix (e.g. "fix: Resolve" → "fix: resolve")
+  cleaned[0] = cleaned[0].replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
+  // Ensure first line is under 72 chars
+  if (cleaned[0].length > 72) {
+    cleaned[0] = cleaned[0].slice(0, 72).replace(/\s+\S*$/, '')
+  }
+  return cleaned.join('\n').trim()
 }
 
 async function generateViaLocalLlm(stat: string, diff: string): Promise<string> {
