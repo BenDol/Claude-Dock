@@ -2664,8 +2664,35 @@ export async function resolveConflictFile(
 
 export async function abortMerge(cwd: string): Promise<void> {
   const state = await getMergeState(cwd)
-  const cmd = state.type === 'rebase' ? 'rebase' : state.type === 'cherry-pick' ? 'cherry-pick' : state.type === 'revert' ? 'revert' : 'merge'
-  await gitExec(cwd, [cmd, '--abort'], 15000)
+
+  if (state.type !== 'none') {
+    // A tracked operation is in progress — use the matching --abort subcommand.
+    const cmd = state.type === 'rebase' ? 'rebase'
+      : state.type === 'cherry-pick' ? 'cherry-pick'
+      : state.type === 'revert' ? 'revert'
+      : 'merge'
+    await gitExec(cwd, [cmd, '--abort'], 15000)
+    return
+  }
+
+  // No tracked merge/rebase/cherry-pick/revert, but there may still be unmerged
+  // paths in the index (e.g. from `git stash pop` or `git stash apply` conflicts).
+  // In this case `git merge --abort` fails because MERGE_HEAD is missing.
+  // Resolve by restoring the conflicting files from HEAD.
+  const status = await getStatus(cwd)
+  if (status.conflicts.length > 0) {
+    const paths = status.conflicts.map((c) => c.path)
+    getServices().log('[git-manager] abortMerge: no tracked merge, resetting', paths.length, 'conflicting files from HEAD')
+    // Reset the index entries for the conflicting files to HEAD, then checkout.
+    // This clears the unmerged state and restores the files without touching
+    // non-conflicting changes (so work-in-progress is preserved).
+    await gitExec(cwd, ['reset', 'HEAD', '--', ...paths], 15000)
+    await gitExec(cwd, ['checkout', '--', ...paths], 15000)
+    return
+  }
+
+  // Nothing to abort — no tracked operation and no conflicts.
+  getServices().log('[git-manager] abortMerge: nothing to abort')
 }
 
 export async function mergeBranch(cwd: string, branchName: string): Promise<void> {

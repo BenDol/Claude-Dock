@@ -250,26 +250,26 @@ function parseGitError(action: string, errorMsg: string, context: {
     })
   }
 
-  // Unmerged paths / dirty index from active merge — need to resolve or abort
+  // Unmerged paths / dirty index from active merge or stash pop — need to resolve or abort
   if (/unmerged|fix conflicts and run|fix them up|could not write index/i.test(msg)) {
     resolutions.push({
-      label: 'Abort merge',
-      description: 'Cancel the current merge/rebase/cherry-pick and retry',
+      label: 'Discard conflicts and retry',
+      description: 'Reset the conflicting files to HEAD and retry the operation',
       action: async () => {
         await api.gitManager.abortMerge(context.projectDir)
         if (context.retry) await context.retry()
       }
     })
     resolutions.push({
-      label: 'Abort merge only',
-      description: 'Cancel the current merge/rebase/cherry-pick without retrying',
+      label: 'Discard conflicts only',
+      description: 'Reset the conflicting files to HEAD without retrying',
       action: async () => {
         await api.gitManager.abortMerge(context.projectDir)
       }
     })
     return {
-      title: 'Merge in progress',
-      message: 'There is an active merge with unresolved conflicts. Resolve the conflicts or abort the merge before performing other git operations.',
+      title: 'Unresolved conflicts',
+      message: 'There are unresolved conflicts (from a merge, stash pop, or other operation). Resolve them or discard the conflicting changes before performing other git operations.',
       resolutions
     }
   }
@@ -1731,7 +1731,7 @@ const GitManagerApp: React.FC = () => {
           <div className="gm-merge-bar-left">
             <WarningIcon />
             <span>
-              {status.conflicts.length} unresolved conflict{status.conflicts.length > 1 ? 's' : ''}
+              {status.conflicts.length} unresolved conflict{status.conflicts.length > 1 ? 's' : ''} (stash pop or other operation)
             </span>
           </div>
           <div className="gm-merge-bar-actions">
@@ -1740,7 +1740,7 @@ const GitManagerApp: React.FC = () => {
               if (!r.success) handleSmartError(`Abort failed: ${r.error || 'Unknown error'}`)
               refresh()
             }}>
-              Abort
+              Discard conflicts
             </button>
             <button className="gm-merge-bar-btn" onClick={() => setActiveTab('conflicts')}>
               Resolve...

@@ -20,7 +20,8 @@ import {
   continueMerge,
   createTag,
   getLog,
-  getBranches
+  getBranches,
+  getStatus
 } from '../git-operations'
 
 describe('mergeBranch', () => {
@@ -187,6 +188,46 @@ describe('abortMerge', () => {
     await abortMerge(repo.cwd)
     const state2 = await getMergeState(repo.cwd)
     expect(state2.inProgress).toBe(false)
+  })
+
+  it('handles stash pop conflicts (no MERGE_HEAD)', async () => {
+    // Set up a stash pop conflict: commit a file, modify it and stash, commit a
+    // different change on the same line, then pop the stash — conflict but no
+    // MERGE_HEAD file.
+    commitFile(repo.cwd, 'file.txt', 'base\n', 'base')
+    writeFile(repo.cwd, 'file.txt', 'stash-change\n')
+    run(repo.cwd, 'git', ['stash', 'push', '-m', 'test stash'])
+    commitFile(repo.cwd, 'file.txt', 'committed-change\n', 'conflicting commit')
+
+    // Pop should fail with a conflict
+    try { run(repo.cwd, 'git', ['stash', 'pop']) } catch { /* expected */ }
+
+    // Verify: conflicts exist, but no merge is in progress
+    const status = await getStatus(repo.cwd)
+    expect(status.conflicts.length).toBeGreaterThan(0)
+
+    const state = await getMergeState(repo.cwd)
+    expect(state.inProgress).toBe(false)
+    expect(state.type).toBe('none')
+
+    // abortMerge should handle this gracefully (not throw)
+    await abortMerge(repo.cwd)
+
+    // After abort, conflicts should be resolved
+    const statusAfter = await getStatus(repo.cwd)
+    expect(statusAfter.conflicts.length).toBe(0)
+
+    // The file should be restored to the committed version
+    const content = fs.readFileSync(path.join(repo.cwd, 'file.txt'), 'utf-8').replace(/\r\n/g, '\n')
+    expect(content).toBe('committed-change\n')
+  })
+
+  it('does not throw when there is nothing to abort', async () => {
+    commitFile(repo.cwd, 'file.txt', 'content\n', 'clean repo')
+    // Should complete without error
+    await abortMerge(repo.cwd)
+    const state = await getMergeState(repo.cwd)
+    expect(state.inProgress).toBe(false)
   })
 })
 
