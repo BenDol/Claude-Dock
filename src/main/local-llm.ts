@@ -165,36 +165,48 @@ export class LocalLlmManager {
   }
 
   private async extractServerBinary(zipPath: string, destDir: string): Promise<void> {
-    // Use Node.js built-in zip extraction (available in Node 22+ / Electron 34+)
-    // Fallback: use system tools
     const binName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
 
     if (process.platform === 'win32') {
-      // Use PowerShell to extract
+      // Extract llama-server.exe AND all sibling files (DLLs it depends on).
+      // The zip has a top-level directory; we find the directory containing
+      // llama-server.exe and extract all files from it flat into destDir.
       const { execFile } = await import('child_process')
+      const escapedZip = zipPath.replace(/'/g, "''")
+      const escapedDest = destDir.replace(/'/g, "''")
       await new Promise<void>((resolve, reject) => {
         execFile('powershell', [
           '-NoProfile', '-Command',
           `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
-          `$zip = [System.IO.Compression.ZipFile]::OpenRead('${zipPath.replace(/'/g, "''")}'); ` +
-          `$entry = $zip.Entries | Where-Object { $_.Name -eq '${binName}' } | Select-Object -First 1; ` +
-          `if ($entry) { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, '${path.join(destDir, binName).replace(/'/g, "''")}', $true) }; ` +
+          `$zip = [System.IO.Compression.ZipFile]::OpenRead('${escapedZip}'); ` +
+          `$server = $zip.Entries | Where-Object { $_.Name -eq '${binName}' } | Select-Object -First 1; ` +
+          `if (-not $server) { $zip.Dispose(); throw 'Binary not found in archive' }; ` +
+          `$dir = $server.FullName.Substring(0, $server.FullName.LastIndexOf('/')); ` +
+          `foreach ($e in $zip.Entries) { ` +
+          `  if ($e.FullName.StartsWith($dir + '/') -and $e.Name -ne '' -and -not $e.FullName.EndsWith('/')) { ` +
+          `    $out = Join-Path '${escapedDest}' $e.Name; ` +
+          `    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true) ` +
+          `  } ` +
+          `}; ` +
           `$zip.Dispose()`
-        ], { timeout: 30_000 }, (err) => {
+        ], { timeout: 60_000 }, (err) => {
           if (err) reject(new Error(`Failed to extract ${binName}: ${err.message}`))
           else resolve()
         })
       })
     } else {
-      // Use unzip on macOS/Linux
+      // Extract all files from the directory containing llama-server, flat into destDir
       const { execFile } = await import('child_process')
       await new Promise<void>((resolve, reject) => {
-        // Extract just the llama-server binary, stripping leading directories
-        execFile('unzip', ['-jo', zipPath, `*/${binName}`, '-d', destDir], { timeout: 30_000 }, (err) => {
+        execFile('unzip', ['-jo', zipPath, '-d', destDir], { timeout: 60_000 }, (err) => {
           if (err) reject(new Error(`Failed to extract ${binName}: ${err.message}`))
           else {
-            // Make executable
-            try { fs.chmodSync(path.join(destDir, binName), 0o755) } catch { /* ignore */ }
+            // Make binaries executable
+            try {
+              for (const f of fs.readdirSync(destDir)) {
+                fs.chmodSync(path.join(destDir, f), 0o755)
+              }
+            } catch { /* ignore */ }
             resolve()
           }
         })
@@ -349,8 +361,17 @@ export class LocalLlmManager {
       windowsHide: true
     })
 
+    // Capture stderr for diagnostics (llama-server logs to stderr)
+    let stderrBuf = ''
+    this.serverProcess.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      stderrBuf += text
+      // Keep only last 2KB for diagnostics
+      if (stderrBuf.length > 2048) stderrBuf = stderrBuf.slice(-2048)
+    })
+
     this.serverProcess.on('exit', (code) => {
-      log(`[local-llm] Server exited with code ${code}`)
+      log(`[local-llm] Server exited with code ${code}${stderrBuf ? '\n' + stderrBuf.trim() : ''}`)
       this.serverProcess = null
       this.clearIdleTimer()
     })
