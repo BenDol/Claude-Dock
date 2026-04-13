@@ -6,7 +6,7 @@ import { log, logError } from './logger'
 
 // Bump this when CLAUDE.md block or MCP server script changes.
 // Migration will auto-update existing installs on startup.
-const MCP_VERSION = 3
+const MCP_VERSION = 4
 
 const CLAUDE_MD_START = '<!-- claude-dock-start -->'
 const CLAUDE_MD_END = '<!-- claude-dock-end -->'
@@ -44,7 +44,7 @@ function getDataDir(): string {
 
 /** Project-local MCP script path (shareable via git) */
 function getProjectMcpScriptPath(projectDir: string): string {
-  return path.join(projectDir, '.claude', 'claude-dock-mcp.js')
+  return path.join(projectDir, '.claude', 'claude-dock-mcp.cjs')
 }
 
 /** Legacy absolute path (AppData) — used for migration cleanup */
@@ -54,9 +54,9 @@ function getLegacyMcpServerPath(): string {
 
 function getMcpServerSourcePath(): string {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'claude-dock-mcp.js')
+    return path.join(process.resourcesPath, 'claude-dock-mcp.cjs')
   }
-  return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.js')
+  return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.cjs')
 }
 
 function getDockConfigPath(): string {
@@ -280,7 +280,7 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
     if (!mcpJson.mcpServers) mcpJson.mcpServers = {}
     mcpJson.mcpServers['claude-dock'] = {
       command: 'node',
-      args: ['.claude/claude-dock-mcp.js']
+      args: ['.claude/claude-dock-mcp.cjs']
     }
     writeMcpJson(projectDir, mcpJson)
     log(`linked-mode: added claude-dock to ${projectDir}/.mcp.json`)
@@ -319,9 +319,11 @@ export function uninstallMcp(projectDir: string): { success: boolean; error?: st
     // 2. Remove CLAUDE.md instructions
     removeClaudeMd()
 
-    // 3. Delete project-local MCP server script
+    // 3. Delete project-local MCP server script (both .cjs and legacy .js)
     const projectScript = getProjectMcpScriptPath(projectDir)
     try { if (fs.existsSync(projectScript)) fs.unlinkSync(projectScript) } catch { /* ignore */ }
+    const legacyProjectScript = path.join(projectDir, '.claude', 'claude-dock-mcp.js')
+    try { if (fs.existsSync(legacyProjectScript)) fs.unlinkSync(legacyProjectScript) } catch { /* ignore */ }
 
     // 4. Delete runtime data files from AppData
     for (const file of [getLegacyMcpServerPath(), getDockConfigPath(), getVersionPath()]) {
@@ -404,11 +406,9 @@ export function migrateProjectIfNeeded(projectDir: string): void {
     const args: string[] = entry.args || []
     const currentPath = args[0] || ''
 
-    // Check if using old absolute path (contains AppData or similar absolute prefix)
-    const isAbsolute = path.isAbsolute(currentPath.replace(/\//g, path.sep))
-    const isAlreadyRelative = currentPath === '.claude/claude-dock-mcp.js'
+    const isAlreadyCjs = currentPath === '.claude/claude-dock-mcp.cjs'
 
-    if (isAlreadyRelative) {
+    if (isAlreadyCjs) {
       // Just ensure the script file is up-to-date
       const dest = getProjectMcpScriptPath(projectDir)
       const src = getMcpServerSourcePath()
@@ -419,26 +419,29 @@ export function migrateProjectIfNeeded(projectDir: string): void {
       return
     }
 
-    if (isAbsolute || !isAlreadyRelative) {
-      log(`linked-mode: migrating project MCP to relative path in ${projectDir}`)
+    // Migrate from old .js path (relative or absolute) to .cjs
+    log(`linked-mode: migrating project MCP to .cjs in ${projectDir}`)
 
-      // Copy MCP script into project
-      const src = getMcpServerSourcePath()
-      const dest = getProjectMcpScriptPath(projectDir)
-      fs.mkdirSync(path.dirname(dest), { recursive: true })
+    // Copy new .cjs script into project
+    const src = getMcpServerSourcePath()
+    const dest = getProjectMcpScriptPath(projectDir)
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
 
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, dest)
-      }
-
-      // Update .mcp.json to use relative path
-      mcpJson.mcpServers['claude-dock'] = {
-        command: 'node',
-        args: ['.claude/claude-dock-mcp.js']
-      }
-      writeMcpJson(projectDir, mcpJson)
-      log(`linked-mode: project migration complete for ${projectDir}`)
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest)
     }
+
+    // Clean up old .js script if it exists
+    const oldScript = path.join(projectDir, '.claude', 'claude-dock-mcp.js')
+    try { if (fs.existsSync(oldScript)) fs.unlinkSync(oldScript) } catch { /* ignore */ }
+
+    // Update .mcp.json to use .cjs
+    mcpJson.mcpServers['claude-dock'] = {
+      command: 'node',
+      args: ['.claude/claude-dock-mcp.cjs']
+    }
+    writeMcpJson(projectDir, mcpJson)
+    log(`linked-mode: project migration complete for ${projectDir}`)
   } catch (err) {
     logError(`linked-mode: project migration failed for ${projectDir} (non-fatal)`, err)
   }

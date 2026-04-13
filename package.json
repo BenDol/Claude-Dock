@@ -58,8 +58,8 @@
     ],
     "extraResources": [
       {
-        "from": "resources/claude-dock-mcp.js",
-        "to": "claude-dock-mcp.js"
+        "from": "resources/claude-dock-mcp.cjs",
+        "to": "claude-dock-mcp.cjs"
       }
     ],
     "asarUnpack": [

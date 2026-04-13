@@ -3,7 +3,7 @@
     "claude-dock": {
       "command": "node",
       "args": [
-        ".claude/claude-dock-mcp.js"
+        ".claude/claude-dock-mcp.cjs"
       ]
     }
   }
