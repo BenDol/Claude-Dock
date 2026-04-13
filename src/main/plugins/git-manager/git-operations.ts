@@ -1586,9 +1586,19 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     return r
   }))
 
-  // Claude is optional (off by default)
-  const claudeEnabled = getServices().getPluginSetting(cwd, 'git-manager', 'enableClaude') as boolean
-  getServices().log(`[git-manager] commit msg providers: cwd=${cwd} claudeEnabled=${claudeEnabled}`)
+  // Claude is optional (off by default).
+  // When inside a submodule, settings may be stored under the parent project,
+  // so walk up the directory tree to find the nearest configured value.
+  let claudeEnabled = false
+  let settingsDir = cwd
+  for (let i = 0; i < 5; i++) {
+    const val = getServices().getPluginSetting(settingsDir, 'git-manager', 'enableClaude')
+    if (val !== undefined) { claudeEnabled = !!val; break }
+    const parent = path.dirname(settingsDir)
+    if (parent === settingsDir) break
+    settingsDir = parent
+  }
+  getServices().log(`[git-manager] commit msg providers: cwd=${cwd} settingsDir=${settingsDir} claudeEnabled=${claudeEnabled}`)
   if (claudeEnabled) {
     providers.push(generateViaClaude(stat, diff).then((r) => {
       getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
