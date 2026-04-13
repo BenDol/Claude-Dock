@@ -14,24 +14,26 @@ export function initLogger(debug: boolean): void {
   const logDir = path.join(app.getPath('userData'), 'logs')
   fs.mkdirSync(logDir, { recursive: true })
 
-  // Rotate: keep only the last N log files
-  try {
-    const files = fs.readdirSync(logDir)
-      .filter((f) => f.startsWith('dock-') && f.endsWith('.log'))
-      .sort()
-    while (files.length >= MAX_LOG_FILES) {
-      const old = files.shift()!
-      fs.unlinkSync(path.join(logDir, old))
-    }
-  } catch {
-    // best-effort rotation
-  }
-
   const ts = new Date().toISOString().replace(/[:.]/g, '-')
   const logPath = path.join(logDir, `dock-${ts}.log`)
   logStream = fs.createWriteStream(logPath, { flags: 'a' })
 
   log('Logger initialized', `debug=${debug}`, `version=${app.getVersion()}`, `platform=${process.platform}`)
+
+  // Rotate old log files asynchronously — don't block startup
+  setImmediate(() => {
+    try {
+      const files = fs.readdirSync(logDir)
+        .filter((f) => f.startsWith('dock-') && f.endsWith('.log'))
+        .sort()
+      while (files.length >= MAX_LOG_FILES) {
+        const old = files.shift()!
+        try { fs.unlinkSync(path.join(logDir, old)) } catch { /* best-effort */ }
+      }
+    } catch {
+      // best-effort rotation
+    }
+  })
 }
 
 export function setDebug(enabled: boolean): void {

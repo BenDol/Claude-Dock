@@ -39,7 +39,8 @@ declare const __DEBUG_DEFAULT__: boolean
 
 // Init logging early — debug enabled via settings, CLI flag, or build default (bleeding-edge)
 const cliDebug = process.argv.includes('--enable-logging')
-const settingsDebug = (() => { try { return getSetting('advanced')?.debugLogging } catch { return false } })()
+const advancedSettings = (() => { try { return getSetting('advanced') } catch { return undefined } })()
+const settingsDebug = advancedSettings?.debugLogging
 const buildDebug = typeof __DEBUG_DEFAULT__ !== 'undefined' && __DEBUG_DEFAULT__
 initLogger(cliDebug || settingsDebug || buildDebug)
 
@@ -50,7 +51,7 @@ enrichPathWithKnownDirs()
 // Increase V8 heap limit for renderer processes (default ~256MB).
 // The git-manager renderer can exceed this on large repos with many diffs.
 // Configurable via settings (requires restart). Default: 2048MB.
-const heapSizeMb = (() => { try { return getSetting('advanced')?.maxHeapSizeMb } catch { return undefined } })()
+const heapSizeMb = advancedSettings?.maxHeapSizeMb
 const effectiveHeap = typeof heapSizeMb === 'number' && heapSizeMb >= 256 ? heapSizeMb : 2048
 app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${effectiveHeap}`)
 

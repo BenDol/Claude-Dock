@@ -677,7 +677,10 @@ function DockApp() {
   useEffect(() => {
     async function init() {
       const api = getDockApi()
-      const info = await api.dock.getInfo()
+      const [info] = await Promise.all([
+        api.dock.getInfo(),
+        loadSettings()
+      ])
       if (info) {
         setDockInfo(info.id, info.projectDir)
         if (info.savedSessionCount > 0) {
@@ -685,7 +688,6 @@ function DockApp() {
           setIsResumingSession(true)
         }
       }
-      await loadSettings()
       setInitialized(true)
     }
     init()

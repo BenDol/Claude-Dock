@@ -31,8 +31,10 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   // Write batching — accumulate data and flush via rAF to reduce xterm write() calls
+  // Max-wait timer ensures data is flushed within 16ms even if RAF is delayed
   const writeBufRef = useRef('')
   const writeRafRef = useRef<number | null>(null)
+  const writeMaxWaitRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const settings = useSettingsStore((s) => s.settings)
 
@@ -66,14 +68,17 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
       }
       writeBufRef.current += data
       if (writeRafRef.current === null) {
-        writeRafRef.current = requestAnimationFrame(() => {
+        const flush = () => {
           writeRafRef.current = null
+          if (writeMaxWaitRef.current) { clearTimeout(writeMaxWaitRef.current); writeMaxWaitRef.current = null }
           const buf = writeBufRef.current
           writeBufRef.current = ''
           if (buf && termRef.current) {
             termRef.current.write(buf)
           }
-        })
+        }
+        writeRafRef.current = requestAnimationFrame(flush)
+        writeMaxWaitRef.current = setTimeout(flush, 16)
       }
     })
     return cleanup
@@ -290,6 +295,7 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   useEffect(() => {
     return () => {
       if (writeRafRef.current !== null) cancelAnimationFrame(writeRafRef.current)
+      if (writeMaxWaitRef.current !== null) clearTimeout(writeMaxWaitRef.current)
       getDockApi().shell.kill(shellId)
       termRef.current?.dispose()
       termRef.current = null

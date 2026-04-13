@@ -539,9 +539,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           getDockApi().terminal.resize(terminalId, newCols, newRows)
         }
       }
-      setTimeout(correctiveFit, 200)
-      setTimeout(correctiveFit, 500)
-      setTimeout(correctiveFit, 1000)
+      setTimeout(() => {
+        correctiveFit()
+        // If container still not sized after initial fit, retry once more after layout animation
+        if (containerRef.current && (containerRef.current.clientWidth < 10 || containerRef.current.clientHeight < 10)) {
+          setTimeout(correctiveFit, 800)
+        }
+      }, 200)
 
       termRef.current = term
       fitAddonRef.current = fitAddon
@@ -765,14 +769,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         // the user's scroll position if they were scrolled up
         if (wasScrolledUp && viewport) {
           requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (scrolledUpRef.current || wasScrolledUp) {
-                // Don't restore — let the user re-scroll manually.
-                // The alternative (restoring exact position) is fragile because
-                // line wrapping changes after resize, making the old position wrong.
-              }
-              programmaticScrollRef.current = false
-            })
+            programmaticScrollRef.current = false
           })
         }
       }, 150)

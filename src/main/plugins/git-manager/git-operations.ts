@@ -214,38 +214,53 @@ export async function getCommitIndex(cwd: string, hash: string): Promise<number>
 export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
   const branches: GitBranchInfo[] = []
 
-  // Local branches with tracking info
+  // Fetch local and remote branches in a single git call
   try {
     const { stdout } = await gitExec(cwd, [
       'for-each-ref',
-      '--format=%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)',
-      'refs/heads/'
+      '--format=%(refname)%09%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)',
+      'refs/heads/', 'refs/remotes/'
     ], 10000)
 
     for (const line of stdout.split('\n')) {
       if (!line.trim()) continue
-      const [rawName, tracking, trackInfo, head] = line.split('\t')
-      if (!rawName || /^HEAD(\/|$)/i.test(rawName)) continue
-      // Strip heads/ prefix if present (submodule tracking branches sometimes include it)
-      const name = rawName.replace(/^heads?\//i, '')
-      let ahead = 0, behind = 0
-      if (trackInfo) {
-        const aheadMatch = trackInfo.match(/ahead (\d+)/)
-        const behindMatch = trackInfo.match(/behind (\d+)/)
-        if (aheadMatch) ahead = parseInt(aheadMatch[1], 10)
-        if (behindMatch) behind = parseInt(behindMatch[1], 10)
+      const [refname, rawName, tracking, trackInfo, head] = line.split('\t')
+      if (!rawName) continue
+
+      if (refname.startsWith('refs/heads/')) {
+        // Local branch
+        if (/^HEAD(\/|$)/i.test(rawName)) continue
+        const name = rawName.replace(/^heads?\//i, '')
+        let ahead = 0, behind = 0
+        if (trackInfo) {
+          const aheadMatch = trackInfo.match(/ahead (\d+)/)
+          const behindMatch = trackInfo.match(/behind (\d+)/)
+          if (aheadMatch) ahead = parseInt(aheadMatch[1], 10)
+          if (behindMatch) behind = parseInt(behindMatch[1], 10)
+        }
+        branches.push({
+          name,
+          current: head === '*',
+          remote: false,
+          tracking: tracking || undefined,
+          ahead,
+          behind
+        })
+      } else if (refname.startsWith('refs/remotes/')) {
+        // Remote branch
+        if (rawName.endsWith('/HEAD') || /\/HEAD$/i.test(rawName)) continue
+        const name = rawName.replace(/^([^/]+\/)heads\//i, '$1')
+        branches.push({
+          name,
+          current: false,
+          remote: true,
+          ahead: 0,
+          behind: 0
+        })
       }
-      branches.push({
-        name,
-        current: head === '*',
-        remote: false,
-        tracking: tracking || undefined,
-        ahead,
-        behind
-      })
     }
   } catch (err) {
-    getServices().logError('[git-manager] getBranches (local) failed:', err)
+    getServices().logError('[git-manager] getBranches failed:', err)
   }
 
   // If no local branch is marked as current, HEAD is detached — add a synthetic entry
@@ -265,34 +280,6 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
     } catch {
       // ignore — empty repo or other edge case
     }
-  }
-
-  // Remote branches
-  try {
-    const { stdout } = await gitExec(cwd, [
-      'for-each-ref',
-      '--format=%(refname:short)',
-      'refs/remotes/'
-    ], 10000)
-
-    for (const line of stdout.split('\n')) {
-      let name = line.trim()
-      if (!name || name.endsWith('/HEAD')) continue
-      // Strip heads/ prefix from remote branch names (e.g. origin/heads/1.0.2 -> origin/1.0.2)
-      name = name.replace(/^([^/]+\/)heads\//i, '$1')
-      // Skip HEAD-only refs
-      if (/\/HEAD$/i.test(name)) continue
-      // Skip if already covered by a local tracking branch
-      branches.push({
-        name,
-        current: false,
-        remote: true,
-        ahead: 0,
-        behind: 0
-      })
-    }
-  } catch (err) {
-    getServices().logError('[git-manager] getBranches (remote) failed:', err)
   }
 
   return branches

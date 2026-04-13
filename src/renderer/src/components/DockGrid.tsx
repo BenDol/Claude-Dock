@@ -54,14 +54,12 @@ const DockGrid: React.FC = () => {
   useEffect(() => {
     if (terminals.length !== prevCountRef.current) {
       prevCountRef.current = terminals.length
-      // Staggered re-fits: grid layout needs time to settle after adding/removing a cell.
-      // RGL uses a 200ms CSS transition on width/height, so we bracket it with multiple
-      // refit events to catch both fast (no transition) and animated layout changes.
+      // RGL uses a 200ms CSS transition on width/height. The transitionend listener
+      // (below) handles the primary refit at exactly the right time. These two timeouts
+      // are safety nets: 50ms for fast (no-transition) cases, 600ms as a late fallback.
       const timers = [
         setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 50),
-        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 250),
-        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 600),
-        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 1000)
+        setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 600)
       ]
       return () => timers.forEach(clearTimeout)
     }
