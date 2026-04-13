@@ -181,8 +181,9 @@ export class LocalLlmManager {
 
     if (process.platform === 'win32') {
       // Extract llama-server.exe AND all sibling files (DLLs it depends on).
-      // The zip has a top-level directory; we find the directory containing
-      // llama-server.exe and extract all files from it flat into destDir.
+      // The zip may have files at the root or inside a subdirectory — handle both.
+      // We find the directory containing llama-server.exe and extract all files
+      // from that same directory level flat into destDir.
       const { execFile } = await import('child_process')
       const escapedZip = zipPath.replace(/'/g, "''")
       const escapedDest = destDir.replace(/'/g, "''")
@@ -193,9 +194,13 @@ export class LocalLlmManager {
           `$zip = [System.IO.Compression.ZipFile]::OpenRead('${escapedZip}'); ` +
           `$server = $zip.Entries | Where-Object { $_.Name -eq '${binName}' } | Select-Object -First 1; ` +
           `if (-not $server) { $zip.Dispose(); throw 'Binary not found in archive' }; ` +
-          `$dir = $server.FullName.Substring(0, $server.FullName.LastIndexOf('/')); ` +
+          `$idx = $server.FullName.LastIndexOf('/'); ` +
+          `$dir = if ($idx -ge 0) { $server.FullName.Substring(0, $idx) } else { '' }; ` +
           `foreach ($e in $zip.Entries) { ` +
-          `  if ($e.FullName.StartsWith($dir + '/') -and $e.Name -ne '' -and -not $e.FullName.EndsWith('/')) { ` +
+          `  if ($e.Name -eq '' -or $e.FullName.EndsWith('/')) { continue }; ` +
+          `  $eIdx = $e.FullName.LastIndexOf('/'); ` +
+          `  $eDir = if ($eIdx -ge 0) { $e.FullName.Substring(0, $eIdx) } else { '' }; ` +
+          `  if ($eDir -eq $dir) { ` +
           `    $out = Join-Path '${escapedDest}' $e.Name; ` +
           `    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true) ` +
           `  } ` +
@@ -207,7 +212,7 @@ export class LocalLlmManager {
         })
       })
     } else {
-      // Extract all files from the directory containing llama-server, flat into destDir
+      // Extract all files flat into destDir (strips directory structure)
       const { execFile } = await import('child_process')
       await new Promise<void>((resolve, reject) => {
         execFile('unzip', ['-jo', zipPath, '-d', destDir], { timeout: 60_000 }, (err) => {
