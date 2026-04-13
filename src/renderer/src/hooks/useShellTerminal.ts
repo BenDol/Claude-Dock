@@ -159,9 +159,13 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
         window.addEventListener('blur', () => termElement.classList.remove('ctrl-held'))
       }
 
-      fitAddon.fit()
+      if (container.clientWidth > 0 && container.clientHeight > 0) {
+        fitAddon.fit()
+      }
       const { cols, rows } = term
-      getDockApi().shell.resize(shellId, cols, rows)
+      if (cols > 0 && rows > 0) {
+        getDockApi().shell.resize(shellId, cols, rows)
+      }
 
       // Track scroll position for scroll-to-bottom button
       const viewport = container.querySelector('.xterm-viewport') as HTMLElement
@@ -259,11 +263,15 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   )
 
   const fit = useCallback(() => {
-    if (fitAddonRef.current && termRef.current) {
+    if (fitAddonRef.current && termRef.current && containerRef.current) {
+      const { clientWidth, clientHeight } = containerRef.current
+      if (clientWidth === 0 || clientHeight === 0) return // Container not visible (e.g. minimized)
       try {
         fitAddonRef.current.fit()
         const { cols, rows } = termRef.current
-        getDockApi().shell.resize(shellId, cols, rows)
+        if (cols > 0 && rows > 0) {
+          getDockApi().shell.resize(shellId, cols, rows)
+        }
       } catch {
         // Ignore fit errors
       }

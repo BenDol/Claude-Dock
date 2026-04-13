@@ -278,8 +278,10 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
     document.addEventListener('mouseup', onUp)
   }, [])
 
+  const allMinimized = columns.every(col => col.shells.every(s => minimizedShells.has(s.shellId)))
+
   return (
-    <div className="shell-area" ref={areaRef} style={{ height: areaHeight }}>
+    <div className="shell-area" ref={areaRef} style={{ height: allMinimized ? 'auto' : areaHeight }}>
       <div className="shell-area-handle" onMouseDown={handleDragStart}>
         <div className="shell-area-grip" />
       </div>

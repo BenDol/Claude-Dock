@@ -245,8 +245,9 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
 
   const canAdd = onSplitRight || onStackBelow
 
-  if (minimized) {
-    return (
+  return (
+    <>
+    {minimized && (
       <div
         className={`shell-panel-minimized ${isInColumn ? 'shell-panel-minimized-h' : 'shell-panel-minimized-v'}`}
         onClick={onToggleMinimize}
@@ -254,11 +255,8 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
       >
         <span className="shell-panel-minimized-label">{label || 'Shell'}</span>
       </div>
-    )
-  }
-
-  return (
-    <div className="shell-panel" style={flexRatio != null ? { flex: flexRatio } : undefined} tabIndex={-1} onKeyDown={handlePanelKeyDown}>
+    )}
+    <div className="shell-panel" style={minimized ? { display: 'none' } : flexRatio != null ? { flex: flexRatio } : undefined} tabIndex={-1} onKeyDown={handlePanelKeyDown}>
       <div className="shell-panel-handle">
         <span className="shell-panel-label">{label || 'Shell'}{shellType && shellType !== 'default' ? <span className="shell-panel-type">{shellType}</span> : null}</span>
         {canAdd && (
@@ -374,6 +372,7 @@ const ShellPanel: React.FC<ShellPanelProps> = ({ shellId, terminalId, onClose, o
         )}
       </div>
     </div>
+    </>
   )
 }
 
