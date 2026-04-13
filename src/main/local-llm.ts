@@ -95,7 +95,19 @@ export class LocalLlmManager {
 
   isServerBinaryAvailable(): boolean {
     try {
-      return fs.existsSync(this.getServerBinaryPath())
+      const binPath = this.getServerBinaryPath()
+      if (!fs.existsSync(binPath)) return false
+      // On Windows, verify companion DLLs exist (the exe is dynamically linked)
+      if (process.platform === 'win32') {
+        const binDir = path.dirname(binPath)
+        const files = fs.readdirSync(binDir)
+        const hasDlls = files.some((f) => f.endsWith('.dll'))
+        if (!hasDlls) {
+          log('[local-llm] Server binary found but companion DLLs missing — will re-download')
+          return false
+        }
+      }
+      return true
     } catch {
       return false
     }
@@ -400,7 +412,15 @@ export class LocalLlmManager {
     const deadline = Date.now() + SERVER_READY_TIMEOUT
     while (Date.now() < deadline) {
       if (!this.serverProcess || this.serverProcess.exitCode !== null) {
-        throw new Error('llama-server exited unexpectedly during startup')
+        const code = this.serverProcess?.exitCode
+        // 3221225781 = 0xC0000135 = STATUS_DLL_NOT_FOUND on Windows
+        const isDllMissing = code === 3221225781 || code === -1073741515
+        const hint = isDllMissing ? ' (missing DLLs — clearing bin directory for re-download)' : ''
+        if (isDllMissing) {
+          // Auto-fix: clear the bin dir so next attempt re-downloads with all DLLs
+          try { fs.rmSync(path.dirname(this.getServerBinaryPath()), { recursive: true, force: true }) } catch { /* ignore */ }
+        }
+        throw new Error(`llama-server exited unexpectedly during startup (code ${code}${hint})`)
       }
       try {
         const ok = await this.healthCheck()
