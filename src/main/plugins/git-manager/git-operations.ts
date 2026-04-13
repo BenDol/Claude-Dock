@@ -2458,6 +2458,26 @@ export async function getConflictFileContent(cwd: string, filePath: string): Pro
     }
   }
 
+  // If the file doesn't exist on disk, it was deleted — treat as a delete conflict
+  if (!fs.existsSync(absPath)) {
+    // Figure out which side deleted by checking what stages exist
+    const stageHashes: Record<number, string> = {}
+    for (const entry of (lsFilesOutput || '').split('\0').filter(Boolean)) {
+      const match = entry.match(/^(\d+)\s+([0-9a-f]+)\s+(\d)\s+/)
+      if (match) stageHashes[parseInt(match[3])] = match[2]
+    }
+    // Try to get content from whatever stage exists
+    let content = ''
+    const contentHash = stageHashes[3] || stageHashes[2] || stageHashes[1]
+    if (contentHash) {
+      try { const { stdout } = await gitExec(cwd, ['show', contentHash], 5000); content = stdout } catch { /* ignore */ }
+    }
+    const deletedBy = stageHashes[2] && !stageHashes[3] ? 'theirs' as const
+      : !stageHashes[2] && stageHashes[3] ? 'ours' as const
+      : 'theirs' as const // default: treat as incoming deletion
+    return { path: filePath, chunks: [], raw: content, deleteConflict: { deletedBy, content } }
+  }
+
   const raw = fs.readFileSync(absPath, 'utf-8')
   const chunks = parseConflictMarkers(raw)
   return { path: filePath, chunks, raw }

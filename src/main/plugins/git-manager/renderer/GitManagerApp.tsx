@@ -9220,7 +9220,33 @@ const MergeConflictsPanel: React.FC<{
               </div>
             )}
           </div>
-        ) : null}
+        ) : (
+          <div className="gm-conflicts-content">
+            <div className="gm-conflicts-content-header">
+              <span className="gm-conflicts-content-path">{selectedFile}</span>
+              <div className="gm-conflicts-content-actions">
+                <button
+                  className="gm-small-btn gm-conflicts-mark-btn"
+                  onClick={handleMarkResolved}
+                  disabled={busy}
+                  title="Mark as resolved (stages the file)"
+                >
+                  Mark as Resolved
+                </button>
+              </div>
+            </div>
+            <div className="gm-conflicts-placeholder" style={{ padding: '40px 20px' }}>
+              <p>Unable to load conflict content for this file.</p>
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+                The file may have been deleted or is a binary file. You can mark it as resolved to accept the current state, or use the command line to resolve it manually.
+              </p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                <button className="gm-small-btn" onClick={() => handleResolveAll('ours')} disabled={busy}>Accept Ours</button>
+                <button className="gm-small-btn" onClick={() => handleResolveAll('theirs')} disabled={busy}>Accept Theirs</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

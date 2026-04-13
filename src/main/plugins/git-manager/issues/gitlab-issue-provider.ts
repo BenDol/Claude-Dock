@@ -286,8 +286,8 @@ export class GitLabIssueProvider implements IssueProvider {
     try {
       const args = ['issue', 'list', '--output', 'json', '--per-page', '100']
       if (state === 'closed') args.push('--closed')
-      else if (state === 'open' || !state) args.push('--opened')
-      else args.push('--all')
+      else if (state === 'all') args.push('--all')
+      // glab defaults to open issues when --closed is not used, so no flag needed for 'open'
       const { stdout } = await glab(args, projectDir)
       const raw = JSON.parse(stdout) as Array<Record<string, unknown>>
       return (raw || []).map(mapIssue)
