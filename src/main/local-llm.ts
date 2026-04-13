@@ -175,6 +175,7 @@ export class LocalLlmManager {
       await new Promise<void>((resolve, reject) => {
         execFile('powershell', [
           '-NoProfile', '-Command',
+          `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
           `$zip = [System.IO.Compression.ZipFile]::OpenRead('${zipPath.replace(/'/g, "''")}'); ` +
           `$entry = $zip.Entries | Where-Object { $_.Name -eq '${binName}' } | Select-Object -First 1; ` +
           `if ($entry) { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, '${path.join(destDir, binName).replace(/'/g, "''")}', $true) }; ` +
