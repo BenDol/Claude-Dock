@@ -4,7 +4,7 @@
  * Architecture:
  * - Spawns llama-server on first generate() call
  * - Communicates via OpenAI-compatible HTTP API (localhost)
- * - Auto-downloads the model on first use to {userData}/models/
+ * - Auto-downloads the server binary and model on first use to {userData}/llm/
  * - Idles down after 5 minutes of inactivity
  * - Killed on app quit
  *
@@ -26,10 +26,24 @@ import { IPC } from '../shared/ipc-channels'
 
 const MODEL_FILENAME = 'qwen2.5-coder-0.5b-instruct-q4_k_m.gguf'
 const MODEL_URL = 'https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf'
+
+// llama.cpp release binary — CPU-only server build
+const LLAMA_RELEASE_TAG = 'b5460'
+const SERVER_BIN_URLS: Record<string, string> = {
+  'win32-x64': `https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_RELEASE_TAG}/llama-${LLAMA_RELEASE_TAG}-bin-win-cpu-x64.zip`,
+  'darwin-arm64': `https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_RELEASE_TAG}/llama-${LLAMA_RELEASE_TAG}-bin-macos-arm64.zip`,
+  'darwin-x64': `https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_RELEASE_TAG}/llama-${LLAMA_RELEASE_TAG}-bin-macos-x64.zip`,
+  'linux-x64': `https://github.com/ggerganov/llama.cpp/releases/download/${LLAMA_RELEASE_TAG}/llama-${LLAMA_RELEASE_TAG}-bin-ubuntu-x64.zip`
+}
+
 const SERVER_READY_TIMEOUT = 60_000 // 60s — includes model load time on first start
 const SERVER_IDLE_TIMEOUT = 5 * 60_000 // 5 minutes
 const IDLE_CHECK_INTERVAL = 60_000 // check every minute
 const HEALTH_POLL_INTERVAL = 500
+
+function getLlmDir(): string {
+  return path.join(app.getPath('userData'), 'llm')
+}
 
 export class LocalLlmManager {
   private static instance: LocalLlmManager | null = null
@@ -39,6 +53,7 @@ export class LocalLlmManager {
   private lastRequestTime = 0
   private idleTimer: ReturnType<typeof setInterval> | null = null
   private downloadPromise: Promise<void> | null = null
+  private serverDownloadPromise: Promise<void> | null = null
   private startupPromise: Promise<void> | null = null
   private shutdownRegistered = false
   private downloading = false
@@ -53,23 +68,19 @@ export class LocalLlmManager {
 
   // -- Path resolution --
 
-  getModelDir(): string {
-    return path.join(app.getPath('userData'), 'models')
-  }
-
   getModelPath(): string {
-    return path.join(this.getModelDir(), MODEL_FILENAME)
+    return path.join(getLlmDir(), MODEL_FILENAME)
   }
 
   getServerBinaryPath(): string {
     const binName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
+    // Packaged app: check bundled resources first
     if (app.isPackaged) {
-      return path.join(process.resourcesPath, 'llm', binName)
+      const bundled = path.join(process.resourcesPath, 'llm', binName)
+      if (fs.existsSync(bundled)) return bundled
     }
-    // Dev mode
-    return path.join(app.getAppPath(), 'resources', 'llm',
-      process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux',
-      binName)
+    // Downloaded binary in userData
+    return path.join(getLlmDir(), 'bin', binName)
   }
 
   // -- Status queries --
@@ -77,6 +88,14 @@ export class LocalLlmManager {
   isModelAvailable(): boolean {
     try {
       return fs.existsSync(this.getModelPath())
+    } catch {
+      return false
+    }
+  }
+
+  isServerBinaryAvailable(): boolean {
+    try {
+      return fs.existsSync(this.getServerBinaryPath())
     } catch {
       return false
     }
@@ -94,24 +113,106 @@ export class LocalLlmManager {
     return this._downloadProgress
   }
 
-  getStatus(): { modelAvailable: boolean; serverRunning: boolean; downloading: boolean; downloadProgress: number } {
+  getStatus(): { modelAvailable: boolean; serverAvailable: boolean; serverRunning: boolean; downloading: boolean; downloadProgress: number } {
     return {
       modelAvailable: this.isModelAvailable(),
+      serverAvailable: this.isServerBinaryAvailable(),
       serverRunning: this.isServerRunning(),
       downloading: this.downloading,
       downloadProgress: this._downloadProgress
     }
   }
 
+  // -- Server binary download --
+
+  async ensureServerBinary(): Promise<void> {
+    if (this.isServerBinaryAvailable()) return
+    if (this.serverDownloadPromise) return this.serverDownloadPromise
+
+    this.serverDownloadPromise = this.performServerDownload()
+    try {
+      await this.serverDownloadPromise
+    } finally {
+      this.serverDownloadPromise = null
+    }
+  }
+
+  private async performServerDownload(): Promise<void> {
+    const platformKey = `${process.platform}-${process.arch}`
+    const zipUrl = SERVER_BIN_URLS[platformKey]
+    if (!zipUrl) {
+      throw new Error(`No llama-server binary available for platform: ${platformKey}`)
+    }
+
+    const binDir = path.join(getLlmDir(), 'bin')
+    fs.mkdirSync(binDir, { recursive: true })
+
+    const zipPath = path.join(getLlmDir(), 'llama-server.zip')
+    log(`[local-llm] Downloading llama-server for ${platformKey}...`)
+
+    try {
+      await this.downloadFile(zipUrl, zipPath, (pct) => {
+        log(`[local-llm] Server binary download: ${pct}%`)
+      })
+
+      // Extract the llama-server binary from the zip
+      await this.extractServerBinary(zipPath, binDir)
+      log('[local-llm] Server binary installed')
+    } finally {
+      // Clean up zip
+      try { fs.unlinkSync(zipPath) } catch { /* ignore */ }
+    }
+  }
+
+  private async extractServerBinary(zipPath: string, destDir: string): Promise<void> {
+    // Use Node.js built-in zip extraction (available in Node 22+ / Electron 34+)
+    // Fallback: use system tools
+    const binName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
+
+    if (process.platform === 'win32') {
+      // Use PowerShell to extract
+      const { execFile } = await import('child_process')
+      await new Promise<void>((resolve, reject) => {
+        execFile('powershell', [
+          '-NoProfile', '-Command',
+          `$zip = [System.IO.Compression.ZipFile]::OpenRead('${zipPath.replace(/'/g, "''")}'); ` +
+          `$entry = $zip.Entries | Where-Object { $_.Name -eq '${binName}' } | Select-Object -First 1; ` +
+          `if ($entry) { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, '${path.join(destDir, binName).replace(/'/g, "''")}', $true) }; ` +
+          `$zip.Dispose()`
+        ], { timeout: 30_000 }, (err) => {
+          if (err) reject(new Error(`Failed to extract ${binName}: ${err.message}`))
+          else resolve()
+        })
+      })
+    } else {
+      // Use unzip on macOS/Linux
+      const { execFile } = await import('child_process')
+      await new Promise<void>((resolve, reject) => {
+        // Extract just the llama-server binary, stripping leading directories
+        execFile('unzip', ['-jo', zipPath, `*/${binName}`, '-d', destDir], { timeout: 30_000 }, (err) => {
+          if (err) reject(new Error(`Failed to extract ${binName}: ${err.message}`))
+          else {
+            // Make executable
+            try { fs.chmodSync(path.join(destDir, binName), 0o755) } catch { /* ignore */ }
+            resolve()
+          }
+        })
+      })
+    }
+
+    // Verify the binary was extracted
+    if (!fs.existsSync(path.join(destDir, binName))) {
+      throw new Error(`${binName} not found in zip archive`)
+    }
+  }
+
   // -- Model download --
 
   async downloadModel(): Promise<void> {
-    // Return existing download promise if one is in progress
     if (this.downloadPromise) return this.downloadPromise
-
     if (this.isModelAvailable()) return
 
-    this.downloadPromise = this.performDownload()
+    this.downloadPromise = this.performModelDownload()
     try {
       await this.downloadPromise
     } finally {
@@ -119,13 +220,13 @@ export class LocalLlmManager {
     }
   }
 
-  private async performDownload(): Promise<void> {
+  private async performModelDownload(): Promise<void> {
     this.downloading = true
     this._downloadProgress = 0
     this.broadcastDownloadProgress(0)
 
-    const modelDir = this.getModelDir()
-    fs.mkdirSync(modelDir, { recursive: true })
+    const llmDir = getLlmDir()
+    fs.mkdirSync(llmDir, { recursive: true })
 
     const tempPath = this.getModelPath() + '.downloading'
     const finalPath = this.getModelPath()
@@ -135,13 +236,11 @@ export class LocalLlmManager {
         this._downloadProgress = progress
         this.broadcastDownloadProgress(progress)
       })
-      // Rename temp → final atomically
       fs.renameSync(tempPath, finalPath)
       this._downloadProgress = 100
       this.broadcastDownloadProgress(100)
       log(`[local-llm] Model downloaded to ${finalPath}`)
     } catch (err) {
-      // Clean up partial download
       try { fs.unlinkSync(tempPath) } catch { /* ignore */ }
       this._downloadProgress = 0
       logError('[local-llm] Model download failed:', err)
@@ -166,7 +265,6 @@ export class LocalLlmManager {
 
         const proto = targetUrl.startsWith('https') ? https : http
         const req = proto.get(targetUrl, (res) => {
-          // Follow redirects
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             res.resume()
             follow(res.headers.location, redirects + 1)
@@ -205,13 +303,11 @@ export class LocalLlmManager {
   // -- Server lifecycle --
 
   async ensureServer(): Promise<void> {
-    // Already running
     if (this.isServerRunning()) {
       this.lastRequestTime = Date.now()
       return
     }
 
-    // Return existing startup promise if one is in progress
     if (this.startupPromise) return this.startupPromise
 
     this.startupPromise = this.performStartup()
@@ -223,18 +319,17 @@ export class LocalLlmManager {
   }
 
   private async performStartup(): Promise<void> {
-    // Download model if needed
-    if (!this.isModelAvailable()) {
-      await this.downloadModel()
-    }
+    // Download server binary and model in parallel if needed
+    const downloads: Promise<void>[] = []
+    if (!this.isServerBinaryAvailable()) downloads.push(this.ensureServerBinary())
+    if (!this.isModelAvailable()) downloads.push(this.downloadModel())
+    if (downloads.length > 0) await Promise.all(downloads)
 
-    // Verify binary exists
     const binPath = this.getServerBinaryPath()
     if (!fs.existsSync(binPath)) {
       throw new Error(`llama-server binary not found at ${binPath}`)
     }
 
-    // Find a free port
     this.serverPort = await this.findFreePort()
 
     log(`[local-llm] Starting llama-server on port ${this.serverPort}`)
@@ -243,7 +338,7 @@ export class LocalLlmManager {
       '-m', this.getModelPath(),
       '--port', String(this.serverPort),
       '--ctx-size', '4096',
-      '-ngl', '0', // CPU only
+      '-ngl', '0',
       '--threads', String(Math.min(4, os.cpus().length)),
       '--log-disable'
     ]
@@ -265,13 +360,11 @@ export class LocalLlmManager {
       this.clearIdleTimer()
     })
 
-    // Log stderr for debugging
     this.serverProcess.stderr?.on('data', (data: Buffer) => {
       const text = data.toString().trim()
       if (text) log(`[local-llm] server: ${text.slice(0, 200)}`)
     })
 
-    // Wait for server readiness
     await this.waitForServer()
 
     this.lastRequestTime = Date.now()
@@ -284,7 +377,6 @@ export class LocalLlmManager {
   private async waitForServer(): Promise<void> {
     const deadline = Date.now() + SERVER_READY_TIMEOUT
     while (Date.now() < deadline) {
-      // Fail fast if the process exited
       if (!this.serverProcess || this.serverProcess.exitCode !== null) {
         throw new Error('llama-server exited unexpectedly during startup')
       }

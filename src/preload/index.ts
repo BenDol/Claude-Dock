@@ -168,7 +168,7 @@ export interface DockApi {
     getBranch: (projectDir: string) => Promise<string | null>
   }
   llm: {
-    status: () => Promise<{ modelAvailable: boolean; serverRunning: boolean; downloading: boolean; downloadProgress: number }>
+    status: () => Promise<{ modelAvailable: boolean; serverAvailable: boolean; serverRunning: boolean; downloading: boolean; downloadProgress: number }>
     download: () => Promise<{ success: boolean; error?: string }>
     onDownloadProgress: (callback: (progress: number) => void) => () => void
   }

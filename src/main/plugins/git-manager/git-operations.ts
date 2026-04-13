@@ -1606,9 +1606,10 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     return await Promise.any(providers)
   } catch (agg) {
     const errors = agg instanceof AggregateError ? agg.errors : [agg]
-    for (const e of errors) getServices().log(`[git-manager] provider failed: ${e instanceof Error ? e.message : e}`)
+    const reasons = errors.map((e: unknown) => e instanceof Error ? e.message : String(e))
+    for (const r of reasons) getServices().log(`[git-manager] provider failed: ${r}`)
     throw new Error(
-      'Could not generate commit message. The local LLM model may need to be downloaded.' +
+      'Could not generate commit message: ' + reasons[0] +
       (claudeEnabled ? '' : ' You can also enable Claude in Git Manager settings.')
     )
   }

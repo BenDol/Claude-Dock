@@ -627,7 +627,7 @@ export function registerIpcHandlers(): void {
       const { LocalLlmManager } = await import('./local-llm')
       return LocalLlmManager.getInstance().getStatus()
     } catch {
-      return { modelAvailable: false, serverRunning: false, downloading: false, downloadProgress: 0 }
+      return { modelAvailable: false, serverAvailable: false, serverRunning: false, downloading: false, downloadProgress: 0 }
     }
   })
 
