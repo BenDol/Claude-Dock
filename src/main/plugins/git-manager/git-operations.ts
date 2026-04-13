@@ -1428,6 +1428,7 @@ export async function setRemoteUrl(cwd: string, name: string, url: string, pushU
 const COMMIT_MSG_PROMPT = [
   'Write a git commit message for the following staged changes.',
   'Use conventional commit format (feat:, fix:, refactor:, docs:, chore:, style:, test:).',
+  'The word after the colon must be lowercase (e.g. "fix: resolve issue" not "fix: Resolve issue").',
   'First line: a short summary under 72 characters.',
   'If the changes cover multiple distinct topics, add a blank line after the summary then bullet points (using -) for each change.',
   'Return ONLY the commit message — no quotes, no explanation, no markdown fences, no extra text.'
@@ -1438,8 +1439,10 @@ function cleanCommitMessage(raw: string): string {
     .replace(/^["']|["']$/g, '')
     .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
-  // Ensure first line is under 72 chars
   const lines = msg.split('\n')
+  // Enforce lowercase after conventional commit prefix (e.g. "fix: Resolve" → "fix: resolve")
+  lines[0] = lines[0].replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
+  // Ensure first line is under 72 chars
   if (lines[0].length > 72) {
     lines[0] = lines[0].slice(0, 72).replace(/\s+\S*$/, '')
   }
