@@ -237,6 +237,10 @@ export const IPC = {
   ISSUE_STOP_POLLING: 'issue:stopPolling',
   ISSUE_GET_TYPE_PROFILES: 'issue:getTypeProfiles',
   ISSUE_SET_TYPE_PROFILES: 'issue:setTypeProfiles',
+  ISSUE_STATUS_CAPABILITY: 'issue:statusCapability',
+  ISSUE_LIST_STATUSES: 'issue:listStatuses',
+  ISSUE_FETCH_STATUSES: 'issue:fetchStatuses',
+  ISSUE_SET_STATUS: 'issue:setStatus',
 
   // Claude Tasks
   CLAUDE_SEND_TASK: 'claude:sendTask',

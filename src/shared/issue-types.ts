@@ -7,6 +7,31 @@
 export type IssueState = 'open' | 'closed'
 export type IssueStateReason = 'completed' | 'not_planned' | 'reopened'
 
+/**
+ * Provider-native status (e.g. GitHub Projects v2 single-select option,
+ * or GitLab work-item status widget value). This is orthogonal to `state`:
+ * an issue can be `open` with status "In Progress", or `closed` with
+ * status "Done". Providers that don't support a native status concept
+ * return a `supported: false` capability and never populate this field.
+ */
+export interface IssueStatus {
+  /** Provider-opaque identifier (GraphQL ID for single-select option / work-item status). */
+  id: string
+  /** Display name (e.g. "In Progress", "Done"). */
+  name: string
+  /** Normalized category hint for badge coloring when `color` is absent. */
+  category?: 'todo' | 'in_progress' | 'done' | 'triage' | 'canceled'
+  /** Hex color without leading '#' when the provider supplies one. */
+  color?: string
+}
+
+/** Capability probe result for native status support. */
+export interface IssueStatusCapability {
+  supported: boolean
+  /** Human-readable explanation when unsupported (shown inline in UI). */
+  reason?: string
+}
+
 export interface IssueUser {
   login: string
   name?: string
@@ -59,6 +84,13 @@ export interface Issue {
   closedAt?: string | null
   url: string
   locked?: boolean
+  /**
+   * Provider-native status, populated only when the provider supports it
+   * (GitHub Projects v2 Status field, GitLab work-item status widget).
+   * Null/undefined when the issue isn't linked to a project or the
+   * provider capability is unavailable.
+   */
+  status?: IssueStatus | null
 }
 
 export interface IssueCreateRequest {

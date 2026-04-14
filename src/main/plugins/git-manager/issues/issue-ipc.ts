@@ -349,6 +349,65 @@ export function registerIssueIpc(): void {
     }
   })
 
+  ipcMain.handle(IPC.ISSUE_STATUS_CAPABILITY, async (_event, projectDir: string, force?: boolean) => {
+    getServices().log('[issue-ipc] statusCapability', projectDir, 'force=', !!force)
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return { supported: false, reason: 'No issue provider for this project' }
+    try {
+      return await provider.getStatusCapability(projectDir, !!force)
+    } catch (err) {
+      getServices().logError('[issue-ipc] statusCapability failed:', err)
+      return { supported: false, reason: err instanceof Error ? err.message : 'Failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.ISSUE_LIST_STATUSES, async (_event, projectDir: string) => {
+    getServices().log('[issue-ipc] listStatuses', projectDir)
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return []
+    try {
+      return await provider.listStatuses(projectDir)
+    } catch (err) {
+      getServices().logError('[issue-ipc] listStatuses failed:', err)
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.ISSUE_FETCH_STATUSES, async (_event, projectDir: string, issueIds: number[]) => {
+    getServices().log('[issue-ipc] fetchStatuses', projectDir, issueIds.length)
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return {}
+    try {
+      const map = await provider.fetchIssueStatuses(projectDir, issueIds || [])
+      // Serialize Map to plain object for IPC transport.
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of map.entries()) out[String(k)] = v
+      return out
+    } catch (err) {
+      getServices().logError('[issue-ipc] fetchStatuses failed:', err)
+      return {}
+    }
+  })
+
+  ipcMain.handle(IPC.ISSUE_SET_STATUS, async (
+    _event,
+    projectDir: string,
+    id: number,
+    statusId: string
+  ) => {
+    getServices().log('[issue-ipc] setStatus', projectDir, id, statusId)
+    const provider = await registry.resolve(projectDir)
+    if (!provider) return { success: false, error: 'No issue provider for this project' }
+    try {
+      const result = await provider.setIssueStatus(projectDir, id, statusId)
+      if (result.success) getManager().invalidateIssue(projectDir, id)
+      return result
+    } catch (err) {
+      getServices().logError('[issue-ipc] setStatus failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Failed' }
+    }
+  })
+
   ipcMain.handle(IPC.ISSUE_GET_CURRENT_USER, async (_event, projectDir: string) => {
     getServices().log('[issue-ipc] getCurrentUser', projectDir)
     const provider = await registry.resolve(projectDir)

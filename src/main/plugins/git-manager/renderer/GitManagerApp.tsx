@@ -20,6 +20,7 @@ import type {
   GitSearchResponse
 } from '../../../../shared/git-manager-types'
 import { remoteUrlToCommitUrl, detectProvider, type GitProvider } from '../../../../shared/remote-url'
+import type { Issue, IssueStatus, IssueStatusCapability } from '../../../../shared/issue-types'
 import { highlightDiffHunks, highlightCode } from './diff-highlight'
 import { ProviderIcon, providerLabel } from './ProviderIcons'
 import CiPanel from './CiPanel'
@@ -5175,6 +5176,263 @@ const StashDropIcon: React.FC = React.memo(() => (
   </svg>
 ))
 
+// --- Working Changes: Issues panel -------------------------------------------
+
+/** Parse a comma-separated status names string into a normalized lowercase list. */
+function parseInProgressNames(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return ['in progress', 'doing', 'in review']
+  return raw.split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0)
+}
+
+/** Resolve the CSS color for a status badge, preferring provider color then category. */
+function statusBadgeStyle(status: IssueStatus): React.CSSProperties {
+  if (status.color) return { background: `#${status.color}`, color: '#fff' }
+  switch (status.category) {
+    case 'done': return { background: '#2ea043', color: '#fff' }
+    case 'in_progress': return { background: '#f59e0b', color: '#1a1b26' }
+    case 'triage': return { background: '#8b5cf6', color: '#fff' }
+    case 'canceled': return { background: '#6b7280', color: '#fff' }
+    case 'todo': return { background: '#3b82f6', color: '#fff' }
+    default: return { background: '#4b5563', color: '#fff' }
+  }
+}
+
+interface WorkingChangesIssuesPanelProps {
+  projectDir: string
+  settingsDir: string
+  /** Set of selected issue iids/numbers. Selection state lives on the parent so the commit handler can read it. */
+  selectedIds: Set<number>
+  onSelectionChange: (next: Set<number>) => void
+  /** Called when issues load so the parent knows current issue list for completion orchestration. */
+  onIssuesLoaded?: (issues: Issue[], statuses: IssueStatus[], capability: IssueStatusCapability | null) => void
+}
+
+const WorkingChangesIssuesPanel: React.FC<WorkingChangesIssuesPanelProps> = ({
+  projectDir,
+  settingsDir,
+  selectedIds,
+  onSelectionChange,
+  onIssuesLoaded
+}) => {
+  const [collapsed, setCollapsed] = usePersistedCollapsed('workingChangesIssues', true)
+  const [issues, setIssues] = useState<Issue[]>([])
+  const [statuses, setStatuses] = useState<IssueStatus[]>([])
+  const [capability, setCapability] = useState<IssueStatusCapability | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [filter, setFilter] = useState<'inProgress' | 'all'>('inProgress')
+  const [providerAvailable, setProviderAvailable] = useState<boolean | null>(null)
+  const [inProgressNames, setInProgressNames] = useState<string[]>([])
+  const [pendingStatus, setPendingStatus] = useState<Set<number>>(new Set())
+  const api = getDockApi()
+  // Increment per load; async callbacks compare against current to drop stale results.
+  const loadReqRef = useRef(0)
+  const mountedRef = useRef(true)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+
+  // Load in-progress names from settings.
+  useEffect(() => {
+    api.plugins.getSetting(settingsDir, 'git-manager', 'inProgressStatusNames').then((val) => {
+      if (mountedRef.current) setInProgressNames(parseInProgressNames(val))
+    })
+  }, [settingsDir, api])
+
+  const loadIssues = useCallback(async (force = false) => {
+    const reqId = ++loadReqRef.current
+    const isCurrent = () => mountedRef.current && loadReqRef.current === reqId
+    setLoading(true)
+    try {
+      const avail = await api.issues.checkAvailable(projectDir)
+      if (!isCurrent()) return
+      const available = !!avail
+      setProviderAvailable(available)
+      if (!available) {
+        setIssues([]); setStatuses([]); setCapability(null)
+        onIssuesLoaded?.([], [], null)
+        return
+      }
+
+      const cap = await api.issues.getStatusCapability(projectDir, force)
+      if (!isCurrent()) return
+      setCapability(cap)
+
+      const [list, statusList] = await Promise.all([
+        api.issues.list(projectDir, 'open'),
+        cap.supported ? api.issues.listStatuses(projectDir) : Promise.resolve([] as IssueStatus[])
+      ])
+      if (!isCurrent()) return
+
+      // Enrich with status when supported.
+      let enriched = list
+      if (cap.supported && list.length > 0) {
+        const map = await api.issues.fetchStatuses(projectDir, list.map((i) => i.id))
+        if (!isCurrent()) return
+        enriched = list.map((i) => ({ ...i, status: (map[String(i.id)] as IssueStatus | null | undefined) ?? null }))
+      }
+      setIssues(enriched)
+      setStatuses(statusList)
+      onIssuesLoaded?.(enriched, statusList, cap)
+    } catch (err) {
+      if (!isCurrent()) return
+      console.error('[WorkingChangesIssuesPanel] loadIssues failed', err)
+      setIssues([]); setStatuses([]); setCapability(null)
+      onIssuesLoaded?.([], [], null)
+    } finally {
+      if (isCurrent()) setLoading(false)
+    }
+  }, [projectDir, api, onIssuesLoaded])
+
+  // Load on mount and when project changes; reload after a successful set-status.
+  useEffect(() => { loadIssues(false) }, [loadIssues])
+
+  const filteredIssues = useMemo(() => {
+    if (filter === 'all') return issues
+    if (!capability?.supported || inProgressNames.length === 0) return issues
+    const names = new Set(inProgressNames)
+    return issues.filter((i) => i.status && names.has(i.status.name.toLowerCase()))
+  }, [issues, filter, capability, inProgressNames])
+
+  const visibleIds = useMemo(() => filteredIssues.map((i) => i.id), [filteredIssues])
+
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    onSelectionChange(next)
+  }
+  const selectAllVisible = () => {
+    const next = new Set(selectedIds)
+    for (const id of visibleIds) next.add(id)
+    onSelectionChange(next)
+  }
+  const clearSelection = () => onSelectionChange(new Set())
+
+  const onChangeStatus = async (issueId: number, newStatusId: string) => {
+    if (!newStatusId) return
+    // Optimistic: update local state, mark pending.
+    setPendingStatus((prev) => new Set(prev).add(issueId))
+    const prevIssue = issues.find((i) => i.id === issueId)
+    const newStatus = statuses.find((s) => s.id === newStatusId) || null
+    setIssues((list) => list.map((i) => i.id === issueId ? { ...i, status: newStatus } : i))
+    try {
+      const result = await api.issues.setStatus(projectDir, issueId, newStatusId)
+      if (!result.success) {
+        // Roll back.
+        setIssues((list) => list.map((i) => i.id === issueId ? { ...i, status: prevIssue?.status ?? null } : i))
+        console.error('[WorkingChangesIssuesPanel] setStatus failed:', result.error)
+      }
+    } catch (err) {
+      setIssues((list) => list.map((i) => i.id === issueId ? { ...i, status: prevIssue?.status ?? null } : i))
+      console.error('[WorkingChangesIssuesPanel] setStatus threw:', err)
+    } finally {
+      setPendingStatus((prev) => { const n = new Set(prev); n.delete(issueId); return n })
+    }
+  }
+
+  // Clear selected ids that no longer appear in the current issue list.
+  useEffect(() => {
+    if (selectedIds.size === 0) return
+    const known = new Set(issues.map((i) => i.id))
+    const pruned = new Set<number>()
+    for (const id of selectedIds) if (known.has(id)) pruned.add(id)
+    if (pruned.size !== selectedIds.size) onSelectionChange(pruned)
+  }, [issues, selectedIds, onSelectionChange])
+
+  if (providerAvailable === false) return null
+
+  return (
+    <div className="gm-wc-issues">
+      <div className="gm-wc-issues-header">
+        <button className="gm-wc-issues-toggle" onClick={() => setCollapsed(!collapsed)}>
+          <SectionChevron collapsed={collapsed} />
+          <span>Issues</span>
+          <span className="gm-wc-issues-count">{filteredIssues.length}</span>
+          {selectedIds.size > 0 && (
+            <span className="gm-wc-issues-selected" title="Selected issues will be completed on Commit & Push">
+              {selectedIds.size} selected
+            </span>
+          )}
+        </button>
+        {!collapsed && (
+          <div className="gm-wc-issues-actions">
+            <button
+              className="gm-wc-issues-filter-btn"
+              onClick={() => setFilter(filter === 'inProgress' ? 'all' : 'inProgress')}
+              title={filter === 'inProgress' ? 'Showing in-progress statuses only' : 'Showing all open issues'}
+            >
+              {filter === 'inProgress' ? 'In Progress' : 'All Open'}
+            </button>
+            <button className="gm-wc-issues-refresh" onClick={() => loadIssues(true)} title="Refresh issues (force re-probe project config)" disabled={loading}>
+              <RefreshIcon />
+            </button>
+            {visibleIds.length > 0 && (
+              <button className="gm-wc-issues-select-all" onClick={selectAllVisible} title="Select all visible">
+                Select all
+              </button>
+            )}
+            {selectedIds.size > 0 && (
+              <button className="gm-wc-issues-clear" onClick={clearSelection} title="Clear selection">
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {!collapsed && (
+        <div className="gm-wc-issues-body">
+          {loading && issues.length === 0 && (
+            <div className="gm-wc-issues-empty"><span className="gm-toolbar-spinner" /> Loading issues…</div>
+          )}
+          {!loading && filteredIssues.length === 0 && (
+            <div className="gm-wc-issues-empty">
+              {filter === 'inProgress' && issues.length > 0
+                ? 'No issues match the configured in-progress statuses.'
+                : 'No open issues.'}
+            </div>
+          )}
+          {capability && !capability.supported && capability.reason && (
+            <div className="gm-wc-issues-hint" title={capability.reason}>
+              {capability.reason} — selected issues will be closed on push.
+            </div>
+          )}
+          {filteredIssues.map((issue) => {
+            const checked = selectedIds.has(issue.id)
+            const statusBusy = pendingStatus.has(issue.id)
+            return (
+              <div key={issue.id} className={`gm-wc-issue-row${checked ? ' gm-wc-issue-row-selected' : ''}`}>
+                <label className="gm-wc-issue-check">
+                  <input type="checkbox" checked={checked} onChange={() => toggleSelect(issue.id)} />
+                </label>
+                <a className="gm-wc-issue-title" href={issue.url} target="_blank" rel="noreferrer" title={issue.title}>
+                  <span className="gm-wc-issue-id">#{issue.id}</span>
+                  <span>{issue.title}</span>
+                </a>
+                {issue.status && (
+                  <span className="gm-wc-issue-status-badge" style={statusBadgeStyle(issue.status)}>
+                    {issue.status.name}
+                  </span>
+                )}
+                {capability?.supported && statuses.length > 0 && (
+                  <select
+                    className="gm-wc-issue-status-select"
+                    value={issue.status?.id || ''}
+                    onChange={(e) => onChangeStatus(issue.id, e.target.value)}
+                    disabled={statusBusy}
+                    title={statusBusy ? 'Updating…' : 'Change status'}
+                  >
+                    <option value="" disabled>{issue.status ? 'Change…' : 'Set status…'}</option>
+                    {statuses.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const WorkingChanges: React.FC<{
   status: GitStatusResult | null
   stashes: GitStashEntry[]
@@ -5217,6 +5475,17 @@ const WorkingChanges: React.FC<{
   const fileListRef = useRef<HTMLDivElement>(null)
   const scrollListRef = useRef<HTMLDivElement>(null)
   const commitBoxRef = useRef<HTMLDivElement>(null)
+
+  // Issues panel state (Working Changes completion flow).
+  const [issuesPanelEnabled, setIssuesPanelEnabled] = useState(false)
+  const [completingIssues, setCompletingIssues] = useState(false)
+  const [selectedIssueIds, setSelectedIssueIds] = useState<Set<number>>(new Set())
+  const issuesSnapshotRef = useRef<{ issues: Issue[]; statuses: IssueStatus[]; capability: IssueStatusCapability | null }>({
+    issues: [], statuses: [], capability: null
+  })
+  const handleIssuesLoaded = useCallback((issues: Issue[], statuses: IssueStatus[], capability: IssueStatusCapability | null) => {
+    issuesSnapshotRef.current = { issues, statuses, capability }
+  }, [])
 
   // Report busy state to parent for tab indicator
   useEffect(() => {
@@ -5306,6 +5575,21 @@ const WorkingChanges: React.FC<{
     getDockApi().plugins.getSetting(settingsDir, 'git-manager', 'autoGenerateCommitMsg')
       .then((val) => { setAutoGen(typeof val === 'boolean' ? val : true) })
   }, [settingsDir])
+
+  // Load issues-panel enablement setting.
+  useEffect(() => {
+    getDockApi().plugins.getSetting(settingsDir, 'git-manager', 'workingChangesIssuesEnabled')
+      .then((val) => { setIssuesPanelEnabled(val === true) })
+  }, [settingsDir])
+
+  // Clear any stale selection when the panel is toggled off, otherwise the
+  // plain-Commit button stays disabled with no UI to clear the selection.
+  useEffect(() => {
+    if (!issuesPanelEnabled && selectedIssueIds.size > 0) setSelectedIssueIds(new Set())
+  }, [issuesPanelEnabled, selectedIssueIds])
+
+  // Drop selection when the repo changes — issue iids don't carry between projects.
+  useEffect(() => { setSelectedIssueIds(new Set()) }, [projectDir])
 
   // Listen for LLM model download progress
   useEffect(() => {
@@ -5544,11 +5828,90 @@ const WorkingChanges: React.FC<{
     }
   }
 
+  const completeSelectedIssues = useCallback(async (commitHash: string, commitSubject: string) => {
+    const ids = [...selectedIssueIds]
+    if (ids.length === 0) return
+    const snapshot = issuesSnapshotRef.current
+    try {
+      // Resolve commit URL from the origin remote so comments include a clickable link.
+      const remotes = await api.gitManager.getRemotes(projectDir)
+      const origin = remotes.find((r) => r.name === 'origin') || remotes[0]
+      const commitUrl = origin ? (remoteUrlToCommitUrl(origin.fetchUrl, commitHash) || '') : ''
+      // Fallback for {commitUrl}: a short hash is always more useful than an empty string.
+      const commitUrlFallback = commitUrl || commitHash.slice(0, 8)
+
+      // Load completion settings.
+      const [completedNameRaw, templateRaw, branch] = await Promise.all([
+        api.plugins.getSetting(settingsDir, 'git-manager', 'completedStatusName'),
+        api.plugins.getSetting(settingsDir, 'git-manager', 'commitCommentTemplate'),
+        api.git.getBranch(projectDir).catch(() => '')
+      ])
+      const completedName = typeof completedNameRaw === 'string' && completedNameRaw.trim() ? completedNameRaw.trim() : 'Done'
+      const template = typeof templateRaw === 'string' && templateRaw.trim() ? templateRaw : 'Addressed in {commitUrl}'
+      const body = template
+        .replace(/\{commitUrl\}/g, commitUrlFallback)
+        .replace(/\{commitHash\}/g, commitHash)
+        .replace(/\{commitSubject\}/g, commitSubject)
+        .replace(/\{branch\}/g, typeof branch === 'string' ? branch : '')
+
+      // Resolve the "Completed" status id (case-insensitive) from the cached status list.
+      const completedStatus = snapshot.capability?.supported
+        ? snapshot.statuses.find((s) => s.name.toLowerCase() === completedName.toLowerCase())
+        : null
+
+      // Process issues with limited concurrency.
+      const failures: { id: number; error: string }[] = []
+      const concurrency = 3
+      let index = 0
+      const worker = async (): Promise<void> => {
+        while (index < ids.length) {
+          const myIndex = index++
+          const issueId = ids[myIndex]
+          try {
+            const issue = snapshot.issues.find((i) => i.id === issueId)
+            // Prefer native status transition when supported + resolvable; else close.
+            if (completedStatus) {
+              const res = await api.issues.setStatus(projectDir, issueId, completedStatus.id)
+              if (!res.success) {
+                // Fall back to close on status failure.
+                await api.issues.setState(projectDir, issueId, 'closed', 'completed')
+              } else if (issue?.state === 'open') {
+                // GitHub: also close the issue so it's off the board. GitLab native status
+                // is enough, but closing there is harmless if the issue is already in a
+                // Done state — skip it there.
+                const remoteProvider = origin ? detectProvider(origin.fetchUrl) : 'generic'
+                if (remoteProvider === 'github') {
+                  await api.issues.setState(projectDir, issueId, 'closed', 'completed')
+                }
+              }
+            } else if (issue && issue.state === 'open') {
+              await api.issues.setState(projectDir, issueId, 'closed', 'completed')
+            }
+            if (body) await api.issues.addComment(projectDir, issueId, body)
+          } catch (err) {
+            failures.push({ id: issueId, error: err instanceof Error ? err.message : 'Failed' })
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker))
+      setSelectedIssueIds(new Set())
+
+      if (failures.length > 0) {
+        const msg = failures.map((f) => `#${f.id}: ${f.error}`).join('; ')
+        onError(`Some issues could not be completed — ${msg}`)
+      }
+    } catch (err) {
+      console.error('[WorkingChanges] completeSelectedIssues failed', err)
+      onError(`Issue completion failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }, [selectedIssueIds, projectDir, settingsDir, api, onError])
+
   const handleCommitPush = async () => {
     if (generating) { pendingActionRef.current = 'commit-push'; setPendingAction('commit-push'); return }
     if (!commitMsg.trim()) return
     setBusy(true)
     setCommitting('commit-push')
+    const commitSubjectSnapshot = commitMsg.split(/\r?\n/)[0].trim()
     const result = await api.gitManager.commit(projectDir, commitMsg)
     if (result.success) {
       setCommitMsg('')
@@ -5557,10 +5920,10 @@ const WorkingChanges: React.FC<{
       const pushResult = await api.gitManager.push(projectDir)
       const wasCancelled = pushCancelledRef?.current
       onPushStateChange?.(false)
-      setBusy(false)
-      setCommitting(null)
       if (!pushResult.success) {
         // Commit succeeded but push failed — navigate to commit either way
+        setBusy(false)
+        setCommitting(null)
         if (onCommitted && result.hash) { onCommitted(result.hash) } else { onRefresh() }
         // If user cancelled, don't show error
         if (wasCancelled) return
@@ -5570,6 +5933,19 @@ const WorkingChanges: React.FC<{
         })
         return
       }
+      // Push succeeded — complete any selected issues before navigating away.
+      // Keep busy=true through completion so duplicate clicks can't run it twice;
+      // `completingIssues` drives the distinct button label.
+      if (selectedIssueIds.size > 0 && result.hash) {
+        setCompletingIssues(true)
+        try {
+          await completeSelectedIssues(result.hash, commitSubjectSnapshot)
+        } finally {
+          setCompletingIssues(false)
+        }
+      }
+      setBusy(false)
+      setCommitting(null)
       if (onCommitted && result.hash) { onCommitted(result.hash) }
       else { onRefresh() }
     } else {
@@ -5870,6 +6246,15 @@ const WorkingChanges: React.FC<{
               <button onClick={() => setGenError(null)}>&#10005;</button>
             </div>
           )}
+          {issuesPanelEnabled && (
+            <WorkingChangesIssuesPanel
+              projectDir={projectDir}
+              settingsDir={settingsDir}
+              selectedIds={selectedIssueIds}
+              onSelectionChange={setSelectedIssueIds}
+              onIssuesLoaded={handleIssuesLoaded}
+            />
+          )}
           {status.staged.length === 0 && stageableUnstaged.length > 0 ? (
             <div className="gm-commit-btn-group">
               <button
@@ -5885,7 +6270,8 @@ const WorkingChanges: React.FC<{
               <button
                 className={`gm-commit-btn gm-commit-btn-left${pendingAction === 'commit' ? ' gm-commit-btn-queued' : ''}`}
                 onClick={handleCommit}
-                disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
+                disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim()) || selectedIssueIds.size > 0}
+                title={selectedIssueIds.size > 0 ? 'Selected issues will be completed after push — use Commit & Push' : undefined}
               >
                 {committing === 'commit'
                   ? <><span className="gm-commit-spinner" /> Committing...</>
@@ -5898,11 +6284,13 @@ const WorkingChanges: React.FC<{
                 onClick={handleCommitPush}
                 disabled={busy || status.staged.length === 0 || (!generating && !commitMsg.trim())}
               >
-                {committing === 'commit-push'
-                  ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
-                  : pendingAction === 'commit-push'
-                    ? <><span className="gm-commit-spinner" /> Commit & Push <span className="gm-commit-queued-hint">after generate</span></>
-                    : 'Commit & Push'}
+                {completingIssues
+                  ? <><span className="gm-commit-spinner" /> Completing issues...</>
+                  : committing === 'commit-push'
+                    ? <><span className="gm-commit-spinner" /> Committing & Pushing...</>
+                    : pendingAction === 'commit-push'
+                      ? <><span className="gm-commit-spinner" /> Commit & Push <span className="gm-commit-queued-hint">after generate</span></>
+                      : 'Commit & Push'}
               </button>
             </div>
           )}

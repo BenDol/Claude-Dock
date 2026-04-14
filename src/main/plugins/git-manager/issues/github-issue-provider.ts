@@ -14,7 +14,9 @@ import type {
   IssueLabel,
   IssueUser,
   IssueMilestone,
-  IssueStateReason
+  IssueStateReason,
+  IssueStatus,
+  IssueStatusCapability
 } from '../../../../shared/issue-types'
 import type { CiSetupStatus } from '../../../../shared/ci-types'
 import { getServices } from '../services'
@@ -622,4 +624,298 @@ export class GitHubIssueProvider implements IssueProvider {
       return false
     }
   }
+
+  // ---- Projects v2 Status (read/write via GraphQL) --------------------------
+
+  private projectMetaCache = new Map<string, CacheEntry<ProjectV2Meta | null>>()
+  private statusCapCache = new Map<string, CacheEntry<IssueStatusCapability>>()
+
+  /**
+   * Resolve the configured Projects v2 project + Status field for this repo.
+   * Returns null if settings are missing or the project isn't reachable.
+   * Cached for 5 minutes to avoid repeated GraphQL hits.
+   */
+  private async resolveProjectMeta(projectDir: string): Promise<ProjectV2Meta | null> {
+    const cached = cacheGet(this.projectMetaCache, projectDir)
+    if (cached !== null) return cached
+
+    const numRaw = getServices().getPluginSetting(projectDir, 'git-manager', 'githubProjectNumber')
+    const projectNumber = typeof numRaw === 'number' ? numRaw
+      : typeof numRaw === 'string' && numRaw.trim() ? parseInt(numRaw, 10) : NaN
+    if (!Number.isFinite(projectNumber) || projectNumber <= 0) {
+      getServices().log('[issue-github] resolveProjectMeta: no githubProjectNumber configured')
+      this.projectMetaCache.set(projectDir, { at: Date.now(), data: null })
+      return null
+    }
+
+    const ownerOverride = getServices().getPluginSetting(projectDir, 'git-manager', 'githubProjectOwner')
+    let owner: string | null = typeof ownerOverride === 'string' && ownerOverride.trim() ? ownerOverride.trim() : null
+    if (!owner) {
+      const repo = await this.getRepo(projectDir)
+      owner = repo?.owner ?? null
+    }
+    if (!owner) {
+      getServices().logError('[issue-github] resolveProjectMeta: could not resolve owner for project lookup')
+      this.projectMetaCache.set(projectDir, { at: Date.now(), data: null })
+      return null
+    }
+
+    // Query user(login), then organization(login) as fallback.
+    const query = `
+      query($owner:String!, $number:Int!) {
+        user(login:$owner) { projectV2(number:$number) { id field(name:"Status") { ... on ProjectV2SingleSelectField { id name options { id name } } } } }
+        organization(login:$owner) { projectV2(number:$number) { id field(name:"Status") { ... on ProjectV2SingleSelectField { id name options { id name } } } } }
+      }
+    `
+    try {
+      const { stdout } = await gh(
+        ['api', 'graphql', '-f', `owner=${owner}`, '-F', `number=${projectNumber}`, '-f', `query=${query}`],
+        projectDir
+      )
+      const parsed = JSON.parse(stdout) as { data?: { user?: { projectV2?: RawProjectV2 }; organization?: { projectV2?: RawProjectV2 } } }
+      const raw = parsed.data?.user?.projectV2 || parsed.data?.organization?.projectV2 || null
+      if (!raw || !raw.id || !raw.field?.id) {
+        getServices().log('[issue-github] resolveProjectMeta: project not found or has no Status field', owner, projectNumber)
+        this.projectMetaCache.set(projectDir, { at: Date.now(), data: null })
+        return null
+      }
+      const meta: ProjectV2Meta = {
+        owner,
+        projectNumber,
+        projectId: raw.id,
+        statusFieldId: raw.field.id,
+        options: (raw.field.options || []).map((o) => ({ id: o.id, name: o.name }))
+      }
+      cacheSet(this.projectMetaCache, projectDir, meta)
+      return meta
+    } catch (err) {
+      getServices().logError('[issue-github] resolveProjectMeta GraphQL failed:', err)
+      this.projectMetaCache.set(projectDir, { at: Date.now(), data: null })
+      return null
+    }
+  }
+
+  async getStatusCapability(projectDir: string, force = false): Promise<IssueStatusCapability> {
+    if (force) {
+      this.statusCapCache.delete(projectDir)
+      this.projectMetaCache.delete(projectDir)
+    }
+    const cached = cacheGet(this.statusCapCache, projectDir)
+    if (cached) return cached
+    const meta = await this.resolveProjectMeta(projectDir)
+    const cap: IssueStatusCapability = meta
+      ? { supported: true }
+      : { supported: false, reason: 'Configure a GitHub Projects v2 project number in Git Manager settings to enable native status.' }
+    cacheSet(this.statusCapCache, projectDir, cap)
+    return cap
+  }
+
+  async listStatuses(projectDir: string): Promise<IssueStatus[]> {
+    const meta = await this.resolveProjectMeta(projectDir)
+    if (!meta) return []
+    return meta.options.map((o) => ({ id: o.id, name: o.name, category: guessStatusCategory(o.name) }))
+  }
+
+  async setIssueStatus(
+    projectDir: string,
+    id: number,
+    statusId: string
+  ): Promise<IssueActionResult> {
+    getServices().log('[issue-github] setIssueStatus', projectDir, id, statusId)
+    try {
+      const meta = await this.resolveProjectMeta(projectDir)
+      if (!meta) return { success: false, error: 'GitHub Projects v2 is not configured for this repo.' }
+      const repo = await this.getRepo(projectDir)
+      if (!repo) return { success: false, error: 'Could not resolve repository for issue.' }
+
+      // 1) Find the project item id for this issue (add it if not yet in the project).
+      const itemId = await this.ensureIssueProjectItem(projectDir, repo.owner, repo.name, id, meta.projectId)
+      if (!itemId) return { success: false, error: 'Could not add issue to the configured project.' }
+
+      // 2) Update the Status single-select value.
+      const mutation = `
+        mutation($project:ID!, $item:ID!, $field:ID!, $option:String!) {
+          updateProjectV2ItemFieldValue(input:{ projectId:$project, itemId:$item, fieldId:$field, value:{ singleSelectOptionId:$option } }) {
+            projectV2Item { id }
+          }
+        }
+      `
+      await gh(
+        [
+          'api', 'graphql',
+          '-f', `project=${meta.projectId}`,
+          '-f', `item=${itemId}`,
+          '-f', `field=${meta.statusFieldId}`,
+          '-f', `option=${statusId}`,
+          '-f', `query=${mutation}`
+        ],
+        projectDir
+      )
+
+      const issue = await this.getIssue(projectDir, id)
+      return { success: true, issue: issue ?? undefined }
+    } catch (err) {
+      getServices().logError('[issue-github] setIssueStatus failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update status' }
+    }
+  }
+
+  /**
+   * Resolve the project item id for the given issue within our configured
+   * project. If the issue isn't yet an item in the project, adds it. Returns
+   * null on failure.
+   */
+  private async ensureIssueProjectItem(
+    projectDir: string,
+    owner: string,
+    repoName: string,
+    issueNumber: number,
+    projectId: string
+  ): Promise<string | null> {
+    // First, fetch the issue node id and any existing project items.
+    const lookup = `
+      query($owner:String!, $repo:String!, $num:Int!) {
+        repository(owner:$owner, name:$repo) {
+          issue(number:$num) {
+            id
+            projectItems(first:50) { nodes { id project { id } } }
+          }
+        }
+      }
+    `
+    let issueNodeId: string | null = null
+    try {
+      const { stdout } = await gh(
+        ['api', 'graphql', '-f', `owner=${owner}`, '-f', `repo=${repoName}`, '-F', `num=${issueNumber}`, '-f', `query=${lookup}`],
+        projectDir
+      )
+      const parsed = JSON.parse(stdout) as {
+        data?: { repository?: { issue?: { id: string; projectItems?: { nodes?: Array<{ id: string; project?: { id: string } }> } } } }
+      }
+      const issue = parsed.data?.repository?.issue
+      if (!issue?.id) {
+        getServices().logError('[issue-github] ensureIssueProjectItem: issue node not found', issueNumber)
+        return null
+      }
+      issueNodeId = issue.id
+      const existing = (issue.projectItems?.nodes || []).find((n) => n.project?.id === projectId)
+      if (existing?.id) return existing.id
+    } catch (err) {
+      getServices().logError('[issue-github] ensureIssueProjectItem lookup failed:', err)
+      return null
+    }
+
+    // Not yet in project — add it.
+    const add = `
+      mutation($project:ID!, $content:ID!) {
+        addProjectV2ItemById(input:{ projectId:$project, contentId:$content }) {
+          item { id }
+        }
+      }
+    `
+    try {
+      const { stdout } = await gh(
+        ['api', 'graphql', '-f', `project=${projectId}`, '-f', `content=${issueNodeId}`, '-f', `query=${add}`],
+        projectDir
+      )
+      const parsed = JSON.parse(stdout) as { data?: { addProjectV2ItemById?: { item?: { id: string } } } }
+      return parsed.data?.addProjectV2ItemById?.item?.id ?? null
+    } catch (err) {
+      getServices().logError('[issue-github] ensureIssueProjectItem add failed:', err)
+      return null
+    }
+  }
+
+  /**
+   * Batch-fetch the Projects v2 Status for a set of issues. Returns a map
+   * keyed by issue number; missing entries mean the issue isn't in the
+   * project. Used by the Working Changes panel to enrich list results.
+   */
+  async fetchIssueStatuses(
+    projectDir: string,
+    issueNumbers: number[]
+  ): Promise<Map<number, IssueStatus | null>> {
+    const result = new Map<number, IssueStatus | null>()
+    if (issueNumbers.length === 0) return result
+    const meta = await this.resolveProjectMeta(projectDir)
+    if (!meta) return result
+    const repo = await this.getRepo(projectDir)
+    if (!repo) return result
+
+    // GraphQL aliased query — one round trip for up to ~50 issues.
+    // gh api graphql field args need unique aliases per issue.
+    const MAX_PER_QUERY = 50
+    for (let i = 0; i < issueNumbers.length; i += MAX_PER_QUERY) {
+      const chunk = issueNumbers.slice(i, i + MAX_PER_QUERY)
+      const selections = chunk
+        .map((n) => `i${n}: issue(number:${n}) { number projectItems(first:10) { nodes { project { id } fieldValueByName(name:"Status") { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } } } } }`)
+        .join('\n')
+      const query = `
+        query($owner:String!, $repo:String!) {
+          repository(owner:$owner, name:$repo) {
+            ${selections}
+          }
+        }
+      `
+      try {
+        const { stdout } = await gh(
+          ['api', 'graphql', '-f', `owner=${repo.owner}`, '-f', `repo=${repo.name}`, '-f', `query=${query}`],
+          projectDir
+        )
+        const parsed = JSON.parse(stdout) as { data?: { repository?: Record<string, RawIssueProjectItems | null> } }
+        const repoData = parsed.data?.repository || {}
+        for (const n of chunk) {
+          const node = repoData[`i${n}`]
+          if (!node) { result.set(n, null); continue }
+          const item = (node.projectItems?.nodes || []).find((it) => it?.project?.id === meta.projectId)
+          const fv = item?.fieldValueByName
+          if (fv?.optionId && fv.name) {
+            result.set(n, { id: fv.optionId, name: fv.name, category: guessStatusCategory(fv.name) })
+          } else {
+            result.set(n, null)
+          }
+        }
+      } catch (err) {
+        getServices().logError('[issue-github] fetchIssueStatuses chunk failed:', err)
+        // Mark the chunk as null so the panel still renders without status.
+        for (const n of chunk) result.set(n, null)
+      }
+    }
+    return result
+  }
+}
+
+// ---- GraphQL shape helpers ---------------------------------------------------
+
+interface RawProjectV2 {
+  id: string
+  field?: { id: string; name: string; options?: Array<{ id: string; name: string }> }
+}
+
+interface RawIssueProjectItems {
+  projectItems?: {
+    nodes?: Array<{
+      project?: { id: string }
+      fieldValueByName?: { optionId?: string; name?: string }
+    } | null>
+  }
+}
+
+interface ProjectV2Meta {
+  owner: string
+  projectNumber: number
+  projectId: string
+  statusFieldId: string
+  options: Array<{ id: string; name: string }>
+}
+
+/** Best-effort category guess from a status name for badge coloring. */
+function guessStatusCategory(name: string): IssueStatus['category'] {
+  const n = name.toLowerCase()
+  if (/(done|complete|closed|shipped|resolved|merged)/.test(n)) return 'done'
+  if (/(progress|doing|review|blocked|in.?work|wip)/.test(n)) return 'in_progress'
+  if (/(triage|backlog|icebox|needs.?info)/.test(n)) return 'triage'
+  if (/(cancel|won.?t|wontfix|duplicate)/.test(n)) return 'canceled'
+  if (/(todo|open|new|planned)/.test(n)) return 'todo'
+  return undefined
 }

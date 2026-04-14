@@ -8,7 +8,9 @@ import type {
   IssueLabel,
   IssueUser,
   IssueMilestone,
-  IssueStateReason
+  IssueStateReason,
+  IssueStatus,
+  IssueStatusCapability
 } from '../../../../shared/issue-types'
 import type { CiSetupStatus } from '../../../../shared/ci-types'
 
@@ -69,6 +71,38 @@ export interface IssueProvider {
     id: number,
     milestone: number | string | null
   ): Promise<IssueActionResult>
+
+  // ---------- Native status (GitHub Projects v2 / GitLab work items) ----------
+  /**
+   * Probe whether this provider can read/write a native status for the given
+   * repo. Should be cheap and safe to call on every panel mount — implementations
+   * cache the result per-session. Returns `{ supported: false, reason }` when
+   * the required feature isn't configured (e.g. no GitHub project number set)
+   * or unavailable (e.g. GitLab instance without work-items status widget).
+   *
+   * Pass `force: true` to bust the capability/project cache — the panel's
+   * refresh button uses this so changes to `githubProjectNumber` take effect
+   * without waiting for the TTL.
+   */
+  getStatusCapability(projectDir: string, force?: boolean): Promise<IssueStatusCapability>
+  /** List the available status values for this repo (e.g. Todo / In Progress / Done). */
+  listStatuses(projectDir: string): Promise<IssueStatus[]>
+  /**
+   * Batch-resolve current status for the given issue ids. Returns a map
+   * keyed by issue id (GitHub issue number / GitLab iid). Missing entries
+   * or null values mean no status is tracked for that issue. Used by the
+   * Working Changes panel to enrich a plain `listIssues` result.
+   */
+  fetchIssueStatuses(
+    projectDir: string,
+    issueIds: number[]
+  ): Promise<Map<number, IssueStatus | null>>
+  /**
+   * Update the native status on an issue. `statusId` comes from `listStatuses`
+   * — callers resolve by name when needed (e.g. match configured "Completed"
+   * name against the available list).
+   */
+  setIssueStatus(projectDir: string, id: number, statusId: string): Promise<IssueActionResult>
 
   // ---------- Comments ----------
   addComment(projectDir: string, id: number, body: string): Promise<IssueComment | null>

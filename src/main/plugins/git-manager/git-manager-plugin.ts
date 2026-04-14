@@ -97,6 +97,49 @@ export class GitManagerPlugin implements DockPlugin {
       description: 'Show desktop notifications when CI runs complete',
       type: 'boolean',
       defaultValue: true
+    },
+    {
+      key: 'workingChangesIssuesEnabled',
+      label: 'Issues panel in Working Changes',
+      description: 'Show an Issues panel below the commit message so you can mark issues complete with a commit',
+      type: 'boolean',
+      defaultValue: false
+    },
+    {
+      key: 'inProgressStatusNames',
+      label: 'In-progress status names',
+      description: 'Comma-separated status names treated as "in progress" for the Working Changes issues filter',
+      type: 'string',
+      defaultValue: 'In Progress,Doing,In Review'
+    },
+    {
+      key: 'completedStatusName',
+      label: 'Completed status name',
+      description: 'Status name to set on selected issues after a successful Commit & Push (GitLab native status / GitHub Projects v2). Falls back to closing the issue if no match.',
+      type: 'string',
+      defaultValue: 'Done'
+    },
+    {
+      key: 'githubProjectNumber',
+      label: 'GitHub Projects v2 number',
+      description: 'Project number (visible in the project URL) used to resolve the Status field for issues. Leave empty to disable native status on GitHub.',
+      type: 'number',
+      placeholder: '0',
+      defaultValue: 0
+    },
+    {
+      key: 'githubProjectOwner',
+      label: 'GitHub Projects v2 owner override',
+      description: 'User or organization login that owns the project. Leave empty to infer from the repo remote.',
+      type: 'string',
+      defaultValue: ''
+    },
+    {
+      key: 'commitCommentTemplate',
+      label: 'Commit comment template',
+      description: 'Posted on each selected issue after Commit & Push. Placeholders: {commitUrl}, {commitHash}, {commitSubject}, {branch}.',
+      type: 'string',
+      defaultValue: 'Addressed in {commitUrl}'
     }
   ]
 

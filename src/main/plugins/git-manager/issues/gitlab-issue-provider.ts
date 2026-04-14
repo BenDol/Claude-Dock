@@ -14,7 +14,9 @@ import type {
   IssueLabel,
   IssueUser,
   IssueMilestone,
-  IssueStateReason
+  IssueStateReason,
+  IssueStatus,
+  IssueStatusCapability
 } from '../../../../shared/issue-types'
 import type { CiSetupStatus } from '../../../../shared/ci-types'
 import { getServices } from '../services'
@@ -614,5 +616,259 @@ export class GitLabIssueProvider implements IssueProvider {
       getServices().logError('[issue-gitlab] deleteComment failed:', err)
       return false
     }
+  }
+
+  // ---- Work Item Status (GitLab Premium, GraphQL) ---------------------------
+
+  private statusCapCache = new Map<string, CacheEntry<IssueStatusCapability>>()
+  private statusListCache = new Map<string, CacheEntry<IssueStatus[]>>()
+
+  /**
+   * URL-decode the cached project path ("group%2Frepo" -> "group/repo") for GraphQL fullPath.
+   */
+  private async getFullPath(projectDir: string): Promise<string | null> {
+    const encoded = await this.getProjectPath(projectDir)
+    if (!encoded) return null
+    try { return decodeURIComponent(encoded) } catch { return null }
+  }
+
+  /**
+   * Run a GraphQL query against GitLab via `glab api graphql`. Throws on
+   * non-zero exit or when the response has `errors`.
+   */
+  private async graphql(
+    projectDir: string,
+    query: string,
+    variables: Record<string, string | number | null>
+  ): Promise<Record<string, unknown>> {
+    const args: string[] = ['api', 'graphql']
+    for (const [k, v] of Object.entries(variables)) {
+      if (typeof v === 'number') args.push('-F', `${k}=${v}`)
+      else if (v === null) args.push('-f', `${k}=`)
+      else args.push('-f', `${k}=${v}`)
+    }
+    args.push('-f', `query=${query}`)
+    const { stdout } = await glab(args, projectDir)
+    const parsed = JSON.parse(stdout) as { data?: Record<string, unknown>; errors?: Array<{ message?: string }> }
+    if (parsed.errors?.length) {
+      const msg = parsed.errors.map((e) => e.message || '').filter(Boolean).join('; ') || 'GraphQL error'
+      throw new Error(msg)
+    }
+    return parsed.data || {}
+  }
+
+  async getStatusCapability(projectDir: string, force = false): Promise<IssueStatusCapability> {
+    if (force) {
+      this.statusCapCache.delete(projectDir)
+      this.statusListCache.delete(projectDir)
+    }
+    const cached = cacheGet(this.statusCapCache, projectDir)
+    if (cached) return cached
+
+    // Introspect the WorkItemWidgetStatus type — if it doesn't exist on this
+    // GitLab instance, the feature isn't available (Premium/Ultimate-only and
+    // requires a recent enough version).
+    const query = `query { __type(name: "WorkItemWidgetStatus") { name fields { name } } }`
+    try {
+      const data = await this.graphql(projectDir, query, {})
+      const type = data.__type as { name?: string; fields?: Array<{ name: string }> } | null
+      if (!type || !type.name) {
+        const cap: IssueStatusCapability = {
+          supported: false,
+          reason: 'Native work-item status is unavailable on this GitLab instance. Requires GitLab Premium/Ultimate with the status widget enabled.'
+        }
+        cacheSet(this.statusCapCache, projectDir, cap)
+        return cap
+      }
+      const cap: IssueStatusCapability = { supported: true }
+      cacheSet(this.statusCapCache, projectDir, cap)
+      return cap
+    } catch (err) {
+      getServices().logError('[issue-gitlab] getStatusCapability introspection failed:', err)
+      const cap: IssueStatusCapability = {
+        supported: false,
+        reason: 'Could not reach GitLab GraphQL API to probe work-item status support.'
+      }
+      cacheSet(this.statusCapCache, projectDir, cap)
+      return cap
+    }
+  }
+
+  async listStatuses(projectDir: string): Promise<IssueStatus[]> {
+    const cached = cacheGet(this.statusListCache, projectDir)
+    if (cached) return cached
+
+    const cap = await this.getStatusCapability(projectDir)
+    if (!cap.supported) return []
+
+    const fullPath = await this.getFullPath(projectDir)
+    if (!fullPath) return []
+
+    // Work item types expose allowed statuses via widget definitions.
+    const query = `
+      query($fullPath:ID!) {
+        workspace: project(fullPath:$fullPath) {
+          workItemTypes {
+            nodes {
+              name
+              widgetDefinitions {
+                ... on WorkItemWidgetDefinitionStatus {
+                  allowedStatuses { id name category iconName color }
+                }
+              }
+            }
+          }
+        }
+      }
+    `
+    try {
+      const data = await this.graphql(projectDir, query, { fullPath })
+      const ws = data.workspace as { workItemTypes?: { nodes?: Array<{ widgetDefinitions?: Array<{ allowedStatuses?: Array<RawWorkItemStatus> }> }> } } | null
+      const seen = new Map<string, IssueStatus>()
+      for (const wit of ws?.workItemTypes?.nodes || []) {
+        for (const def of wit.widgetDefinitions || []) {
+          for (const s of def.allowedStatuses || []) {
+            if (!s?.id || !s.name) continue
+            if (!seen.has(s.id)) {
+              seen.set(s.id, mapWorkItemStatus(s))
+            }
+          }
+        }
+      }
+      const statuses = [...seen.values()]
+      cacheSet(this.statusListCache, projectDir, statuses)
+      return statuses
+    } catch (err) {
+      getServices().logError('[issue-gitlab] listStatuses failed:', err)
+      return []
+    }
+  }
+
+  async fetchIssueStatuses(
+    projectDir: string,
+    issueIds: number[]
+  ): Promise<Map<number, IssueStatus | null>> {
+    const result = new Map<number, IssueStatus | null>()
+    if (issueIds.length === 0) return result
+
+    const cap = await this.getStatusCapability(projectDir)
+    if (!cap.supported) return result
+
+    const fullPath = await this.getFullPath(projectDir)
+    if (!fullPath) return result
+
+    // Batch via aliased sub-selections — one round-trip per chunk of issues.
+    const MAX_PER_QUERY = 50
+    for (let i = 0; i < issueIds.length; i += MAX_PER_QUERY) {
+      const chunk = issueIds.slice(i, i + MAX_PER_QUERY)
+      // Validate each id is a positive integer — we interpolate its string form
+      // into the GraphQL query body, so a non-integer would be a syntax error.
+      const safeChunk = chunk.filter((n) => Number.isInteger(n) && n > 0)
+      if (safeChunk.length === 0) {
+        for (const n of chunk) result.set(n, null)
+        continue
+      }
+      const selections = safeChunk
+        .map((n) => `i${n}: workItems(iid:"${n}", first:1) { nodes { iid widgets { ... on WorkItemWidgetStatus { status { id name category iconName color } } } } }`)
+        .join('\n')
+      const query = `
+        query($fullPath:ID!) {
+          workspace: project(fullPath:$fullPath) {
+            ${selections}
+          }
+        }
+      `
+      try {
+        const data = await this.graphql(projectDir, query, { fullPath })
+        const ws = data.workspace as Record<string, { nodes?: Array<{ iid?: string; widgets?: Array<{ status?: RawWorkItemStatus | null }> }> } | null> | null
+        for (const n of safeChunk) {
+          const field = ws?.[`i${n}`]
+          const node = field?.nodes?.[0]
+          if (!node) { result.set(n, null); continue }
+          const widget = (node.widgets || []).find((w) => w && 'status' in w) as { status?: RawWorkItemStatus | null } | undefined
+          const st = widget?.status
+          result.set(n, st ? mapWorkItemStatus(st) : null)
+        }
+      } catch (err) {
+        getServices().logError('[issue-gitlab] fetchIssueStatuses chunk failed:', err)
+        for (const n of safeChunk) result.set(n, null)
+      }
+    }
+    return result
+  }
+
+  async setIssueStatus(
+    projectDir: string,
+    id: number,
+    statusId: string
+  ): Promise<IssueActionResult> {
+    getServices().log('[issue-gitlab] setIssueStatus', projectDir, id, statusId)
+    try {
+      const cap = await this.getStatusCapability(projectDir)
+      if (!cap.supported) return { success: false, error: cap.reason || 'Status not supported on this GitLab instance.' }
+
+      const fullPath = await this.getFullPath(projectDir)
+      if (!fullPath) return { success: false, error: 'Could not resolve project path.' }
+
+      // Resolve the work item GID from the issue iid.
+      const lookup = `
+        query($fullPath:ID!, $iid:String!) {
+          workspace: project(fullPath:$fullPath) {
+            workItems(iid:$iid, first:1) { nodes { id } }
+          }
+        }
+      `
+      const lookupData = await this.graphql(projectDir, lookup, { fullPath, iid: String(id) })
+      const ws = lookupData.workspace as { workItems?: { nodes?: Array<{ id?: string }> } } | null
+      const workItemId = ws?.workItems?.nodes?.[0]?.id
+      if (!workItemId) return { success: false, error: 'Could not resolve work item for issue.' }
+
+      const mutation = `
+        mutation($id:WorkItemID!, $statusId:ID!) {
+          workItemUpdate(input:{ id:$id, statusWidget:{ status:$statusId } }) {
+            errors
+            workItem { id }
+          }
+        }
+      `
+      const mutData = await this.graphql(projectDir, mutation, { id: workItemId, statusId })
+      const upd = mutData.workItemUpdate as { errors?: string[]; workItem?: { id: string } } | null
+      if (upd?.errors?.length) {
+        return { success: false, error: upd.errors.join('; ') }
+      }
+
+      const issue = await this.getIssue(projectDir, id)
+      return { success: true, issue: issue ?? undefined }
+    } catch (err) {
+      getServices().logError('[issue-gitlab] setIssueStatus failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update status' }
+    }
+  }
+}
+
+// ---- GraphQL shape helpers ---------------------------------------------------
+
+interface RawWorkItemStatus {
+  id: string
+  name: string
+  category?: string | null
+  iconName?: string | null
+  color?: string | null
+}
+
+function mapWorkItemStatus(raw: RawWorkItemStatus): IssueStatus {
+  const cat = (raw.category || '').toLowerCase()
+  const normalized: IssueStatus['category'] =
+    cat.includes('progress') || cat.includes('in_progress') ? 'in_progress'
+    : cat.includes('done') ? 'done'
+    : cat.includes('triage') ? 'triage'
+    : cat.includes('cancel') ? 'canceled'
+    : cat.includes('open') || cat.includes('todo') ? 'todo'
+    : undefined
+  return {
+    id: raw.id,
+    name: raw.name,
+    category: normalized,
+    color: raw.color ? raw.color.replace(/^#/, '') : undefined
   }
 }

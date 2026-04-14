@@ -30,7 +30,9 @@ import type {
   IssueLabel,
   IssueUser,
   IssueMilestone,
-  IssueTypeProfiles
+  IssueTypeProfiles,
+  IssueStatus,
+  IssueStatusCapability
 } from '../shared/issue-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 import type {
@@ -362,6 +364,10 @@ export interface DockApi {
     stopPolling: (projectDir: string) => Promise<void>
     getTypeProfiles: (projectDir: string) => Promise<IssueTypeProfiles>
     setTypeProfiles: (projectDir: string, profiles: IssueTypeProfiles) => Promise<{ success: boolean; json?: string; error?: string }>
+    getStatusCapability: (projectDir: string, force?: boolean) => Promise<IssueStatusCapability>
+    listStatuses: (projectDir: string) => Promise<IssueStatus[]>
+    fetchStatuses: (projectDir: string, issueIds: number[]) => Promise<Record<string, IssueStatus | null>>
+    setStatus: (projectDir: string, id: number, statusId: string) => Promise<IssueActionResult>
   }
   telemetry: {
     setConsent: (consent: boolean) => Promise<void>
@@ -835,7 +841,11 @@ const dockApi: DockApi = {
     startPolling: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_START_POLLING, projectDir),
     stopPolling: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_STOP_POLLING, projectDir),
     getTypeProfiles: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_GET_TYPE_PROFILES, projectDir),
-    setTypeProfiles: (projectDir, profiles) => ipcRenderer.invoke(IPC.ISSUE_SET_TYPE_PROFILES, projectDir, profiles)
+    setTypeProfiles: (projectDir, profiles) => ipcRenderer.invoke(IPC.ISSUE_SET_TYPE_PROFILES, projectDir, profiles),
+    getStatusCapability: (projectDir, force) => ipcRenderer.invoke(IPC.ISSUE_STATUS_CAPABILITY, projectDir, force),
+    listStatuses: (projectDir) => ipcRenderer.invoke(IPC.ISSUE_LIST_STATUSES, projectDir),
+    fetchStatuses: (projectDir, issueIds) => ipcRenderer.invoke(IPC.ISSUE_FETCH_STATUSES, projectDir, issueIds),
+    setStatus: (projectDir, id, statusId) => ipcRenderer.invoke(IPC.ISSUE_SET_STATUS, projectDir, id, statusId)
   },
   telemetry: {
     setConsent: (consent) => ipcRenderer.invoke(IPC.TELEMETRY_SET_CONSENT, consent),
