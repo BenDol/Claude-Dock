@@ -1432,10 +1432,14 @@ const COMMIT_MSG_PROMPT = [
   'First line: a short summary under 72 characters.',
   'If the changes cover multiple distinct topics, end the summary line with a colon, then on the very next line (no blank line in between) list each additional change as " - <change>" (one leading space, a dash, a space, then the change). The bullet lines must NOT start with a conventional commit prefix, and you must NOT produce more than one commit message.',
   'Structure only (do not copy the placeholder text — replace it with the real summary and real bullets):\n<summary>:\n - <first additional change>\n - <second additional change>\n',
+  'Do NOT include any part of the diff (no lines starting with +, -, @@, diff --git, index, ---, or +++) in the commit message.',
   'Return ONLY the single commit message — no quotes, no explanation, no markdown fences, no extra text.'
 ].join(' ')
 
 const CONV_COMMIT_RE = /^(feat|fix|refactor|docs|chore|style|test|perf|build|ci|revert)(\([^)]*\))?:\s/i
+// Lines that clearly mean the LLM echoed the diff into the output.
+// Bullets start with a leading space ( - text), so they don't match these.
+const DIFF_MARKER_RE = /^(diff --git |index [0-9a-f]{4,}|@@ |--- [ab]?\/|--- \/dev|\+\+\+ [ab]?\/|\+\+\+ \/dev|[+-]\S)/
 
 function cleanCommitMessage(raw: string): string {
   const msg = raw.trim()
@@ -1446,12 +1450,13 @@ function cleanCommitMessage(raw: string): string {
   const rawLines = msg.split('\n')
   const firstLine = rawLines[0]?.trim() ?? ''
 
-  // Small models sometimes emit a second commit message instead of bullets, or
+  // Small models sometimes emit a second commit message, echo the diff, or
   // repeat the summary line. Cut at whichever boundary appears first.
   let cutIdx = -1
   for (let i = 1; i < rawLines.length; i++) {
-    const trimmed = rawLines[i].trim()
-    if (trimmed === firstLine || CONV_COMMIT_RE.test(trimmed)) { cutIdx = i; break }
+    const line = rawLines[i]
+    const trimmed = line.trim()
+    if (trimmed === firstLine || CONV_COMMIT_RE.test(trimmed) || DIFF_MARKER_RE.test(line)) { cutIdx = i; break }
   }
   const kept = cutIdx > 0 ? rawLines.slice(0, cutIdx) : rawLines
 
