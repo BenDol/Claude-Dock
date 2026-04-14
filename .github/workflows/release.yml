@@ -1,0 +1,348 @@
+name: Release
+
+# Stable, versioned release workflow. Manually dispatched — each run produces
+# a new immutable GitHub release tagged `vX.Y.Z`. Versions can be provided
+# explicitly or auto-computed from the latest existing tag + bump type.
+
+concurrency:
+  group: stable-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Explicit version (X.Y.Z). Leave empty to auto-increment using "bump".'
+        type: string
+        required: false
+        default: ''
+      bump:
+        description: 'Auto-increment type (ignored if explicit version is set).'
+        type: choice
+        required: true
+        default: 'minor'
+        options:
+          - feature
+          - major
+          - minor
+      skip_tests:
+        description: 'Skip the test suite.'
+        type: boolean
+        default: false
+
+jobs:
+  # -----------------------------------------------------------------------
+  # 1. Determine the new version and fail fast if the tag already exists.
+  # -----------------------------------------------------------------------
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need all tags for version discovery.
+
+      - name: Compute next version
+        id: compute
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force --quiet
+
+          # Latest existing stable tag, falling back to v1.0.0 baseline. The
+          # bleeding-edge channel already ships as 1.0.0 in package.json, so
+          # the first stable must be > 1.0.0 to trigger the auto-updater.
+          LATEST_TAG=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          LATEST_TAG="${LATEST_TAG:-v1.0.0}"
+          echo "Latest existing tag: $LATEST_TAG"
+
+          IFS='.' read -r FEAT MAJ MIN <<< "${LATEST_TAG#v}"
+
+          INPUT_VERSION='${{ inputs.version }}'
+          BUMP='${{ inputs.bump }}'
+
+          if [ -n "$INPUT_VERSION" ]; then
+            NEW_VERSION="${INPUT_VERSION#v}"
+            # Validate shape: X.Y.Z where each part is a non-negative integer.
+            if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid version format: '$INPUT_VERSION' (expected X.Y.Z)"
+              exit 1
+            fi
+            echo "Using explicit version: $NEW_VERSION"
+          else
+            case "$BUMP" in
+              feature) NEW_VERSION="$((FEAT + 1)).0.0" ;;
+              major)   NEW_VERSION="${FEAT}.$((MAJ + 1)).0" ;;
+              minor)   NEW_VERSION="${FEAT}.${MAJ}.$((MIN + 1))" ;;
+              *)
+                echo "::error::Unknown bump type: $BUMP"
+                exit 1
+                ;;
+            esac
+            echo "Computed $BUMP bump: $LATEST_TAG -> v$NEW_VERSION"
+          fi
+
+          # Fail if the tag already exists locally or on the remote.
+          if git tag -l "v$NEW_VERSION" | grep -q .; then
+            echo "::error::Tag v$NEW_VERSION already exists"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/v$NEW_VERSION" | grep -q .; then
+            echo "::error::Remote tag v$NEW_VERSION already exists"
+            exit 1
+          fi
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+  # -----------------------------------------------------------------------
+  # 2. Build + package for each platform. Matches build.yml structure so
+  #    native modules, signing, and notarization stay consistent.
+  # -----------------------------------------------------------------------
+  build:
+    needs: determine-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    env:
+      NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: '3.12'
+
+      - name: Install setuptools (needed by node-gyp)
+        run: pip install setuptools
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache node_modules & Electron
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/AppData/Local/electron/Cache
+            ~/Library/Caches/electron
+            ~/.cache/electron
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron-builder
+          key: deps-${{ matrix.platform }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Run tests
+        if: inputs.skip_tests != true
+        run: npx vitest run
+
+      # Bump package.json to the target stable version (ephemeral — not
+      # committed back to the repo). This drives `app.getVersion()` and the
+      # artifact filenames.
+      - name: Set package.json version
+        shell: bash
+        run: npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Build app
+        run: npx electron-vite build
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+          UPDATE_PROFILE: latest
+          PRODUCTION_BUILD: '1'
+
+      - name: Generate plugin archive
+        run: node scripts/generate-plugin-archive.js
+
+      - name: Import macOS signing certificate
+        if: matrix.platform == 'mac' && vars.SKIP_MAC_SIGNING != 'true'
+        env:
+          MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERTIFICATE" ]; then
+            echo "No certificate configured — skipping code signing"
+            exit 0
+          fi
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$MAC_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MAC_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Package (${{ matrix.platform }})
+        run: npx electron-builder --${{ matrix.platform }} --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Stable releases attempt notarization (notarize.js gracefully skips
+          # if APPLE_ID/PASSWORD/TEAM_ID are not configured). bleeding-edge
+          # always sets SKIP_NOTARIZE=true to keep CI fast.
+          SKIP_NOTARIZE: ${{ vars.SKIP_NOTARIZE_STABLE || 'false' }}
+
+      - name: Zip win-unpacked directory
+        if: matrix.platform == 'win'
+        working-directory: dist/win-unpacked
+        run: 7z a -tzip "../Claude-Dock-win-unpacked.zip" .
+        shell: bash
+
+      # Produce version-agnostic duplicates so the README can use
+      # `releases/latest/download/Claude-Dock-<platform>.<ext>` URLs that
+      # never need updating for new versions.
+      - name: Create version-agnostic asset copies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          case "${{ matrix.platform }}" in
+            win)
+              # NSIS setup exe (default electron-builder name includes spaces + version)
+              for f in *Setup*.exe; do
+                [ -f "$f" ] && cp -f "$f" "Claude-Dock-Setup.exe" && break
+              done || true
+              # Portable exe
+              for f in *Portable*.exe; do
+                [ -f "$f" ] && cp -f "$f" "Claude-Dock-Portable.exe" && break
+              done || true
+              # Unpacked zip is already named consistently.
+              ;;
+            mac)
+              for f in *.dmg; do
+                [ -f "$f" ] && cp -f "$f" "Claude-Dock.dmg" && break
+              done || true
+              ;;
+            linux)
+              for f in *.AppImage; do
+                [ -f "$f" ] && cp -f "$f" "Claude-Dock.AppImage" && break
+              done || true
+              ;;
+          esac
+          echo "Version-agnostic copies in dist/:"
+          ls -la dist 2>/dev/null || ls -la
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-dock-${{ matrix.platform }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/Claude-Dock-win-unpacked.zip
+            dist/plugins.zip
+            dist/plugins.update
+          if-no-files-found: error
+          retention-days: 7
+
+  # -----------------------------------------------------------------------
+  # 3. Publish the GitHub release with assets from every platform.
+  # -----------------------------------------------------------------------
+  publish:
+    needs: [determine-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # Collect everything into a single directory; dedupe by name so
+          # plugins.zip / plugins.update (identical across platforms) don't
+          # fail the upload with "already exists".
+          for f in artifacts/*/*; do
+            base=$(basename "$f")
+            if [ ! -e "release/$base" ]; then
+              cp "$f" "release/$base"
+            fi
+          done
+          echo "Release assets:"
+          ls -la release
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v$NEW_VERSION"
+
+          # Defensive: final duplicate-tag check (determine-version ran earlier,
+          # but we want to fail clearly here too if something slipped through).
+          if gh release view "$TAG" &>/dev/null; then
+            echo "::error::Release $TAG already exists — aborting publish"
+            exit 1
+          fi
+
+          # Two-phase publish so we can roll back cleanly if asset upload fails:
+          #   1) Create the release as a draft (invisible to users + auto-updater).
+          #   2) Upload all assets with retries.
+          #   3) Promote the draft to the official latest release.
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --draft \
+            --generate-notes
+
+          # Upload assets with simple retry per file. If any file ultimately fails,
+          # delete the draft release and exit so we don't leave a half-built tag.
+          upload_with_retry() {
+            local f="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$f" --clobber; then return 0; fi
+              echo "::warning::upload of $(basename "$f") failed (attempt $attempt/3)"
+              sleep $((attempt * 10))
+            done
+            return 1
+          }
+
+          for f in release/*; do
+            if ! upload_with_retry "$f"; then
+              echo "::error::Failed to upload $(basename "$f") after 3 attempts — rolling back"
+              gh release delete "$TAG" --yes --cleanup-tag || true
+              exit 1
+            fi
+          done
+
+          # All assets uploaded — promote draft to the official latest release.
+          gh release edit "$TAG" --draft=false --latest
+
+          echo "Published stable release $TAG"

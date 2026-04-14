@@ -9,9 +9,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock.Setup.1.0.0.exe">Windows</a> |
-  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock-1.0.0.AppImage">Linux</a> |
-  <a href="https://github.com/BenDol/Claude-Dock/releases/download/bleeding-edge/Claude.Dock-1.0.0-universal.dmg">MacOS</a>
+  <strong>Download the latest stable release:</strong><br/>
+  <a href="https://github.com/BenDol/Claude-Dock/releases/latest/download/Claude-Dock-Setup.exe">Windows</a> |
+  <a href="https://github.com/BenDol/Claude-Dock/releases/latest/download/Claude-Dock.AppImage">Linux</a> |
+  <a href="https://github.com/BenDol/Claude-Dock/releases/latest/download/Claude-Dock.dmg">macOS</a>
+  <br/>
+  <sub>
+    Prefer the latest build? Grab the
+    <a href="https://github.com/BenDol/Claude-Dock/releases/tag/bleeding-edge">bleeding-edge</a>
+    release (generated on every commit, may be unstable).
+  </sub>
+  <br/>
+  <sub>
+    <em>The stable download links resolve to the newest <code>vX.Y.Z</code> release. If no
+    stable release has been cut yet, use the bleeding-edge link above.</em>
+  </sub>
 </p>
 
 ---

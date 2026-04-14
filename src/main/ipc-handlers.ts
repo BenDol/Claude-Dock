@@ -22,7 +22,7 @@ import { PluginManager, getPluginsDir } from './plugins'
 import { NotificationManager } from './notification-manager'
 import { resetPluginTrust } from './plugins/plugin-loader'
 import { PluginUpdateService } from './plugins/plugin-updater'
-import { getOverrides as getPluginOverrides } from './plugins/plugin-update-store'
+import { getOverrides as getPluginOverrides, clearAllOverrides as clearAllPluginOverrides, clearAllDismissedVersions as clearAllDismissedPluginVersions, clearAllSeenOverrideHashes as clearAllSeenPluginOverrideHashes } from './plugins/plugin-update-store'
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
 import { TelemetryCollector, type TelemetryPayload } from './telemetry'
@@ -1049,6 +1049,78 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       releaseUpdateLock()
       throw new Error(err instanceof Error ? err.message : 'Install failed')
+    }
+  })
+
+  /**
+   * Switch the updater profile (e.g. bleeding-edge <-> latest) and immediately
+   * check for updates under the new profile.
+   *
+   * Cleanup rules:
+   *   - bleeding-edge -> latest: clear all plugin overrides (bleeding-edge
+   *     pushes plugin updates via overrides that would shadow stable builds'
+   *     bundled plugins), clear seen-override hashes, clear dismissed versions.
+   *   - any profile transition: clear dismissed versions so the user sees a
+   *     fresh set of plugin updates under the new profile.
+   *   - same-profile: no-op cleanup, just persist and check.
+   */
+  ipcMain.handle(IPC.UPDATER_SWITCH_PROFILE, async (_event, newProfile: string) => {
+    const currentSettings = getSettings()
+    const currentProfile = currentSettings.updater?.profile || 'latest'
+
+    if (currentProfile !== newProfile) {
+      // Downgrading from bleeding-edge back to the stable channel — reset any
+      // plugin overrides installed while on bleeding-edge so the stable build's
+      // bundled plugin versions take effect.
+      if (currentProfile === 'bleeding-edge' && newProfile === 'latest') {
+        try {
+          const overrides = getPluginOverrides()
+          const overrideCount = Object.keys(overrides).length
+          const overridesCleared = clearAllPluginOverrides()
+          const seenCleared = clearAllSeenPluginOverrideHashes()
+          if (!overridesCleared || !seenCleared) {
+            // Persisted writes failed after retries — surface to the caller so the
+            // UI can warn the user that overrides may still shadow stable plugins.
+            // Throwing aborts the profile switch so the user can retry cleanly.
+            logError(`[updater] switchProfile cleanup write failed (overrides=${overridesCleared}, seen=${seenCleared})`)
+            throw new Error('Failed to clear plugin overrides — please restart and try again.')
+          }
+          log(`[updater] switchProfile bleeding-edge->latest: cleared ${overrideCount} plugin override(s)`)
+        } catch (err) {
+          logError('[updater] switchProfile override cleanup failed:', err)
+          throw err
+        }
+      }
+
+      // On any real profile change, drop dismissed versions so updates under
+      // the new profile surface fresh.
+      try {
+        clearAllDismissedPluginVersions()
+      } catch (err) {
+        logError('[updater] switchProfile dismissed-versions cleanup failed:', err)
+      }
+    }
+
+    // Persist the new profile. Other updater sub-settings (autoUpdate,
+    // autoUpdatePlugins) are preserved.
+    setSettings({
+      updater: {
+        ...(currentSettings.updater || { profile: 'latest', autoUpdate: false, autoUpdatePlugins: false }),
+        profile: newProfile
+      }
+    })
+
+    log(`[updater] switchProfile: ${currentProfile} -> ${newProfile}`)
+
+    if (__DEV__) {
+      return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
+    }
+
+    try {
+      return await checkForUpdate(newProfile)
+    } catch (err) {
+      logError('[updater] switchProfile check failed:', err)
+      return { available: false, version: '', releaseNotes: '', downloadUrl: '', assetName: '', assetSize: 0 }
     }
   })
 

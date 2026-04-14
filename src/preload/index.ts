@@ -156,6 +156,7 @@ export interface DockApi {
     check: (profile: string) => Promise<UpdateInfo>
     download: (url: string, assetName: string) => Promise<string>
     install: () => Promise<void>
+    switchProfile: (profile: string) => Promise<UpdateInfo>
     savePendingProject: (dir: string) => Promise<void>
     isLocked: () => Promise<boolean>
     hasActiveTerminals: () => Promise<boolean>
@@ -587,6 +588,7 @@ const dockApi: DockApi = {
     check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),
     download: (url, assetName) => ipcRenderer.invoke(IPC.UPDATER_DOWNLOAD, url, assetName),
     install: () => ipcRenderer.invoke(IPC.UPDATER_INSTALL),
+    switchProfile: (profile) => ipcRenderer.invoke(IPC.UPDATER_SWITCH_PROFILE, profile),
     savePendingProject: (dir) => ipcRenderer.invoke(IPC.UPDATER_SAVE_PENDING_PROJECT, dir),
     isLocked: () => ipcRenderer.invoke(IPC.UPDATER_IS_LOCKED),
     hasActiveTerminals: () => ipcRenderer.invoke(IPC.UPDATER_HAS_ACTIVE_TERMINALS),

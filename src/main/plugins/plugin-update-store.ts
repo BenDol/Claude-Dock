@@ -1,4 +1,4 @@
-import { createSafeStore, safeRead, safeWrite } from '../safe-store'
+import { createSafeStore, safeRead, safeWrite, safeWriteSync } from '../safe-store'
 import type Store from 'electron-store'
 
 export interface PluginOverrideEntry {
@@ -81,6 +81,31 @@ export function removeOverride(pluginId: string): void {
   const overrides = getOverrides()
   delete overrides[pluginId]
   safeWrite(() => getStore().set('overrides', overrides))
+}
+
+/** Clear every installed plugin override. Used when switching update profiles
+ *  (bleeding-edge -> latest) so stable builds can fall back to their bundled
+ *  plugin versions instead of running overrides that were pulled in from the
+ *  bleeding-edge plugin archive.
+ *
+ *  Uses safeWriteSync so the caller knows whether the clear actually persisted
+ *  — critical for the profile-switch path where a silent failure would leave
+ *  the wrong plugin code active across the version downgrade. */
+export function clearAllOverrides(): boolean {
+  return safeWriteSync(() => getStore().set('overrides', {}))
+}
+
+/** Clear every remembered "user dismissed this update" entry. Used when
+ *  switching profiles so the user sees a fresh set of plugin updates. */
+export function clearAllDismissedVersions(): boolean {
+  return safeWriteSync(() => getStore().set('dismissedVersions', {}))
+}
+
+/** Clear every remembered "user has seen this override notification" entry.
+ *  Kept in sync with clearAllOverrides so the notification state stays
+ *  consistent with the override state. */
+export function clearAllSeenOverrideHashes(): boolean {
+  return safeWriteSync(() => getStore().set('seenOverrideHashes', {}))
 }
 
 export function getSeenOverrideHashes(): Record<string, string> {

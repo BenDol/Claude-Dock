@@ -44,6 +44,7 @@ export const IPC = {
   UPDATER_CHECK: 'updater:check',
   UPDATER_DOWNLOAD: 'updater:download',
   UPDATER_INSTALL: 'updater:install',
+  UPDATER_SWITCH_PROFILE: 'updater:switchProfile',
   UPDATER_SAVE_PENDING_PROJECT: 'updater:savePendingProject',
   UPDATER_IS_LOCKED: 'updater:isLocked',
   UPDATER_HAS_ACTIVE_TERMINALS: 'updater:hasActiveTerminals',

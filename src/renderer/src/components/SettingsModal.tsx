@@ -315,6 +315,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
   const update = useSettingsStore((s) => s.update)
   const [updateCheckStatus, setUpdateCheckStatus] = useState('')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [switchingProfile, setSwitchingProfile] = useState(false)
+  const [pendingUpdate, setPendingUpdate] = useState<{ version: string; downloadUrl: string; assetName: string; assetSize: number; releaseNotes: string } | null>(null)
+  const [installingUpdate, setInstallingUpdate] = useState(false)
   const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null)
   const [mcpBusy, setMcpBusy] = useState(false)
   const [mcpStatus, setMcpStatus] = useState('')
@@ -410,6 +413,61 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
       setUpdateCheckStatus('Failed to check for updates.')
     }
     setCheckingUpdate(false)
+  }
+
+  const handleProfileChange = async (newProfile: string) => {
+    const currentProfile = settings.updater?.profile || 'latest'
+    if (newProfile === currentProfile) return
+
+    const confirmMessage = currentProfile === 'bleeding-edge' && newProfile === 'latest'
+      ? 'Switch to Latest (Stable)?\n\nThis will reset any plugin customizations you picked up from Bleeding Edge and check for the newest stable release. You may be prompted to install an update.'
+      : currentProfile === 'latest' && newProfile === 'bleeding-edge'
+        ? 'Switch to Bleeding Edge?\n\nBleeding Edge builds are generated from every commit and may be unstable. You will be updated to the latest development build.'
+        : `Switch update profile to "${newProfile}"?`
+
+    if (!window.confirm(confirmMessage)) return
+
+    setSwitchingProfile(true)
+    setUpdateCheckStatus('Switching profile...')
+    setPendingUpdate(null)
+    try {
+      const info = await getDockApi().updater.switchProfile(newProfile)
+      // Local store mirror — the persisted value comes from setSettings in main.
+      updateUpdater({ profile: newProfile })
+      if (info.available) {
+        setPendingUpdate({
+          version: info.version,
+          downloadUrl: info.downloadUrl,
+          assetName: info.assetName,
+          assetSize: info.assetSize,
+          releaseNotes: info.releaseNotes
+        })
+        setUpdateCheckStatus(`Update available: ${info.version}. Install to apply the profile change.`)
+      } else {
+        setUpdateCheckStatus('Profile updated. You are up to date.')
+      }
+    } catch (err) {
+      console.warn('[updater] switchProfile failed', err)
+      const msg = err instanceof Error ? err.message : 'Failed to switch profile.'
+      setUpdateCheckStatus(msg)
+    }
+    setSwitchingProfile(false)
+  }
+
+  const handleInstallPendingUpdate = async () => {
+    if (!pendingUpdate) return
+    setInstallingUpdate(true)
+    setUpdateCheckStatus('Downloading...')
+    try {
+      const api = getDockApi()
+      await api.updater.download(pendingUpdate.downloadUrl, pendingUpdate.assetName)
+      setUpdateCheckStatus('Installing and restarting...')
+      await api.updater.install()
+    } catch (err) {
+      console.warn('[updater] install failed', err)
+      setUpdateCheckStatus('Failed to install update.')
+      setInstallingUpdate(false)
+    }
   }
 
   const handleCheckPath = async () => {
@@ -1226,12 +1284,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   Update Profile
                   <select
                     value={settings.updater?.profile || 'latest'}
-                    onChange={(e) => updateUpdater({ profile: e.target.value })}
+                    onChange={(e) => { void handleProfileChange(e.target.value) }}
+                    disabled={switchingProfile || installingUpdate}
                   >
-                    <option value="latest" disabled>Latest (stable)</option>
+                    <option value="latest">Latest (Stable)</option>
                     <option value="bleeding-edge">Bleeding Edge</option>
                   </select>
                 </label>
+                <div className="settings-description">
+                  {settings.updater?.profile === 'bleeding-edge'
+                    ? 'Receiving a new build on every commit to main. May be unstable.'
+                    : 'Receiving versioned stable releases only. Recommended for most users.'}
+                </div>
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -1261,10 +1325,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   <button
                     className="settings-check-update-btn"
                     onClick={handleCheckForUpdates}
-                    disabled={checkingUpdate}
+                    disabled={checkingUpdate || switchingProfile || installingUpdate}
                   >
                     {checkingUpdate ? 'Checking...' : 'Check for Updates'}
                   </button>
+                  {pendingUpdate && (
+                    <button
+                      className="settings-check-update-btn"
+                      style={{ marginLeft: 8 }}
+                      onClick={handleInstallPendingUpdate}
+                      disabled={installingUpdate}
+                    >
+                      {installingUpdate ? 'Installing...' : `Install ${pendingUpdate.version}`}
+                    </button>
+                  )}
                   {updateCheckStatus && (
                     <div className="settings-update-status">{updateCheckStatus}</div>
                   )}
