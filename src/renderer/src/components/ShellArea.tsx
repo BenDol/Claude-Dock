@@ -326,7 +326,7 @@ const ShellArea: React.FC<ShellAreaProps> = ({ terminalId, defaultHeight, initia
                         flexRatio={minimizedShells.has(shell.shellId) ? undefined : panelRatios.get(shell.shellId)}
                         minimized={minimizedShells.has(shell.shellId)}
                         onToggleMinimize={() => toggleMinimize(shell.shellId)}
-                        isInColumn={col.shells.length > 1}
+                        isInColumn={col.shells.length > 1 || columns.length === 1}
                       />
                     </React.Fragment>
                   )
