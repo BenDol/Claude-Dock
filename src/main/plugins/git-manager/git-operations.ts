@@ -1430,7 +1430,8 @@ const COMMIT_MSG_PROMPT = [
   'Use conventional commit format (feat:, fix:, refactor:, docs:, chore:, style:, test:).',
   'The word after the colon must be lowercase (e.g. "fix: resolve issue" not "fix: Resolve issue").',
   'First line: a short summary under 72 characters.',
-  'If the changes cover multiple distinct topics, add a blank line after the summary then bullet points (using -) for each change.',
+  'If the changes cover multiple distinct topics, end the summary line with a colon, then on the very next line (no blank line in between) list each additional change as " - <change>" (one leading space, a dash, a space, then the change).',
+  'Example of the multi-topic format:\nfeat: add foo support:\n - update bar to handle foo\n - tweak baz defaults\n',
   'Return ONLY the commit message — no quotes, no explanation, no markdown fences, no extra text.'
 ].join(' ')
 
