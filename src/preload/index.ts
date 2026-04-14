@@ -479,6 +479,11 @@ export interface DockApi {
     readFile: (projectDir: string, relativePath: string) => Promise<{ content?: string; error?: string }>
     writeFile: (projectDir: string, relativePath: string, content: string) => Promise<{ success: boolean; error?: string }>
     detachEditor: (projectDir: string, tabData: string) => Promise<{ success: boolean; error?: string }>
+    routeOpenFile: (req: { projectDir: string; relativePath: string; content: string; line?: number; column?: number }) => Promise<{ routedTo: 'dock' | 'detached' }>
+    redockEditor: (projectDir: string, tabsJson: string) => Promise<{ success: boolean; error?: string }>
+    getEditorWindowState: (projectDir: string) => Promise<{ open: boolean; primary: boolean; bounds?: { x: number; y: number; width: number; height: number; maximized: boolean } }>
+    setPrimaryEditor: (projectDir: string, primary: boolean) => Promise<{ success: boolean }>
+    onOpenFile: (callback: (req: { projectDir: string; relativePath: string; content: string; line?: number; column?: number }) => void) => () => void
     scanTsFiles: (projectDir: string) => Promise<{ filePath: string; content: string }[]>
     buildSymbolIndex: (projectDir: string) => Promise<{ name: string; filePath: string; line: number; column: number; kind: string }[]>
     querySymbol: (projectDir: string, name: string) => Promise<{ name: string; filePath: string; line: number; column: number; kind: string }[]>
@@ -486,7 +491,6 @@ export interface DockApi {
     replace: (projectDir: string, opts: { query: string; replacement: string; filePath?: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) => Promise<any>
     undoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
     redoReplace: () => Promise<{ success: boolean; filesRestored: number; description?: string }>
-    getDetachedTabs: () => Promise<string | null>
     watchStart: (projectDir: string) => Promise<void>
     watchStop: (projectDir: string) => Promise<void>
     onChanged: (callback: (changes: string[]) => void) => () => void
@@ -1006,6 +1010,15 @@ const dockApi: DockApi = {
     readFile: (projectDir, relativePath) => ipcRenderer.invoke(IPC.WORKSPACE_READ_FILE, projectDir, relativePath),
     writeFile: (projectDir, relativePath, content) => ipcRenderer.invoke(IPC.WORKSPACE_WRITE_FILE, projectDir, relativePath, content),
     detachEditor: (projectDir, tabData) => ipcRenderer.invoke(IPC.WORKSPACE_DETACH_EDITOR, projectDir, tabData),
+    routeOpenFile: (req) => ipcRenderer.invoke(IPC.WORKSPACE_ROUTE_OPEN_FILE, req),
+    redockEditor: (projectDir, tabsJson) => ipcRenderer.invoke(IPC.WORKSPACE_REDOCK_EDITOR, projectDir, tabsJson),
+    getEditorWindowState: (projectDir) => ipcRenderer.invoke(IPC.WORKSPACE_GET_EDITOR_WINDOW_STATE, projectDir),
+    setPrimaryEditor: (projectDir, primary) => ipcRenderer.invoke(IPC.WORKSPACE_SET_PRIMARY_EDITOR, projectDir, primary),
+    onOpenFile: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, req: { projectDir: string; relativePath: string; content: string; line?: number; column?: number }) => callback(req)
+      ipcRenderer.on('editor:open-file', handler)
+      return () => ipcRenderer.removeListener('editor:open-file', handler)
+    },
     scanTsFiles: (projectDir) => ipcRenderer.invoke(IPC.WORKSPACE_SCAN_TS_FILES, projectDir),
     buildSymbolIndex: (projectDir) => ipcRenderer.invoke(IPC.WORKSPACE_BUILD_SYMBOL_INDEX, projectDir),
     querySymbol: (projectDir, name) => ipcRenderer.invoke(IPC.WORKSPACE_QUERY_SYMBOL, projectDir, name),
@@ -1013,7 +1026,6 @@ const dockApi: DockApi = {
     replace: (projectDir, opts) => ipcRenderer.invoke(IPC.WORKSPACE_REPLACE, projectDir, opts),
     undoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_UNDO_REPLACE),
     redoReplace: () => ipcRenderer.invoke(IPC.WORKSPACE_REDO_REPLACE),
-    getDetachedTabs: () => ipcRenderer.invoke('workspace:getDetachedTabs'),
     watchStart: (projectDir) => ipcRenderer.invoke(IPC.WORKSPACE_WATCH_START, projectDir),
     watchStop: (projectDir) => ipcRenderer.invoke(IPC.WORKSPACE_WATCH_STOP, projectDir),
     onChanged: (callback) => {

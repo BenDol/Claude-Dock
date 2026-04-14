@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import { useEditorStore, isBinaryFile } from '@dock-renderer/stores/editor-store'
+import { routeOpenFile } from '@dock-renderer/lib/route-open-file'
 
 interface SearchMatch {
   filePath: string
@@ -137,7 +138,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ projectDir, visible, onClose 
     if (isBinaryFile(match.filePath.split('/').pop() || '')) return
     const r = await api.workspace.readFile(projectDir, match.filePath)
     if (r.content != null) {
-      useEditorStore.getState().openFile(projectDir, match.filePath, r.content)
+      routeOpenFile({ projectDir, relativePath: match.filePath, content: r.content, line: match.line, column: match.column })
     }
   }, [projectDir])
 

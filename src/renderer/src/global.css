@@ -1438,6 +1438,69 @@ body {
   flex-shrink: 0;
 }
 
+/* Detached editor window titlebar */
+.detached-editor-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--toolbar-height);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding-left: 12px;
+  flex-shrink: 0;
+}
+.detached-editor-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.detached-editor-titlebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.detached-editor-titlebar-project {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.detached-editor-titlebar-right {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+.detached-editor-titlebar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-color);
+  margin: 0 4px;
+}
+.detached-editor-redock-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: background 0.1s, color 0.1s;
+}
+.detached-editor-redock-btn:hover:not(:disabled) {
+  background: var(--hover-color, rgba(255,255,255,0.1));
+  color: var(--text-primary);
+}
+.detached-editor-redock-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* Preview toggle button */
 .editor-preview-btn { font-size: 15px !important; }
 .editor-preview-btn-active {

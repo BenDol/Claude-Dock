@@ -1,8 +1,10 @@
-import { ipcMain, shell, BrowserWindow } from 'electron'
+import { ipcMain, shell } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { IPC } from '../../../shared/ipc-channels'
 import { readDirectory, readTreeAsync, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
+import { EditorWindowManager, type OpenFileRequest } from './editor-window-manager'
+import { getEditorWindowState, saveEditorWindowState } from './editor-window-store'
 
 import { getServices } from './services'
 
@@ -267,64 +269,51 @@ export function registerWorkspaceIpc(): void {
     }
   })
 
-  // Detach editor tab to a standalone BrowserWindow
-  let pendingTabData: string | null = null
-  const detachedWindows = new Map<string, BrowserWindow>()
-
-  // Renderer pulls tab data when it's mounted and ready
-  ipcMain.handle('workspace:getDetachedTabs', () => {
-    const data = pendingTabData
-    pendingTabData = null
-    return data
-  })
+  // ── Detached editor window ────────────────────────────────────────────────
 
   ipcMain.handle(IPC.WORKSPACE_DETACH_EDITOR, async (_event, projectDir: string, tabData: string) => {
     try {
-      const win = new BrowserWindow({
-        width: 900,
-        height: 650,
-        minWidth: 500,
-        minHeight: 350,
-        frame: false,
-        title: 'Editor',
-        backgroundColor: '#1e1e2e',
-        webPreferences: {
-          preload: path.join(__dirname, '../preload/index.js'),
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: false
-        }
-      })
-
-      // Load the dock renderer with a query param — tab data sent via IPC after load
-      // (not in URL, which has length limits for large file contents)
-      const queryParam = `?detachedEditor=true&projectDir=${encodeURIComponent(projectDir)}`
-      const rendererUrl = process.env.ELECTRON_RENDERER_URL
-      // Store tab data so the renderer can pull it when ready
-      pendingTabData = tabData
-
-      if (rendererUrl) {
-        await win.loadURL(`${rendererUrl}${queryParam}`)
-      } else {
-        await win.loadFile(path.join(__dirname, '../renderer/index.html'), { search: queryParam.slice(1) })
-      }
-
-      win.webContents.on('before-input-event', (_evt, input) => {
-        if (input.type !== 'keyDown') return
-        if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
-          win.webContents.toggleDevTools()
-        }
-      })
-
-      const id = `detached-${Date.now()}`
-      detachedWindows.set(id, win)
-      win.on('closed', () => detachedWindows.delete(id))
-
+      await EditorWindowManager.getInstance().openOrFocus(projectDir, tabData, true)
       return { success: true }
     } catch (err) {
       getServices().logError('[workspace] detach editor failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Detach failed' }
     }
+  })
+
+  /**
+   * Route a file-open request: returns whether the dock should open it locally
+   * or whether main has already forwarded it to the detached editor window.
+   */
+  ipcMain.handle(IPC.WORKSPACE_ROUTE_OPEN_FILE, (_event, req: OpenFileRequest) => {
+    const state = getEditorWindowState(req.projectDir)
+    if (state?.primary) {
+      const ok = EditorWindowManager.getInstance().forwardOpenFile(req.projectDir, req)
+      if (ok) return { routedTo: 'detached' as const }
+    }
+    return { routedTo: 'dock' as const }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_REDOCK_EDITOR, (_event, projectDir: string, tabsJson: string) => {
+    try {
+      const { DockManager } = require('../../dock-manager') as typeof import('../../dock-manager')
+      const dock = DockManager.getInstance().findDockByDir(projectDir)
+      const dockWebContents = dock?.window.webContents ?? null
+      EditorWindowManager.getInstance().redock(projectDir, tabsJson, dockWebContents)
+      return { success: true }
+    } catch (err) {
+      getServices().logError('[workspace] redock editor failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Redock failed' }
+    }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_GET_EDITOR_WINDOW_STATE, (_event, projectDir: string) => {
+    return getEditorWindowState(projectDir) || { open: false, primary: false }
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_SET_PRIMARY_EDITOR, (_event, projectDir: string, primary: boolean) => {
+    saveEditorWindowState(projectDir, { primary })
+    return { success: true }
   })
 }
 
@@ -343,7 +332,8 @@ export function disposeWorkspaceIpc(): void {
     IPC.WORKSPACE_UNDO_REPLACE, IPC.WORKSPACE_REDO_REPLACE,
     IPC.WORKSPACE_WATCH_START, IPC.WORKSPACE_WATCH_STOP,
     IPC.WORKSPACE_SCAN_TS_FILES, IPC.WORKSPACE_BUILD_SYMBOL_INDEX, IPC.WORKSPACE_QUERY_SYMBOL,
-    'workspace:getDetachedTabs'
+    IPC.WORKSPACE_ROUTE_OPEN_FILE, IPC.WORKSPACE_REDOCK_EDITOR,
+    IPC.WORKSPACE_GET_EDITOR_WINDOW_STATE, IPC.WORKSPACE_SET_PRIMARY_EDITOR
   ]
   for (const ch of channels) { try { ipcMain.removeHandler(ch) } catch { /* ignore */ } }
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, Suspense, Component, type ErrorInfo, type ReactNode } from 'react'
+import React, { useEffect, useState, useCallback, useMemo, useRef, Suspense, Component, type ErrorInfo, type ReactNode } from 'react'
 import DockGrid from './components/DockGrid'
 import { DockPanelLayout } from './components/DockPanelLayout'
 import Toolbar from './components/Toolbar'
@@ -611,8 +611,18 @@ Good luck. Be careful, be thorough, and ask questions.`
 /** Detached editor window — renders EditorOverlay full-screen with tabs from URL */
 const LazyEditorOverlay = React.lazy(() => import('./components/EditorOverlay'))
 
+// EditorOverlay (rendered inside DetachedEditorShell) owns the IPC listeners
+// for `editor:open-file` and `editor:hydrate-tabs`, so they're not duplicated here.
+
 function DetachedEditorShell() {
   const loadSettings = useSettingsStore((s) => s.load)
+  const tabCount = useEditorStore((s) => s.tabs.length)
+
+  const projectDir = useMemo(
+    () => decodeURIComponent(new URLSearchParams(window.location.search).get('projectDir') || ''),
+    []
+  )
+  const projectName = useMemo(() => projectDir.split(/[/\\]/).pop() || projectDir, [projectDir])
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -620,43 +630,40 @@ function DetachedEditorShell() {
     })
   }, [loadSettings])
 
-  // Pull tab data from main process when mounted (renderer pulls, not push — avoids race condition)
-  useEffect(() => {
-    const api = getDockApi()
-    // Retry a few times — the main process sets pendingTabData before loadURL,
-    // but the renderer's useEffect may fire before the IPC handler is ready
-    let attempts = 0
-    const tryLoad = () => {
-      api.workspace.getDetachedTabs().then((tabData) => {
-        if (!tabData) {
-          if (++attempts < 5) setTimeout(tryLoad, 200)
-          return
-        }
-        try {
-          const tabs = JSON.parse(tabData)
-          const store = useEditorStore.getState()
-          for (const tab of tabs) {
-            if (tab.projectDir && tab.relativePath && tab.content != null) {
-              store.openFile(tab.projectDir, tab.relativePath, tab.content)
-            }
-          }
-        } catch { /* ignore malformed data */ }
-      }).catch(() => {
-        if (++attempts < 5) setTimeout(tryLoad, 200)
-      })
+  const handleRedock = useCallback(async () => {
+    const tabs = useEditorStore.getState().tabs
+    const dirty = tabs.filter((t) => t.content !== t.savedContent)
+    if (dirty.length > 0) {
+      const names = dirty.map((t) => t.fileName).join(', ')
+      if (!confirm(`Unsaved changes in: ${names}\nRedock anyway? Changes will move with the tabs but stay unsaved.`)) return
     }
-    tryLoad()
-  }, [])
+    await getDockApi().workspace.redockEditor(projectDir, JSON.stringify(tabs))
+  }, [projectDir])
 
   return (
     <div className="app" style={{ height: '100vh' }}>
       {/* Frameless window title bar with drag region + controls */}
-      <div className="detached-editor-titlebar" style={{ WebkitAppRegion: 'drag', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 'var(--toolbar-height)', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', padding: '0 8px', flexShrink: 0 } as React.CSSProperties}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>Editor</span>
-        <div style={{ WebkitAppRegion: 'no-drag', display: 'flex', gap: 2 } as React.CSSProperties}>
-          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.minimize()}>&#x2015;</button>
-          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.maximize()}>&#9744;</button>
-          <button className="editor-tab-close" style={{ fontSize: 14, padding: '2px 6px' }} onClick={() => getDockApi().win.close()}>&#10005;</button>
+      <div className="detached-editor-titlebar" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+        <div className="detached-editor-titlebar-left" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <span className="detached-editor-titlebar-title">Editor</span>
+          {projectName && <span className="detached-editor-titlebar-project">{projectName}</span>}
+        </div>
+        <div className="detached-editor-titlebar-right" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button
+            className="detached-editor-redock-btn"
+            onClick={handleRedock}
+            disabled={tabCount === 0}
+            title="Move all tabs back to the dock window"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3h18v18H3z" /><path d="M9 12h12" /><path d="M15 6l-6 6 6 6" />
+            </svg>
+            <span>Redock</span>
+          </button>
+          <div className="detached-editor-titlebar-sep" />
+          <button className="win-btn" onClick={() => getDockApi().win.minimize()} title="Minimize">&#x2015;</button>
+          <button className="win-btn" onClick={() => getDockApi().win.maximize()} title="Maximize">&#9744;</button>
+          <button className="win-btn win-close" onClick={() => getDockApi().win.close()} title="Close">&#10005;</button>
         </div>
       </div>
       <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>

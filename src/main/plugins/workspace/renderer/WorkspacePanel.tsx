@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { PanelProps } from '@dock-renderer/panel-registry'
 import { useEditorStore, isBinaryFile } from '@dock-renderer/stores/editor-store'
+import { routeOpenFile } from '@dock-renderer/lib/route-open-file'
 import SearchPanel from './SearchPanel'
 
 interface FileEntry {
@@ -617,7 +618,7 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
       api.workspace.openFile(projectDir, filePath)
       return
     }
-    useEditorStore.getState().openFile(projectDir, filePath, result.content!)
+    routeOpenFile({ projectDir, relativePath: filePath, content: result.content! })
   }, [projectDir])
 
   const handleDoubleClick = useCallback((entry: FileEntry) => {
