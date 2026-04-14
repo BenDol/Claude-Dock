@@ -630,6 +630,29 @@ function DetachedEditorShell() {
     })
   }, [loadSettings])
 
+  // Editor IPC listeners at root level — registered before EditorOverlay finishes
+  // lazy-loading so initial `editor:hydrate-tabs` (pushed after did-finish-load) lands.
+  useEffect(() => {
+    const api = getDockApi()
+    const cleanupHydrate = api.workspace.onHydrateTabs((tabsJson: string) => {
+      try {
+        const tabs = JSON.parse(tabsJson)
+        const store = useEditorStore.getState()
+        for (const tab of tabs) {
+          if (tab.projectDir && tab.relativePath && tab.content != null) {
+            store.openFile(tab.projectDir, tab.relativePath, tab.content)
+          }
+        }
+      } catch { /* ignore malformed */ }
+    })
+    const cleanupOpen = api.workspace.onOpenFile((req) => {
+      const store = useEditorStore.getState()
+      if (req.line != null) store.openFileAtPosition(req.projectDir, req.relativePath, req.content, req.line, req.column ?? 1)
+      else store.openFile(req.projectDir, req.relativePath, req.content)
+    })
+    return () => { cleanupHydrate(); cleanupOpen() }
+  }, [])
+
   const handleRedock = useCallback(async () => {
     const tabs = useEditorStore.getState().tabs
     const dirty = tabs.filter((t) => t.content !== t.savedContent)
@@ -719,6 +742,32 @@ function DockApp() {
       document.title = `${name} - Claude Dock`
     }
   }, [projectDir])
+
+  // Editor IPC listeners — must be at root level (not inside EditorOverlay)
+  // because EditorOverlay unmounts when tabs.length === 0, which happens
+  // after the user drags the last tab out to the detached window. Without
+  // root-level listeners, redock and forwarded file-open events would be
+  // fired into the void when the dock has no open editor tabs.
+  useEffect(() => {
+    const api = getDockApi()
+    const cleanupHydrate = api.workspace.onHydrateTabs((tabsJson: string) => {
+      try {
+        const tabs = JSON.parse(tabsJson)
+        const store = useEditorStore.getState()
+        for (const tab of tabs) {
+          if (tab.projectDir && tab.relativePath && tab.content != null) {
+            store.openFile(tab.projectDir, tab.relativePath, tab.content)
+          }
+        }
+      } catch { /* ignore malformed */ }
+    })
+    const cleanupOpen = api.workspace.onOpenFile((req) => {
+      const store = useEditorStore.getState()
+      if (req.line != null) store.openFileAtPosition(req.projectDir, req.relativePath, req.content, req.line, req.column ?? 1)
+      else store.openFile(req.projectDir, req.relativePath, req.content)
+    })
+    return () => { cleanupHydrate(); cleanupOpen() }
+  }, [])
 
   // Auto-spawn terminals (matching saved session count or 1)
   useEffect(() => {

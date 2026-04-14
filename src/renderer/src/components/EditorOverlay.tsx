@@ -381,29 +381,6 @@ const EditorOverlay: React.FC = () => {
     return () => window.removeEventListener('keydown', handler)
   }, [handleCloseTab])
 
-  // Listen for tab hydration events from the detached editor's redock action
-  // (and for direct file-open IPC, used by the detached editor window).
-  useEffect(() => {
-    const api = getDockApi()
-    const cleanupHydrate = api.workspace.onHydrateTabs((tabsJson: string) => {
-      try {
-        const tabs = JSON.parse(tabsJson)
-        const store = useEditorStore.getState()
-        for (const tab of tabs) {
-          if (tab.projectDir && tab.relativePath && tab.content != null) {
-            store.openFile(tab.projectDir, tab.relativePath, tab.content)
-          }
-        }
-      } catch { /* ignore malformed */ }
-    })
-    const cleanupOpen = api.workspace.onOpenFile((req) => {
-      const store = useEditorStore.getState()
-      if (req.line != null) store.openFileAtPosition(req.projectDir, req.relativePath, req.content, req.line, req.column ?? 1)
-      else store.openFile(req.projectDir, req.relativePath, req.content)
-    })
-    return () => { cleanupHydrate(); cleanupOpen() }
-  }, [])
-
   // When active tab changes, focus the editor and reveal pending position
   useEffect(() => {
     if (!editorRef.current) return
