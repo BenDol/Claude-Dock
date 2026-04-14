@@ -1426,36 +1426,42 @@ export async function setRemoteUrl(cwd: string, name: string, url: string, pushU
 // --- Commit message generation ---
 
 const COMMIT_MSG_PROMPT = [
-  'Write a git commit message for the following staged changes.',
+  'Write ONE git commit message (not multiple) that describes all of the staged changes together.',
   'Use conventional commit format (feat:, fix:, refactor:, docs:, chore:, style:, test:).',
   'The word after the colon must be lowercase (e.g. "fix: resolve issue" not "fix: Resolve issue").',
   'First line: a short summary under 72 characters.',
-  'If the changes cover multiple distinct topics, end the summary line with a colon, then on the very next line (no blank line in between) list each additional change as " - <change>" (one leading space, a dash, a space, then the change).',
-  'Example of the multi-topic format:\nfeat: add foo support:\n - update bar to handle foo\n - tweak baz defaults\n',
-  'Return ONLY the commit message — no quotes, no explanation, no markdown fences, no extra text.'
+  'If the changes cover multiple distinct topics, end the summary line with a colon, then on the very next line (no blank line in between) list each additional change as " - <change>" (one leading space, a dash, a space, then the change). The bullet lines must NOT start with a conventional commit prefix, and you must NOT produce more than one commit message.',
+  'Structure only (do not copy the placeholder text — replace it with the real summary and real bullets):\n<summary>:\n - <first additional change>\n - <second additional change>\n',
+  'Return ONLY the single commit message — no quotes, no explanation, no markdown fences, no extra text.'
 ].join(' ')
 
+const CONV_COMMIT_RE = /^(feat|fix|refactor|docs|chore|style|test|perf|build|ci|revert)(\([^)]*\))?:\s/i
+
 function cleanCommitMessage(raw: string): string {
-  let msg = raw.trim()
+  const msg = raw.trim()
     .replace(/^["']|["']$/g, '')
     .replace(/^```[^\n]*\n?|```$/gm, '')
     .trim()
 
-  // Strip LLM repetition: if the first non-empty line appears again later, truncate there
-  const lines = msg.split('\n')
-  const firstLine = lines[0]?.trim()
-  if (firstLine) {
-    let cutIdx = -1
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trim() === firstLine) { cutIdx = i; break }
-    }
-    if (cutIdx > 0) {
-      // Keep everything before the first repetition, drop trailing blank lines
-      msg = lines.slice(0, cutIdx).join('\n').replace(/\n+$/, '')
-    }
-  }
+  const rawLines = msg.split('\n')
+  const firstLine = rawLines[0]?.trim() ?? ''
 
-  const cleaned = msg.split('\n')
+  // Small models sometimes emit a second commit message instead of bullets, or
+  // repeat the summary line. Cut at whichever boundary appears first.
+  let cutIdx = -1
+  for (let i = 1; i < rawLines.length; i++) {
+    const trimmed = rawLines[i].trim()
+    if (trimmed === firstLine || CONV_COMMIT_RE.test(trimmed)) { cutIdx = i; break }
+  }
+  const kept = cutIdx > 0 ? rawLines.slice(0, cutIdx) : rawLines
+
+  // If the body is bullets, drop blank lines between the summary and bullets and
+  // normalize bullet markers to " - <text>".
+  const bodyHasBullets = kept.slice(1).some((l) => /^\s*[-*]\s/.test(l))
+  const cleaned = bodyHasBullets
+    ? [kept[0], ...kept.slice(1).filter((l) => l.trim() !== '').map((l) => l.replace(/^\s*[-*]\s+/, ' - '))]
+    : [...kept]
+
   // Enforce lowercase after conventional commit prefix (e.g. "fix: Resolve" → "fix: resolve")
   cleaned[0] = cleaned[0].replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
   // Ensure first line is under 72 chars
