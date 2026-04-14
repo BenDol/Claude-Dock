@@ -72,8 +72,8 @@ describe('GitManagerPlugin settings schema', () => {
   })
 
   it('has all expected settings registered', () => {
-    // 7 core settings + 4 Issues-tab settings = 11
-    expect(plugin.settingsSchema.length).toBe(11)
+    // 7 core + 4 Issues-tab + 3 Working Changes issues + 3 GitHub Projects v2 = 17
+    expect(plugin.settingsSchema.length).toBe(17)
   })
 
   it('has enableIssuesTab boolean setting defaulting false', () => {
