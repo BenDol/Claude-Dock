@@ -1480,15 +1480,22 @@ function cleanCommitMessage(raw: string): string {
     .trim()
 
   const rawLines = msg.split('\n')
-  const firstLine = rawLines[0]?.trim() ?? ''
+    .map((l) => l.replace(/\r$/, ''))
+    // Drop leading blank/whitespace-only lines so "firstLine" is the real summary
+    .filter((l, i, arr) => i > 0 || l.trim().length > 0)
+
+  // Small models occasionally emit the summary on line 2 after a blank line.
+  // Find the first non-empty line that looks like a summary.
+  let firstLineIdx = rawLines.findIndex((l) => l.trim().length > 0)
+  if (firstLineIdx < 0) firstLineIdx = 0
+  const firstLine = rawLines[firstLineIdx]?.trim() ?? ''
 
   // Small models sometimes emit a second commit message, echo the diff, or
   // repeat the summary line. Cut at whichever boundary appears first.
   let cutIdx = -1
-  for (let i = 1; i < rawLines.length; i++) {
+  for (let i = firstLineIdx + 1; i < rawLines.length; i++) {
     const line = rawLines[i]
     const trimmed = line.trim()
-    // Repeat of summary => cut
     if (trimmed === firstLine && trimmed.length > 0) { cutIdx = i; break }
     // A full conventional commit line AFTER the first line is a second message.
     // Bullets stripped of their "- " prefix could look like conventional lines
@@ -1496,9 +1503,8 @@ function cleanCommitMessage(raw: string): string {
     if (CONV_COMMIT_RE.test(trimmed) && !/^[-*]\s/.test(trimmed)) { cutIdx = i; break }
     if (DIFF_MARKER_RE.test(line)) { cutIdx = i; break }
   }
-  const kept = cutIdx > 0 ? rawLines.slice(0, cutIdx) : rawLines
+  const kept = cutIdx > 0 ? rawLines.slice(firstLineIdx, cutIdx) : rawLines.slice(firstLineIdx)
 
-  // Classify: first line is the summary, rest is body. Detect bullets in body.
   const summary = kept[0] ?? ''
   const bodyLines = kept.slice(1)
   const bulletLines = bodyLines
@@ -1524,6 +1530,10 @@ function cleanCommitMessage(raw: string): string {
   if (cleanedSummary.length > 72) {
     cleanedSummary = cleanedSummary.slice(0, 72).replace(/\s+\S*$/, '')
   }
+
+  // Reject garbage — must have a conventional commit prefix to be considered valid.
+  // This lets callers retry instead of committing with nonsense text.
+  if (!CONV_COMMIT_RE.test(cleanedSummary.trim())) return ''
 
   if (uniqueBullets.length === 0) return cleanedSummary.trim()
   return `${cleanedSummary.trim()}\n\n${uniqueBullets.map((b) => `- ${b}`).join('\n')}`

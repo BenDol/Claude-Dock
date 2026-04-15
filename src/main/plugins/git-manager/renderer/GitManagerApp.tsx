@@ -1441,6 +1441,15 @@ const GitManagerApp: React.FC = () => {
   }, [])
 
   const navigateToSubmodule = useCallback((sub: GitSubmoduleInfo) => {
+    // Prevent re-entering the same submodule. The submodule list takes time
+    // to refresh after navigation; if the user double-clicks the entry for
+    // the repo they're already inside (stale list), we'd end up stacking the
+    // path onto itself (e.g. .../libs/sub/libs/sub) and reloading uselessly.
+    const normalize = (p: string): string => p.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '')
+    const normActive = normalize(activeDir)
+    const normSubPath = normalize(sub.path)
+    if (normActive === normSubPath || normActive.endsWith('/' + normSubPath)) return
+
     // Uninitialized submodules have no .git reference, so git commands would
     // silently fall back to the parent repo — showing wrong commits/branches.
     if (sub.status === 'uninitialized') {
@@ -5509,6 +5518,7 @@ const WorkingChanges: React.FC<{
   const [autoGen, setAutoGen] = useState(false)
   const [llmDownloadProgress, setLlmDownloadProgress] = useState<number | null>(null)
   const userEditedMsgRef = useRef(false)
+  const autoGenRef = useRef(0)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [gitignoreModal, setGitignoreModal] = useState<{ pattern: string; hasTracked: boolean } | null>(null)
   const [stageLoopWarning, setStageLoopWarning] = useState<string[] | null>(null)
@@ -5608,8 +5618,25 @@ const WorkingChanges: React.FC<{
     }
   }, [projectDir, settingsDir, refreshStatus])
 
-  // Persist commit message to localStorage
+  // When projectDir changes (e.g. user navigates into a submodule), reload the
+  // draft commit message from that project's localStorage key. This also
+  // prevents a stale in-flight generation from writing the wrong project's
+  // message into the new project's draft.
+  const currentProjectDirRef = useRef(projectDir)
   useEffect(() => {
+    if (currentProjectDirRef.current === projectDir) return
+    currentProjectDirRef.current = projectDir
+    try { setCommitMsg(localStorage.getItem(`gm-commit-msg:${projectDir}`) || '') } catch { setCommitMsg('') }
+    userEditedMsgRef.current = false
+    // Invalidate any in-flight generation — it was for the previous projectDir
+    autoGenRef.current++
+  }, [projectDir])
+
+  // Persist commit message to localStorage under the CURRENT projectDir.
+  // Guard against persisting a stale message under a newly-navigated projectDir
+  // by comparing against the ref before writing.
+  useEffect(() => {
+    if (currentProjectDirRef.current !== projectDir) return
     const key = `gm-commit-msg:${projectDir}`
     if (commitMsg) localStorage.setItem(key, commitMsg)
     else localStorage.removeItem(key)
@@ -5715,21 +5742,21 @@ const WorkingChanges: React.FC<{
   const pendingActionRef = useRef<'commit' | 'commit-push' | null>(null)
   const [pendingAction, setPendingAction] = useState<'commit' | 'commit-push' | null>(null)
 
-  const autoGenRef = useRef(0)
-
   const triggerAutoGenerate = async () => {
     const gen = ++autoGenRef.current
+    const capturedProjectDir = projectDir
     userEditedMsgRef.current = false
     setCommitMsg('')
     setGenerating(true)
     setGenError(null)
     try {
-      let result = await api.gitManager.generateCommitMsg(projectDir)
+      let result = await api.gitManager.generateCommitMsg(capturedProjectDir)
       // Retry once on failure
       if (!result.success) {
-        result = await api.gitManager.generateCommitMsg(projectDir)
+        result = await api.gitManager.generateCommitMsg(capturedProjectDir)
       }
-      if (gen !== autoGenRef.current || userEditedMsgRef.current) return // superseded or user started typing
+      // Discard if superseded, project navigated away, or user started typing
+      if (gen !== autoGenRef.current || capturedProjectDir !== currentProjectDirRef.current || userEditedMsgRef.current) return
       if (result.success && result.message) {
         setCommitMsg(result.message)
         // Execute queued action if any
@@ -5773,8 +5800,8 @@ const WorkingChanges: React.FC<{
     } catch (err) {
       // Retry once on exception
       try {
-        const retry = await api.gitManager.generateCommitMsg(projectDir)
-        if (gen !== autoGenRef.current || userEditedMsgRef.current) return
+        const retry = await api.gitManager.generateCommitMsg(capturedProjectDir)
+        if (gen !== autoGenRef.current || capturedProjectDir !== currentProjectDirRef.current || userEditedMsgRef.current) return
         if (retry.success && retry.message) {
           setCommitMsg(retry.message)
           setGenerating(false)

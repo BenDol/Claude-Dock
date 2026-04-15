@@ -499,14 +499,26 @@ export class LocalLlmManager {
     await this.ensureServer()
     this.lastRequestTime = Date.now()
 
+    // Correlation id — included in the prompt AND logged with the response so
+    // we can verify responses belong to their request (not a stale leftover).
+    const reqId = Math.random().toString(36).slice(2, 10)
+
     const body = JSON.stringify({
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
-      max_tokens: 200,
+      max_tokens: 400,
       stream: false,
       frequency_penalty: 1.2,
-      presence_penalty: 0.6
+      presence_penalty: 0.6,
+      // llama.cpp-specific: disable server-side prompt KV caching so each
+      // request is fully independent. Default is true which can bias output
+      // toward prior responses when prompts share a long prefix.
+      cache_prompt: false,
+      // Random seed per request (-1 = random in llama.cpp)
+      seed: -1
     })
+
+    log(`[local-llm] req=${reqId} tokens=${prompt.length}ch`)
 
     const response = await new Promise<string>((resolve, reject) => {
       const req = http.request({
@@ -516,7 +528,9 @@ export class LocalLlmManager {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body)
+          'Content-Length': Buffer.byteLength(body),
+          // Prevent any proxy/agent from caching the response
+          'Cache-Control': 'no-cache'
         }
       }, (res) => {
         let data = ''
@@ -529,6 +543,7 @@ export class LocalLlmManager {
               return
             }
             const text = json?.choices?.[0]?.message?.content || ''
+            log(`[local-llm] req=${reqId} response: ${text.slice(0, 120).replace(/\n/g, '\\n')}${text.length > 120 ? '…' : ''}`)
             resolve(text)
           } catch {
             reject(new Error('Invalid JSON from llama-server'))
