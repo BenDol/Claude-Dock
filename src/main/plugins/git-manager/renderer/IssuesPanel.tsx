@@ -964,7 +964,7 @@ function IssueDetailPanel({
               </>
             ) : (
               <div
-                className="gm-issue-body-rendered"
+                className="gm-issue-body-rendered gm-md"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(issue.body) }}
               />
             )}
@@ -1153,7 +1153,7 @@ function CommentRow({
           </div>
         </>
       ) : (
-        <div className="gm-issue-comment-body" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="gm-issue-comment-body gm-md" dangerouslySetInnerHTML={{ __html: html }} />
       )}
     </div>
   )
