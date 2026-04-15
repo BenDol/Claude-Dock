@@ -1425,21 +1425,50 @@ export async function setRemoteUrl(cwd: string, name: string, url: string, pushU
 
 // --- Commit message generation ---
 
-const COMMIT_MSG_PROMPT = [
-  'Write ONE git commit message (not multiple) that describes all of the staged changes together.',
-  'Use conventional commit format (feat:, fix:, refactor:, docs:, chore:, style:, test:).',
-  'The word after the colon must be lowercase (e.g. "fix: resolve issue" not "fix: Resolve issue").',
-  'First line: a short summary under 72 characters.',
-  'If the changes cover multiple distinct topics, end the summary line with a colon, then on the very next line (no blank line in between) list each additional change as " - <change>" (one leading space, a dash, a space, then the change). The bullet lines must NOT start with a conventional commit prefix, and you must NOT produce more than one commit message.',
-  'Structure only (do not copy the placeholder text — replace it with the real summary and real bullets):\n<summary>:\n - <first additional change>\n - <second additional change>\n',
-  'Do NOT include any part of the diff (no lines starting with +, -, @@, diff --git, index, ---, or +++) in the commit message.',
-  'Return ONLY the single commit message — no quotes, no explanation, no markdown fences, no extra text.'
-].join(' ')
-
-const CONV_COMMIT_RE = /^(feat|fix|refactor|docs|chore|style|test|perf|build|ci|revert)(\([^)]*\))?:\s/i
+const CONV_COMMIT_TYPES = 'feat|fix|refactor|docs|chore|style|test|perf|build|ci|revert'
+const CONV_COMMIT_RE = new RegExp(`^(${CONV_COMMIT_TYPES})(\\([^)]*\\))?:\\s`, 'i')
 // Lines that clearly mean the LLM echoed the diff into the output.
-// Bullets start with a leading space ( - text), so they don't match these.
+// Bullets start with a space-dash (- text), so they don't match these.
 const DIFF_MARKER_RE = /^(diff --git |index [0-9a-f]{4,}|@@ |--- [ab]?\/|--- \/dev|\+\+\+ [ab]?\/|\+\+\+ \/dev|[+-]\S)/
+
+/**
+ * Commit-message prompt.
+ *
+ * Structure enforced by the prompt (and reinforced by `cleanCommitMessage`):
+ *
+ *     <type>: <summary of all changes>       (under 72 chars, lowercase after colon)
+ *                                            (blank line)
+ *     - first notable change                 (bullets describe specific files/areas)
+ *     - second notable change                (bullets MUST NOT start with a type prefix)
+ *
+ * A one-line summary with no bullets is valid for simple commits.
+ */
+const COMMIT_MSG_PROMPT = [
+  'Write ONE git commit message describing all the staged changes together.',
+  '',
+  'Format:',
+  '  <type>: <summary>',
+  '',
+  '  - <detail about change A>',
+  '  - <detail about change B>',
+  '',
+  'Rules:',
+  '- The first line uses conventional commit format: one of feat, fix, refactor, docs, chore, style, test, perf, build, ci, revert — followed by ": " and a short summary under 72 characters.',
+  '- The word after the colon on the first line must be lowercase.',
+  '- If the summary line alone covers everything, output just the summary line and stop.',
+  '- If there are multiple distinct changes, follow the summary line with one blank line, then bullet points starting with "- " (dash, space). Each bullet describes one change. Bullets must NEVER start with a type prefix (no "fix:", no "feat:", etc.).',
+  '- Describe all staged changes in the bullets — do not truncate to one area.',
+  '- Do not copy diff content (no lines starting with +, -filename, @@, diff --git, index).',
+  '- Output ONLY the commit message. No quotes, no code fences, no explanation.'
+].join('\n')
+
+/**
+ * Strip a conventional-commit type prefix from the start of a line.
+ * Used for bullet lines where the LLM sometimes echoes the prefix.
+ */
+function stripConventionalPrefix(text: string): string {
+  return text.replace(CONV_COMMIT_RE, '').trim()
+}
 
 function cleanCommitMessage(raw: string): string {
   const msg = raw.trim()
@@ -1456,31 +1485,75 @@ function cleanCommitMessage(raw: string): string {
   for (let i = 1; i < rawLines.length; i++) {
     const line = rawLines[i]
     const trimmed = line.trim()
-    if (trimmed === firstLine || CONV_COMMIT_RE.test(trimmed) || DIFF_MARKER_RE.test(line)) { cutIdx = i; break }
+    // Repeat of summary => cut
+    if (trimmed === firstLine && trimmed.length > 0) { cutIdx = i; break }
+    // A full conventional commit line AFTER the first line is a second message.
+    // Bullets stripped of their "- " prefix could look like conventional lines
+    // (e.g. "- fix: ..."), so only cut when the line isn't a bullet.
+    if (CONV_COMMIT_RE.test(trimmed) && !/^[-*]\s/.test(trimmed)) { cutIdx = i; break }
+    if (DIFF_MARKER_RE.test(line)) { cutIdx = i; break }
   }
   const kept = cutIdx > 0 ? rawLines.slice(0, cutIdx) : rawLines
 
-  // If the body is bullets, drop blank lines between the summary and bullets and
-  // normalize bullet markers to " - <text>".
-  const bodyHasBullets = kept.slice(1).some((l) => /^\s*[-*]\s/.test(l))
-  const cleaned = bodyHasBullets
-    ? [kept[0], ...kept.slice(1).filter((l) => l.trim() !== '').map((l) => l.replace(/^\s*[-*]\s+/, ' - '))]
-    : [...kept]
+  // Classify: first line is the summary, rest is body. Detect bullets in body.
+  const summary = kept[0] ?? ''
+  const bodyLines = kept.slice(1)
+  const bulletLines = bodyLines
+    .filter((l) => /^\s*[-*]\s/.test(l))
+    .map((l) => l.replace(/^\s*[-*]\s+/, '').trim())
+    .map(stripConventionalPrefix)
+    .filter((l) => l.length > 0)
 
-  // Enforce lowercase after conventional commit prefix (e.g. "fix: Resolve" → "fix: resolve")
-  cleaned[0] = cleaned[0].replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
-  // Ensure first line is under 72 chars
-  if (cleaned[0].length > 72) {
-    cleaned[0] = cleaned[0].slice(0, 72).replace(/\s+\S*$/, '')
+  // Rebuild with canonical format: summary, blank line, dash-space bullets.
+  // Dedupe bullets (small models sometimes repeat).
+  const seenBullets = new Set<string>()
+  const uniqueBullets: string[] = []
+  for (const b of bulletLines) {
+    const key = b.toLowerCase()
+    if (!seenBullets.has(key)) {
+      seenBullets.add(key)
+      uniqueBullets.push(b)
+    }
   }
-  return cleaned.join('\n').trim()
+
+  // Enforce lowercase after conventional commit prefix ("fix: Resolve" -> "fix: resolve")
+  let cleanedSummary = summary.replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
+  if (cleanedSummary.length > 72) {
+    cleanedSummary = cleanedSummary.slice(0, 72).replace(/\s+\S*$/, '')
+  }
+
+  if (uniqueBullets.length === 0) return cleanedSummary.trim()
+  return `${cleanedSummary.trim()}\n\n${uniqueBullets.map((b) => `- ${b}`).join('\n')}`
+}
+
+/** Assemble the LLM prompt: instructions, a worked example, then the actual diff. */
+function buildCommitPrompt(stat: string, diff: string): string {
+  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
+  return [
+    COMMIT_MSG_PROMPT,
+    '',
+    'Example output for a commit that touches multiple files:',
+    'refactor: extract shared logger utility',
+    '',
+    '- move log/logError from main/index.ts into src/shared/logger.ts',
+    '- update all imports to use the shared module',
+    '- remove duplicate log buffer initialization',
+    '',
+    '---',
+    '',
+    'Staged changes (file stats):',
+    stat.trim(),
+    '',
+    'Diff:',
+    shortDiff,
+    '',
+    'Now output the commit message for the changes above:'
+  ].join('\n')
 }
 
 async function generateViaLocalLlm(stat: string, diff: string): Promise<string> {
   const { LocalLlmManager } = await import('../../local-llm')
-  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
-  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
-  const raw = await LocalLlmManager.getInstance().generate(prompt)
+  const raw = await LocalLlmManager.getInstance().generate(buildCommitPrompt(stat, diff))
   const msg = cleanCommitMessage(raw)
   if (!msg) throw new Error('Empty response from local LLM')
   return msg
@@ -1488,8 +1561,7 @@ async function generateViaLocalLlm(stat: string, diff: string): Promise<string> 
 
 async function generateViaClaude(stat: string, diff: string): Promise<string> {
   const { spawn } = require('child_process') as typeof import('child_process')
-  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
-  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
+  const prompt = buildCommitPrompt(stat, diff)
 
   const stdout = await new Promise<string>((resolve, reject) => {
     const proc = spawn('claude', ['-p', '--model', 'haiku', '--max-turns', '1', '--output-format', 'text'], {
@@ -1519,8 +1591,7 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set')
 
-  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
-  const prompt = `${COMMIT_MSG_PROMPT}\n\nDiff summary:\n${stat}\n\nDiff:\n${shortDiff}`
+  const prompt = buildCommitPrompt(stat, diff)
 
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
