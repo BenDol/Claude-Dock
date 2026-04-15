@@ -3459,6 +3459,29 @@ label:hover .setting-scope-btn,
   min-height: 0;
 }
 
+.launcher-list-reopen {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.launcher-item-reopen {
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
+}
+.launcher-item-reopen:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-color) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
+}
+.launcher-item-reopen .launcher-item-icon {
+  color: var(--accent-color);
+}
+.launcher-item-reopen .launcher-item-name {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
 
 .launcher-item {
   display: flex;

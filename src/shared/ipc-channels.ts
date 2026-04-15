@@ -38,6 +38,8 @@ export const IPC = {
   WIN_MAXIMIZE: 'win:maximize',
   WIN_CLOSE: 'win:close',
   APP_CLOSE_ALL: 'app:closeAll',
+  APP_GET_LAST_SESSION: 'app:getLastSession',
+  APP_REOPEN_LAST_SESSION: 'app:reopenLastSession',
   APP_OPEN_EXTERNAL: 'app:openExternal',
   APP_RELAUNCH: 'app:relaunch',
   APP_OPEN_IN_EXPLORER: 'app:openInExplorer',

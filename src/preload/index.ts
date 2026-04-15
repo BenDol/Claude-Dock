@@ -35,6 +35,7 @@ import type {
   IssueStatusCapability
 } from '../shared/issue-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
+import type { LastSessionEntry } from '../shared/last-session-types'
 import type {
   CloudProviderId,
   CloudProviderInfo,
@@ -153,6 +154,8 @@ export interface DockApi {
     openInExplorer: (dir: string) => Promise<void>
     relaunch: () => Promise<void>
     closeAll: () => Promise<void>
+    getLastSession: () => Promise<LastSessionEntry[]>
+    reopenLastSession: () => Promise<{ opened: number; failed: string[] }>
   }
   updater: {
     check: (profile: string) => Promise<UpdateInfo>
@@ -599,7 +602,9 @@ const dockApi: DockApi = {
     openExternal: (url) => ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL, url),
     openInExplorer: (dir) => ipcRenderer.invoke(IPC.APP_OPEN_IN_EXPLORER, dir),
     relaunch: () => ipcRenderer.invoke(IPC.APP_RELAUNCH),
-    closeAll: () => ipcRenderer.invoke(IPC.APP_CLOSE_ALL)
+    closeAll: () => ipcRenderer.invoke(IPC.APP_CLOSE_ALL),
+    getLastSession: () => ipcRenderer.invoke(IPC.APP_GET_LAST_SESSION),
+    reopenLastSession: () => ipcRenderer.invoke(IPC.APP_REOPEN_LAST_SESSION)
   },
   updater: {
     check: (profile) => ipcRenderer.invoke(IPC.UPDATER_CHECK, profile),

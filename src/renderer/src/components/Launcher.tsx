@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { getDockApi } from '../lib/ipc-bridge'
 import PluginPanel from './PluginPanel'
+import type { LastSessionEntry } from '../../../shared/last-session-types'
 
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2.0
@@ -31,6 +32,8 @@ type ClonePhase = 'idle' | 'input' | 'cloning' | 'error'
 
 const Launcher: React.FC = () => {
   const [recentPaths, setRecentPaths] = useState<RecentPath[]>([])
+  const [lastSession, setLastSession] = useState<LastSessionEntry[]>([])
+  const [reopening, setReopening] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pluginPanelPath, setPluginPanelPath] = useState<string | null>(null)
   const [pluginSetupPath, setPluginSetupPath] = useState<string | null>(null)
@@ -131,6 +134,10 @@ const Launcher: React.FC = () => {
     api.app.getRecentPaths().then((paths) => {
       setRecentPaths(paths)
       setLoading(false)
+    })
+
+    api.app.getLastSession().then(setLastSession).catch((err) => {
+      console.warn('[launcher] getLastSession failed:', err)
     })
 
     return () => {
@@ -905,6 +912,47 @@ const Launcher: React.FC = () => {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {lastSession.length > 0 && (
+          <div className="launcher-list launcher-list-reopen">
+            <button
+              className="launcher-item launcher-item-reopen"
+              onClick={async () => {
+                setReopening(true)
+                try {
+                  const result = await getDockApi().app.reopenLastSession()
+                  if (result.failed.length > 0) {
+                    console.warn('[launcher] some workspaces failed to reopen:', result.failed)
+                  }
+                } catch (err) {
+                  console.error('[launcher] reopenLastSession failed:', err)
+                  setReopening(false)
+                }
+                // On success, main closes the launcher — this component unmounts
+                // before setReopening(false) would run, so only the error path resets.
+              }}
+              disabled={isBlocked || reopening}
+              title={lastSession.map((e) => e.path).join('\n')}
+            >
+              <div className="launcher-item-icon">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 8a5 5 0 0 1 8.5-3.5L13 6" />
+                  <path d="M13 2v4h-4" />
+                  <path d="M13 8a5 5 0 0 1-8.5 3.5L3 10" />
+                  <path d="M3 14v-4h4" />
+                </svg>
+              </div>
+              <div className="launcher-item-info">
+                <span className="launcher-item-name">
+                  {reopening ? 'Reopening workspaces…' : `Reopen previous workspaces (${lastSession.length})`}
+                </span>
+                <span className="launcher-item-path">
+                  {lastSession.map((e) => e.name).join(', ')}
+                </span>
+              </div>
+            </button>
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { DockManager } from './dock-manager'
 import { getSettings, setSettings } from './settings-store'
 import { getProjectMergedSettings, writeProjectSettings, writeLocalProjectSettings, getSettingsOrigins, removeProjectKey } from './project-settings'
 import { getRecentPaths, removeRecentPath } from './recent-store'
+import { saveLastSession, getLastSession } from './last-session-store'
 import { saveSessions } from './session-store'
 import { checkForUpdate, downloadUpdate, installAndRestart, setDownloadedPath } from './auto-updater'
 import { savePendingProject, isUpdateLocked, acquireUpdateLock, releaseUpdateLock, setAppUpdateInProgress } from './pending-project'
@@ -427,29 +428,61 @@ export function registerIpcHandlers(): void {
     const manager = DockManager.getInstance()
     const docks = manager.getAllDocks()
 
+    // Persist the set of open projectDirs BEFORE destroying anything so the
+    // launcher can offer to reopen them. Skip if no docks are open so we don't
+    // wipe a previously-saved session with an empty list.
+    const openDirs = docks.map((d) => d.projectDir)
+    if (openDirs.length > 0) saveLastSession(openDirs)
+
     // Find docks with active terminals — they need confirmation
     const withTerminals = docks.filter((d) => d.ptyManager.size > 0)
     const withoutTerminals = docks.filter((d) => d.ptyManager.size === 0)
 
-    // Close docks without terminals immediately
     for (const dock of withoutTerminals) {
       dock.window.destroy()
     }
 
     if (withTerminals.length === 0) {
-      // No terminals anywhere — all closed, quit the app
       app.quit()
       return
     }
 
     // Focus the first dock with terminals and trigger its close dialog.
     // The DockWindow 'close' handler will show the confirmation.
-    // Close each one sequentially — if user cancels, stop.
     for (const dock of withTerminals) {
       dock.window.show()
       dock.window.focus()
-      dock.window.close() // triggers the close event handler with confirmation dialog
+      dock.window.close()
     }
+  })
+
+  ipcMain.handle(IPC.APP_GET_LAST_SESSION, () => {
+    return getLastSession()
+  })
+
+  ipcMain.handle(IPC.APP_REOPEN_LAST_SESSION, async () => {
+    const entries = getLastSession()
+    if (entries.length === 0) return { opened: 0, failed: [] }
+    const manager = DockManager.getInstance()
+    // Close launcher before creating docks to avoid a GPU-resource race
+    // (same pattern as APP_OPEN_DOCK_PATH). Don't let a launcher-close error
+    // abort the whole flow — docks can coexist with a lingering launcher.
+    try { await manager.closeLauncherAndWait() } catch (err) {
+      log(`[reopen-last-session] launcher close failed: ${err}`)
+    }
+    let opened = 0
+    const failed: string[] = []
+    for (const entry of entries) {
+      if (manager.findDockByDir(entry.path)) continue
+      try {
+        await manager.createDock(entry.path)
+        opened++
+      } catch (err) {
+        log(`[reopen-last-session] failed to open ${entry.path}: ${err}`)
+        failed.push(entry.path)
+      }
+    }
+    return { opened, failed }
   })
 
   ipcMain.handle(IPC.APP_PICK_DIRECTORY, async () => {
