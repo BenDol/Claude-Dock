@@ -6135,6 +6135,25 @@ div.gm-ftree-search-current {
 .gm-issue-popover-item:hover { background: var(--hover-color, var(--bg-secondary)); }
 .gm-issue-popover-item-active { background: color-mix(in srgb, var(--accent-color) 15%, transparent); }
 .gm-issue-popover-check { color: var(--accent-color); }
+.gm-issue-popover-error {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--danger-color, #ff6b6b);
+  border-top: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--danger-color, #ff6b6b) 10%, transparent);
+}
+
+/* Status badge — pill chip used inline + inside the status popover. */
+.gm-issue-status-badge {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: nowrap;
+  vertical-align: middle;
+}
 
 /* Claude action button */
 .gm-claude-btn {

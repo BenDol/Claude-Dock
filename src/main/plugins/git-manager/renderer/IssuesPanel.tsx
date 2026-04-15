@@ -8,6 +8,8 @@ import type {
   IssueLabel,
   IssueUser,
   IssueMilestone,
+  IssueStatus,
+  IssueStatusCapability,
   IssueUpdateRequest,
   IssueTypeProfiles,
   IssueTypeProfile,
@@ -1012,6 +1014,12 @@ function IssueDetailPanel({
             current={issue.milestone}
             onChanged={() => { onRefresh(); onListChanged() }}
           />
+          <StatusEditor
+            projectDir={projectDir}
+            issueId={issue.id}
+            current={issue.status ?? null}
+            onChanged={() => { onRefresh(); onListChanged() }}
+          />
 
           <div className="gm-issue-section">
             <div className="gm-issue-section-header">Author</div>
@@ -1397,6 +1405,167 @@ function MilestoneEditor({
             </div>
           ))}
           {(available || []).length === 0 && <div className="gm-pr-empty">No milestones available.</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Fallback colors when a status has no provider-supplied color.
+ * Keyed by the normalized `IssueStatus.category` hint.
+ */
+const STATUS_CATEGORY_COLORS: Record<NonNullable<IssueStatus['category']>, string> = {
+  todo: '#6e7681',
+  triage: '#9e6a03',
+  in_progress: '#2f81f7',
+  done: '#3fb950',
+  canceled: '#8b949e'
+}
+
+function statusBadgeBg(status: IssueStatus): string {
+  if (status.color) return status.color.startsWith('#') ? status.color : `#${status.color}`
+  if (status.category) return STATUS_CATEGORY_COLORS[status.category]
+  return '#6e7681'
+}
+
+function StatusBadge({ status }: { status: IssueStatus }) {
+  const bg = statusBadgeBg(status)
+  const fg = pickContrastTextColor(bg)
+  return (
+    <span className="gm-issue-status-badge" style={{ background: bg, color: fg }}>
+      {status.name}
+    </span>
+  )
+}
+
+/**
+ * Edits the provider-native status of an issue (GitHub Projects v2 single-select
+ * Status field, GitLab work-item status widget). Capability is probed once per
+ * `projectDir`; when unsupported the editor renders an inline note instead of
+ * a broken popover. Status cannot be cleared via the existing IPC contract
+ * (`statusId: string` is required), so only set-to-value is offered — matching
+ * what both providers actually support.
+ */
+function StatusEditor({
+  projectDir,
+  issueId,
+  current,
+  onChanged
+}: {
+  projectDir: string
+  issueId: number
+  current: IssueStatus | null | undefined
+  onChanged: () => void
+}) {
+  const api = getDockApi()
+  const [open, setOpen] = useState(false)
+  const [available, setAvailable] = useState<IssueStatus[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [capability, setCapability] = useState<IssueStatusCapability | null>(null)
+
+  // Reset cached options + popover state when switching repos.
+  useEffect(() => {
+    setAvailable(null)
+    setOpen(false)
+    setError(null)
+    setCapability(null)
+  }, [projectDir])
+
+  // Probe capability whenever the repo changes.
+  useEffect(() => {
+    let cancelled = false
+    api.issues.getStatusCapability(projectDir).then((cap) => {
+      if (!cancelled) setCapability(cap)
+    }).catch((err) => {
+      console.warn('[issues] getStatusCapability failed:', err)
+      if (!cancelled) setCapability({ supported: false, reason: 'Failed to probe status capability.' })
+    })
+    return () => { cancelled = true }
+  }, [api, projectDir])
+
+  const loadAvailable = useCallback(async () => {
+    if (available) return
+    try {
+      const list = await api.issues.listStatuses(projectDir)
+      setAvailable(list)
+    } catch (err) {
+      console.warn('[issues] listStatuses failed:', err)
+      setAvailable([])
+      setError(err instanceof Error ? err.message : 'Failed to load statuses')
+    }
+  }, [api, projectDir, available])
+
+  const choose = async (s: IssueStatus) => {
+    if (current && current.id === s.id) { setOpen(false); return }
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await api.issues.setStatus(projectDir, issueId, s.id)
+      if (!result.success) {
+        setError(result.error || 'Failed to update status')
+      } else {
+        onChanged()
+        setOpen(false)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update status')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Hide section entirely while we don't yet know whether status is supported,
+  // to avoid a flash of an empty editor.
+  if (capability === null) return null
+
+  if (!capability.supported) {
+    return (
+      <div className="gm-issue-section">
+        <div className="gm-issue-section-header"><span>Status</span></div>
+        <div className="gm-pr-empty" title={capability.reason || ''}>
+          {capability.reason || 'Status not supported by this provider.'}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="gm-issue-section">
+      <div className="gm-issue-section-header">
+        <span>Status</span>
+        <button
+          className="gm-small-btn"
+          onClick={async () => { await loadAvailable(); setOpen((o) => !o) }}
+          disabled={busy}
+        >
+          {open ? 'Done' : 'Edit'}
+        </button>
+      </div>
+      <div>
+        {current ? <StatusBadge status={current} /> : <span className="gm-pr-empty">Not set.</span>}
+      </div>
+      {open && (
+        <div className="gm-issue-popover">
+          {available === null && <div className="gm-loading">Loading...</div>}
+          {available !== null && available.length === 0 && (
+            <div className="gm-pr-empty">No statuses available.</div>
+          )}
+          {(available || []).map((s) => {
+            const isActive = !!current && current.id === s.id
+            return (
+              <div
+                key={s.id}
+                className={`gm-issue-popover-item${isActive ? ' gm-issue-popover-item-active' : ''}`}
+                onClick={() => { if (!busy) choose(s) }}
+              >
+                <StatusBadge status={s} />
+                {isActive && <span className="gm-issue-popover-check">✓</span>}
+              </div>
+            )
+          })}
+          {error && <div className="gm-issue-popover-error">{error}</div>}
         </div>
       )}
     </div>
