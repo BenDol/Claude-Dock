@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDockStore } from '../stores/dock-store'
+import { useEditorStore } from '../stores/editor-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import { getToolbarActions } from '../toolbar-actions'
@@ -317,6 +318,23 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
 
   const api = getDockApi()
 
+  // When the dock's embedded editor has tabs open, the close button closes the
+  // editor (instead of the app) to prevent accidentally quitting while editing.
+  // Only applies to the docked editor — the detached editor window is unaffected.
+  const handleCloseClick = useCallback(() => {
+    const tabs = useEditorStore.getState().tabs
+    if (tabs.length === 0) {
+      api.win.close()
+      return
+    }
+    const dirty = tabs.filter((t) => t.content !== t.savedContent)
+    if (dirty.length > 0) {
+      const names = dirty.map((t) => t.fileName).join(', ')
+      if (!confirm(`Unsaved changes in: ${names}\nClose editor anyway?`)) return
+    }
+    useEditorStore.getState().closeAllTabs()
+  }, [api])
+
   return (
     <div className="toolbar" ref={toolbarRef} role="toolbar" aria-label="Dock toolbar">
       <div className="toolbar-left">
@@ -417,7 +435,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
         <button className="win-btn win-maximize" onClick={() => api.win.maximize()} title="Maximize">
           &#9744;
         </button>
-        <button className="win-btn win-close" onClick={() => api.win.close()} title="Close">
+        <button className="win-btn win-close" onClick={handleCloseClick} title="Close">
           &#10005;
         </button>
       </div>
