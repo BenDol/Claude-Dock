@@ -1553,20 +1553,13 @@ function cleanCommitMessage(raw: string): string {
   return `${cleanedSummary.trim()}\n\n${uniqueBullets.map((b) => `- ${b}`).join('\n')}`
 }
 
-/** Assemble the LLM prompt: instructions, a worked example, then the actual diff. */
+/** Assemble the LLM prompt: rules, then the actual diff. No worked example —
+ *  small models tend to copy concrete examples verbatim instead of synthesizing
+ *  from the diff. The schematic format in COMMIT_MSG_PROMPT is enough. */
 function buildCommitPrompt(stat: string, diff: string): string {
   const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
   return [
     COMMIT_MSG_PROMPT,
-    '',
-    'Example (FORMAT ONLY — this example is about an imaginary rate-limiter and has NOTHING to do with the real diff below. Do not copy these words, file names, or topic; they are only here to show the shape of the output):',
-    '<<<example>>>',
-    'feat: add token-bucket rate limiter to api gateway',
-    '',
-    '- introduce RateLimiter class in api/gateway/rate-limit.ts',
-    '- wire limiter into request middleware with 60 req/min default',
-    '- add unit tests covering burst and refill behaviour',
-    '<<<end example>>>',
     '',
     '---',
     '',
@@ -1576,7 +1569,7 @@ function buildCommitPrompt(stat: string, diff: string): string {
     'Diff:',
     shortDiff,
     '',
-    'Now write the commit message for the staged changes above. Your message MUST describe what this specific diff changes — reference the actual file names, functions, and symbols that appear in the stats and diff. Do not output anything about rate limiters, loggers, or any topic not present in the diff.'
+    'Write the commit message for the staged changes above. Reference the actual file names, functions, and symbols that appear in the stats and diff — do not invent any topic that is not present in the diff. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
   ].join('\n')
 }
 
