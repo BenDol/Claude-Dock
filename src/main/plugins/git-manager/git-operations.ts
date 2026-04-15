@@ -1433,6 +1433,10 @@ const CONV_COMMIT_RE = new RegExp(`^(${CONV_COMMIT_TYPES})(\\([^)]*\\))?:\\s`, '
 // Lines that clearly mean the LLM echoed the diff into the output.
 // Bullets start with a space-dash (- text), so they don't match these.
 const DIFF_MARKER_RE = /^(diff --git |index [0-9a-f]{4,}|@@ |--- [ab]?\/|--- \/dev|\+\+\+ [ab]?\/|\+\+\+ \/dev|[+-]\S)/
+// Distinctive phrases from the worked example in buildCommitPrompt. If any of
+// these show up in the output, the model copied the example instead of
+// describing the actual diff — reject so the caller retries/fails loudly.
+const EXAMPLE_LEAK_RE = /token-bucket|rate limiter|ratelimiter|api\/gateway\/rate-limit|60 req\/min|burst and refill/i
 
 /**
  * Commit-message prompt.
@@ -1457,6 +1461,7 @@ const COMMIT_MSG_PROMPT = [
   '',
   'Rules:',
   '- The first line uses conventional commit format: one of feat, fix, refactor, docs, chore, style, test, perf, build, ci, revert — followed by ": " and a short summary under 72 characters.',
+  '- Do NOT include a scope in parentheses after the type. Write "feat: add foo", never "feat(path/to/file.ts): add foo" or "feat(scope): add foo". The type is always immediately followed by ": ".',
   '- The word after the colon on the first line must be lowercase.',
   '- If the summary line alone covers everything, output just the summary line and stop.',
   '- If there are multiple distinct changes, follow the summary line with one blank line, then bullet points starting with "- " (dash, space). Each bullet describes one change. Bullets must NEVER start with a type prefix (no "fix:", no "feat:", etc.).',
@@ -1525,8 +1530,12 @@ function cleanCommitMessage(raw: string): string {
     }
   }
 
+  // Strip scope in parentheses after the type ("feat(path/foo.ts): bar" -> "feat: bar").
+  // Conventional-commit scopes are technically valid but the project style forbids them,
+  // and small models often insert the changed file path as the scope.
+  let cleanedSummary = summary.replace(new RegExp(`^(${CONV_COMMIT_TYPES})\\([^)]*\\):\\s*`, 'i'), (_, type: string) => `${type.toLowerCase()}: `)
   // Enforce lowercase after conventional commit prefix ("fix: Resolve" -> "fix: resolve")
-  let cleanedSummary = summary.replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
+  cleanedSummary = cleanedSummary.replace(/^(\w+(?:\([^)]*\))?:\s*)([A-Z])/, (_, prefix, ch) => prefix + ch.toLowerCase())
   if (cleanedSummary.length > 72) {
     cleanedSummary = cleanedSummary.slice(0, 72).replace(/\s+\S*$/, '')
   }
@@ -1534,6 +1543,11 @@ function cleanCommitMessage(raw: string): string {
   // Reject garbage — must have a conventional commit prefix to be considered valid.
   // This lets callers retry instead of committing with nonsense text.
   if (!CONV_COMMIT_RE.test(cleanedSummary.trim())) return ''
+
+  // Reject output that leaked phrases from the prompt's worked example — that
+  // means the model copied instead of describing the actual diff.
+  const combined = [cleanedSummary, ...uniqueBullets].join('\n')
+  if (EXAMPLE_LEAK_RE.test(combined)) return ''
 
   if (uniqueBullets.length === 0) return cleanedSummary.trim()
   return `${cleanedSummary.trim()}\n\n${uniqueBullets.map((b) => `- ${b}`).join('\n')}`
@@ -1545,12 +1559,14 @@ function buildCommitPrompt(stat: string, diff: string): string {
   return [
     COMMIT_MSG_PROMPT,
     '',
-    'Example output for a commit that touches multiple files:',
-    'refactor: extract shared logger utility',
+    'Example (FORMAT ONLY — this example is about an imaginary rate-limiter and has NOTHING to do with the real diff below. Do not copy these words, file names, or topic; they are only here to show the shape of the output):',
+    '<<<example>>>',
+    'feat: add token-bucket rate limiter to api gateway',
     '',
-    '- move log/logError from main/index.ts into src/shared/logger.ts',
-    '- update all imports to use the shared module',
-    '- remove duplicate log buffer initialization',
+    '- introduce RateLimiter class in api/gateway/rate-limit.ts',
+    '- wire limiter into request middleware with 60 req/min default',
+    '- add unit tests covering burst and refill behaviour',
+    '<<<end example>>>',
     '',
     '---',
     '',
@@ -1560,7 +1576,7 @@ function buildCommitPrompt(stat: string, diff: string): string {
     'Diff:',
     shortDiff,
     '',
-    'Now output the commit message for the changes above:'
+    'Now write the commit message for the staged changes above. Your message MUST describe what this specific diff changes — reference the actual file names, functions, and symbols that appear in the stats and diff. Do not output anything about rate limiters, loggers, or any topic not present in the diff.'
   ].join('\n')
 }
 
