@@ -181,6 +181,7 @@ export const IPC = {
   GIT_MGR_ADD_WORKTREE: 'gitMgr:addWorktree',
   GIT_MGR_REMOVE_WORKTREE: 'gitMgr:removeWorktree',
   GIT_MGR_RESOLVE_WORKTREE: 'gitMgr:resolveWorktree',
+  GIT_MGR_PRUNE_WORKTREES: 'gitMgr:pruneWorktrees',
 
   // CI
   CI_CHECK_AVAILABLE: 'ci:checkAvailable',

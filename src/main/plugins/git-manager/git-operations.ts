@@ -24,7 +24,10 @@ import type {
   GitSearchResponse,
   GitSearchResult,
   SearchResultSource,
-  GitWorktreeInfo
+  GitWorktreeInfo,
+  ResolveWorktreeOptions,
+  ResolveWorktreeResult,
+  PruneWorktreesResult
 } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 
@@ -2880,6 +2883,32 @@ export async function removeWorktree(cwd: string, worktreePath: string, force?: 
 }
 
 /**
+ * Prune orphaned worktree administrative entries (those whose directories were
+ * deleted outside git). Safe to run any time — it only removes metadata for
+ * worktrees git already considers missing.
+ */
+export async function pruneWorktrees(cwd: string): Promise<PruneWorktreesResult> {
+  getServices().log(`[git-manager] pruneWorktrees: cwd=${cwd}`)
+  try {
+    const { stdout } = await gitExec(cwd, ['worktree', 'prune', '--verbose'], 15000)
+    // Git emits lines like "Removing worktrees/foo: gitdir file points to non-existent location"
+    // (forward slash on Unix, backslash on Windows)
+    const pruned = stdout
+      .split(/\r?\n/)
+      .map((l) => {
+        const m = l.match(/^Removing (?:worktrees[/\\])?([^:]+)/)
+        return m ? m[1].trim() : null
+      })
+      .filter((s): s is string => !!s)
+    getServices().log(`[git-manager] pruneWorktrees: pruned ${pruned.length} entries`)
+    return { pruned }
+  } catch (err: any) {
+    getServices().logError('[git-manager] pruneWorktrees failed:', err)
+    return { pruned: [], error: err instanceof Error ? err.message : 'Prune failed' }
+  }
+}
+
+/**
  * Resolve a worktree: stage all changes, commit, optionally merge into a target branch, then remove the worktree.
  * If no targetBranch, the commit stays on the worktree's branch (headless or named).
  */
@@ -2887,61 +2916,218 @@ export async function resolveWorktree(
   mainCwd: string,
   worktreePath: string,
   commitMessage: string,
-  targetBranch?: string
-): Promise<{ success: boolean; commitHash?: string; merged?: boolean; error?: string }> {
-  getServices().log(`[git-manager] resolveWorktree: path=${worktreePath} target=${targetBranch || 'none'} cwd=${mainCwd}`)
+  targetBranch?: string,
+  options?: ResolveWorktreeOptions
+): Promise<ResolveWorktreeResult> {
+  const warnings: string[] = []
+  const log = (msg: string): void => getServices().log(`[git-manager] resolveWorktree: ${msg}`)
+  log(`path=${worktreePath} target=${targetBranch || 'none'} captureBranch=${options?.captureBranchName || 'none'} cwd=${mainCwd}`)
 
+  // --- 1. Probe worktree HEAD state -----------------------------------------
+  let sourceBranch = ''
   try {
-    // 1. Check for changes in the worktree
-    const status = await getStatus(worktreePath)
-    const changedCount = status.staged.length + status.unstaged.length + status.untracked.length + status.conflicts.length
-    const hasChanges = changedCount > 0
-
-    let commitHash = ''
-
-    if (hasChanges) {
-      // 2. Stage all changes
-      await gitExec(worktreePath, ['add', '-A'], 15000)
-      getServices().log(`[git-manager] resolveWorktree: staged ${changedCount} file(s)`)
-
-      // 3. Commit
-      const result = await gitExec(worktreePath, ['commit', '-m', commitMessage], 30000)
-      const hashMatch = result.stdout.match(/\[[\w/.-]+\s+([a-f0-9]+)\]/)
-      commitHash = hashMatch?.[1] || ''
-      getServices().log(`[git-manager] resolveWorktree: committed ${commitHash}`)
-    } else {
-      // Get the current HEAD hash
-      const { stdout } = await gitExec(worktreePath, ['rev-parse', '--short', 'HEAD'], 5000)
-      commitHash = stdout.trim()
-      getServices().log(`[git-manager] resolveWorktree: no changes to commit, HEAD=${commitHash}`)
-    }
-
-    // 4. If a target branch was specified, merge the worktree's branch into it
-    let merged = false
-    if (targetBranch) {
-      // Get the worktree's current branch
-      const { stdout: wtBranch } = await gitExec(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
-      const sourceBranch = wtBranch.trim()
-      getServices().log(`[git-manager] resolveWorktree: merging "${sourceBranch}" into "${targetBranch}" from main repo`)
-
-      // Merge from the main repo (which has access to all branches)
-      await gitExec(mainCwd, ['checkout', targetBranch], 15000)
-      await gitExec(mainCwd, ['merge', sourceBranch, '--no-ff', '-m', `Merge worktree: ${commitMessage}`], 30000)
-      merged = true
-      getServices().log(`[git-manager] resolveWorktree: merged successfully`)
-    }
-
-    // 5. Remove the worktree
-    try {
-      await removeWorktree(mainCwd, worktreePath, true)
-    } catch (e: any) {
-      getServices().logError('[git-manager] resolveWorktree: failed to remove worktree (non-fatal):', e.message)
-    }
-
-    return { success: true, commitHash, merged }
+    const { stdout } = await gitExec(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+    sourceBranch = stdout.trim()
   } catch (err: any) {
-    getServices().logError('[git-manager] resolveWorktree failed:', err)
-    return { success: false, error: err instanceof Error ? err.message : 'Resolve failed' }
+    getServices().logError('[git-manager] resolveWorktree: could not read worktree HEAD:', err)
+    return { success: false, error: `Could not read worktree HEAD: ${err?.message || 'unknown error'}` }
+  }
+  const isDetached = sourceBranch === 'HEAD' || sourceBranch === ''
+
+  // --- 2. Detached-HEAD gate ------------------------------------------------
+  if (isDetached && !targetBranch && !options?.captureBranchName) {
+    log('detached HEAD detected with no merge target and no capture branch — prompting caller')
+    return {
+      success: false,
+      needsCaptureBranch: true,
+      error: 'Worktree is on a detached HEAD. Provide a capture branch name or a merge target so the commit is preserved.'
+    }
+  }
+
+  if (isDetached && options?.captureBranchName) {
+    const name = options.captureBranchName.trim()
+    if (!name) return { success: false, error: 'Capture branch name is empty' }
+    try {
+      await gitExec(worktreePath, ['checkout', '-b', name], 10000)
+      sourceBranch = name
+      log(`created capture branch '${name}' in worktree`)
+    } catch (err: any) {
+      const msg = err?.message || ''
+      const friendly = /already exists/i.test(msg)
+        ? `Branch '${name}' already exists. Pick a different capture branch name.`
+        : `Failed to create capture branch '${name}': ${msg}`
+      return { success: false, needsCaptureBranch: true, error: friendly }
+    }
+  }
+
+  // --- 3. Main-repo preflight (only if we plan to merge) --------------------
+  if (targetBranch) {
+    try {
+      const mainStatus = await getStatus(mainCwd)
+      const mainDirty = mainStatus.staged.length + mainStatus.unstaged.length + mainStatus.conflicts.length
+      if (mainDirty > 0) {
+        return {
+          success: false,
+          error: 'Main repository has uncommitted changes — commit or stash them before merging a worktree.'
+        }
+      }
+    } catch (err: any) {
+      getServices().logError('[git-manager] resolveWorktree: main preflight status failed:', err)
+      return { success: false, error: `Could not check main repository state: ${err?.message || 'unknown error'}` }
+    }
+  }
+
+  // --- 4. Detect and commit changes in the worktree ------------------------
+  // Cross-check getStatus with `git diff-index` to avoid false "no changes"
+  // when the porcelain parse silently swallowed an error.
+  let hasTrackedChanges = false
+  let hasUntracked = false
+  try {
+    await gitExec(worktreePath, ['diff-index', '--quiet', 'HEAD', '--'], 10000)
+    hasTrackedChanges = false
+  } catch {
+    hasTrackedChanges = true // non-zero exit = dirty index or working tree
+  }
+  try {
+    const { stdout } = await gitExec(worktreePath, ['ls-files', '--others', '--exclude-standard'], 10000)
+    hasUntracked = stdout.trim().length > 0
+  } catch (err) {
+    getServices().logError('[git-manager] resolveWorktree: ls-files probe failed (continuing):', err)
+  }
+
+  let commitHash = ''
+  let commitAttempted = false
+
+  if (hasTrackedChanges || hasUntracked) {
+    commitAttempted = true
+    try {
+      await gitExec(worktreePath, ['add', '-A'], 15000)
+      log('staged all changes')
+    } catch (err: any) {
+      return { success: false, error: `Failed to stage changes: ${err?.message || 'unknown error'}` }
+    }
+    try {
+      await gitExec(worktreePath, ['commit', '-m', commitMessage], 30000)
+      log('committed successfully')
+    } catch (err: any) {
+      const msg = err?.message || ''
+      // Benign: "nothing to commit" can happen if every staged path was
+      // gitignored or an empty rename. Not fatal — we still proceed to merge/remove.
+      if (/nothing to commit|no changes added/i.test(msg)) {
+        warnings.push('Nothing to commit (staged paths were ignored or produced no diff).')
+        log('nothing to commit — continuing as clean')
+      } else {
+        return { success: false, error: `Commit failed: ${msg}` }
+      }
+    }
+  }
+
+  // Canonical hash via rev-parse (stable regardless of commit output format).
+  try {
+    const { stdout } = await gitExec(worktreePath, ['rev-parse', 'HEAD'], 5000)
+    commitHash = stdout.trim()
+  } catch (err: any) {
+    getServices().logError('[git-manager] resolveWorktree: rev-parse HEAD failed:', err)
+    return { success: false, error: `Could not resolve worktree HEAD: ${err?.message || 'unknown error'}` }
+  }
+
+  if (!commitAttempted) log(`no changes to commit — HEAD=${commitHash.slice(0, 8)}`)
+
+  // --- 5. Merge into target branch (optional) -------------------------------
+  let merged = false
+  if (targetBranch) {
+    try {
+      await gitExec(mainCwd, ['checkout', targetBranch], 15000)
+      log(`checked out '${targetBranch}' in main repo`)
+    } catch (err: any) {
+      return { success: false, error: `Could not checkout '${targetBranch}' in main repo: ${err?.message || 'unknown error'}` }
+    }
+
+    let mergeThrew = false
+    try {
+      await gitExec(mainCwd, ['merge', sourceBranch, '--no-ff', '-m', `Merge worktree: ${commitMessage}`], 60000)
+    } catch (err: any) {
+      mergeThrew = true
+      log(`merge command threw: ${err?.message || 'unknown'}`)
+    }
+
+    // Post-merge status: authoritative — determines conflicts even if merge exited 0.
+    let postStatus: GitStatusResult | null = null
+    try {
+      postStatus = await getStatus(mainCwd)
+    } catch (err) {
+      getServices().logError('[git-manager] resolveWorktree: post-merge status failed:', err)
+    }
+    const conflictCount = postStatus?.conflicts.length ?? 0
+
+    if (conflictCount > 0) {
+      // Conflicts in main — keep worktree for safety; UI opens git-manager.
+      log(`merge produced ${conflictCount} conflict(s) — leaving merge in progress, preserving worktree`)
+      return {
+        success: true,
+        commitHash,
+        merged: false,
+        hasConflicts: true,
+        mergeInProgress: true,
+        removedWorktree: false,
+        warnings
+      }
+    }
+
+    if (mergeThrew) {
+      // Threw but no conflicts detected — unexpected state. Try to rollback the merge.
+      try { await gitExec(mainCwd, ['merge', '--abort'], 10000) } catch { /* nothing in progress */ }
+      return { success: false, error: 'Merge failed and produced no conflicts. The merge has been aborted.' }
+    }
+
+    merged = true
+    log(`merged '${sourceBranch}' into '${targetBranch}'`)
+  }
+
+  // --- 6. Remove the worktree ----------------------------------------------
+  let removedWorktree = false
+  try {
+    await removeWorktree(mainCwd, worktreePath, true)
+    removedWorktree = true
+  } catch (err: any) {
+    getServices().logError('[git-manager] resolveWorktree: failed to remove worktree:', err)
+    warnings.push(`Worktree could not be removed: ${err?.message || 'unknown error'}`)
+  }
+
+  // --- 7. Optional source-branch cleanup -----------------------------------
+  if (options?.deleteSourceBranch && removedWorktree && sourceBranch && sourceBranch !== 'HEAD') {
+    // Never delete the branch currently checked out in mainCwd — fail-safe if
+    // the rev-parse lookup fails rather than potentially deleting a load-bearing branch.
+    let mainBranch: string | null = null
+    try {
+      const { stdout } = await gitExec(mainCwd, ['rev-parse', '--abbrev-ref', 'HEAD'], 5000)
+      mainBranch = stdout.trim()
+    } catch (err: any) {
+      warnings.push(`Could not verify main repo's current branch — skipped deleting '${sourceBranch}' to be safe: ${err?.message || 'unknown'}`)
+    }
+    if (mainBranch !== null) {
+      const protectedBranches = new Set(['main', 'master', 'develop', 'trunk', mainBranch].filter(Boolean))
+      if (!protectedBranches.has(sourceBranch)) {
+        try {
+          await gitExec(mainCwd, ['branch', '-D', sourceBranch], 10000)
+          log(`deleted source branch '${sourceBranch}'`)
+        } catch (err: any) {
+          warnings.push(`Could not delete source branch '${sourceBranch}': ${err?.message || 'unknown error'}`)
+        }
+      } else {
+        warnings.push(`Skipped deleting protected branch '${sourceBranch}'.`)
+      }
+    }
+  }
+
+  return {
+    success: true,
+    commitHash,
+    merged,
+    hasConflicts: false,
+    mergeInProgress: false,
+    removedWorktree,
+    warnings: warnings.length ? warnings : undefined
   }
 }
 

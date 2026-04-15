@@ -9,6 +9,9 @@ import { getServices } from './services'
 import { registerCiIpc } from './ci/ci-ipc'
 import { registerPrIpc } from './pr/pr-ipc'
 
+/** Prevents duplicate resolveWorktree calls for the same (project, worktree) pair. */
+const resolveWorktreeInFlight = new Set<string>()
+
 export function registerGitManagerIpc(): void {
   const winManager = GitManagerWindowManager.getInstance()
 
@@ -783,8 +786,29 @@ export function registerGitManagerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.GIT_MGR_RESOLVE_WORKTREE, async (_event, projectDir: string, worktreePath: string, commitMessage: string, targetBranch?: string) => {
-    return gitOps.resolveWorktree(projectDir, worktreePath, commitMessage, targetBranch)
+  ipcMain.handle(IPC.GIT_MGR_RESOLVE_WORKTREE, async (
+    _event,
+    projectDir: string,
+    worktreePath: string,
+    commitMessage: string,
+    targetBranch?: string,
+    options?: { captureBranchName?: string; deleteSourceBranch?: boolean }
+  ) => {
+    const key = `${projectDir}::${worktreePath}`
+    if (resolveWorktreeInFlight.has(key)) {
+      getServices().log(`[git-manager-ipc] resolveWorktree skipped — already in flight: ${key}`)
+      return { success: false, error: 'A resolve is already in progress for this worktree.' }
+    }
+    resolveWorktreeInFlight.add(key)
+    try {
+      return await gitOps.resolveWorktree(projectDir, worktreePath, commitMessage, targetBranch, options)
+    } finally {
+      resolveWorktreeInFlight.delete(key)
+    }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_PRUNE_WORKTREES, async (_event, projectDir: string) => {
+    return gitOps.pruneWorktrees(projectDir)
   })
 
   ipcMain.handle(IPC.GIT_MGR_RESOLVE_WITH_CLAUDE, async (_event, projectDir: string, filePath: string, instructions: string) => {

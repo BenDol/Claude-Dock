@@ -170,7 +170,7 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const setPendingWorktree = useDockStore((s) => s.setPendingWorktree)
   const [worktreePopover, setWorktreePopover] = useState(false)
   const [worktreePos, setWorktreePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean }[]>([])
+  const [worktrees, setWorktrees] = useState<{ path: string; branch: string; head: string; isMain: boolean; isBare?: boolean; isPrunable?: boolean; hasDirtyWorkTree?: boolean; changeCount?: number }[]>([])
   const [branches, setBranches] = useState<{ name: string; current: boolean }[]>([])
   const [wtLoading, setWtLoading] = useState(false)
   const [resolveMode, setResolveMode] = useState(false)
@@ -178,7 +178,28 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const [resolveTarget, setResolveTarget] = useState<string>('')
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
+  // Detected just-in-time when the popover opens with an active worktree.
+  const [wtIsDetached, setWtIsDetached] = useState(false)
+  const [captureBranchName, setCaptureBranchName] = useState<string>('')
+  const [needsCapture, setNeedsCapture] = useState(false)
+  const [wtChangeCount, setWtChangeCount] = useState<number | null>(null)
+  // Confirmation for "Discard & Remove" — replaces window.confirm.
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+  // Remove-confirmation for a non-active worktree (popover list X button).
+  const [otherWorktreeRemove, setOtherWorktreeRemove] = useState<{ path: string; branch: string; changeCount: number } | null>(null)
+  // Transient result banner after a successful resolve (shown before the terminal closes).
+  const [resolveResult, setResolveResult] = useState<{
+    commitHash?: string
+    merged?: boolean
+    warnings?: string[]
+  } | null>(null)
   const wtBtnRef = useRef<HTMLButtonElement>(null)
+  // Track the deferred tear-down timer so it can be cleared if the component
+  // unmounts between the resolve-success banner and the tear-down itself.
+  const resolveTeardownTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (resolveTeardownTimer.current) clearTimeout(resolveTeardownTimer.current)
+  }, [])
 
   // Recalculate popover position when it opens
   useEffect(() => {
@@ -191,13 +212,39 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   const openWorktreePopover = useCallback(async () => {
     setWorktreePopover(true)
     setWtLoading(true)
+    setNeedsCapture(false)
+    setResolveResult(null)
     const api = getDockApi()
     try {
-      const [wts, brs] = await Promise.all([
+      const tasks: Promise<unknown>[] = [
         api.gitManager.listWorktrees(projectDir),
         api.gitManager.getBranches(projectDir)
-      ])
+      ]
+      // Probe dirty state + HEAD of the active worktree so the resolve form
+      // can show change count and the capture-branch input when detached.
+      if (worktreePath) {
+        tasks.push(api.gitManager.getStatus(worktreePath).catch(() => null))
+      }
+      const [wts, brs, maybeStatus] = await Promise.all(tasks) as [
+        Awaited<ReturnType<typeof api.gitManager.listWorktrees>>,
+        Awaited<ReturnType<typeof api.gitManager.getBranches>>,
+        Awaited<ReturnType<typeof api.gitManager.getStatus>> | null | undefined
+      ]
       setWorktrees(wts)
+      if (maybeStatus) {
+        const branch = maybeStatus.branch || ''
+        const detached = branch === 'HEAD' || branch === '' || branch === '(detached)'
+        setWtIsDetached(detached)
+        const count = maybeStatus.staged.length + maybeStatus.unstaged.length + maybeStatus.untracked.length + maybeStatus.conflicts.length
+        setWtChangeCount(count)
+        if (detached && !captureBranchName) {
+          const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13).replace('T', '-')
+          setCaptureBranchName(`wip/worktree-${ts}`)
+        }
+      } else {
+        setWtIsDetached(false)
+        setWtChangeCount(null)
+      }
       // Include all branches (local + remote) — worktrees can be created from any.
       const allBranches = brs
         .map((b: any) => ({
@@ -249,14 +296,21 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
 
     const api = getDockApi()
     try {
-      const result = await api.gitManager.addWorktree(projectDir, branch)
+      let result = await api.gitManager.addWorktree(projectDir, branch)
+      // Race mitigation: if another terminal just deleted a worktree with the
+      // same name, git may briefly report "already exists" before pruning
+      // clears it. Wait a beat and retry once before falling back to a list probe.
+      if (!result.success && result.error && /already exists/i.test(result.error)) {
+        await new Promise((r) => setTimeout(r, 500))
+        result = await api.gitManager.addWorktree(projectDir, branch)
+      }
       if (result.success && result.path) {
         // Worktree ready — set the real path and clear pending so spawn proceeds
         setTerminalWorktree(nextId, result.path)
         setPendingWorktree(nextId, null)
       } else if (result.error) {
-        // If worktree already exists, try to use it directly
-        if (result.error.includes('already exists')) {
+        // Final fallback: if it still reports "already exists", look it up.
+        if (/already exists/i.test(result.error)) {
           const wts = await api.gitManager.listWorktrees(projectDir)
           const strippedBranch = branch.replace(/^[^/]+\//, '')
           const existing = wts.find((w: any) => w.branch === strippedBranch || w.branch === branch)
@@ -285,42 +339,89 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     if (!worktreePath || !resolveCommitMsg.trim()) return
     setResolving(true)
     setResolveError(null)
+    setNeedsCapture(false)
+    const api = getDockApi()
     try {
-      const result = await getDockApi().gitManager.resolveWorktree(
+      const captureName = (wtIsDetached && !resolveTarget) ? captureBranchName.trim() : ''
+      const result = await api.gitManager.resolveWorktree(
         projectDir,
         worktreePath,
         resolveCommitMsg.trim(),
-        resolveTarget || undefined
+        resolveTarget || undefined,
+        captureName ? { captureBranchName: captureName } : undefined
       )
-      if (result.success) {
+
+      if (!result.success) {
+        // Detached HEAD signal: prompt for a branch name and let the user retry.
+        if (result.needsCaptureBranch) {
+          setNeedsCapture(true)
+          if (!captureBranchName) {
+            const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13).replace('T', '-')
+            setCaptureBranchName(`wip/worktree-${ts}`)
+          }
+        }
+        setResolveError(result.error || 'Resolve failed')
+        setResolving(false)
+        return
+      }
+
+      // Conflicts: keep the terminal/worktree; open git-manager so the user can resolve.
+      if (result.hasConflicts) {
+        setResolveResult({ commitHash: result.commitHash, merged: false, warnings: result.warnings })
+        setResolveError('Merge conflicts detected in the main repo. Opening git-manager to resolve.')
+        try { await api.gitManager.open(projectDir) } catch { /* best-effort */ }
+        setResolving(false)
+        return
+      }
+
+      // Success path — show a brief banner before closing the terminal.
+      setResolveResult({ commitHash: result.commitHash, merged: !!result.merged, warnings: result.warnings })
+      // Give the user ~800ms to see the confirmation banner before tearing down.
+      // Clear any previous timer to handle re-entry.
+      if (resolveTeardownTimer.current) clearTimeout(resolveTeardownTimer.current)
+      resolveTeardownTimer.current = setTimeout(() => {
+        resolveTeardownTimer.current = null
         setWorktreePopover(false)
         setResolveMode(false)
         setTerminalWorktree(terminalId, null)
-        // Close this terminal since the worktree is gone
-        getDockApi().terminal.kill(terminalId)
+        try { api.terminal.kill(terminalId) } catch { /* ok */ }
         removeTerminal(terminalId)
-      } else {
-        setResolveError(result.error || 'Resolve failed')
-      }
+      }, 800)
     } catch (e: any) {
-      setResolveError(e.message || 'Resolve failed')
+      setResolveError(e?.message || 'Resolve failed')
+      setResolving(false)
     }
-    setResolving(false)
-  }, [worktreePath, resolveCommitMsg, resolveTarget, projectDir, terminalId, setTerminalWorktree, removeTerminal])
+  }, [worktreePath, resolveCommitMsg, resolveTarget, captureBranchName, wtIsDetached, projectDir, terminalId, setTerminalWorktree, removeTerminal])
 
-  const handleDiscardWorktree = useCallback(async () => {
+  // Shows the styled confirm dialog (replaces the previous window.confirm flow).
+  const openDiscardConfirm = useCallback(() => {
     if (!worktreePath) return
-    if (!window.confirm('Discard all changes and remove this worktree? This cannot be undone.')) return
+    setDiscardConfirmOpen(true)
+  }, [worktreePath])
+
+  const handleConfirmDiscard = useCallback(async () => {
+    if (!worktreePath) return
+    setDiscardConfirmOpen(false)
     setResolving(true)
+    setResolveError(null)
+    const api = getDockApi()
+    let removeResult: { success: boolean; error?: string } | null = null
     try {
-      await getDockApi().gitManager.removeWorktree(projectDir, worktreePath, true)
+      removeResult = await api.gitManager.removeWorktree(projectDir, worktreePath, true)
+    } catch (e: any) {
+      removeResult = { success: false, error: e?.message || 'Failed to remove worktree' }
+    }
+
+    // Only tear down terminal state on success. On failure, keep the popover
+    // open with the error visible so the user can see what happened and decide.
+    if (removeResult?.success) {
       setWorktreePopover(false)
       setResolveMode(false)
       setTerminalWorktree(terminalId, null)
-      getDockApi().terminal.kill(terminalId)
+      try { api.terminal.kill(terminalId) } catch { /* ok */ }
       removeTerminal(terminalId)
-    } catch (e: any) {
-      setResolveError(e.message || 'Failed to remove worktree')
+    } else {
+      setResolveError(removeResult?.error || 'Failed to remove worktree')
     }
     setResolving(false)
   }, [worktreePath, projectDir, terminalId, setTerminalWorktree, removeTerminal])
@@ -694,7 +795,21 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
               <div className="worktree-popover-loading">Loading...</div>
             ) : resolveMode && worktreePath ? (
               <div className="worktree-popover-body">
-                <div className="worktree-popover-label">Resolve Worktree</div>
+                <div className="worktree-popover-label">
+                  Resolve Worktree
+                  {wtChangeCount !== null && (
+                    <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--text-secondary, #888)' }}>
+                      {wtChangeCount === 0 ? '(no changes)' : `(${wtChangeCount} change${wtChangeCount > 1 ? 's' : ''})`}
+                    </span>
+                  )}
+                </div>
+                {wtIsDetached && (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary, #888)', padding: '4px 0 6px', lineHeight: 1.4 }}>
+                    Worktree is on a detached HEAD. {resolveTarget
+                      ? 'The commit will be merged into the target branch.'
+                      : 'Provide a capture branch so the commit is preserved.'}
+                  </div>
+                )}
                 <div className="worktree-resolve-form">
                   <input
                     type="text"
@@ -716,18 +831,37 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                       <option key={b.name} value={b.name}>{b.name.replace(/^[^/]+\//, '')}{b.current ? ' (current)' : ''}</option>
                     ))}
                   </select>
+                  {(wtIsDetached || needsCapture) && !resolveTarget && (
+                    <input
+                      type="text"
+                      className="worktree-resolve-input"
+                      placeholder="Capture branch (e.g. wip/worktree-20260415-1430)"
+                      value={captureBranchName}
+                      onChange={(e) => setCaptureBranchName(e.target.value)}
+                      spellCheck={false}
+                      autoFocus={needsCapture}
+                      title="The commit will be saved on this branch before the worktree is removed."
+                    />
+                  )}
+                  {resolveResult && !resolveError && (
+                    <div className="worktree-resolve-error" style={{ color: 'var(--success-color, #3fb950)', background: 'rgba(63,185,80,0.08)' }}>
+                      {resolveResult.merged ? 'Merged and removed — ' : 'Committed and removed — '}
+                      {resolveResult.commitHash ? resolveResult.commitHash.slice(0, 8) : ''}
+                      {resolveResult.warnings?.length ? ` · ${resolveResult.warnings.join('; ')}` : ''}
+                    </div>
+                  )}
                   {resolveError && <div className="worktree-resolve-error">{resolveError}</div>}
                   <div className="worktree-resolve-actions">
-                    <button className="worktree-resolve-cancel" onClick={() => setResolveMode(false)} disabled={resolving}>Cancel</button>
+                    <button className="worktree-resolve-cancel" onClick={() => { setResolveMode(false); setResolveResult(null); setResolveError(null); setNeedsCapture(false) }} disabled={resolving}>Cancel</button>
                     <button
                       className="worktree-resolve-confirm"
                       onClick={handleResolveWorktree}
-                      disabled={resolving || !resolveCommitMsg.trim()}
+                      disabled={resolving || !resolveCommitMsg.trim() || (wtIsDetached && !resolveTarget && !captureBranchName.trim())}
                     >
                       {resolving ? 'Resolving...' : resolveTarget ? 'Commit & Merge' : 'Commit & Remove'}
                     </button>
                   </div>
-                  <button className="worktree-discard-btn" onClick={handleDiscardWorktree} disabled={resolving}>
+                  <button className="worktree-discard-btn" onClick={openDiscardConfirm} disabled={resolving}>
                     Discard & Remove Worktree
                   </button>
                 </div>
@@ -737,10 +871,10 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                 {worktreePath && (
                   <>
                     <div className="worktree-popover-label">Current Worktree</div>
-                    <button className="worktree-popover-item worktree-resolve-btn" onClick={() => { setResolveMode(true); setResolveCommitMsg(''); setResolveTarget(''); setResolveError(null) }}>
+                    <button className="worktree-popover-item worktree-resolve-btn" onClick={() => { setResolveMode(true); setResolveCommitMsg(''); setResolveTarget(''); setResolveError(null); setResolveResult(null); setNeedsCapture(false) }}>
                       <span className="worktree-popover-branch">Resolve Worktree</span>
                     </button>
-                    <button className="worktree-popover-item" onClick={handleDiscardWorktree} style={{ color: '#f87171' }}>
+                    <button className="worktree-popover-item" onClick={openDiscardConfirm} style={{ color: '#f87171' }}>
                       <span className="worktree-popover-branch">Discard & Remove</span>
                     </button>
                     <div className="worktree-popover-divider" />
@@ -757,14 +891,14 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                           className="worktree-delete-btn"
                           onClick={async (e) => {
                             e.stopPropagation()
-                            if (!confirm(`Delete worktree "${wt.branch || wt.head}"?\n\nThis will remove the directory:\n${wt.path}`)) return
                             const api = getDockApi()
-                            const r = await api.gitManager.removeWorktree(projectDir, wt.path, true)
-                            if (r.success) {
-                              setWorktrees(prev => prev.filter(w => w.path !== wt.path))
-                            } else {
-                              alert(`Failed to remove worktree: ${r.error || 'Unknown error'}`)
-                            }
+                            // JIT dirty check — the stored list may be stale.
+                            let changeCount = wt.changeCount ?? 0
+                            try {
+                              const s = await api.gitManager.getStatus(wt.path)
+                              changeCount = s.staged.length + s.unstaged.length + s.untracked.length + s.conflicts.length
+                            } catch { /* fall back to stored value */ }
+                            setOtherWorktreeRemove({ path: wt.path, branch: wt.branch || wt.head, changeCount })
                           }}
                           title="Delete worktree"
                         >
@@ -789,6 +923,90 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                 )}
               </div>
             )}
+          </div>
+        </>,
+        document.body
+      )}
+      {discardConfirmOpen && worktreePath && createPortal(
+        <>
+          <div className="worktree-popover-backdrop" onClick={() => setDiscardConfirmOpen(false)} />
+          <div className="worktree-popover" style={{ top: '40%', left: '50%', transform: 'translateX(-50%)', minWidth: 320 }}>
+            <div className="worktree-popover-header">
+              <span>Discard Worktree</span>
+              <button className="worktree-popover-close" onClick={() => setDiscardConfirmOpen(false)}>&times;</button>
+            </div>
+            <div className="worktree-popover-body">
+              <div style={{ fontSize: 12, padding: '8px 2px 12px', lineHeight: 1.5 }}>
+                {wtChangeCount && wtChangeCount > 0 ? (
+                  <><strong>{wtChangeCount} uncommitted change{wtChangeCount > 1 ? 's' : ''}</strong> will be permanently lost.</>
+                ) : 'This will remove the worktree directory.'}
+                <br />
+                <span style={{ color: 'var(--text-secondary, #888)', fontSize: 11 }}>{worktreePath}</span>
+              </div>
+              <div className="worktree-resolve-actions">
+                <button className="worktree-resolve-cancel" onClick={() => setDiscardConfirmOpen(false)} disabled={resolving}>Cancel</button>
+                <button
+                  className="worktree-discard-btn"
+                  style={{ marginTop: 0 }}
+                  onClick={handleConfirmDiscard}
+                  disabled={resolving}
+                >
+                  {resolving ? 'Removing...' : 'Discard & Remove'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+      {otherWorktreeRemove && createPortal(
+        <>
+          <div className="worktree-popover-backdrop" onClick={() => setOtherWorktreeRemove(null)} />
+          <div className="worktree-popover" style={{ top: '40%', left: '50%', transform: 'translateX(-50%)', minWidth: 320 }}>
+            <div className="worktree-popover-header">
+              <span>Remove Worktree</span>
+              <button className="worktree-popover-close" onClick={() => setOtherWorktreeRemove(null)}>&times;</button>
+            </div>
+            <div className="worktree-popover-body">
+              <div style={{ fontSize: 12, padding: '8px 2px 12px', lineHeight: 1.5 }}>
+                Remove worktree <strong>{otherWorktreeRemove.branch}</strong>?
+                {otherWorktreeRemove.changeCount > 0 && (
+                  <> <span style={{ color: '#f87171' }}>({otherWorktreeRemove.changeCount} uncommitted change{otherWorktreeRemove.changeCount > 1 ? 's' : ''} will be lost)</span></>
+                )}
+                <br />
+                <span style={{ color: 'var(--text-secondary, #888)', fontSize: 11 }}>{otherWorktreeRemove.path}</span>
+              </div>
+              <div className="worktree-resolve-actions">
+                <button className="worktree-resolve-cancel" onClick={() => setOtherWorktreeRemove(null)}>Cancel</button>
+                <button
+                  className="worktree-discard-btn"
+                  style={{ marginTop: 0 }}
+                  onClick={async () => {
+                    const target = otherWorktreeRemove
+                    setOtherWorktreeRemove(null)
+                    const api = getDockApi()
+                    const r = await api.gitManager.removeWorktree(projectDir, target.path, true)
+                    if (r.success) {
+                      setWorktrees(prev => prev.filter(w => w.path !== target.path))
+                      // If we just removed the worktree this terminal was bound to,
+                      // tear down the terminal-side state too — otherwise the card
+                      // is stuck on a path that no longer exists.
+                      if (target.path === worktreePath) {
+                        setWorktreePopover(false)
+                        setResolveMode(false)
+                        setTerminalWorktree(terminalId, null)
+                        try { api.terminal.kill(terminalId) } catch { /* ok */ }
+                        removeTerminal(terminalId)
+                      }
+                    } else {
+                      setResolveError(`Failed to remove worktree: ${r.error || 'Unknown error'}`)
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
           </div>
         </>,
         document.body

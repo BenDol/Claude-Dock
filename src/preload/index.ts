@@ -301,10 +301,17 @@ export interface DockApi {
     previewGitignore: (projectDir: string, pattern: string) => Promise<string[]>
     addToGitignore: (projectDir: string, pattern: string, removeFromIndex: boolean) => Promise<{ success: boolean; error?: string }>
     migrateToLfs: (projectDir: string, filePaths: string[]) => Promise<{ success: boolean; message?: string; error?: string }>
-    listWorktrees: (projectDir: string) => Promise<{ path: string; branch: string; head: string; isMain: boolean }[]>
+    listWorktrees: (projectDir: string) => Promise<import('../shared/git-manager-types').GitWorktreeInfo[]>
     addWorktree: (projectDir: string, branch: string, targetPath?: string) => Promise<{ success: boolean; path?: string; error?: string }>
     removeWorktree: (projectDir: string, worktreePath: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
-    resolveWorktree: (projectDir: string, worktreePath: string, commitMessage: string, targetBranch?: string) => Promise<{ success: boolean; commitHash?: string; merged?: boolean; error?: string }>
+    resolveWorktree: (
+      projectDir: string,
+      worktreePath: string,
+      commitMessage: string,
+      targetBranch?: string,
+      options?: { captureBranchName?: string; deleteSourceBranch?: boolean }
+    ) => Promise<import('../shared/git-manager-types').ResolveWorktreeResult>
+    pruneWorktrees: (projectDir: string) => Promise<import('../shared/git-manager-types').PruneWorktreesResult>
     onReopen: (callback: () => void) => () => void
   }
   ci: {
@@ -770,7 +777,8 @@ const dockApi: DockApi = {
     listWorktrees: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_LIST_WORKTREES, projectDir),
     addWorktree: (projectDir, branch, targetPath) => ipcRenderer.invoke(IPC.GIT_MGR_ADD_WORKTREE, projectDir, branch, targetPath),
     removeWorktree: (projectDir, worktreePath, force) => ipcRenderer.invoke(IPC.GIT_MGR_REMOVE_WORKTREE, projectDir, worktreePath, force),
-    resolveWorktree: (projectDir, worktreePath, commitMessage, targetBranch) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WORKTREE, projectDir, worktreePath, commitMessage, targetBranch),
+    resolveWorktree: (projectDir, worktreePath, commitMessage, targetBranch, options) => ipcRenderer.invoke(IPC.GIT_MGR_RESOLVE_WORKTREE, projectDir, worktreePath, commitMessage, targetBranch, options),
+    pruneWorktrees: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_PRUNE_WORKTREES, projectDir),
     onReopen: (callback) => {
       const handler = () => callback()
       ipcRenderer.on('git-manager:reopen', handler)

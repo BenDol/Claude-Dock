@@ -651,6 +651,12 @@ const GitManagerApp: React.FC = () => {
   const [confirmModal, setConfirmModal] = useState<{
     title: string; message: React.ReactNode; confirmLabel: string; danger?: boolean; onConfirm: () => void
   } | null>(null)
+  // Dedicated modal for dirty-worktree removal — offers Commit & Remove / Commit & Merge / Discard.
+  const [worktreeRemoveModal, setWorktreeRemoveModal] = useState<{
+    wt: GitWorktreeInfo
+    changeCount: number
+    isDetached: boolean
+  } | null>(null)
   // Navigation: activeDir is the repo we're currently viewing, navStack tracks parent repos
   const [activeDir, setActiveDir] = useState(projectDir)
   const [navStack, setNavStack] = useState<NavEntry[]>([])
@@ -1007,7 +1013,8 @@ const GitManagerApp: React.FC = () => {
       setWorktreesLoading(true)
       api.gitManager.listWorktrees(activeDir).then((data: GitWorktreeInfo[]) => {
         if (wtGen === worktreeGenRef.current) {
-          setWorktrees(data.filter(wt => !wt.isMain && !wt.isPrunable))
+          // Include prunable entries so the user can clean up orphans from the sidebar.
+          setWorktrees(data.filter(wt => !wt.isMain))
           setWorktreesLoading(false)
         }
       }).catch(() => {
@@ -1857,7 +1864,33 @@ const GitManagerApp: React.FC = () => {
           {(worktrees.length > 0 || worktreesLoading) && (
             <CollapsibleSection title="Worktrees" count={worktrees.length} loading={worktreesLoading}>
               {worktrees.map(wt => (
-                <WorktreeSidebarItem key={wt.path} worktree={wt} onNavigate={navigateToWorktree} onRemove={(wtPath) => {
+                <WorktreeSidebarItem key={wt.path} worktree={wt} onNavigate={navigateToWorktree} onRemove={async (wtPath) => {
+                  // Prunable entries have no working directory — bypass the dirty check.
+                  if (wt.isPrunable) {
+                    setConfirmModal({
+                      title: 'Prune orphaned worktree',
+                      message: (<p>Prune metadata for <strong>{wt.branch || wtPath}</strong>?<br /><span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{wtPath}</span></p>),
+                      confirmLabel: 'Prune',
+                      onConfirm: async () => {
+                        const r = await getDockApi().gitManager.pruneWorktrees(activeDir)
+                        if (r.error) setError(r.error)
+                        refresh()
+                      }
+                    })
+                    return
+                  }
+                  // JIT dirty-check: the listWorktrees snapshot may be stale.
+                  let changeCount = wt.changeCount ?? 0
+                  let isDetached = !wt.branch || wt.branch === 'HEAD' || wt.branch === '(detached)'
+                  try {
+                    const s = await getDockApi().gitManager.getStatus(wtPath)
+                    changeCount = s.staged.length + s.unstaged.length + s.untracked.length + s.conflicts.length
+                    isDetached = !s.branch || s.branch === 'HEAD' || s.branch === '(detached)'
+                  } catch { /* fall back to stored values */ }
+                  if (changeCount > 0 || isDetached) {
+                    setWorktreeRemoveModal({ wt, changeCount, isDetached })
+                    return
+                  }
                   setConfirmModal({
                     title: 'Remove worktree',
                     message: (<p>Remove worktree <strong>{wt.branch || wtPath}</strong>?<br /><span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{wtPath}</span></p>),
@@ -2271,6 +2304,18 @@ const GitManagerApp: React.FC = () => {
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           onClose={() => setConfirmModal(null)}
+        />
+      )}
+      {worktreeRemoveModal && (
+        <WorktreeRemoveModal
+          wt={worktreeRemoveModal.wt}
+          changeCount={worktreeRemoveModal.changeCount}
+          isDetached={worktreeRemoveModal.isDetached}
+          activeDir={activeDir}
+          branches={branches}
+          onClose={() => setWorktreeRemoveModal(null)}
+          onDone={() => { setWorktreeRemoveModal(null); refresh() }}
+          onOpenGitManager={() => { /* already in git-manager window — just refresh to surface merge state */ refresh() }}
         />
       )}
       {actionError && (
@@ -10180,6 +10225,151 @@ const ConfirmModal: React.FC<{
   </div>
 )
 
+/**
+ * Dirty-worktree remove modal. Commits first (optionally merging) instead of
+ * silently destroying uncommitted changes. Offers an escape hatch to discard.
+ */
+const WorktreeRemoveModal: React.FC<{
+  wt: GitWorktreeInfo
+  changeCount: number
+  isDetached: boolean
+  activeDir: string
+  branches: GitBranchInfo[]
+  onClose: () => void
+  onDone: () => void
+  onOpenGitManager?: () => void
+}> = ({ wt, changeCount, isDetached, activeDir, branches, onClose, onDone, onOpenGitManager }) => {
+  const [commitMsg, setCommitMsg] = useState('')
+  const [targetBranch, setTargetBranch] = useState('')
+  const [captureName, setCaptureName] = useState(() => {
+    if (!isDetached) return ''
+    const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 13).replace('T', '-')
+    return `wip/worktree-${ts}`
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[] | null>(null)
+
+  const canCommit = commitMsg.trim().length > 0 && (!isDetached || targetBranch || captureName.trim().length > 0)
+
+  const runCommit = useCallback(async () => {
+    if (!canCommit) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await getDockApi().gitManager.resolveWorktree(
+        activeDir, wt.path, commitMsg.trim(),
+        targetBranch || undefined,
+        (isDetached && !targetBranch && captureName.trim()) ? { captureBranchName: captureName.trim() } : undefined
+      )
+      if (!r.success) {
+        setErr(r.error || 'Resolve failed')
+        setBusy(false)
+        return
+      }
+      if (r.hasConflicts) {
+        setWarnings(['Merge conflicts detected in main repo — worktree preserved.'])
+        onOpenGitManager?.()
+        setBusy(false)
+        return
+      }
+      onDone()
+    } catch (e: any) {
+      setErr(e?.message || 'Resolve failed')
+      setBusy(false)
+    }
+  }, [activeDir, wt.path, commitMsg, targetBranch, isDetached, captureName, canCommit, onDone, onOpenGitManager])
+
+  const runDiscard = useCallback(async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = await getDockApi().gitManager.removeWorktree(activeDir, wt.path, true)
+      if (!r.success) {
+        setErr(r.error || 'Remove failed')
+        setBusy(false)
+        return
+      }
+      onDone()
+    } catch (e: any) {
+      setErr(e?.message || 'Remove failed')
+      setBusy(false)
+    }
+  }, [activeDir, wt.path, onDone])
+
+  return (
+    <div className="gm-modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}>
+      <div className="gm-modal">
+        <div className="gm-modal-header">
+          <span>Remove Worktree</span>
+          <button className="gm-modal-close" onClick={onClose} disabled={busy}>&times;</button>
+        </div>
+        <div className="gm-modal-body" style={{ fontSize: 12, lineHeight: 1.5 }}>
+          <p style={{ marginTop: 0 }}>
+            <strong>{wt.branch || wt.path}</strong>
+            {changeCount > 0 && (
+              <> has <span style={{ color: '#f87171' }}>{changeCount} uncommitted change{changeCount > 1 ? 's' : ''}</span>.</>
+            )}
+            {isDetached && <> Worktree is on a detached HEAD.</>}
+          </p>
+          <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: -6 }}>{wt.path}</p>
+          <input
+            type="text"
+            className="gm-modal-input"
+            placeholder="Commit message"
+            value={commitMsg}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            style={{ width: '100%', marginTop: 8 }}
+            autoFocus
+          />
+          <select
+            className="gm-modal-input"
+            value={targetBranch}
+            onChange={(e) => setTargetBranch(e.target.value)}
+            style={{ width: '100%', marginTop: 6 }}
+          >
+            <option value="">Commit only (no merge)</option>
+            {branches.filter(b => !b.remote).map(b => (
+              <option key={b.name} value={b.name}>{b.name}{b.current ? ' (current)' : ''}</option>
+            ))}
+          </select>
+          {isDetached && !targetBranch && (
+            <input
+              type="text"
+              className="gm-modal-input"
+              placeholder="Capture branch name"
+              value={captureName}
+              onChange={(e) => setCaptureName(e.target.value)}
+              style={{ width: '100%', marginTop: 6 }}
+              title="Required when the worktree is on a detached HEAD — the commit will land on this branch."
+            />
+          )}
+          {err && <div style={{ color: '#f87171', marginTop: 8, fontSize: 11 }}>{err}</div>}
+          {warnings && <div style={{ color: 'var(--text-secondary)', marginTop: 8, fontSize: 11 }}>{warnings.join('; ')}</div>}
+        </div>
+        <div className="gm-modal-footer" style={{ gap: 8 }}>
+          <button className="gm-modal-btn" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            className="gm-modal-btn gm-modal-btn-danger"
+            onClick={runDiscard}
+            disabled={busy}
+            title="Discard all uncommitted changes and remove the worktree."
+          >
+            {busy ? '...' : 'Discard & Remove'}
+          </button>
+          <button
+            className="gm-modal-btn gm-modal-btn-primary"
+            onClick={runCommit}
+            disabled={busy || !canCommit}
+          >
+            {busy ? '...' : targetBranch ? 'Commit & Merge' : 'Commit & Remove'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // --- Add Submodule / Add Remote modals ---
 
 const AddSubmoduleModal: React.FC<{
@@ -10999,41 +11189,54 @@ const WorktreeSidebarItem: React.FC<{
 }> = ({ worktree, onNavigate, onRemove }) => {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const dirName = worktree.path.split(/[/\\]/).pop() || worktree.path
+  const orphaned = !!worktree.isPrunable
   const tooltip = [
     worktree.branch ? `Branch: ${worktree.branch}` : `HEAD: ${worktree.head}`,
     worktree.path,
+    orphaned ? 'Orphaned — working tree missing. Use Prune to clean up.' : null,
     worktree.hasDirtyWorkTree ? 'Has uncommitted changes' : null,
-    'Double-click to open worktree'
+    orphaned ? null : 'Double-click to open worktree'
   ].filter(Boolean).join('\n')
 
   return (
     <>
       <div
-        className="gm-sidebar-item gm-sidebar-item-worktree"
-        onDoubleClick={() => onNavigate(worktree)}
+        className={`gm-sidebar-item gm-sidebar-item-worktree${orphaned ? ' gm-sidebar-item-orphaned' : ''}`}
+        onDoubleClick={() => { if (!orphaned) onNavigate(worktree) }}
         onContextMenu={(e) => {
           e.preventDefault()
           const zoom = parseFloat(document.documentElement.style.zoom) || 1
           setCtxMenu({ x: e.clientX / zoom, y: e.clientY / zoom })
         }}
         title={tooltip}
-        style={{ paddingLeft: 22 }}
+        style={{ paddingLeft: 22, opacity: orphaned ? 0.65 : undefined }}
       >
         <WorktreeIcon />
         <span className="gm-branch-name">
           {worktree.branch || dirName}
           {worktree.branch && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({dirName})</span>}
+          {orphaned && <span style={{ color: '#f87171', fontWeight: 400, marginLeft: 6, fontSize: 10 }}>(orphaned)</span>}
         </span>
         <span className="gm-submodule-indicators">
-          {worktree.changeCount != null && worktree.changeCount > 0 && (
+          {!orphaned && worktree.changeCount != null && worktree.changeCount > 0 && (
             <span className="gm-badge gm-badge-submodule-changes" title={`${worktree.changeCount} working change${worktree.changeCount > 1 ? 's' : ''}`}>
               {worktree.changeCount}
             </span>
           )}
-          {worktree.hasDirtyWorkTree && (
+          {!orphaned && worktree.hasDirtyWorkTree && (
             <span className="gm-submodule-dirty" title="Has uncommitted changes">
               <SubmoduleDirtyIcon />
             </span>
+          )}
+          {orphaned && (
+            <button
+              className="gm-small-btn"
+              style={{ fontSize: 10, padding: '1px 6px' }}
+              onClick={(e) => { e.stopPropagation(); onRemove(worktree.path) }}
+              title="Prune this orphaned worktree entry"
+            >
+              Prune
+            </button>
           )}
         </span>
       </div>

@@ -106,6 +106,42 @@ export interface GitWorktreeInfo {
   hasDirtyWorkTree?: boolean
 }
 
+/**
+ * Options for the worktree resolve (commit + optional merge + remove) flow.
+ * `captureBranchName` is only used when the worktree is on a detached HEAD and
+ * no merge target is set — the backend creates the branch in the worktree so
+ * the commit has a reachable ref after worktree removal.
+ */
+export interface ResolveWorktreeOptions {
+  captureBranchName?: string
+  deleteSourceBranch?: boolean
+}
+
+/**
+ * Rich result from resolveWorktree. `success=false` with `needsCaptureBranch`
+ * signals the detached-HEAD case where the UI should prompt for a branch name
+ * and retry; `hasConflicts` with `mergeInProgress` signals that the merge step
+ * halted with conflicts in the main repo and the worktree was preserved so the
+ * user can resolve them in git-manager.
+ */
+export interface ResolveWorktreeResult {
+  success: boolean
+  commitHash?: string
+  merged?: boolean
+  hasConflicts?: boolean
+  mergeInProgress?: boolean
+  removedWorktree?: boolean
+  warnings?: string[]
+  needsCaptureBranch?: boolean
+  error?: string
+}
+
+/** Result of `git worktree prune` — directories that were pruned. */
+export interface PruneWorktreesResult {
+  pruned: string[]
+  error?: string
+}
+
 /** Conflicted file entry */
 export interface GitConflictEntry {
   path: string
