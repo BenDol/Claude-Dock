@@ -996,6 +996,12 @@ function IssueDetailPanel({
             </div>
           </div>
 
+          <StatusEditor
+            projectDir={projectDir}
+            issueId={issue.id}
+            current={issue.status ?? null}
+            onChanged={() => { onRefresh(); onListChanged() }}
+          />
           <LabelEditor
             projectDir={projectDir}
             issueId={issue.id}
@@ -1012,12 +1018,6 @@ function IssueDetailPanel({
             projectDir={projectDir}
             issueId={issue.id}
             current={issue.milestone}
-            onChanged={() => { onRefresh(); onListChanged() }}
-          />
-          <StatusEditor
-            projectDir={projectDir}
-            issueId={issue.id}
-            current={issue.status ?? null}
             onChanged={() => { onRefresh(); onListChanged() }}
           />
 

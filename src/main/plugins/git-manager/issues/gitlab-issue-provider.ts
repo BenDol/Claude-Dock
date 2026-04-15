@@ -657,54 +657,31 @@ export class GitLabIssueProvider implements IssueProvider {
     return parsed.data || {}
   }
 
-  async getStatusCapability(projectDir: string, force = false): Promise<IssueStatusCapability> {
-    if (force) {
-      this.statusCapCache.delete(projectDir)
-      this.statusListCache.delete(projectDir)
-    }
-    const cached = cacheGet(this.statusCapCache, projectDir)
-    if (cached) return cached
+  /**
+   * Candidate inline-fragment type names for the status widget definition.
+   * Tried in order; first one that the GitLab instance accepts wins. We probe
+   * the actual data query (rather than __type introspection) because:
+   *   1. introspection can be restricted by instance config
+   *   2. a type can exist without the project actually exposing statuses
+   *   3. recent GitLab versions have shipped multiple naming conventions
+   *      (`WorkItemWidgetDefinitionStatus` for the simple status, and
+   *      `WorkItemWidgetDefinitionCustomStatus` for the Ultimate custom-status feature)
+   */
+  private static readonly STATUS_DEF_TYPE_CANDIDATES = [
+    'WorkItemWidgetDefinitionStatus',
+    'WorkItemWidgetDefinitionCustomStatus'
+  ]
 
-    // Introspect the WorkItemWidgetStatus type — if it doesn't exist on this
-    // GitLab instance, the feature isn't available (Premium/Ultimate-only and
-    // requires a recent enough version).
-    const query = `query { __type(name: "WorkItemWidgetStatus") { name fields { name } } }`
-    try {
-      const data = await this.graphql(projectDir, query, {})
-      const type = data.__type as { name?: string; fields?: Array<{ name: string }> } | null
-      if (!type || !type.name) {
-        const cap: IssueStatusCapability = {
-          supported: false,
-          reason: 'Native work-item status is unavailable on this GitLab instance. Requires GitLab Premium/Ultimate with the status widget enabled.'
-        }
-        cacheSet(this.statusCapCache, projectDir, cap)
-        return cap
-      }
-      const cap: IssueStatusCapability = { supported: true }
-      cacheSet(this.statusCapCache, projectDir, cap)
-      return cap
-    } catch (err) {
-      getServices().logError('[issue-gitlab] getStatusCapability introspection failed:', err)
-      const cap: IssueStatusCapability = {
-        supported: false,
-        reason: 'Could not reach GitLab GraphQL API to probe work-item status support.'
-      }
-      cacheSet(this.statusCapCache, projectDir, cap)
-      return cap
-    }
-  }
-
-  async listStatuses(projectDir: string): Promise<IssueStatus[]> {
-    const cached = cacheGet(this.statusListCache, projectDir)
-    if (cached) return cached
-
-    const cap = await this.getStatusCapability(projectDir)
-    if (!cap.supported) return []
-
-    const fullPath = await this.getFullPath(projectDir)
-    if (!fullPath) return []
-
-    // Work item types expose allowed statuses via widget definitions.
+  /**
+   * Probe a single candidate type by issuing the real data query. Returns the
+   * mapped statuses on success, or throws on GraphQL error so the caller can
+   * try the next candidate.
+   */
+  private async probeStatusesForType(
+    projectDir: string,
+    fullPath: string,
+    typeName: string
+  ): Promise<IssueStatus[]> {
     const query = `
       query($fullPath:ID!) {
         workspace: project(fullPath:$fullPath) {
@@ -712,7 +689,7 @@ export class GitLabIssueProvider implements IssueProvider {
             nodes {
               name
               widgetDefinitions {
-                ... on WorkItemWidgetDefinitionStatus {
+                ... on ${typeName} {
                   allowedStatuses { id name category iconName color }
                 }
               }
@@ -721,27 +698,79 @@ export class GitLabIssueProvider implements IssueProvider {
         }
       }
     `
-    try {
-      const data = await this.graphql(projectDir, query, { fullPath })
-      const ws = data.workspace as { workItemTypes?: { nodes?: Array<{ widgetDefinitions?: Array<{ allowedStatuses?: Array<RawWorkItemStatus> }> }> } } | null
-      const seen = new Map<string, IssueStatus>()
-      for (const wit of ws?.workItemTypes?.nodes || []) {
-        for (const def of wit.widgetDefinitions || []) {
-          for (const s of def.allowedStatuses || []) {
-            if (!s?.id || !s.name) continue
-            if (!seen.has(s.id)) {
-              seen.set(s.id, mapWorkItemStatus(s))
-            }
-          }
+    const data = await this.graphql(projectDir, query, { fullPath })
+    const ws = data.workspace as { workItemTypes?: { nodes?: Array<{ name?: string; widgetDefinitions?: Array<{ allowedStatuses?: Array<RawWorkItemStatus> }> }> } } | null
+    const seen = new Map<string, IssueStatus>()
+    for (const wit of ws?.workItemTypes?.nodes || []) {
+      for (const def of wit.widgetDefinitions || []) {
+        for (const s of def?.allowedStatuses || []) {
+          if (!s?.id || !s.name) continue
+          if (!seen.has(s.id)) seen.set(s.id, mapWorkItemStatus(s))
         }
       }
-      const statuses = [...seen.values()]
-      cacheSet(this.statusListCache, projectDir, statuses)
-      return statuses
-    } catch (err) {
-      getServices().logError('[issue-gitlab] listStatuses failed:', err)
-      return []
     }
+    return [...seen.values()]
+  }
+
+  async getStatusCapability(projectDir: string, force = false): Promise<IssueStatusCapability> {
+    if (force) {
+      this.statusCapCache.delete(projectDir)
+      this.statusListCache.delete(projectDir)
+    }
+    const cached = cacheGet(this.statusCapCache, projectDir)
+    if (cached) return cached
+
+    const fullPath = await this.getFullPath(projectDir)
+    if (!fullPath) {
+      const cap: IssueStatusCapability = {
+        supported: false,
+        reason: 'Could not resolve GitLab project path for this repo.'
+      }
+      cacheSet(this.statusCapCache, projectDir, cap)
+      return cap
+    }
+
+    // Try each candidate widget-definition type until one works. The first that
+    // returns a non-empty status list wins, populates the list cache, and marks
+    // capability as supported. If a type triggers a GraphQL error (typically
+    // "Unknown type ..." when the inline fragment doesn't exist in the schema),
+    // we log it and try the next candidate.
+    let lastError: string | null = null
+    let typeFoundButEmpty = false
+    for (const typeName of GitLabIssueProvider.STATUS_DEF_TYPE_CANDIDATES) {
+      try {
+        const statuses = await this.probeStatusesForType(projectDir, fullPath, typeName)
+        getServices().log(`[issue-gitlab] status probe (${typeName}): ${statuses.length} statuses`)
+        if (statuses.length > 0) {
+          cacheSet(this.statusListCache, projectDir, statuses)
+          const cap: IssueStatusCapability = { supported: true }
+          cacheSet(this.statusCapCache, projectDir, cap)
+          return cap
+        }
+        // Query succeeded but returned nothing — the type exists but the
+        // project has no allowed statuses configured for any work-item type.
+        typeFoundButEmpty = true
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        getServices().log(`[issue-gitlab] status probe (${typeName}) failed: ${msg}`)
+        lastError = msg
+      }
+    }
+
+    const reason = typeFoundButEmpty
+      ? 'No work-item statuses are configured for this GitLab project. Add allowed statuses in the project settings.'
+      : `Native work-item status is unavailable on this GitLab instance. Requires GitLab Premium/Ultimate with the status widget enabled.${lastError ? ` (last error: ${lastError})` : ''}`
+    const cap: IssueStatusCapability = { supported: false, reason }
+    cacheSet(this.statusCapCache, projectDir, cap)
+    return cap
+  }
+
+  async listStatuses(projectDir: string): Promise<IssueStatus[]> {
+    // getStatusCapability populates statusListCache as a side effect on success,
+    // so after it runs we can read the cache directly.
+    await this.getStatusCapability(projectDir)
+    const cached = cacheGet(this.statusListCache, projectDir)
+    return cached || []
   }
 
   async fetchIssueStatuses(
