@@ -1,6 +1,7 @@
 :root {
   --accent-color: #da7756;
   --term-bg: #1a1b26;
+  --shell-term-bg: #2c2d38;
   --term-fg: #c0caf5;
   --term-cursor: #c0caf5;
   --term-selection: #33467c;
@@ -2045,8 +2046,8 @@ body {
   align-items: center;
   height: 16px;
   padding: 0 6px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 78%, var(--accent-color) 22%);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, var(--accent-color) 30%);
   user-select: none;
   flex-shrink: 0;
   cursor: row-resize;
@@ -2189,8 +2190,9 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  /* Match xterm's background so the gap below the last row is invisible */
-  background: var(--term-bg, #1a1b26);
+  /* Match xterm's background so the gap below the last row is invisible.
+     Shell terminals use a slightly lightened bg to differentiate from Claude terminals. */
+  background: var(--shell-term-bg, #2c2d38);
 }
 
 /* Smaller scroll-to-bottom button for shell panels */

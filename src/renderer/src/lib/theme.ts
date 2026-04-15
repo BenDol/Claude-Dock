@@ -26,6 +26,25 @@ export function getEffectiveTerminalColors(settings: Settings): TerminalColors {
   return isDarkMode(settings) ? DARK_TERMINAL_COLORS : LIGHT_TERMINAL_COLORS
 }
 
+/** Lighten a #rrggbb color by `amount` (0–255 per channel). Used to differentiate
+ *  shell terminal backgrounds from Claude terminal backgrounds. */
+function lightenHex(hex: string, amount: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return hex
+  const num = parseInt(m[1], 16)
+  const r = Math.min(255, ((num >> 16) & 0xff) + amount)
+  const g = Math.min(255, ((num >> 8) & 0xff) + amount)
+  const b = Math.min(255, (num & 0xff) + amount)
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')
+}
+
+/** Shell terminals share the active theme but use a lightened background to make
+ *  them visually distinct from Claude terminals. */
+export function getShellTerminalColors(settings: Settings): TerminalColors {
+  const tc = getEffectiveTerminalColors(settings)
+  return { ...tc, background: lightenHex(tc.background, 18) }
+}
+
 export function applyThemeToDocument(settings: Settings): void {
   const root = document.documentElement
   const { terminal } = settings
@@ -39,6 +58,8 @@ export function applyThemeToDocument(settings: Settings): void {
   root.style.setProperty('--term-fg', tc.foreground)
   root.style.setProperty('--term-cursor', tc.cursor)
   root.style.setProperty('--term-selection', tc.selectionBackground)
+  // Shell terminals use a slightly lightened bg to look different from Claude terminals
+  root.style.setProperty('--shell-term-bg', getShellTerminalColors(settings).background)
 
   // Terminal font
   root.style.setProperty('--term-font-family', terminal.fontFamily)

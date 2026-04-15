@@ -6,7 +6,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { SearchAddon } from '@xterm/addon-search'
 import { getDockApi } from '../lib/ipc-bridge'
 import { useSettingsStore } from '../stores/settings-store'
-import { getEffectiveTerminalColors } from '../lib/theme'
+import { getShellTerminalColors } from '../lib/theme'
 
 interface UseShellTerminalOptions {
   shellId: string
@@ -89,7 +89,7 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
       if (!container || termRef.current) return
       containerRef.current = container
 
-      const tc = getEffectiveTerminalColors(settings)
+      const tc = getShellTerminalColors(settings)
 
       const term = new Terminal({
         allowProposedApi: true,
@@ -306,7 +306,7 @@ export function useShellTerminal({ shellId, shellType }: UseShellTerminalOptions
   // Update theme when settings change
   useEffect(() => {
     if (!termRef.current) return
-    const tc = getEffectiveTerminalColors(settings)
+    const tc = getShellTerminalColors(settings)
     termRef.current.options.theme = { ...tc }
     termRef.current.options.fontFamily = settings.terminal.fontFamily
     termRef.current.options.fontSize = settings.terminal.fontSize
