@@ -119,6 +119,10 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
   const [filter, setFilter] = useState<IssueState | 'all'>('open')
   const [searchText, setSearchText] = useState('')
   const [loading, setLoading] = useState(false)
+  const [statusCapability, setStatusCapability] = useState<IssueStatusCapability | null>(null)
+  const [availableStatuses, setAvailableStatuses] = useState<IssueStatus[]>([])
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [myIssuesOnly, setMyIssuesOnly] = useState(false)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('list')
@@ -196,6 +200,38 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
     })
     return () => { cancelled = true }
   }, [status, effectiveProjectDir])
+
+  // Probe status capability + load available statuses for the filter dropdown.
+  // Both calls are cached server-side so this is cheap on subsequent panel mounts.
+  useEffect(() => {
+    if (status !== 'ready') return
+    let cancelled = false
+    setStatusCapability(null)
+    setAvailableStatuses([])
+    api.issues.getStatusCapability(effectiveProjectDir).then(async (cap) => {
+      if (cancelled) return
+      setStatusCapability(cap)
+      if (!cap.supported) return
+      try {
+        const list = await api.issues.listStatuses(effectiveProjectDir)
+        if (!cancelled) setAvailableStatuses(list)
+      } catch (err) {
+        console.warn('[issues] listStatuses failed:', err)
+      }
+    }).catch((err) => {
+      console.warn('[issues] getStatusCapability failed:', err)
+      if (!cancelled) setStatusCapability({ supported: false })
+    })
+    return () => { cancelled = true }
+  }, [status, effectiveProjectDir])
+
+  // Reset the secondary filters when the underlying repo changes — they don't
+  // make sense across project boundaries (status ids are provider-opaque, and
+  // "Mine" depends on the current user for that provider).
+  useEffect(() => {
+    setStatusFilter(null)
+    setMyIssuesOnly(false)
+  }, [effectiveProjectDir])
 
   const loadIssues = useCallback(async () => {
     if (status !== 'ready') return
@@ -288,17 +324,30 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
   const enterFull = () => setViewMode('full')
   const exitFull = () => setViewMode('split')
 
-  // Filtered list
+  // Filtered list — applies the secondary filters on top of the
+  // server-side state filter (open/closed/all).
   const filtered = useMemo(() => {
+    let result = issues
+    if (myIssuesOnly && currentUser) {
+      const me = currentUser.login
+      result = result.filter((i) =>
+        i.assignees.some((a) => a.login === me) || i.author.login === me
+      )
+    }
+    if (statusFilter) {
+      result = result.filter((i) => i.status?.id === statusFilter)
+    }
     const q = searchText.trim().toLowerCase()
-    if (!q) return issues
-    return issues.filter((i) =>
-      i.title.toLowerCase().includes(q) ||
-      String(i.id).includes(q) ||
-      i.labels.some((l) => l.name.toLowerCase().includes(q)) ||
-      i.assignees.some((a) => a.login.toLowerCase().includes(q))
-    )
-  }, [issues, searchText])
+    if (q) {
+      result = result.filter((i) =>
+        i.title.toLowerCase().includes(q) ||
+        String(i.id).includes(q) ||
+        i.labels.some((l) => l.name.toLowerCase().includes(q)) ||
+        i.assignees.some((a) => a.login.toLowerCase().includes(q))
+      )
+    }
+    return result
+  }, [issues, searchText, statusFilter, myIssuesOnly, currentUser])
 
   // -----------------------------------------------------------------------
   // Render
@@ -397,7 +446,29 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
                     {f.charAt(0).toUpperCase() + f.slice(1)}
                   </button>
                 ))}
+                {currentUser && (
+                  <button
+                    className={`gm-pr-filter${myIssuesOnly ? ' gm-pr-filter-active' : ''}`}
+                    onClick={() => setMyIssuesOnly((v) => !v)}
+                    title={`Show only issues assigned to or opened by @${currentUser.login}`}
+                  >
+                    Mine
+                  </button>
+                )}
               </div>
+              {statusCapability?.supported && availableStatuses.length > 0 && (
+                <select
+                  className="gm-issues-status-select"
+                  value={statusFilter ?? ''}
+                  onChange={(e) => setStatusFilter(e.target.value || null)}
+                  title="Filter by status"
+                >
+                  <option value="">All statuses</option>
+                  {availableStatuses.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              )}
               <input
                 type="text"
                 className="gm-issues-search"

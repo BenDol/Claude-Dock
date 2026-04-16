@@ -5842,6 +5842,18 @@ div.gm-ftree-search-current {
 }
 .gm-issues-search:focus { outline: none; border-color: var(--accent-color); }
 
+.gm-issues-status-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  max-width: 160px;
+}
+.gm-issues-status-select:focus { outline: none; border-color: var(--accent-color); }
+
 .gm-issues-list {
   flex: 1;
   overflow-y: auto;
@@ -6086,27 +6098,75 @@ div.gm-ftree-search-current {
   margin-top: 8px;
 }
 
-/* Comments */
+/* Comments — each user comment is its own card with a tinted header bar so
+   adjacent comments don't visually blend together. System notes (e.g. GitLab
+   "assigned to @x" entries) stay lightweight and inline-feeling. */
 
 .gm-issue-comment {
-  padding: 10px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  margin-bottom: 12px;
+  overflow: hidden;
 }
-.gm-issue-comment:last-of-type { border-bottom: none; }
-.gm-issue-comment-system {
-  font-size: 11px; color: var(--text-secondary); font-style: italic;
-}
+.gm-issue-comment:last-of-type { margin-bottom: 0; }
+
 .gm-issue-comment-header {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--text-secondary);
-  margin-bottom: 6px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
 }
+.gm-issue-comment-header strong { color: var(--text-primary); font-weight: 600; }
 .gm-issue-comment-edited { font-style: italic; opacity: 0.7; }
 .gm-issue-comment-actions {
   margin-left: auto;
   display: flex; gap: 4px;
 }
-.gm-issue-comment-body { font-size: 13px; color: var(--text-primary); line-height: 1.5; }
+
+.gm-issue-comment-body {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.55;
+  padding: 10px 12px;
+}
+
+/* In-place edit: the textarea + buttons live inside the card body, so
+   reset the body padding to give the textarea breathing room without
+   double-padding. */
+.gm-issue-comment textarea { margin: 10px 12px 0; width: calc(100% - 24px); }
+.gm-issue-comment .gm-issue-editor-buttons { padding: 0 12px 10px; margin-top: 6px; }
+
+/* System notes: small, inline-feeling, no card frame — they're meta
+   ("@foo assigned this to @bar"), not real conversation. */
+.gm-issue-comment-system {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.gm-issue-comment-system + .gm-issue-comment-system { border-top: 1px dashed color-mix(in srgb, var(--border-color) 40%, transparent); }
+.gm-issue-comment-system .gm-issue-comment-header {
+  display: inline-flex;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.gm-issue-comment-system .gm-issue-comment-body {
+  display: inline-block;
+  padding: 0 0 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+/* Collapse paragraph margins from .gm-md so a system note reads as one line. */
+.gm-issue-comment-system .gm-issue-comment-body p { margin: 0; display: inline; }
+.gm-issue-comment-system + .gm-issue-comment:not(.gm-issue-comment-system) { margin-top: 8px; }
 
 .gm-issue-new-comment { margin-top: 10px; }
 
