@@ -122,7 +122,8 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
   const [statusCapability, setStatusCapability] = useState<IssueStatusCapability | null>(null)
   const [availableStatuses, setAvailableStatuses] = useState<IssueStatus[]>([])
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const [myIssuesOnly, setMyIssuesOnly] = useState(false)
+  const [createdByMeOnly, setCreatedByMeOnly] = useState(false)
+  const [assignedToMeOnly, setAssignedToMeOnly] = useState(false)
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('list')
@@ -227,10 +228,11 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
 
   // Reset the secondary filters when the underlying repo changes — they don't
   // make sense across project boundaries (status ids are provider-opaque, and
-  // "Mine" depends on the current user for that provider).
+  // user-scoped filters depend on the current user for that provider).
   useEffect(() => {
     setStatusFilter(null)
-    setMyIssuesOnly(false)
+    setCreatedByMeOnly(false)
+    setAssignedToMeOnly(false)
   }, [effectiveProjectDir])
 
   const loadIssues = useCallback(async () => {
@@ -325,14 +327,18 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
   const exitFull = () => setViewMode('split')
 
   // Filtered list — applies the secondary filters on top of the
-  // server-side state filter (open/closed/all).
+  // server-side state filter (open/closed/all). Created/Assigned are
+  // independent ANDs (matching GitHub/GitLab convention), so enabling
+  // both narrows to issues you opened AND that are assigned to you.
   const filtered = useMemo(() => {
     let result = issues
-    if (myIssuesOnly && currentUser) {
+    if (createdByMeOnly && currentUser) {
       const me = currentUser.login
-      result = result.filter((i) =>
-        i.assignees.some((a) => a.login === me) || i.author.login === me
-      )
+      result = result.filter((i) => i.author.login === me)
+    }
+    if (assignedToMeOnly && currentUser) {
+      const me = currentUser.login
+      result = result.filter((i) => i.assignees.some((a) => a.login === me))
     }
     if (statusFilter) {
       result = result.filter((i) => i.status?.id === statusFilter)
@@ -347,7 +353,7 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
       )
     }
     return result
-  }, [issues, searchText, statusFilter, myIssuesOnly, currentUser])
+  }, [issues, searchText, statusFilter, createdByMeOnly, assignedToMeOnly, currentUser])
 
   // -----------------------------------------------------------------------
   // Render
@@ -447,13 +453,22 @@ export default function IssuesPanel({ projectDir, rootProjectDir, active }: Issu
                   </button>
                 ))}
                 {currentUser && (
-                  <button
-                    className={`gm-pr-filter${myIssuesOnly ? ' gm-pr-filter-active' : ''}`}
-                    onClick={() => setMyIssuesOnly((v) => !v)}
-                    title={`Show only issues assigned to or opened by @${currentUser.login}`}
-                  >
-                    Mine
-                  </button>
+                  <>
+                    <button
+                      className={`gm-pr-filter${createdByMeOnly ? ' gm-pr-filter-active' : ''}`}
+                      onClick={() => setCreatedByMeOnly((v) => !v)}
+                      title={`Show only issues opened by @${currentUser.login}`}
+                    >
+                      Created
+                    </button>
+                    <button
+                      className={`gm-pr-filter${assignedToMeOnly ? ' gm-pr-filter-active' : ''}`}
+                      onClick={() => setAssignedToMeOnly((v) => !v)}
+                      title={`Show only issues assigned to @${currentUser.login}`}
+                    >
+                      Assigned
+                    </button>
+                  </>
                 )}
               </div>
               {statusCapability?.supported && availableStatuses.length > 0 && (
