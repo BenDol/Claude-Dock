@@ -11,16 +11,96 @@ import {
   getDefaultIssueProfiles
 } from './issue-type-profiles'
 import type {
+  Issue,
   IssueState,
   IssueStateReason,
+  IssueStatus,
   IssueCreateRequest,
   IssueUpdateRequest,
   IssueCommentPreview,
   IssueTypeProfiles
 } from '../../../../shared/issue-types'
+import type { IssueProvider } from './issue-provider'
 import type { IssueFixTask, ClaudeTaskRequest } from '../../../../shared/claude-task-types'
 
 const registry = IssueProviderRegistry.getInstance()
+
+/**
+ * Enrich raw issues from the provider with two pieces of metadata that
+ * provider-native list/get calls don't always populate:
+ *
+ *   1. **Label colors** — GitLab returns labels as bare name strings on
+ *      issues. We look them up in the repo-wide labels list (cached) so
+ *      chips render with their configured color.
+ *   2. **Native status** — GitLab work-item status / GitHub Projects v2
+ *      Status field. Stored on a separate widget that requires a second
+ *      round-trip; if the provider supports it, batch-fetch and merge.
+ *
+ * Both enrichments are best-effort: failures log and pass the issues
+ * through unchanged so the UI never breaks because of a slow or
+ * missing secondary call.
+ */
+async function enrichIssues(
+  provider: IssueProvider,
+  projectDir: string,
+  issues: Issue[]
+): Promise<Issue[]> {
+  if (issues.length === 0) return issues
+
+  const [labelColorMap, statusMap] = await Promise.all([
+    enrichLabelColors(provider, projectDir, issues),
+    enrichStatuses(provider, projectDir, issues)
+  ])
+
+  return issues.map((issue) => {
+    let next = issue
+    if (statusMap && statusMap.has(issue.id)) {
+      next = { ...next, status: statusMap.get(issue.id) ?? null }
+    }
+    if (labelColorMap && next.labels.some((l) => !l.color)) {
+      next = {
+        ...next,
+        labels: next.labels.map((l) =>
+          l.color ? l : (labelColorMap.has(l.name) ? { ...l, color: labelColorMap.get(l.name) } : l)
+        )
+      }
+    }
+    return next
+  })
+}
+
+async function enrichLabelColors(
+  provider: IssueProvider,
+  projectDir: string,
+  issues: Issue[]
+): Promise<Map<string, string | undefined> | null> {
+  const needsColors = issues.some((i) => i.labels.some((l) => !l.color))
+  if (!needsColors) return null
+  try {
+    const labels = await provider.listLabels(projectDir)
+    const map = new Map<string, string | undefined>()
+    for (const l of labels) map.set(l.name, l.color)
+    return map
+  } catch (err) {
+    getServices().log('[issue-ipc] enrichLabelColors failed:', err instanceof Error ? err.message : String(err))
+    return null
+  }
+}
+
+async function enrichStatuses(
+  provider: IssueProvider,
+  projectDir: string,
+  issues: Issue[]
+): Promise<Map<number, IssueStatus | null> | null> {
+  try {
+    const cap = await provider.getStatusCapability(projectDir)
+    if (!cap.supported) return null
+    return await provider.fetchIssueStatuses(projectDir, issues.map((i) => i.id))
+  } catch (err) {
+    getServices().log('[issue-ipc] enrichStatuses failed:', err instanceof Error ? err.message : String(err))
+    return null
+  }
+}
 
 let issueManager: IssueManager | null = null
 function getManager(): IssueManager {
@@ -107,7 +187,8 @@ export function registerIssueIpc(): void {
     const provider = await registry.resolve(projectDir)
     if (!provider) return []
     try {
-      return await provider.listIssues(projectDir, state)
+      const issues = await provider.listIssues(projectDir, state)
+      return await enrichIssues(provider, projectDir, issues)
     } catch (err) {
       getServices().logError('[issue-ipc] list failed:', err)
       return []
@@ -119,7 +200,10 @@ export function registerIssueIpc(): void {
     const provider = await registry.resolve(projectDir)
     if (!provider) return null
     try {
-      return await provider.getIssue(projectDir, id)
+      const issue = await provider.getIssue(projectDir, id)
+      if (!issue) return null
+      const [enriched] = await enrichIssues(provider, projectDir, [issue])
+      return enriched
     } catch (err) {
       getServices().logError('[issue-ipc] get failed:', err)
       return null
