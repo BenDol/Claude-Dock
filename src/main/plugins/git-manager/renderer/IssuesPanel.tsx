@@ -1272,6 +1272,7 @@ function LabelEditor({
   const [open, setOpen] = useState(false)
   const [available, setAvailable] = useState<IssueLabel[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const currentNames = new Set(current.map((l) => l.name))
 
@@ -1286,14 +1287,20 @@ function LabelEditor({
   }, [api, projectDir, available])
 
   const toggle = async (label: IssueLabel) => {
+    if (busy) return
     setBusy(true)
+    setError(null)
     try {
-      if (currentNames.has(label.name)) {
-        await api.issues.removeLabel(projectDir, issueId, [label.name])
+      const result = currentNames.has(label.name)
+        ? await api.issues.removeLabel(projectDir, issueId, [label.name])
+        : await api.issues.addLabel(projectDir, issueId, [label.name])
+      if (!result.success) {
+        setError(result.error || 'Failed to update labels')
       } else {
-        await api.issues.addLabel(projectDir, issueId, [label.name])
+        onChanged()
       }
-      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update labels')
     } finally {
       setBusy(false)
     }
@@ -1342,6 +1349,7 @@ function LabelEditor({
             </div>
           ))}
           {(available || []).length === 0 && <div className="gm-pr-empty">No labels available.</div>}
+          {error && <div className="gm-issue-popover-error">{error}</div>}
         </div>
       )}
     </div>
@@ -1363,6 +1371,7 @@ function AssigneeEditor({
   const [open, setOpen] = useState(false)
   const [available, setAvailable] = useState<IssueUser[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const currentLogins = new Set(current.map((u) => u.login))
 
@@ -1377,14 +1386,20 @@ function AssigneeEditor({
   }, [api, projectDir, available])
 
   const toggle = async (u: IssueUser) => {
+    if (busy) return
     setBusy(true)
+    setError(null)
     try {
-      if (currentLogins.has(u.login)) {
-        await api.issues.removeAssignee(projectDir, issueId, [u.login])
+      const result = currentLogins.has(u.login)
+        ? await api.issues.removeAssignee(projectDir, issueId, [u.login])
+        : await api.issues.addAssignee(projectDir, issueId, [u.login])
+      if (!result.success) {
+        setError(result.error || 'Failed to update assignees')
       } else {
-        await api.issues.addAssignee(projectDir, issueId, [u.login])
+        onChanged()
       }
-      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update assignees')
     } finally {
       setBusy(false)
     }
@@ -1418,6 +1433,7 @@ function AssigneeEditor({
             </div>
           ))}
           {(available || []).length === 0 && <div className="gm-pr-empty">No users available.</div>}
+          {error && <div className="gm-issue-popover-error">{error}</div>}
         </div>
       )}
     </div>
@@ -1439,6 +1455,7 @@ function MilestoneEditor({
   const [open, setOpen] = useState(false)
   const [available, setAvailable] = useState<IssueMilestone[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const loadAvailable = useCallback(async () => {
     if (available) return
@@ -1451,11 +1468,19 @@ function MilestoneEditor({
   }, [api, projectDir, available])
 
   const choose = async (m: IssueMilestone | null) => {
+    if (busy) return
     setBusy(true)
+    setError(null)
     try {
-      await api.issues.setMilestone(projectDir, issueId, m ? m.id : null)
-      onChanged()
-      setOpen(false)
+      const result = await api.issues.setMilestone(projectDir, issueId, m ? m.id : null)
+      if (!result.success) {
+        setError(result.error || 'Failed to update milestone')
+      } else {
+        onChanged()
+        setOpen(false)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update milestone')
     } finally {
       setBusy(false)
     }
@@ -1491,6 +1516,7 @@ function MilestoneEditor({
             </div>
           ))}
           {(available || []).length === 0 && <div className="gm-pr-empty">No milestones available.</div>}
+          {error && <div className="gm-issue-popover-error">{error}</div>}
         </div>
       )}
     </div>
