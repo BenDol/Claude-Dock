@@ -46,7 +46,21 @@ function resolveGlab(): string {
 }
 
 function glab(args: string[], cwd: string, opts?: { input?: string }): Promise<{ stdout: string; stderr: string }> {
-  const child = execFileAsync(resolveGlab(), args, { cwd, timeout: 30_000, maxBuffer: 20 * 1024 * 1024 })
+  // When piping JSON via stdin, glab does not set Content-Type automatically,
+  // so GitLab's REST API rejects the request with HTTP 415. Inject the header
+  // just after the `api` subcommand (if not already supplied by the caller).
+  let finalArgs = args
+  if (opts?.input !== undefined && args[0] === 'api') {
+    const hasContentType = args.some((a, i) =>
+      (a === '-H' || a === '--header') &&
+      typeof args[i + 1] === 'string' &&
+      /^content-type:/i.test(args[i + 1])
+    )
+    if (!hasContentType) {
+      finalArgs = ['api', '-H', 'Content-Type: application/json', ...args.slice(1)]
+    }
+  }
+  const child = execFileAsync(resolveGlab(), finalArgs, { cwd, timeout: 30_000, maxBuffer: 20 * 1024 * 1024 })
   if (opts?.input !== undefined) {
     // @ts-ignore — child exposes stdin at runtime
     child.child.stdin?.end(opts.input)

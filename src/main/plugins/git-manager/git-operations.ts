@@ -235,6 +235,9 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
         if (/^HEAD(\/|$)/i.test(rawName)) continue
         const name = rawName.replace(/^heads?\//i, '')
         let ahead = 0, behind = 0
+        // `gone` marks a tracked upstream that no longer exists on the remote.
+        // Treat it as no tracking so the UI shows "Publish" instead of "Push".
+        const upstreamGone = /\bgone\b/i.test(trackInfo || '')
         if (trackInfo) {
           const aheadMatch = trackInfo.match(/ahead (\d+)/)
           const behindMatch = trackInfo.match(/behind (\d+)/)
@@ -245,7 +248,7 @@ export async function getBranches(cwd: string): Promise<GitBranchInfo[]> {
           name,
           current: head === '*',
           remote: false,
-          tracking: tracking || undefined,
+          tracking: upstreamGone ? undefined : (tracking || undefined),
           ahead,
           behind
         })
