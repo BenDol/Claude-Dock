@@ -11,7 +11,6 @@ interface DockState {
   /** Which region of the UI currently has keyboard focus */
   focusRegion: 'grid' | 'toolbar' | 'shell'
   nextTerminalNum: number
-  unlockedTerminals: Set<string>
   loadingTerminals: Set<string>
   /** Maps terminal ID → task type string for terminals running Claude tasks */
   claudeTaskTerminals: Map<string, ClaudeTaskRequest['type']>
@@ -50,7 +49,6 @@ interface DockState {
   setTerminalTitle: (id: string, title: string) => void
   setTerminalAlive: (id: string, alive: boolean) => void
   setGridMode: (mode: GridMode) => void
-  toggleTerminalLock: (id: string) => void
   swapTerminals: (id1: string, id2: string) => void
   setFocusedTerminal: (id: string | null) => void
   setFocusRegion: (region: 'grid' | 'toolbar' | 'shell') => void
@@ -80,7 +78,6 @@ export const useDockStore = create<DockState>((set, get) => ({
   focusedTerminalId: null,
   focusRegion: 'grid',
   nextTerminalNum: 1,
-  unlockedTerminals: new Set<string>(),
   loadingTerminals: new Set<string>(),
   claudeTaskTerminals: new Map<string, ClaudeTaskRequest['type']>(),
   claudeTaskFlags: new Map<string, string>(),
@@ -97,16 +94,11 @@ export const useDockStore = create<DockState>((set, get) => ({
   setDockInfo: (id, projectDir) => set({ dockId: id, projectDir }),
 
   addTerminal: (id) =>
-    set((state) => {
-      const unlockedTerminals = new Set(state.unlockedTerminals)
-      unlockedTerminals.add(id)
-      return {
-        terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}${state.projectDir ? ' - ' + (state.projectDir.split(/[/\\]/).pop() || state.projectDir) : ''}`, isAlive: true }],
-        nextTerminalNum: state.nextTerminalNum + 1,
-        focusedTerminalId: id,
-        unlockedTerminals
-      }
-    }),
+    set((state) => ({
+      terminals: [...state.terminals, { id, title: `Terminal ${state.nextTerminalNum}${state.projectDir ? ' - ' + (state.projectDir.split(/[/\\]/).pop() || state.projectDir) : ''}`, isAlive: true }],
+      nextTerminalNum: state.nextTerminalNum + 1,
+      focusedTerminalId: id
+    })),
 
   removeTerminal: (id) =>
     set((state) => {
@@ -117,8 +109,6 @@ export const useDockStore = create<DockState>((set, get) => ({
             ? terminals[terminals.length - 1].id
             : null
           : state.focusedTerminalId
-      const unlockedTerminals = new Set(state.unlockedTerminals)
-      unlockedTerminals.delete(id)
       const claudeTaskTerminals = new Map(state.claudeTaskTerminals)
       claudeTaskTerminals.delete(id)
       const claudeTaskFlags = new Map(state.claudeTaskFlags)
@@ -129,7 +119,7 @@ export const useDockStore = create<DockState>((set, get) => ({
       pendingWorktrees.delete(id)
       const manualResumeIds = new Map(state.manualResumeIds)
       manualResumeIds.delete(id)
-      return { terminals, focusedTerminalId, unlockedTerminals, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
+      return { terminals, focusedTerminalId, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -143,14 +133,6 @@ export const useDockStore = create<DockState>((set, get) => ({
     })),
 
   setGridMode: (mode) => set({ gridMode: mode }),
-
-  toggleTerminalLock: (id) =>
-    set((state) => {
-      const next = new Set(state.unlockedTerminals)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return { unlockedTerminals: next }
-    }),
 
   swapTerminals: (id1, id2) =>
     set((state) => {

@@ -11,7 +11,6 @@ describe('dock-store claudeTaskTerminals', () => {
       gridMode: 'auto',
       focusedTerminalId: null,
       nextTerminalNum: 1,
-      unlockedTerminals: new Set(),
       loadingTerminals: new Set(),
       claudeTaskTerminals: new Map()
     })

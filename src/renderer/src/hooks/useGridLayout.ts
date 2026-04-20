@@ -27,7 +27,6 @@ export function useGridLayout(): {
   setRowRatios: (ratios: number[]) => void
 } {
   const terminals = useDockStore((s) => s.terminals)
-  const unlockedTerminals = useDockStore((s) => s.unlockedTerminals)
   const maxColumns = useSettingsStore((s) => s.settings.grid.maxColumns)
   const viewportMode = useSettingsStore((s) => s.settings.grid.viewportMode ?? 'auto')
 
@@ -71,11 +70,11 @@ export function useGridLayout(): {
     const finalLayout = layout.map((l) => ({
       ...l,
       static: false,
-      isDraggable: unlockedTerminals.has(l.i)
+      isDraggable: true
     }))
 
     return { cols, logicalCols, layout: finalLayout, rowHeight: 100, rows }
-  }, [terminals, unlockedTerminals, maxColumns, orientation, columnRatios, rowRatios])
+  }, [terminals, maxColumns, orientation, columnRatios, rowRatios])
 
   return { ...result, orientation, setContainerSize, columnRatios, setColumnRatios, rowRatios, setRowRatios }
 }

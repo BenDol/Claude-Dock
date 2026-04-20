@@ -194,6 +194,7 @@ jobs:
         run: npx electron-vite build
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
+          DOCK_ENV_PROFILE: uat
           UPDATE_PROFILE: bleeding-edge
           PRODUCTION_BUILD: '1'
 
@@ -223,6 +224,7 @@ jobs:
       - name: Package (${{ matrix.platform }})
         run: npx electron-builder --${{ matrix.platform }} --publish never
         env:
+          DOCK_ENV_PROFILE: uat
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
