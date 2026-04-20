@@ -1983,7 +1983,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 6px;
+  height: 4px;
   cursor: row-resize;
   background: var(--bg-secondary);
   flex-shrink: 0;
@@ -1995,8 +1995,8 @@ body {
 }
 
 .shell-area-grip {
-  width: 32px;
-  height: 2px;
+  width: 20px;
+  height: 1px;
   border-radius: 1px;
   background: var(--border-color);
 }
@@ -2016,7 +2016,7 @@ body {
 }
 
 .shell-column-divider {
-  width: 5px;
+  width: 3px;
   background: var(--border-color);
   flex-shrink: 0;
   cursor: col-resize;
@@ -2027,7 +2027,7 @@ body {
 }
 
 .shell-panel-divider {
-  height: 5px;
+  height: 3px;
   background: var(--border-color);
   flex-shrink: 0;
   cursor: row-resize;
@@ -2239,6 +2239,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding-left: 5px;
   /* Match xterm's background so the gap below the last row is invisible.
      Shell terminals use a slightly lightened bg to differentiate from Claude terminals. */
   background: var(--shell-term-bg, #2c2d38);
