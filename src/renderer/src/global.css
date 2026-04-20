@@ -512,51 +512,11 @@ body {
   color: #fe8019 !important;
 }
 
-.toolbar-add-btn-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.toolbar-add-popout {
-  position: absolute;
-  top: 50%;
-  right: 100%;
-  transform: translateY(-50%);
-  margin-right: 4px;
-  display: flex;
-  align-items: center;
-  padding: 1px 2px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg-primary) 85%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease;
-  z-index: 20;
-}
-
-/* Invisible bridge so the cursor can cross the 4px gap without losing hover */
-.toolbar-add-popout::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -6px;
-  width: 6px;
-}
-
-.toolbar-add-btn-wrapper:hover .toolbar-add-popout,
-.toolbar-add-popout:hover {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.toolbar-add-popout-btn {
+.toolbar-add-worktree {
   color: #fe8019 !important;
 }
 
-.toolbar-add-popout-btn:hover {
+.toolbar-add-worktree:hover {
   background: color-mix(in srgb, #fe8019 18%, transparent) !important;
   color: #fe8019 !important;
 }

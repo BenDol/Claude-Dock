@@ -399,28 +399,24 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
           >
             <HistoryIcon />
           </button>
-          <div className="toolbar-add-btn-wrapper">
-            <button
-              data-toolbar-btn
-              tabIndex={-1}
-              className={`toolbar-btn toolbar-btn-icon toolbar-add-btn${worktreeMode ? ' toolbar-add-btn-worktree' : ''}`}
-              onClick={(e) => (e.altKey || e.ctrlKey || e.metaKey ? onAddWorktreeTerminal() : onAddTerminal())}
-              title={worktreeMode ? 'New worktree terminal' : 'New terminal (Ctrl+T)'}
-            >
-              {worktreeMode ? <WorktreePlusIcon /> : <PlusIcon />}
-            </button>
-            <div className="toolbar-add-popout">
-              <button
-                data-toolbar-btn
-                tabIndex={-1}
-                className="toolbar-btn toolbar-btn-icon toolbar-add-popout-btn"
-                onClick={onAddWorktreeTerminal}
-                title="New worktree terminal"
-              >
-                <WorktreePlusIcon />
-              </button>
-            </div>
-          </div>
+          <button
+            data-toolbar-btn
+            tabIndex={-1}
+            className="toolbar-btn toolbar-btn-icon toolbar-add-resume toolbar-add-worktree"
+            onClick={onAddWorktreeTerminal}
+            title="New worktree terminal"
+          >
+            <WorktreePlusIcon />
+          </button>
+          <button
+            data-toolbar-btn
+            tabIndex={-1}
+            className={`toolbar-btn toolbar-btn-icon toolbar-add-btn${worktreeMode ? ' toolbar-add-btn-worktree' : ''}`}
+            onClick={(e) => (e.altKey || e.ctrlKey || e.metaKey ? onAddWorktreeTerminal() : onAddTerminal())}
+            title={worktreeMode ? 'New worktree terminal' : 'New terminal (Ctrl+T)'}
+          >
+            {worktreeMode ? <WorktreePlusIcon /> : <PlusIcon />}
+          </button>
         </div>
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button
