@@ -124,7 +124,7 @@ body {
 .win-btn {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   width: var(--toolbar-win-btn-w);
   height: var(--toolbar-height);
   display: flex;
@@ -2112,10 +2112,11 @@ body {
 .shell-panel-label {
   font-size: 10px;
   line-height: 16px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   flex: 1;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 500;
 }
 
 .shell-panel-type {
@@ -2135,7 +2136,7 @@ body {
 .shell-panel-action {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   padding: 2px 4px;
   display: flex;
@@ -2213,7 +2214,7 @@ body {
 .shell-panel-close {
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   padding: 2px;
   display: flex;

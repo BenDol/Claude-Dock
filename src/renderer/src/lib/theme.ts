@@ -26,23 +26,44 @@ export function getEffectiveTerminalColors(settings: Settings): TerminalColors {
   return isDarkMode(settings) ? DARK_TERMINAL_COLORS : LIGHT_TERMINAL_COLORS
 }
 
-/** Lighten a #rrggbb color by `amount` (0–255 per channel). Used to differentiate
- *  shell terminal backgrounds from Claude terminal backgrounds. */
-function lightenHex(hex: string, amount: number): string {
+function parseHex(hex: string): { r: number; g: number; b: number } | null {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!m) return hex
+  if (!m) return null
   const num = parseInt(m[1], 16)
-  const r = Math.min(255, ((num >> 16) & 0xff) + amount)
-  const g = Math.min(255, ((num >> 8) & 0xff) + amount)
-  const b = Math.min(255, (num & 0xff) + amount)
-  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')
+  return { r: (num >> 16) & 0xff, g: (num >> 8) & 0xff, b: num & 0xff }
 }
 
-/** Shell terminals share the active theme but use a lightened background to make
- *  them visually distinct from Claude terminals. */
+function toHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+  return '#' + ((clamp(r) << 16) | (clamp(g) << 8) | clamp(b)).toString(16).padStart(6, '0')
+}
+
+/** Blend two #rrggbb colors. `ratio` is the weight of `b` (0 = all `a`, 1 = all `b`). */
+function mixHex(a: string, b: string, ratio: number): string {
+  const pa = parseHex(a); const pb = parseHex(b)
+  if (!pa || !pb) return a
+  return toHex(pa.r * (1 - ratio) + pb.r * ratio, pa.g * (1 - ratio) + pb.g * ratio, pa.b * (1 - ratio) + pb.b * ratio)
+}
+
+/** Shift a #rrggbb color toward white (dark bgs) or black (light bgs) by `amount`
+ *  per channel, so the shift is meaningful in both dark and light themes. */
+function contrastShift(hex: string, amount: number): string {
+  const p = parseHex(hex)
+  if (!p) return hex
+  const lum = (p.r + p.g + p.b) / 3
+  const sign = lum < 128 ? 1 : -1
+  return toHex(p.r + sign * amount, p.g + sign * amount, p.b + sign * amount)
+}
+
+/** Shell terminals share the active theme but use a differentiated background —
+ *  shifted toward higher contrast (brighter in dark mode, darker in light mode)
+ *  and tinted very subtly toward the accent color so they feel distinct from
+ *  Claude terminals without breaking the theme palette. */
 export function getShellTerminalColors(settings: Settings): TerminalColors {
   const tc = getEffectiveTerminalColors(settings)
-  return { ...tc, background: lightenHex(tc.background, 18) }
+  const shifted = contrastShift(tc.background, 24)
+  const tinted = mixHex(shifted, settings.theme.accentColor, 0.07)
+  return { ...tc, background: tinted }
 }
 
 export function applyThemeToDocument(settings: Settings): void {
