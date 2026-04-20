@@ -51,7 +51,7 @@ describe('generate-plugin-archive.js', () => {
 
     const manifest = JSON.parse(fs.readFileSync(updatePath, 'utf-8'))
 
-    for (const pluginId of ['git-sync', 'git-manager']) {
+    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
       expect(manifest.plugins[pluginId]).toBeDefined()
       const entry = manifest.plugins[pluginId]
       expect(entry.version).toBeDefined()
@@ -69,8 +69,10 @@ describe('generate-plugin-archive.js', () => {
 
     const manifest = JSON.parse(fs.readFileSync(updatePath, 'utf-8'))
 
-    // The per-plugin buildSha should be the last commit touching that plugin's src dir
-    for (const pluginId of ['git-sync', 'git-manager']) {
+    // The per-plugin buildSha should be the last commit touching that plugin's src dir.
+    // Skip plugins with no git history (uncommitted) — they fall back to a content
+    // hash in generate-plugin-archive.js.
+    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
       const entry = manifest.plugins[pluginId]
       const srcDir = `src/main/plugins/${pluginId}`
 
@@ -81,6 +83,7 @@ describe('generate-plugin-archive.js', () => {
         continue // skip if git is unavailable
       }
 
+      if (!expectedSha) continue // uncommitted plugin — skip this specific check
       expect(entry.buildSha).toBe(expectedSha)
     }
   })
@@ -107,9 +110,11 @@ describe('generate-plugin-archive.js', () => {
     // At least one plugin should have a different (older) per-plugin SHA
     // unless the most recent commit happened to touch all plugin dirs
     const pluginShas = Object.values(manifest.plugins).map((p: any) => p.buildSha)
-    // This isn't guaranteed — just a sanity check that they're valid SHA hashes
+    // This isn't guaranteed — just a sanity check that they're valid SHA hashes.
+    // Accept 40-char git SHA-1 or 64-char content SHA-256 (fallback for
+    // uncommitted plugin dirs).
     for (const sha of pluginShas) {
-      expect(sha).toMatch(/^[a-f0-9]{40}$/)
+      expect(sha).toMatch(/^[a-f0-9]{40}$|^[a-f0-9]{64}$/)
     }
   })
 
@@ -137,7 +142,7 @@ describe('generate-plugin-archive.js', () => {
     execSync(`node "${SCRIPT}"`, { cwd: ROOT, encoding: 'utf-8', timeout: 25000 })
     const run2 = JSON.parse(fs.readFileSync(updatePath, 'utf-8'))
 
-    for (const pluginId of ['git-sync', 'git-manager']) {
+    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
       expect(run1.plugins[pluginId].hash).toBe(run2.plugins[pluginId].hash)
     }
   })

@@ -37,7 +37,9 @@ module.exports = {
     buildEnvProfile: envProfile
   },
   extraResources: [
-    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' }
+    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' },
+    // Voice plugin Python scripts — resolved at runtime via process.resourcesPath.
+    { from: 'src/main/plugins/voice/python', to: 'voice-python' }
   ],
   asarUnpack: ['node_modules/node-pty/**'],
   win: {

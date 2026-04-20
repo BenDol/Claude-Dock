@@ -34,6 +34,13 @@ import type {
   IssueStatus,
   IssueStatusCapability
 } from '../shared/issue-types'
+import type {
+  VoiceConfig,
+  VoiceRuntimeStatus,
+  VoiceSetupProgress,
+  VoiceMcpStatus,
+  VoiceMcpConflictAction
+} from '../shared/voice-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 import type { LastSessionEntry } from '../shared/last-session-types'
 import type {
@@ -470,6 +477,28 @@ export interface DockApi {
     setAdapterConfig: (updates: Record<string, unknown>, adapterId?: string) => Promise<{ success: boolean; error?: string }>
     runMaintenance: (action: string, adapterId?: string) => Promise<{ success: boolean; output?: string; error?: string }>
     onReopen: (callback: () => void) => () => void
+  }
+  voice: {
+    open: () => Promise<void>
+    close: () => Promise<void>
+    getSettings: () => Promise<VoiceConfig>
+    setSettings: (patch: any) => Promise<VoiceConfig>
+    resetSettings: () => Promise<VoiceConfig>
+    getStatus: () => Promise<VoiceRuntimeStatus>
+    onStatusChanged: (cb: (s: VoiceRuntimeStatus) => void) => () => void
+    listDevices: () => Promise<{ output: string; error?: string }>
+    testRecord: (seconds: number) => Promise<{ text?: string; error?: string }>
+    setup: {
+      detect: () => Promise<{ path: string; version: string } | null>
+      install: () => Promise<{ success: boolean; error?: string }>
+      onProgress: (cb: (p: VoiceSetupProgress) => void) => () => void
+      uninstall: () => Promise<{ success: boolean }>
+      mcpStatus: () => Promise<VoiceMcpStatus>
+      resolveMcpConflict: (action: VoiceMcpConflictAction) => Promise<{ success: boolean; key?: string }>
+    }
+    restartDaemon: () => Promise<{ success: boolean; error?: string }>
+    openLogs: () => Promise<void>
+    copyDiagnostics: () => Promise<string>
   }
   testRunner: {
     open: (projectDir: string) => Promise<void>
@@ -996,6 +1025,36 @@ const dockApi: DockApi = {
       ipcRenderer.on('memory:reopen', handler)
       return () => ipcRenderer.removeListener('memory:reopen', handler)
     }
+  },
+  voice: {
+    open: () => ipcRenderer.invoke(IPC.VOICE_OPEN),
+    close: () => ipcRenderer.invoke(IPC.VOICE_CLOSE),
+    getSettings: () => ipcRenderer.invoke(IPC.VOICE_GET_SETTINGS),
+    setSettings: (patch) => ipcRenderer.invoke(IPC.VOICE_SET_SETTINGS, patch),
+    resetSettings: () => ipcRenderer.invoke(IPC.VOICE_RESET_SETTINGS),
+    getStatus: () => ipcRenderer.invoke(IPC.VOICE_GET_STATUS),
+    onStatusChanged: (cb) => {
+      const handler = (_e: Electron.IpcRendererEvent, s: VoiceRuntimeStatus) => cb(s)
+      ipcRenderer.on(IPC.VOICE_STATUS_CHANGED, handler)
+      return () => ipcRenderer.removeListener(IPC.VOICE_STATUS_CHANGED, handler)
+    },
+    listDevices: () => ipcRenderer.invoke(IPC.VOICE_LIST_DEVICES),
+    testRecord: (seconds) => ipcRenderer.invoke(IPC.VOICE_TEST_RECORD, seconds),
+    setup: {
+      detect: () => ipcRenderer.invoke(IPC.VOICE_SETUP_DETECT),
+      install: () => ipcRenderer.invoke(IPC.VOICE_SETUP_INSTALL),
+      onProgress: (cb) => {
+        const handler = (_e: Electron.IpcRendererEvent, p: VoiceSetupProgress) => cb(p)
+        ipcRenderer.on(IPC.VOICE_SETUP_PROGRESS, handler)
+        return () => ipcRenderer.removeListener(IPC.VOICE_SETUP_PROGRESS, handler)
+      },
+      uninstall: () => ipcRenderer.invoke(IPC.VOICE_SETUP_UNINSTALL),
+      mcpStatus: () => ipcRenderer.invoke(IPC.VOICE_MCP_STATUS),
+      resolveMcpConflict: (action) => ipcRenderer.invoke(IPC.VOICE_MCP_RESOLVE_CONFLICT, action)
+    },
+    restartDaemon: () => ipcRenderer.invoke(IPC.VOICE_RESTART_DAEMON),
+    openLogs: () => ipcRenderer.invoke(IPC.VOICE_OPEN_LOGS),
+    copyDiagnostics: () => ipcRenderer.invoke(IPC.VOICE_COPY_DIAGNOSTICS)
   },
   testRunner: {
     open: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_OPEN, projectDir),

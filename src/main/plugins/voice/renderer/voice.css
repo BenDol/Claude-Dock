@@ -1,0 +1,254 @@
+/* Voice plugin window styling. Uses CSS variables from global.css so it
+   picks up light/dark theme automatically via applyThemeToDocument. */
+
+.voice-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary, #0f0f14);
+  color: var(--text-primary, #e5e5e5);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  -webkit-app-region: no-drag;
+  overflow: hidden;
+}
+
+.voice-titlebar {
+  height: 32px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--bg-secondary, #1a1a22);
+  border-bottom: 1px solid var(--border-color, #2a2a33);
+  -webkit-app-region: drag;
+}
+.voice-titlebar .voice-title { font-weight: 600; font-size: 12px; }
+.voice-titlebar .voice-title-actions { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+
+.voice-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color, #2a2a33);
+  background: var(--bg-primary, #0f0f14);
+}
+
+.voice-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-tertiary, #1f1f29);
+  border: 1px solid var(--border-color, #2a2a33);
+}
+.voice-status-chip .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted, #7a7a85);
+}
+.voice-status-chip.running .dot { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.6); }
+.voice-status-chip.starting .dot { background: #f59e0b; animation: pulse 1s ease-in-out infinite; }
+.voice-status-chip.crashed .dot { background: #ef4444; }
+.voice-status-chip.installing .dot { background: #3b82f6; animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.voice-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color, #2a2a33);
+  padding: 0 12px;
+  background: var(--bg-primary, #0f0f14);
+}
+.voice-tab {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary, #a0a0a8);
+  font-size: 12px;
+  background: none;
+  border-left: none; border-right: none; border-top: none;
+  font-family: inherit;
+}
+.voice-tab:hover { color: var(--text-primary, #e5e5e5); }
+.voice-tab.active {
+  color: var(--accent, #60a5fa);
+  border-bottom-color: var(--accent, #60a5fa);
+}
+
+.voice-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.voice-section {
+  background: var(--bg-secondary, #1a1a22);
+  border: 1px solid var(--border-color, #2a2a33);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.voice-section h3 {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary, #a0a0a8);
+}
+
+.voice-field {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.voice-field:last-child { margin-bottom: 0; }
+.voice-field label {
+  font-size: 12px;
+  color: var(--text-secondary, #a0a0a8);
+}
+.voice-field input[type=text],
+.voice-field input[type=password],
+.voice-field input[type=number],
+.voice-field select,
+.voice-field textarea {
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-tertiary, #1f1f29);
+  border: 1px solid var(--border-color, #2a2a33);
+  border-radius: 4px;
+  min-width: 200px;
+}
+.voice-field input[type=checkbox] { transform: scale(1.15); }
+.voice-field .hint {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-muted, #7a7a85);
+  margin-top: 2px;
+}
+
+.voice-btn {
+  padding: 6px 12px;
+  background: var(--bg-tertiary, #1f1f29);
+  border: 1px solid var(--border-color, #2a2a33);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+.voice-btn:hover:not(:disabled) { background: var(--bg-hover, #272730); }
+.voice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.voice-btn.primary {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border-color: transparent;
+}
+.voice-btn.primary:hover:not(:disabled) { background: var(--accent-hover, #60a5fa); }
+.voice-btn.danger {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.voice-btn.danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
+
+.voice-row { display: flex; gap: 8px; align-items: center; }
+
+.voice-setup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.voice-setup-card {
+  background: var(--bg-primary, #0f0f14);
+  border: 1px solid var(--border-color, #2a2a33);
+  border-radius: 8px;
+  max-width: 620px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+.voice-setup-card h2 { margin: 0 0 8px 0; font-size: 18px; }
+.voice-setup-card .sub { color: var(--text-secondary, #a0a0a8); margin: 0 0 20px 0; font-size: 12px; }
+.voice-progress {
+  height: 8px;
+  background: var(--bg-tertiary, #1f1f29);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 12px 0 8px 0;
+}
+.voice-progress > div {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 250ms ease;
+}
+.voice-setup-log {
+  background: #000;
+  color: #b0b0b8;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin-top: 10px;
+}
+.voice-error-card {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 10px;
+  white-space: pre-wrap;
+}
+
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-tertiary, #1f1f29);
+  border: 1px solid var(--border-color, #2a2a33);
+  border-radius: 4px;
+}
+.tag-input .tag {
+  background: var(--bg-hover, #272730);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tag-input .tag button {
+  background: none; border: none; color: inherit; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 0;
+}
+.tag-input input {
+  flex: 1;
+  min-width: 100px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  padding: 2px 4px;
+}

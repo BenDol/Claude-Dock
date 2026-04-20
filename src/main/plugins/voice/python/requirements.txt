@@ -1,0 +1,13 @@
+mcp>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+faster-whisper>=1.0.0
+keyboard>=0.13.5; sys_platform == "win32"
+pyperclip>=1.8.0
+
+# Optional: uncomment if you want the OpenAI Whisper API backend
+# openai>=1.0.0
+
+# Note: On Linux, the 'keyboard' library requires root for hotkeys.
+# On macOS, the hotkey daemon is not supported — use /voice command instead.
+# On Linux without root, use /voice command as the alternative.

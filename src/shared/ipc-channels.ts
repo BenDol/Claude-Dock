@@ -357,5 +357,25 @@ export const IPC = {
   TEST_RUNNER_DISCOVER: 'testRunner:discover',
   TEST_RUNNER_RUN: 'testRunner:run',
   TEST_RUNNER_STOP: 'testRunner:stop',
-  TEST_RUNNER_GET_STATUS: 'testRunner:getStatus'
+  TEST_RUNNER_GET_STATUS: 'testRunner:getStatus',
+
+  // Voice Plugin
+  VOICE_OPEN: 'voice:open',
+  VOICE_CLOSE: 'voice:close',
+  VOICE_GET_SETTINGS: 'voice:getSettings',
+  VOICE_SET_SETTINGS: 'voice:setSettings',
+  VOICE_RESET_SETTINGS: 'voice:resetSettings',
+  VOICE_GET_STATUS: 'voice:getStatus',
+  VOICE_STATUS_CHANGED: 'voice:statusChanged',
+  VOICE_LIST_DEVICES: 'voice:listDevices',
+  VOICE_TEST_RECORD: 'voice:testRecord',
+  VOICE_SETUP_DETECT: 'voice:setupDetect',
+  VOICE_SETUP_INSTALL: 'voice:setupInstall',
+  VOICE_SETUP_PROGRESS: 'voice:setupProgress',
+  VOICE_SETUP_UNINSTALL: 'voice:setupUninstall',
+  VOICE_MCP_STATUS: 'voice:mcpStatus',
+  VOICE_MCP_RESOLVE_CONFLICT: 'voice:mcpResolveConflict',
+  VOICE_OPEN_LOGS: 'voice:openLogs',
+  VOICE_COPY_DIAGNOSTICS: 'voice:copyDiagnostics',
+  VOICE_RESTART_DAEMON: 'voice:restartDaemon'
 } as const

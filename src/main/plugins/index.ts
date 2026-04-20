@@ -22,6 +22,8 @@ import { setServices as setWorkspaceServices } from './workspace/services'
 import { createBundledServices as createWorkspaceServices } from './workspace/bundled-services'
 import { setServices as setMemoryServices } from './memory/services'
 import { createBundledServices as createMemoryServices } from './memory/bundled-services'
+import { setServices as setVoiceServices } from './voice/services'
+import { createBundledServices as createVoiceServices } from './voice/bundled-services'
 
 // Register service factories for built-in plugins
 registerServiceFactory('git-manager', createGitManagerServices, setGitManagerServices)
@@ -29,6 +31,7 @@ registerServiceFactory('cloud-integration', createCloudIntegrationServices, setC
 registerServiceFactory('test-runner', createTestRunnerServices, setTestRunnerServices)
 registerServiceFactory('workspace', createWorkspaceServices, setWorkspaceServices)
 registerServiceFactory('memory', createMemoryServices, setMemoryServices)
+registerServiceFactory('voice', createVoiceServices, setVoiceServices)
 
 // Auto-discover all built-in plugins.
 // Convention: each plugin lives in a subdirectory and has a *-plugin.ts file.

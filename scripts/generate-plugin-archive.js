@@ -35,6 +35,8 @@ const BUILTIN_PLUGINS = [
   { id: 'test-runner', srcDir: 'test-runner', entry: 'test-runner-plugin.ts' },
   { id: 'memory', srcDir: 'memory', entry: 'memory-plugin.ts',
     rendererEntry: 'src/main/plugins/memory/renderer/standalone-entry.tsx' },
+  { id: 'voice', srcDir: 'voice', entry: 'voice-plugin.ts',
+    rendererEntry: 'src/main/plugins/voice/renderer/standalone-entry.tsx' },
   // workspace renders inside the dock window (not its own BrowserWindow),
   // so renderer changes require a full app update — cannot be hot-updated.
   { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true }
@@ -66,7 +68,11 @@ function hashDirectory(dirPath) {
  */
 function getPluginBuildSha(srcDir) {
   try {
-    return execSync(`git log -1 --format=%H -- "${srcDir}"`, { encoding: 'utf-8' }).trim()
+    const sha = execSync(`git log -1 --format=%H -- "${srcDir}"`, { encoding: 'utf-8' }).trim()
+    // Uncommitted / untracked plugin dirs produce an empty string — fall back
+    // to a content hash so manifest entries always carry a stable identifier.
+    if (!sha) return hashDirectory(srcDir)
+    return sha
   } catch {
     return hashDirectory(srcDir)
   }
@@ -78,7 +84,10 @@ function getPluginBuildSha(srcDir) {
  */
 function getPluginCommitEpoch(srcDir) {
   try {
-    return parseInt(execSync(`git log -1 --format=%ct -- "${srcDir}"`, { encoding: 'utf-8' }).trim(), 10)
+    const raw = execSync(`git log -1 --format=%ct -- "${srcDir}"`, { encoding: 'utf-8' }).trim()
+    if (!raw) return 0
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) ? n : 0
   } catch {
     return 0
   }

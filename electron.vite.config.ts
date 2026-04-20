@@ -51,7 +51,8 @@ const pluginBuildShas: Record<string, string> = {
   'cloud-integration': getPluginBuildSha('src/main/plugins/cloud-integration'),
   'test-runner': getPluginBuildSha('src/main/plugins/test-runner'),
   'workspace': getPluginBuildSha('src/main/plugins/workspace'),
-  'memory': getPluginBuildSha('src/main/plugins/memory')
+  'memory': getPluginBuildSha('src/main/plugins/memory'),
+  'voice': getPluginBuildSha('src/main/plugins/voice')
 }
 
 export default defineConfig({
