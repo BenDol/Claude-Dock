@@ -1,3 +1,5 @@
+import type { EnvProfile } from './env-profile'
+
 export type TerminalStyle = 'default' | 'standard' | 'claude-code'
 export type BarSize = 'small' | 'medium' | 'large'
 
@@ -11,7 +13,7 @@ export type ProjectSettings = DeepPartial<Settings>
 
 /** Settings sections that only make sense at the app-global level */
 export const GLOBAL_ONLY_SECTIONS: (keyof Settings)[] = [
-  'updater', 'launcher', 'advanced'
+  'updater', 'launcher', 'advanced', 'environment'
 ]
 
 /** Dot-path keys where arrays are concatenated across tiers instead of replaced */
@@ -39,6 +41,8 @@ export interface Settings {
     cursorBlink: boolean
     scrollback: number
     scrollToBottom: boolean
+    /** Mirror Claude Code's input box as a pinned overlay when the user scrolls up. */
+    pinInputBox: boolean
     defaultAllowedTools: string[]
     defaultPermissionMode: 'default' | 'acceptEdits' | 'bypassPermissions'
     /** Directories passed as --add-dir to Claude CLI (concatenated across settings tiers) */
@@ -105,6 +109,10 @@ export interface Settings {
     disableGpuAcceleration: boolean
     maxHeapSizeMb: number
     livePluginReload: boolean
+  }
+  /** Which build profile this binary was compiled for — read-only, set at build time. */
+  environment: {
+    profile: EnvProfile
   }
 }
 
@@ -246,6 +254,7 @@ export const DEFAULT_SETTINGS: Settings = {
     cursorBlink: true,
     scrollback: 5000,
     scrollToBottom: true,
+    pinInputBox: true,
     defaultAllowedTools: [],
     defaultPermissionMode: 'default',
     additionalDirs: []
@@ -311,5 +320,8 @@ export const DEFAULT_SETTINGS: Settings = {
     disableGpuAcceleration: false,
     maxHeapSizeMb: 2048,
     livePluginReload: false
+  },
+  environment: {
+    profile: 'uat'
   }
 }

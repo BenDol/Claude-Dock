@@ -5,10 +5,28 @@ import * as os from 'os'
 import { app } from 'electron'
 import { spawn } from 'child_process'
 import { fetchJSON, fetchText as fetchTextShared } from './http-utils'
+import { ENV_PROFILE } from '../shared/env-profile'
 
 declare const __BUILD_SHA__: string
 // test: force updater rebuild
 const GITHUB_API = 'https://api.github.com/repos/BenDol/Claude-Dock/releases'
+
+/** Profile-suffixed scratch dir for downloaded updates — keeps parallel profile
+ *  updates from colliding in `$TMP/claude-dock-update`. */
+const UPDATE_TMP_DIR = path.join(os.tmpdir(), `claude-dock-${ENV_PROFILE}-update`)
+
+/**
+ * Resolve the effective release channel for this build. Profile decides; the
+ * stored setting is advisory only.
+ *   dev  → never update (returns null)
+ *   uat  → always bleeding-edge
+ *   prod → respect stored setting (latest or a pinned tag)
+ */
+export function resolveUpdateProfile(storedProfile: string): string | null {
+  if (ENV_PROFILE === 'dev') return null
+  if (ENV_PROFILE === 'uat') return 'bleeding-edge'
+  return storedProfile || 'latest'
+}
 
 interface GitHubAsset {
   name: string
@@ -106,7 +124,11 @@ function compareVersions(a: number[], b: number[]): number {
   return 0
 }
 
-export async function checkForUpdate(profile: string): Promise<UpdateInfo> {
+export async function checkForUpdate(argProfile: string): Promise<UpdateInfo> {
+  // Dev builds never auto-update, UAT forces bleeding-edge, prod respects the stored setting.
+  const profile = resolveUpdateProfile(argProfile)
+  if (profile == null) return noUpdate // dev build — updater inert
+
   const releases = await fetchJSON<GitHubRelease[]>(GITHUB_API)
 
   if (profile === 'bleeding-edge') {
@@ -211,7 +233,7 @@ export function downloadUpdate(
   onProgress: ProgressCallback
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const tempDir = path.join(os.tmpdir(), 'claude-dock-update')
+    const tempDir = UPDATE_TMP_DIR
     fs.mkdirSync(tempDir, { recursive: true })
     const filePath = path.join(tempDir, assetName)
 
@@ -299,7 +321,7 @@ export function installAndRestart(): void {
 
 function installWindowsPortable(newExe: string, currentExe: string): void {
   const exeName = path.basename(currentExe)
-  const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.cmd')
+  const scriptPath = path.join(UPDATE_TMP_DIR, 'update.cmd')
   const script = [
     '@echo off',
     `taskkill /IM "${exeName}" >nul 2>&1`,
@@ -329,7 +351,7 @@ function installWindowsPortable(newExe: string, currentExe: string): void {
 function installWindowsNsis(zipPath: string, currentExe: string): void {
   const exeName = path.basename(currentExe)
   const installDir = path.dirname(currentExe)
-  const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.cmd')
+  const scriptPath = path.join(UPDATE_TMP_DIR, 'update.cmd')
   const script = [
     '@echo off',
     // Kill app processes
@@ -365,8 +387,8 @@ function installMacOS(dmgPath: string, currentExe: string): void {
   const appName = path.basename(appBundle)
   const appNameNoExt = appName.replace(/\.app$/, '')
   const appParent = path.dirname(appBundle)
-  const mountPoint = path.join(os.tmpdir(), 'claude-dock-dmg')
-  const updateDir = path.join(os.tmpdir(), 'claude-dock-update')
+  const mountPoint = path.join(os.tmpdir(), `claude-dock-${ENV_PROFILE}-dmg`)
+  const updateDir = UPDATE_TMP_DIR
   const updateLogPath = path.join(updateDir, 'update.log')
 
   // Determine install destination — if running from a read-only volume
@@ -477,7 +499,7 @@ function installMacOS(dmgPath: string, currentExe: string): void {
 
 function installLinux(newAppImage: string, currentExe: string): void {
   const exeBasename = path.basename(currentExe)
-  const scriptPath = path.join(os.tmpdir(), 'claude-dock-update', 'update.sh')
+  const scriptPath = path.join(UPDATE_TMP_DIR, 'update.sh')
   const script = [
     '#!/bin/bash',
     // Gracefully close ALL instances

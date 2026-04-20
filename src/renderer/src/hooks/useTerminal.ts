@@ -9,6 +9,7 @@ import { useDockStore } from '../stores/dock-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
 import { InputUndoManager } from '../lib/input-undo'
+import { detectInputBoxRows, renderPinnedRows } from '../lib/pinned-footer'
 
 /** Resolve a relative path against a base directory, handling `..` and `.` segments. */
 function resolveRelativePath(base: string, relative: string): string {
@@ -293,6 +294,14 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const scrollBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
 
+  // Pinned-footer overlay: mirrors Claude Code's input box while user is scrolled up.
+  // Three refs: wrapper (.pinned-footer), the rows host (.pinned-rows — innerHTML replaced
+  // on each refresh), and the cursor element (.pinned-cursor — positioned absolutely).
+  const pinnedFooterRef = useRef<HTMLDivElement | null>(null)
+  const pinnedRowsRef = useRef<HTMLDivElement | null>(null)
+  const pinnedCursorRef = useRef<HTMLDivElement | null>(null)
+  const pinnedRafRef = useRef<number | null>(null)
+
   // File paste interception state
   const [filePasteData, setFilePasteData] = useState<{
     files: { name: string; path: string }[]
@@ -312,6 +321,96 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const themeMode = useSettingsStore((s) => s.settings.theme.mode)
   const themeAccent = useSettingsStore((s) => s.settings.theme.accentColor)
   const termStyle = useSettingsStore((s) => s.settings.theme.terminalStyle)
+  const pinInputBox = useSettingsStore((s) => s.settings.terminal.pinInputBox)
+
+  // Refresh the pinned-footer overlay. Stable callback — reads current state from
+  // refs and the settings store, so it never needs to re-subscribe to effects.
+  const refreshPinnedFooter = useCallback(() => {
+    const footer = pinnedFooterRef.current
+    const rowsHost = pinnedRowsRef.current
+    const cursor = pinnedCursorRef.current
+    const term = termRef.current
+    const container = containerRef.current
+    if (!footer || !rowsHost || !term || !container) return
+
+    const settings = useSettingsStore.getState().settings
+    const active = settings.terminal.pinInputBox && scrolledUpRef.current
+    const wrapper = container.parentElement
+    const scrollBtn = wrapper?.querySelector('.scroll-to-bottom-btn') as HTMLElement | null
+    const setButtonBottom = (footerPx: number) => {
+      // Match CSS: base offset (6px) when no footer, else 4px container inset
+      // + footer height − 12px so the button sits roughly half over the
+      // footer's top edge (button is ~24px tall).
+      const v = footerPx > 0 ? `${4 + footerPx - 12}px` : '6px'
+      if (scrollBtn) scrollBtn.style.bottom = v
+      wrapper?.style.setProperty('--pinned-footer-height', `${footerPx}px`)
+    }
+    if (!active) {
+      footer.classList.remove('visible')
+      setButtonBottom(0)
+      return
+    }
+
+    const rowCount = detectInputBoxRows(term)
+    if (rowCount <= 0) {
+      footer.classList.remove('visible')
+      setButtonBottom(0)
+      return
+    }
+
+    const theme = getEffectiveTerminalColors(settings)
+    const { cursorRow, cursorCol } = renderPinnedRows(term, rowCount, theme, rowsHost)
+
+    // Derive row height + cell width from xterm's DOM so the overlay aligns pixel-
+    // perfectly with real rows. Fall back to font-metric math if the DOM query fails.
+    const rowEl = container.querySelector('.xterm-rows > div') as HTMLElement | null
+    let rowHeight = Math.round(settings.terminal.fontSize * settings.terminal.lineHeight)
+    let cellWidth = settings.terminal.fontSize * 0.6
+    if (rowEl) {
+      const rect = rowEl.getBoundingClientRect()
+      if (rect.height > 0) rowHeight = rect.height
+      if (rect.width > 0 && term.cols > 0) cellWidth = rect.width / term.cols
+    }
+
+    // Must match `padding-top` in global.css `.pinned-footer`. Absolutely-
+    // positioned children (cursor) are measured from the padding edge, so the
+    // padding does NOT shift them — we have to add it manually.
+    const PINNED_FOOTER_PAD_TOP = 8
+
+    const footerHeight = rowCount * rowHeight + PINNED_FOOTER_PAD_TOP
+
+    footer.style.fontFamily = settings.terminal.fontFamily
+    footer.style.fontSize = `${settings.terminal.fontSize}px`
+    footer.style.lineHeight = `${rowHeight}px`
+    footer.style.background = theme.background
+    footer.style.color = theme.foreground
+    footer.style.height = `${footerHeight}px`
+    setButtonBottom(footerHeight)
+
+    if (cursor) {
+      if (cursorRow != null && cursorCol != null) {
+        cursor.style.left = `${cursorCol * cellWidth}px`
+        cursor.style.top = `${cursorRow * rowHeight + PINNED_FOOTER_PAD_TOP}px`
+        cursor.style.width = `${cellWidth}px`
+        cursor.style.height = `${rowHeight}px`
+        cursor.style.background = theme.cursor
+        cursor.style.display = 'block'
+      } else {
+        cursor.style.display = 'none'
+      }
+    }
+
+    footer.classList.add('visible')
+  }, [])
+
+  // RAF-coalesced refresh — safe to call from high-frequency events (PTY writes).
+  const schedulePinnedRefresh = useCallback(() => {
+    if (pinnedRafRef.current != null) return
+    pinnedRafRef.current = requestAnimationFrame(() => {
+      pinnedRafRef.current = null
+      refreshPinnedFooter()
+    })
+  }, [refreshPinnedFooter])
 
   // Helper to spawn the PTY for this terminal
   const doSpawn = useCallback(() => {
@@ -422,12 +521,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           termRef.current.scrollToBottom()
           requestAnimationFrame(() => { programmaticScrollRef.current = false })
         }
+        // Keep the pinned footer in sync with live buffer changes. RAF coalesces
+        // high-frequency writes and gives xterm's parser a frame to apply the data.
+        if (scrolledUpRef.current) schedulePinnedRefresh()
       } else {
         dataBufferRef.current.push(data)
       }
     })
     return cleanup
-  }, [terminalId])
+  }, [terminalId, schedulePinnedRefresh])
 
   const initTerminal = useCallback(
     (container: HTMLDivElement | null) => {
@@ -444,6 +546,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         cursorStyle: settings.terminal.cursorStyle,
         cursorBlink: settings.terminal.cursorBlink,
         scrollback: settings.terminal.scrollback,
+        // Keep the viewport put when the user is scrolled up and starts typing
+        // — the pinned footer mirrors the input live, so they can keep editing
+        // without being yanked back to the bottom.
+        scrollOnUserInput: false,
         theme: { ...tc }
       })
 
@@ -573,9 +679,28 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             scrollBtnTimerRef.current = setTimeout(() => {
               setScrollBtnVisible(scrolledUpRef.current)
             }, 150)
+            // Sync pinned footer immediately on transition (not debounced — the
+            // overlay should appear/disappear the moment the user scrolls).
+            schedulePinnedRefresh()
           }
         })
       }
+
+      // Create the pinned-footer overlay inside the terminal container. Positioned
+      // absolutely so it floats over xterm's viewport bottom; pointer-events: none
+      // so typing and clicks pass through to the focused xterm.
+      const footer = document.createElement('div')
+      footer.className = 'pinned-footer'
+      const rowsHost = document.createElement('div')
+      rowsHost.className = 'pinned-rows'
+      const cursorEl = document.createElement('div')
+      cursorEl.className = 'pinned-cursor'
+      footer.appendChild(rowsHost)
+      footer.appendChild(cursorEl)
+      container.appendChild(footer)
+      pinnedFooterRef.current = footer
+      pinnedRowsRef.current = rowsHost
+      pinnedCursorRef.current = cursorEl
 
       // Replay buffered data
       if (dataBufferRef.current.length > 0) {
@@ -706,6 +831,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         try { undoRef.current.onInput(data) } catch { /* non-critical */ }
         api.terminal.write(terminalId, data)
       })
+
+      // xterm's parser processes write() chunks across multiple frames, so the
+      // RAF refresh we schedule on PTY arrival can read a stale buffer. This
+      // fires *after* each parse completes — guarantees our pinned-footer
+      // detection sees the final state, so the height (and the scroll-button
+      // position anchored to it) settles correctly when the live-context block
+      // clears.
+      term.onWriteParsed(() => {
+        if (scrolledUpRef.current) schedulePinnedRefresh()
+      })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [terminalId]
@@ -772,11 +907,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
             programmaticScrollRef.current = false
           })
         }
+        // Refresh overlay — row height/cell width may have changed after reflow.
+        schedulePinnedRefresh()
       }, 150)
     } catch {
       // Ignore fit errors
     }
-  }, [terminalId])
+  }, [terminalId, schedulePinnedRefresh])
 
   // Standard fit — only runs if container size changed
   const fit = useCallback(() => fitInner(false), [fitInner])
@@ -800,6 +937,14 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       termRef.current = null
       fitAddonRef.current = null
       if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      if (pinnedRafRef.current != null) {
+        cancelAnimationFrame(pinnedRafRef.current)
+        pinnedRafRef.current = null
+      }
+      pinnedFooterRef.current?.remove()
+      pinnedFooterRef.current = null
+      pinnedRowsRef.current = null
+      pinnedCursorRef.current = null
     }
   }, [])
 
@@ -821,8 +966,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           forceFit()
         } catch { /* ignore */ }
       }
+      // Font/theme changes mean overlay measurements are stale — refresh if visible.
+      schedulePinnedRefresh()
     }, 50)
-  }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId, forceFit])
+  }, [termFontFamily, termFontSize, termLineHeight, termCursorStyle, termCursorBlink, themeMode, themeAccent, termStyle, terminalId, forceFit, schedulePinnedRefresh])
+
+  // React to pinInputBox setting changes — if toggled off while visible, hide;
+  // if toggled on while scrolled up, show.
+  useEffect(() => {
+    schedulePinnedRefresh()
+  }, [pinInputBox, schedulePinnedRefresh])
 
   // Re-fit after grid reposition — force fit since container size always changes
   useEffect(() => {
@@ -852,6 +1005,8 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       scrolledUpRef.current = false
       setScrollBtnVisible(false)
       requestAnimationFrame(() => { programmaticScrollRef.current = false })
+      // Hide pinned footer immediately — we're no longer scrolled up.
+      pinnedFooterRef.current?.classList.remove('visible')
     }
   }, [])
 

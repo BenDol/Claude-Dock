@@ -264,9 +264,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
           onClick={handleScrollBtn}
           title={autoScroll ? 'Auto-scrolling (click to stop)' : 'Scroll to bottom (click to auto-scroll)'}
         >
-          <svg width="40" height="12" viewBox="0 0 40 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="2,2 20,10 38,2" />
-          </svg>
+          scroll to the bottom
         </button>
       )}
       {filePasteData && (

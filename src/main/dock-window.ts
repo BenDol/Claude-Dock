@@ -13,6 +13,7 @@ import { ActivityTracker } from './activity-tracker'
 import { IdleNotifier } from './idle-notifier'
 import { log } from './logger'
 import { CrashReporter } from './crash-reporter'
+import { getTitleSuffix } from '../shared/env-profile'
 
 declare const __DEV__: boolean
 
@@ -62,7 +63,7 @@ export class DockWindow {
       show: false, // Defer show until page is ready to avoid GPU blocking
       frame: false,
       backgroundColor: '#0f0f14',
-      title: `${path.basename(projectDir)} - Claude Dock`,
+      title: `${path.basename(projectDir)} - Claude Dock${getTitleSuffix()}`,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
         contextIsolation: true,

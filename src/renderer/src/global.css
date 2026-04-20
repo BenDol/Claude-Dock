@@ -1833,6 +1833,53 @@ body {
   padding: 4px;
 }
 
+/* Pinned footer — mirrors Claude Code's input box while the user is scrolled up.
+   Hidden by default; .visible is toggled by useTerminal's refreshPinnedFooter. */
+.pinned-footer {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  display: none;
+  overflow: hidden;
+  white-space: pre;
+  font-variant-ligatures: none;
+  pointer-events: none;
+  z-index: 5;
+  /* Visual breathing room above the first pinned row. Kept in sync with
+     PINNED_FOOTER_PAD_TOP in useTerminal.ts (cursor position offsets by the
+     same value since absolute positioning inside ignores our padding). */
+  padding-top: 8px;
+  box-shadow: 0 -6px 10px -6px rgba(0, 0, 0, 0.6);
+}
+
+.pinned-footer.visible {
+  display: block;
+}
+
+.pinned-footer .pinned-rows {
+  width: 100%;
+  height: 100%;
+}
+
+.pinned-footer .pinned-row {
+  white-space: pre;
+  min-height: 1em;
+}
+
+.pinned-footer .pinned-cursor {
+  position: absolute;
+  display: none;
+  opacity: 0.6;
+  mix-blend-mode: difference;
+  pointer-events: none;
+  animation: pinned-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes pinned-cursor-blink {
+  to { opacity: 0; }
+}
+
 .terminal-loading {
   position: absolute;
   inset: 0;
@@ -1867,46 +1914,47 @@ body {
 /* Scroll to bottom button */
 .scroll-to-bottom-btn {
   position: absolute;
-  bottom: 6px;
+  /* Sit roughly half over the pinned footer's top edge so the button
+     straddles the boundary. Footer CSS sets `bottom: 4px`; its height
+     is published as --pinned-footer-height by refreshPinnedFooter. When
+     no footer is pinned the JS sets bottom to 6px directly. */
+  bottom: calc(4px + var(--pinned-footer-height, 0px) - 12px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
-  width: 90px;
-  height: 28px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  padding: 0;
-  color: var(--text-secondary);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent-color) 70%, var(--bg-secondary));
+  border: none;
+  border-radius: 0;
+  padding: 3px 12px;
+  font-family: var(--term-font-family);
+  font-size: 15px;
+  line-height: 1.15;
+  color: #fff;
   cursor: pointer;
-  opacity: 0.8;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
-  animation: scroll-btn-bob 2s ease-in-out infinite;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  opacity: 0.85;
+  transition: opacity 0.15s, background 0.15s, bottom 0.15s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
 }
 
 .scroll-to-bottom-btn:hover {
   opacity: 1;
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-color) 85%, var(--bg-secondary));
 }
 
 .scroll-to-bottom-btn-active {
-  opacity: 0.9;
-  color: var(--accent-color);
-  animation: none;
+  background: color-mix(in srgb, var(--accent-color) 80%, var(--bg-secondary));
+  color: #fff;
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.25), 0 2px 8px rgba(0,0,0,0.5);
 }
 
 .scroll-to-bottom-btn-active:hover {
   opacity: 1;
-  color: var(--accent-color);
-}
-
-@keyframes scroll-btn-bob {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(3px); }
+  background: var(--accent-color);
 }
 
 .terminal-spinner {
@@ -2195,9 +2243,13 @@ body {
   background: var(--shell-term-bg, #2c2d38);
 }
 
-/* Smaller scroll-to-bottom button for shell panels */
+/* Smaller scroll-to-bottom button for shell panels — keeps the old compact
+   pill shape rather than the terminal's square. */
 .shell-scroll-btn {
+  width: auto;
+  height: auto;
   padding: 3px 10px;
+  border-radius: 12px;
   font-size: 10px;
 }
 

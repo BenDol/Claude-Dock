@@ -1,21 +1,37 @@
 import Store from 'electron-store'
 import { Settings, DEFAULT_SETTINGS } from '../shared/settings-schema'
+import { ENV_PROFILE } from '../shared/env-profile'
 import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
 
 declare const __UPDATE_PROFILE__: string
 
 let store: Store<Settings> | null = null
+let profileAligned = false
 
 function getStore(): Store<Settings> {
   if (!store) {
     const defaults = {
       ...DEFAULT_SETTINGS,
-      updater: { ...DEFAULT_SETTINGS.updater, profile: __UPDATE_PROFILE__ }
+      updater: { ...DEFAULT_SETTINGS.updater, profile: __UPDATE_PROFILE__ },
+      environment: { profile: ENV_PROFILE }
     }
     store = createSafeStore<Settings>({
       name: 'settings',
       defaults
     })
+  }
+  // First read after store init: ensure stored environment.profile matches the
+  // running binary. If an old settings.json was copied between installs, or a
+  // user is upgrading from a pre-env-profile build, the stored value could be
+  // stale. Writing it back keeps `settings.environment.profile` truthful.
+  if (!profileAligned) {
+    profileAligned = true
+    try {
+      const current = store.get('environment') as Settings['environment'] | undefined
+      if (!current || current.profile !== ENV_PROFILE) {
+        store.set('environment', { profile: ENV_PROFILE })
+      }
+    } catch { /* best effort — don't break startup if the store is unreadable */ }
   }
   return store
 }

@@ -3,6 +3,7 @@ import * as http from 'http'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { ENV_PROFILE } from '../shared/env-profile'
 
 const USER_AGENT = 'Claude-Dock-Updater'
 
@@ -77,7 +78,7 @@ export function downloadFile(
   destDir?: string
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const dir = destDir || path.join(os.tmpdir(), 'claude-dock-plugin-updates')
+    const dir = destDir || path.join(os.tmpdir(), `claude-dock-${ENV_PROFILE}-plugin-updates`)
     fs.mkdirSync(dir, { recursive: true })
     const filePath = path.join(dir, fileName)
 

@@ -1,6 +1,28 @@
 // Build trigger: 2026-04-02
-import { app, BrowserWindow } from 'electron'
+import { app } from 'electron'
 import * as path from 'path'
+import { getAppName, getAppUserModelId, getUserDataDirName } from '../shared/env-profile'
+
+// Profile identity must be established before any code calls `app.getPath('userData')`.
+//
+// NOTE: the bundler hoists imports, so the sibling imports below are fully
+// loaded before this block runs. The invariant that makes this safe is:
+// **no imported module may call `app.getPath('userData')` (or read any
+// userData-derived path) at module-init time.** Every consumer in this
+// codebase accesses userData lazily inside functions, after `app.whenReady`
+// fires or later — by which point the setPath below has already taken effect.
+//
+// If you add a new module that instantiates an electron-store or caches a
+// userData-derived path at module scope, this ordering will silently break
+// and you must move the consumer's init behind a lazy accessor (or move this
+// block into a module that every such consumer depends on transitively).
+app.setName(getAppName())
+app.setPath('userData', path.join(app.getPath('appData'), getUserDataDirName()))
+if (process.platform === 'win32') {
+  app.setAppUserModelId(getAppUserModelId())
+}
+
+import { BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import { DockManager } from './dock-manager'
 import { registerIpcHandlers } from './ipc-handlers'
@@ -19,12 +41,6 @@ import { cleanOldPastedFiles } from './clipboard-files'
 import { refreshContextMenuIfNeeded, autoRegisterContextMenuOnce } from './context-menu-integration'
 import { TelemetryCollector, checkInstallerConsent } from './telemetry'
 import { CrashReporter } from './crash-reporter'
-
-// Set explicit AppUserModelId so Windows groups taskbar icons correctly
-// (must be called before app.whenReady and match electron-builder appId)
-if (process.platform === 'win32') {
-  app.setAppUserModelId('com.claude.dock')
-}
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling (Squirrel only)
 try {

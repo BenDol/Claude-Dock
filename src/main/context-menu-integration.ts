@@ -13,16 +13,40 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { execSync, execFileSync } from 'child_process'
 import { log, logError } from './logger'
+import {
+  ENV_PROFILE,
+  getAppName,
+  getContextMenuCanonicalGuid,
+  getContextMenuClsid,
+  getContextMenuLabel,
+  getShellExtensionIdentifier,
+  getUserDataDirName
+} from '../shared/env-profile'
 
 // ---------------------------------------------------------------------------
-// Windows — Constants
+// Windows — Constants (profile-aware)
 // ---------------------------------------------------------------------------
 
-const WIN_REG_DIR = 'HKCU\\Software\\Classes\\Directory\\shell\\ClaudeDock'
-const WIN_REG_BG = 'HKCU\\Software\\Classes\\Directory\\Background\\shell\\ClaudeDock'
-const COM_CLSID = '{E94B2C47-5F3A-4A8D-B6D1-7C2E8F9A0B3D}'
+const SHELL_ID = getShellExtensionIdentifier()
+const MENU_LABEL = getContextMenuLabel()
+const WIN_REG_DIR = `HKCU\\Software\\Classes\\Directory\\shell\\${SHELL_ID}`
+const WIN_REG_BG = `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${SHELL_ID}`
+const COM_CLSID = getContextMenuClsid()
+const CANONICAL_GUID = getContextMenuCanonicalGuid()
 const WIN_CLSID_KEY = `HKCU\\Software\\Classes\\CLSID\\${COM_CLSID}`
-const WIN_META_KEY = 'HKCU\\Software\\ClaudeDock'
+const WIN_META_KEY = `HKCU\\Software\\${SHELL_ID}`
+const DLL_NAME = `${SHELL_ID}Menu.dll`
+const CS_FILE_NAME = `${SHELL_ID}Menu.cs`
+const ASSEMBLY_NAME = `${SHELL_ID}Menu`
+const COM_CLASS_NAME = `OpenWith${SHELL_ID}`
+
+// Linux filenames need to be profile-unique too so two installs don't share
+// a single ~/.local/share/<...>/claude-dock entry.
+const LINUX_BASE = getUserDataDirName() // 'claude-dock' for uat, 'claude-dock-prod' etc.
+const LINUX_NEMO_FILE = `${LINUX_BASE}.nemo_action`
+const LINUX_KDE_FILE = `${LINUX_BASE}.desktop`
+// KDE action identifiers must be alphanumeric — derive from SHELL_ID (already PascalCase, no punctuation).
+const KDE_ACTION_ID = `open${SHELL_ID}`
 
 // ---------------------------------------------------------------------------
 // Windows — IExplorerCommand COM DLL (compiled at runtime via csc.exe)
@@ -33,9 +57,14 @@ const WIN_META_KEY = 'HKCU\\Software\\ClaudeDock'
  * When registered as an ExplorerCommandHandler, Windows 11 shows it in the
  * modern (first-level) context menu instead of relegating it to "Show more options".
  *
- * The DLL reads the exe path from HKCU\Software\ClaudeDock\ExePath at runtime
+ * The DLL reads the exe path from HKCU\Software\<SHELL_ID>\ExePath at runtime
  * so it remains valid across auto-updates without recompilation.
+ *
+ * The source is templated with the profile identifier so that each installable
+ * profile compiles its own uniquely-named class / CLSID / registry path —
+ * otherwise two profiles would register colliding COM classes.
  */
+const CLSID_HEX = COM_CLSID.replace(/[{}]/g, '')
 const CS_SOURCE = `using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -43,7 +72,7 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
 
-namespace ClaudeDock
+namespace ${SHELL_ID}
 {
     [ComImport, Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -84,9 +113,9 @@ namespace ClaudeDock
     }
 
     [ComVisible(true)]
-    [Guid("E94B2C47-5F3A-4A8D-B6D1-7C2E8F9A0B3D")]
+    [Guid("${CLSID_HEX}")]
     [ClassInterface(ClassInterfaceType.None)]
-    public class OpenWithClaudeDock : IExplorerCommand
+    public class ${COM_CLASS_NAME} : IExplorerCommand
     {
         private const uint SIGDN_FILESYSPATH = 0x80058000;
 
@@ -94,7 +123,7 @@ namespace ClaudeDock
         {
             try
             {
-                RegistryKey key = Registry.CurrentUser.OpenSubKey("Software\\ClaudeDock");
+                RegistryKey key = Registry.CurrentUser.OpenSubKey("Software\\\\${SHELL_ID}");
                 if (key != null)
                 {
                     object val = key.GetValue("ExePath");
@@ -108,7 +137,7 @@ namespace ClaudeDock
 
         public int GetTitle(IShellItemArray psiItemArray, out IntPtr ppszName)
         {
-            ppszName = Marshal.StringToCoTaskMemUni("Open with Claude Dock");
+            ppszName = Marshal.StringToCoTaskMemUni("${MENU_LABEL}");
             return 0;
         }
 
@@ -126,7 +155,7 @@ namespace ClaudeDock
 
         public int GetCanonicalName(out Guid pguidCommandName)
         {
-            pguidCommandName = new Guid("D47C2B94-A3F5-4D8A-B61D-7C2E8F9A0B3D");
+            pguidCommandName = new Guid("${CANONICAL_GUID}");
             return 0;
         }
 
@@ -190,7 +219,7 @@ function getShellExtDir(): string {
 }
 
 function getDllPath(): string {
-  return path.join(getShellExtDir(), 'ClaudeDockMenu.dll')
+  return path.join(getShellExtDir(), DLL_NAME)
 }
 
 function findCscExe(): string | null {
@@ -222,7 +251,7 @@ function ensureShellExtDll(): boolean {
   const dir = getShellExtDir()
   fs.mkdirSync(dir, { recursive: true })
 
-  const csPath = path.join(dir, 'ClaudeDockMenu.cs')
+  const csPath = path.join(dir, CS_FILE_NAME)
   fs.writeFileSync(csPath, CS_SOURCE)
 
   try {
@@ -255,11 +284,11 @@ function registerComHandler(exePath: string): boolean {
   try {
     // Register CLSID — all entries must succeed for a valid COM registration
     const clsidCmds = [
-      `reg add "${WIN_CLSID_KEY}" /ve /d "OpenWithClaudeDock" /f`,
+      `reg add "${WIN_CLSID_KEY}" /ve /d "${COM_CLASS_NAME}" /f`,
       `reg add "${WIN_CLSID_KEY}\\InprocServer32" /ve /d "mscoree.dll" /f`,
       `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "ThreadingModel" /d "Both" /f`,
-      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Assembly" /d "ClaudeDockMenu, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" /f`,
-      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Class" /d "ClaudeDock.OpenWithClaudeDock" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Assembly" /d "${ASSEMBLY_NAME}, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" /f`,
+      `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "Class" /d "${SHELL_ID}.${COM_CLASS_NAME}" /f`,
       `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "RuntimeVersion" /d "v4.0.30319" /f`,
       `reg add "${WIN_CLSID_KEY}\\InprocServer32" /v "CodeBase" /d "${codeBase}" /f`
     ]
@@ -302,10 +331,10 @@ function unregisterComHandler(): void {
 function windowsRegisterClassic(exePath: string): void {
   const regOpts = { encoding: 'utf8' as const, windowsHide: true, timeout: 10000 }
   const cmds = [
-    `reg add "${WIN_REG_DIR}" /ve /d "Open with Claude Dock" /f`,
+    `reg add "${WIN_REG_DIR}" /ve /d "${MENU_LABEL}" /f`,
     `reg add "${WIN_REG_DIR}" /v "Icon" /d "${exePath}" /f`,
     `reg add "${WIN_REG_DIR}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`,
-    `reg add "${WIN_REG_BG}" /ve /d "Open with Claude Dock" /f`,
+    `reg add "${WIN_REG_BG}" /ve /d "${MENU_LABEL}" /f`,
     `reg add "${WIN_REG_BG}" /v "Icon" /d "${exePath}" /f`,
     `reg add "${WIN_REG_BG}\\command" /ve /d "\\"${exePath}\\" \\"%V\\"" /f`
   ]
@@ -421,7 +450,7 @@ function macRegister(): { success: boolean; error?: string } {
       : exePath
 
     const servicesDir = path.join(app.getPath('home'), 'Library', 'Services')
-    const workflowDir = path.join(servicesDir, 'Open with Claude Dock.workflow')
+    const workflowDir = path.join(servicesDir, `${MENU_LABEL}.workflow`)
     const contentsDir = path.join(workflowDir, 'Contents')
 
     fs.mkdirSync(contentsDir, { recursive: true })
@@ -436,7 +465,7 @@ function macRegister(): { success: boolean; error?: string } {
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Open with Claude Dock</string>
+				<string>${MENU_LABEL}</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>runWorkflowAsService</string>
@@ -661,7 +690,7 @@ done</string>
 function macUnregister(): { success: boolean; error?: string } {
   try {
     const workflowDir = path.join(
-      app.getPath('home'), 'Library', 'Services', 'Open with Claude Dock.workflow'
+      app.getPath('home'), 'Library', 'Services', `${MENU_LABEL}.workflow`
     )
     if (fs.existsSync(workflowDir)) {
       fs.rmSync(workflowDir, { recursive: true, force: true })
@@ -681,7 +710,7 @@ function macUnregister(): { success: boolean; error?: string } {
 
 function macIsRegistered(): boolean {
   const workflowDir = path.join(
-    app.getPath('home'), 'Library', 'Services', 'Open with Claude Dock.workflow'
+    app.getPath('home'), 'Library', 'Services', `${MENU_LABEL}.workflow`
   )
   return fs.existsSync(workflowDir)
 }
@@ -692,7 +721,7 @@ function macRefreshIfNeeded(): void {
   try {
     const wflowPath = path.join(
       app.getPath('home'), 'Library', 'Services',
-      'Open with Claude Dock.workflow', 'Contents', 'document.wflow'
+      `${MENU_LABEL}.workflow`, 'Contents', 'document.wflow'
     )
     const content = fs.readFileSync(wflowPath, 'utf8')
 
@@ -726,10 +755,10 @@ function linuxRegister(): { success: boolean; error?: string } {
 
     const nemoDir = path.join(app.getPath('home'), '.local', 'share', 'nemo', 'actions')
     fs.mkdirSync(nemoDir, { recursive: true })
-    fs.writeFileSync(path.join(nemoDir, 'claude-dock.nemo_action'), [
+    fs.writeFileSync(path.join(nemoDir, LINUX_NEMO_FILE), [
       '[Nemo Action]',
-      'Name=Open with Claude Dock',
-      'Comment=Open this folder in Claude Dock',
+      `Name=${MENU_LABEL}`,
+      `Comment=Open this folder in ${getAppName()}`,
       `Exec="${exePath}" "%F"`,
       'Icon-Name=utilities-terminal',
       'Selection=any',
@@ -739,7 +768,7 @@ function linuxRegister(): { success: boolean; error?: string } {
 
     const nautilusDir = path.join(app.getPath('home'), '.local', 'share', 'nautilus', 'scripts')
     fs.mkdirSync(nautilusDir, { recursive: true })
-    const nautilusScript = path.join(nautilusDir, 'Open with Claude Dock')
+    const nautilusScript = path.join(nautilusDir, MENU_LABEL)
     fs.writeFileSync(nautilusScript, [
       '#!/bin/sh',
       `exec "${exePath}" "$NAUTILUS_SCRIPT_CURRENT_URI" "$@"`,
@@ -749,15 +778,15 @@ function linuxRegister(): { success: boolean; error?: string } {
 
     const kdeDir = path.join(app.getPath('home'), '.local', 'share', 'kio', 'servicemenus')
     fs.mkdirSync(kdeDir, { recursive: true })
-    fs.writeFileSync(path.join(kdeDir, 'claude-dock.desktop'), [
+    fs.writeFileSync(path.join(kdeDir, LINUX_KDE_FILE), [
       '[Desktop Entry]',
       'Type=Service',
       'ServiceTypes=KonqPopupMenu/Plugin',
       'MimeType=inode/directory;',
-      'Actions=openClaudeDock',
+      `Actions=${KDE_ACTION_ID}`,
       '',
-      '[Desktop Action openClaudeDock]',
-      'Name=Open with Claude Dock',
+      `[Desktop Action ${KDE_ACTION_ID}]`,
+      `Name=${MENU_LABEL}`,
       'Icon=utilities-terminal',
       `Exec="${exePath}" "%f"`,
       ''
@@ -775,9 +804,9 @@ function linuxRegister(): { success: boolean; error?: string } {
 function linuxUnregister(): { success: boolean; error?: string } {
   try {
     const files = [
-      path.join(app.getPath('home'), '.local', 'share', 'nemo', 'actions', 'claude-dock.nemo_action'),
-      path.join(app.getPath('home'), '.local', 'share', 'nautilus', 'scripts', 'Open with Claude Dock'),
-      path.join(app.getPath('home'), '.local', 'share', 'kio', 'servicemenus', 'claude-dock.desktop')
+      path.join(app.getPath('home'), '.local', 'share', 'nemo', 'actions', LINUX_NEMO_FILE),
+      path.join(app.getPath('home'), '.local', 'share', 'nautilus', 'scripts', MENU_LABEL),
+      path.join(app.getPath('home'), '.local', 'share', 'kio', 'servicemenus', LINUX_KDE_FILE)
     ]
     for (const f of files) {
       try { fs.unlinkSync(f) } catch { /* may not exist */ }
@@ -793,13 +822,13 @@ function linuxUnregister(): { success: boolean; error?: string } {
 
 function linuxIsRegistered(): boolean {
   const nemoAction = path.join(
-    app.getPath('home'), '.local', 'share', 'nemo', 'actions', 'claude-dock.nemo_action'
+    app.getPath('home'), '.local', 'share', 'nemo', 'actions', LINUX_NEMO_FILE
   )
   const nautilusScript = path.join(
-    app.getPath('home'), '.local', 'share', 'nautilus', 'scripts', 'Open with Claude Dock'
+    app.getPath('home'), '.local', 'share', 'nautilus', 'scripts', MENU_LABEL
   )
   const kdeMenu = path.join(
-    app.getPath('home'), '.local', 'share', 'kio', 'servicemenus', 'claude-dock.desktop'
+    app.getPath('home'), '.local', 'share', 'kio', 'servicemenus', LINUX_KDE_FILE
   )
   return fs.existsSync(nemoAction) || fs.existsSync(nautilusScript) || fs.existsSync(kdeMenu)
 }
@@ -811,7 +840,7 @@ function linuxRefreshIfNeeded(): void {
 
   try {
     const nemoPath = path.join(
-      app.getPath('home'), '.local', 'share', 'nemo', 'actions', 'claude-dock.nemo_action'
+      app.getPath('home'), '.local', 'share', 'nemo', 'actions', LINUX_NEMO_FILE
     )
     if (fs.existsSync(nemoPath)) {
       const content = fs.readFileSync(nemoPath, 'utf8')
@@ -830,6 +859,11 @@ function linuxRefreshIfNeeded(): void {
 // ---------------------------------------------------------------------------
 
 export function registerContextMenu(): { success: boolean; error?: string } {
+  // Dev builds are run-from-source and mutate developer state — don't let them
+  // register a shell extension that would survive the dev session.
+  if (ENV_PROFILE === 'dev') {
+    return { success: false, error: 'Context menu registration disabled in dev builds' }
+  }
   switch (process.platform) {
     case 'win32': return windowsRegister()
     case 'darwin': return macRegister()
@@ -879,6 +913,9 @@ export function refreshContextMenuIfNeeded(): void {
  * The user can still toggle it via Settings after this.
  */
 export function autoRegisterContextMenuOnce(): void {
+  // Dev never auto-registers: developers don't want their machine's context
+  // menu reshuffled every time they run the app from source.
+  if (ENV_PROFILE === 'dev') return
   const flagFile = path.join(app.getPath('userData'), '.context-menu-registered')
   if (fs.existsSync(flagFile)) return
 

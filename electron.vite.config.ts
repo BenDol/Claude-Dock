@@ -29,7 +29,12 @@ function getPluginBuildSha(pluginSrcDir: string): string {
 
 const { sha, fullSha, date } = getBuildInfo()
 const isDev = process.env.PRODUCTION_BUILD !== '1'
-const updateProfile = process.env.UPDATE_PROFILE || 'latest'
+const envProfile = (process.env.DOCK_ENV_PROFILE || (isDev ? 'dev' : 'uat')) as 'dev' | 'uat' | 'prod'
+// When packaging without an explicit UPDATE_PROFILE, infer from env profile:
+// uat→bleeding-edge, prod→latest. Dev still defaults to 'latest' but the auto-updater
+// is gated off entirely in dev builds.
+const defaultUpdateProfile = envProfile === 'uat' ? 'bleeding-edge' : 'latest'
+const updateProfile = process.env.UPDATE_PROFILE || defaultUpdateProfile
 const debugDefault = updateProfile === 'bleeding-edge'
 
 // Unix epoch (seconds) of the HEAD commit — used to determine if plugin updates
@@ -56,6 +61,7 @@ export default defineConfig({
       __BUILD_SHA__: JSON.stringify(fullSha),
       __DEV__: JSON.stringify(isDev),
       __UPDATE_PROFILE__: JSON.stringify(updateProfile),
+      __ENV_PROFILE__: JSON.stringify(envProfile),
       __DEBUG_DEFAULT__: JSON.stringify(debugDefault),
       __PLUGIN_BUILD_SHAS__: JSON.stringify(pluginBuildShas),
       __APP_BUILD_EPOCH__: JSON.stringify(appBuildEpoch)
@@ -72,6 +78,9 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    define: {
+      __ENV_PROFILE__: JSON.stringify(envProfile)
+    },
     build: {
       outDir: 'out/preload'
     }
@@ -87,7 +96,8 @@ export default defineConfig({
     define: {
       __BUILD_SHA__: JSON.stringify(sha),
       __BUILD_DATE__: JSON.stringify(date),
-      __DEV__: JSON.stringify(isDev)
+      __DEV__: JSON.stringify(isDev),
+      __ENV_PROFILE__: JSON.stringify(envProfile)
     },
     build: {
       outDir: 'out/renderer'

@@ -4,6 +4,7 @@ import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
 import type { Settings } from '../../../shared/settings-schema'
 import { DEFAULT_SETTINGS, BUILTIN_NOTIFICATION_SOURCES } from '../../../shared/settings-schema'
+import { ENV_PROFILE } from '../../../shared/env-profile'
 import PluginPanel from './PluginPanel'
 
 function formatKeybind(e: KeyboardEvent): string | null {
@@ -657,6 +658,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   />
                   Scroll to Bottom Button
                 </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.terminal.pinInputBox ?? true}
+                    onChange={(e) => updateTerminal({ pinInputBox: e.target.checked })}
+                  />
+                  Pin Input Box While Scrolled
+                </label>
                 <label>
                   Scrollback Lines
                   <input
@@ -1280,22 +1289,34 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                 </SettingsAccordion>
 
                 <SettingsAccordion title="Updates">
-                <label>
-                  Update Profile
-                  <select
-                    value={settings.updater?.profile || 'latest'}
-                    onChange={(e) => { void handleProfileChange(e.target.value) }}
-                    disabled={switchingProfile || installingUpdate}
-                  >
-                    <option value="latest">Latest (Stable)</option>
-                    <option value="bleeding-edge">Bleeding Edge</option>
-                  </select>
-                </label>
-                <div className="settings-description">
-                  {settings.updater?.profile === 'bleeding-edge'
-                    ? 'Receiving a new build on every commit to main. May be unstable.'
-                    : 'Receiving versioned stable releases only. Recommended for most users.'}
-                </div>
+                {ENV_PROFILE === 'uat' ? (
+                  <div className="settings-description">
+                    This build is on the <strong>Bleeding Edge</strong> channel — updates arrive on every commit to main. Install the Stable build to switch to versioned releases.
+                  </div>
+                ) : ENV_PROFILE === 'dev' ? (
+                  <div className="settings-description">
+                    Automatic updates are disabled in dev builds.
+                  </div>
+                ) : (
+                  <>
+                    <label>
+                      Update Profile
+                      <select
+                        value={settings.updater?.profile || 'latest'}
+                        onChange={(e) => { void handleProfileChange(e.target.value) }}
+                        disabled={switchingProfile || installingUpdate}
+                      >
+                        <option value="latest">Latest (Stable)</option>
+                        <option value="bleeding-edge">Bleeding Edge</option>
+                      </select>
+                    </label>
+                    <div className="settings-description">
+                      {settings.updater?.profile === 'bleeding-edge'
+                        ? 'Receiving a new build on every commit to main. May be unstable.'
+                        : 'Receiving versioned stable releases only. Recommended for most users.'}
+                    </div>
+                  </>
+                )}
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -1346,6 +1367,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                 </SettingsAccordion>
 
                 <SettingsAccordion title="Advanced">
+                <label>
+                  Environment
+                  <input
+                    type="text"
+                    value={settings.environment?.profile || ENV_PROFILE}
+                    readOnly
+                    style={{ fontFamily: 'monospace', opacity: 0.8, cursor: 'default' }}
+                  />
+                </label>
+                <div className="settings-description">
+                  Build profile baked into this installation. <code>uat</code> = bleeding-edge, <code>prod</code> = stable, <code>dev</code> = run-from-source. Install a different build to change.
+                </div>
                 <div>
                   <button
                     className="settings-check-update-btn"

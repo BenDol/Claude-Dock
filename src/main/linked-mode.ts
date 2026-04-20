@@ -3,10 +3,20 @@ import * as path from 'path'
 import { app } from 'electron'
 import { DockManager } from './dock-manager'
 import { log, logError } from './logger'
+import {
+  ENV_PROFILE,
+  getLinkedFileName,
+  getMcpEntryName
+} from '../shared/env-profile'
 
 // Bump this when CLAUDE.md block or MCP server script changes.
 // Migration will auto-update existing installs on startup.
-const MCP_VERSION = 4
+const MCP_VERSION = 5
+
+const LEGACY_LINKED_FILE = '.linked'
+const LEGACY_MCP_ENTRY = 'claude-dock'
+const LINKED_FILE = getLinkedFileName()
+const MCP_ENTRY = getMcpEntryName()
 
 const CLAUDE_MD_START = '<!-- claude-dock-start -->'
 const CLAUDE_MD_END = '<!-- claude-dock-end -->'
@@ -37,9 +47,13 @@ function getClaudeMdPath(): string {
   return path.join(getUserClaudeDir(), 'CLAUDE.md')
 }
 
-/** Runtime data directory (AppData) — for config, messages, activity, version */
+/**
+ * Runtime data directory for MCP-shared state (activity, messages, shells, config,
+ * version). Lives inside the per-profile userData so separate profiles don't
+ * share — or corrupt — each other's dock state.
+ */
 function getDataDir(): string {
-  return path.join(app.getPath('userData').replace(/claude-dock$/, ''), 'claude-dock')
+  return path.join(app.getPath('userData'), 'dock-link')
 }
 
 /** Project-local MCP script path (shareable via git) */
@@ -181,37 +195,83 @@ function escapeRegex(str: string): string {
 
 function createLinkedFile(projectDir: string): void {
   try {
-    const linkedPath = path.join(projectDir, '.linked')
-    fs.writeFileSync(linkedPath, 'Claude Dock linked mode active\n')
-    log(`linked-mode: created .linked in ${projectDir}`)
+    const linkedPath = path.join(projectDir, LINKED_FILE)
+    fs.writeFileSync(linkedPath, `Claude Dock (${ENV_PROFILE}) linked mode active\n`)
+    log(`linked-mode: created ${LINKED_FILE} in ${projectDir}`)
+    // UAT also maintains the legacy unsuffixed .linked so any existing tools
+    // or prompts that look for it keep working. Drop this once the legacy name
+    // is fully retired.
+    if (ENV_PROFILE === 'uat') {
+      const legacyPath = path.join(projectDir, LEGACY_LINKED_FILE)
+      try { fs.writeFileSync(legacyPath, 'Claude Dock linked mode active\n') } catch { /* non-fatal */ }
+    }
   } catch (err) {
-    logError('linked-mode: failed to create .linked', err)
+    logError(`linked-mode: failed to create ${LINKED_FILE}`, err)
   }
 }
 
 function removeLinkedFile(projectDir: string): void {
-  try {
-    const linkedPath = path.join(projectDir, '.linked')
-    if (fs.existsSync(linkedPath)) {
-      fs.unlinkSync(linkedPath)
-      log(`linked-mode: removed .linked from ${projectDir}`)
+  const candidates = [path.join(projectDir, LINKED_FILE)]
+  if (ENV_PROFILE === 'uat') candidates.push(path.join(projectDir, LEGACY_LINKED_FILE))
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p)
+        log(`linked-mode: removed ${path.basename(p)} from ${projectDir}`)
+      }
+    } catch (err) {
+      logError(`linked-mode: failed to remove ${path.basename(p)}`, err)
     }
-  } catch (err) {
-    logError('linked-mode: failed to remove .linked', err)
   }
 }
 
 // ---------- Legacy cleanup ----------
 
+/**
+ * Claude Code remembers approved MCP servers in `.claude/settings.local.json`
+ * under `enabledMcpjsonServers`. When we rename the legacy `claude-dock` entry
+ * to the profile-suffixed `claude-dock-<profile>` we must rename the approval
+ * too, otherwise Claude Code treats it as a brand-new MCP and re-prompts the
+ * user. UAT only — prod/dev never inherit the legacy approval.
+ */
+function renameLegacyMcpApproval(projectDir: string): void {
+  if (ENV_PROFILE !== 'uat') return
+  try {
+    const settingsPath = path.join(projectDir, '.claude', 'settings.local.json')
+    if (!fs.existsSync(settingsPath)) return
+    const raw = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+    const list = raw.enabledMcpjsonServers
+    if (!Array.isArray(list)) return
+    const idx = list.indexOf(LEGACY_MCP_ENTRY)
+    if (idx < 0) return
+    if (list.includes(MCP_ENTRY)) {
+      list.splice(idx, 1) // already approved under new name; just drop legacy
+    } else {
+      list[idx] = MCP_ENTRY
+    }
+    fs.writeFileSync(settingsPath, JSON.stringify(raw, null, 2))
+    log(`linked-mode: renamed '${LEGACY_MCP_ENTRY}' → '${MCP_ENTRY}' in ${projectDir}/.claude/settings.local.json`)
+  } catch (err) {
+    log(`linked-mode: renameLegacyMcpApproval warning: ${err}`)
+  }
+}
+
 function cleanLegacySettings(projectDir: string): void {
   const userDir = getUserClaudeDir()
+  const staleKeys = [MCP_ENTRY, LEGACY_MCP_ENTRY]
   for (const file of ['settings.json', 'settings.local.json']) {
     try {
       const legacyPath = path.join(userDir, file)
       if (!fs.existsSync(legacyPath)) continue
       const raw = JSON.parse(fs.readFileSync(legacyPath, 'utf8'))
-      if (raw.mcpServers?.['claude-dock']) {
-        delete raw.mcpServers['claude-dock']
+      let changed = false
+      for (const key of staleKeys) {
+        if (raw.mcpServers?.[key]) {
+          delete raw.mcpServers[key]
+          changed = true
+        }
+      }
+      if (changed) {
         fs.writeFileSync(legacyPath, JSON.stringify(raw, null, 2))
         log(`linked-mode: cleaned stale entry from ~/${file}`)
       }
@@ -223,8 +283,14 @@ function cleanLegacySettings(projectDir: string): void {
     const projSettings = path.join(projectDir, '.claude', 'settings.local.json')
     if (!fs.existsSync(projSettings)) return
     const raw = JSON.parse(fs.readFileSync(projSettings, 'utf8'))
-    if (raw.mcpServers?.['claude-dock']) {
-      delete raw.mcpServers['claude-dock']
+    let changed = false
+    for (const key of staleKeys) {
+      if (raw.mcpServers?.[key]) {
+        delete raw.mcpServers[key]
+        changed = true
+      }
+    }
+    if (changed) {
       fs.writeFileSync(projSettings, JSON.stringify(raw, null, 2))
       log(`linked-mode: cleaned stale entry from project settings.local.json`)
     }
@@ -259,7 +325,12 @@ function setInstalledVersion(version: number): void {
 
 export function isMcpInstalled(projectDir: string): boolean {
   const mcpJson = readMcpJson(projectDir)
-  return !!mcpJson.mcpServers?.['claude-dock']
+  // Consider installed if either the profile-suffixed entry or the legacy
+  // unsuffixed entry (UAT upgrading from pre-profile build) is present.
+  return !!(
+    mcpJson.mcpServers?.[MCP_ENTRY] ||
+    (ENV_PROFILE === 'uat' && mcpJson.mcpServers?.[LEGACY_MCP_ENTRY])
+  )
 }
 
 export function installMcp(projectDir: string): { success: boolean; error?: string } {
@@ -275,15 +346,26 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
     fs.copyFileSync(src, dest)
     log(`linked-mode: copied MCP server to ${dest}`)
 
-    // 2. Add to project-level .mcp.json with relative path
+    // 2. Add to project-level .mcp.json with profile-suffixed entry name.
+    //    Multiple installed profiles (uat + prod) coexist as sibling entries.
+    //    DOCK_DATA_DIR is an absolute path to this profile's dock-link dir so
+    //    the MCP server writes/reads state in isolation from other profiles.
     const mcpJson = readMcpJson(projectDir)
     if (!mcpJson.mcpServers) mcpJson.mcpServers = {}
-    mcpJson.mcpServers['claude-dock'] = {
+    mcpJson.mcpServers[MCP_ENTRY] = {
       command: 'node',
-      args: ['.claude/claude-dock-mcp.cjs']
+      args: ['.claude/claude-dock-mcp.cjs'],
+      env: { DOCK_DATA_DIR: getDataDir() }
+    }
+    // UAT upgrading from a pre-profile build: rename the old unsuffixed entry
+    // so Claude Code picks up the new key on next launch without asking.
+    if (ENV_PROFILE === 'uat' && mcpJson.mcpServers[LEGACY_MCP_ENTRY]) {
+      delete mcpJson.mcpServers[LEGACY_MCP_ENTRY]
+      log(`linked-mode: renamed legacy '${LEGACY_MCP_ENTRY}' → '${MCP_ENTRY}' in ${projectDir}/.mcp.json`)
     }
     writeMcpJson(projectDir, mcpJson)
-    log(`linked-mode: added claude-dock to ${projectDir}/.mcp.json`)
+    renameLegacyMcpApproval(projectDir)
+    log(`linked-mode: added ${MCP_ENTRY} to ${projectDir}/.mcp.json`)
 
     // 3. Clean stale entries from old install locations
     cleanLegacySettings(projectDir)
@@ -305,12 +387,18 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
 
 export function uninstallMcp(projectDir: string): { success: boolean; error?: string } {
   try {
-    // 1. Remove from project-level .mcp.json
+    // 1. Remove from project-level .mcp.json (both profile entry + legacy name)
     const mcpJson = readMcpJson(projectDir)
-    if (mcpJson.mcpServers?.['claude-dock']) {
-      delete mcpJson.mcpServers['claude-dock']
+    let removed = false
+    for (const key of [MCP_ENTRY, LEGACY_MCP_ENTRY]) {
+      if (mcpJson.mcpServers?.[key]) {
+        delete mcpJson.mcpServers[key]
+        removed = true
+      }
+    }
+    if (removed) {
       writeMcpJson(projectDir, mcpJson)
-      log(`linked-mode: removed claude-dock from ${projectDir}/.mcp.json`)
+      log(`linked-mode: removed ${MCP_ENTRY} from ${projectDir}/.mcp.json`)
     }
 
     // 1b. Clean legacy entries
@@ -370,6 +458,11 @@ export function setMessagingEnabled(enabled: boolean): void {
  */
 export function migrateIfNeeded(): void {
   try {
+    // v5: relocate dock-* state files into dock-link/ subfolder (UAT only, since
+    // prod/dev never wrote to the old parent path). Run BEFORE reading the
+    // installed version — the mcp-version marker itself may need relocating.
+    migrateDataDirIfNeeded()
+
     const installed = getInstalledVersion()
     if (installed === 0) return // MCP never installed
     if (installed >= MCP_VERSION) return // already up-to-date
@@ -394,53 +487,96 @@ export function migrateIfNeeded(): void {
 }
 
 /**
+ * Pre-v5 the data dir was `%userData%` itself; v5 nests it under `dock-link/`.
+ * Move existing dock-* state files so an upgraded UAT install doesn't lose
+ * message history, shell state, or dock-config on first run.
+ */
+function migrateDataDirIfNeeded(): void {
+  if (ENV_PROFILE !== 'uat') return // only UAT could have legacy state at the parent
+  const legacyParent = app.getPath('userData')
+  const newDir = getDataDir()
+  if (legacyParent === newDir) return
+  const legacyFiles = [
+    'dock-activity.json',
+    'dock-config.json',
+    'dock-messages.json',
+    'dock-shell-commands.json',
+    'dock-shell-output.json',
+    'dock-pending-events.json',
+    'mcp-version'
+  ]
+  let moved = 0
+  for (const name of legacyFiles) {
+    const src = path.join(legacyParent, name)
+    const dest = path.join(newDir, name)
+    try {
+      if (!fs.existsSync(src)) continue
+      if (fs.existsSync(dest)) {
+        // New file already exists — leave legacy in place rather than clobber.
+        continue
+      }
+      fs.mkdirSync(newDir, { recursive: true })
+      fs.renameSync(src, dest)
+      moved++
+    } catch (err) {
+      logError(`linked-mode: failed to migrate ${name} into dock-link/`, err)
+    }
+  }
+  if (moved > 0) log(`linked-mode: migrated ${moved} legacy dock-* file(s) into dock-link/`)
+}
+
+/**
  * Run when a dock opens. Migrates the project's .mcp.json from absolute paths
  * to relative paths, and ensures the MCP script is in the project directory.
  */
 export function migrateProjectIfNeeded(projectDir: string): void {
   try {
     const mcpJson = readMcpJson(projectDir)
-    const entry = mcpJson.mcpServers?.['claude-dock']
-    if (!entry) return // MCP not installed for this project
+    const profileEntry = mcpJson.mcpServers?.[MCP_ENTRY]
+    const legacyEntry = mcpJson.mcpServers?.[LEGACY_MCP_ENTRY]
+    const entry = profileEntry || (ENV_PROFILE === 'uat' ? legacyEntry : undefined)
+    if (!entry) return // MCP not installed for this project under this profile
 
     const args: string[] = entry.args || []
     const currentPath = args[0] || ''
-
     const isAlreadyCjs = currentPath === '.claude/claude-dock-mcp.cjs'
+    const hasDataDirEnv = !!entry.env?.DOCK_DATA_DIR
+    const correctDataDir = entry.env?.DOCK_DATA_DIR === getDataDir()
+    const isOnProfileKey = !!profileEntry
+    const needsRewrite =
+      !isAlreadyCjs || !hasDataDirEnv || !correctDataDir || !isOnProfileKey
 
-    if (isAlreadyCjs) {
-      // Just ensure the script file is up-to-date
-      const dest = getProjectMcpScriptPath(projectDir)
-      const src = getMcpServerSourcePath()
-      if (fs.existsSync(src)) {
-        fs.mkdirSync(path.dirname(dest), { recursive: true })
-        fs.copyFileSync(src, dest)
-      }
-      return
-    }
-
-    // Migrate from old .js path (relative or absolute) to .cjs
-    log(`linked-mode: migrating project MCP to .cjs in ${projectDir}`)
-
-    // Copy new .cjs script into project
+    // Always keep the on-disk script up-to-date with the packaged copy
     const src = getMcpServerSourcePath()
     const dest = getProjectMcpScriptPath(projectDir)
-    fs.mkdirSync(path.dirname(dest), { recursive: true })
-
     if (fs.existsSync(src)) {
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
       fs.copyFileSync(src, dest)
     }
+
+    if (!needsRewrite) return
+
+    log(`linked-mode: migrating project MCP entry in ${projectDir} → ${MCP_ENTRY}`)
 
     // Clean up old .js script if it exists
     const oldScript = path.join(projectDir, '.claude', 'claude-dock-mcp.js')
     try { if (fs.existsSync(oldScript)) fs.unlinkSync(oldScript) } catch { /* ignore */ }
 
-    // Update .mcp.json to use .cjs
-    mcpJson.mcpServers['claude-dock'] = {
+    // Rewrite to canonical profile-suffixed form
+    if (!mcpJson.mcpServers) mcpJson.mcpServers = {}
+    mcpJson.mcpServers[MCP_ENTRY] = {
       command: 'node',
-      args: ['.claude/claude-dock-mcp.cjs']
+      args: ['.claude/claude-dock-mcp.cjs'],
+      env: { DOCK_DATA_DIR: getDataDir() }
+    }
+    // Drop the legacy unsuffixed key once we've taken ownership under the
+    // profile-suffixed name. Only UAT does this — prod/dev should never touch
+    // an unsuffixed entry (it belongs to UAT).
+    if (ENV_PROFILE === 'uat' && legacyEntry) {
+      delete mcpJson.mcpServers[LEGACY_MCP_ENTRY]
     }
     writeMcpJson(projectDir, mcpJson)
+    renameLegacyMcpApproval(projectDir)
     log(`linked-mode: project migration complete for ${projectDir}`)
   } catch (err) {
     logError(`linked-mode: project migration failed for ${projectDir} (non-fatal)`, err)

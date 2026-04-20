@@ -7,9 +7,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "package:win": "electron-vite build && electron-builder --win",
-    "package:mac": "electron-vite build && electron-builder --mac",
-    "package:linux": "electron-vite build && electron-builder --linux",
+    "package:win": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --win --config electron-builder.config.js",
+    "package:win:uat": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --win --config electron-builder.config.js",
+    "package:win:prod": "cross-env DOCK_ENV_PROFILE=prod UPDATE_PROFILE=latest PRODUCTION_BUILD=1 electron-vite build && electron-builder --win --config electron-builder.config.js",
+    "package:mac": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --mac --config electron-builder.config.js",
+    "package:mac:uat": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --mac --config electron-builder.config.js",
+    "package:mac:prod": "cross-env DOCK_ENV_PROFILE=prod UPDATE_PROFILE=latest PRODUCTION_BUILD=1 electron-vite build && electron-builder --mac --config electron-builder.config.js",
+    "package:linux": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --linux --config electron-builder.config.js",
+    "package:linux:uat": "cross-env DOCK_ENV_PROFILE=uat UPDATE_PROFILE=bleeding-edge PRODUCTION_BUILD=1 electron-vite build && electron-builder --linux --config electron-builder.config.js",
+    "package:linux:prod": "cross-env DOCK_ENV_PROFILE=prod UPDATE_PROFILE=latest PRODUCTION_BUILD=1 electron-vite build && electron-builder --linux --config electron-builder.config.js",
     "postinstall": "node scripts/fix-node-pty.js && electron-builder install-app-deps",
     "rebuild": "node scripts/fix-node-pty.js && npx @electron/rebuild --force",
     "test": "vitest run",
@@ -42,81 +48,12 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "electron": "^34.0.0",
+    "cross-env": "^7.0.3",
     "electron-builder": "^25.1.8",
     "electron-vite": "^3.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
-  },
-  "build": {
-    "appId": "com.claude.dock",
-    "productName": "Claude Dock",
-    "icon": "assets/icon",
-    "files": [
-      "out/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/claude-dock-mcp.cjs",
-        "to": "claude-dock-mcp.cjs"
-      }
-    ],
-    "asarUnpack": [
-      "node_modules/node-pty/**"
-    ],
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        "nsis",
-        "portable"
-      ],
-      "extraResources": [
-        {
-          "from": "resources/llm/win/llama-server.exe",
-          "to": "llm/llama-server.exe"
-        }
-      ]
-    },
-    "nsis": {
-      "include": "build/installer.nsh"
-    },
-    "portable": {
-      "artifactName": "${productName}-${version}.Portable.${ext}"
-    },
-    "afterSign": "scripts/notarize.js",
-    "mac": {
-      "icon": "assets/icon.png",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "universal"
-          ]
-        }
-      ],
-      "extraResources": [
-        {
-          "from": "resources/llm/mac/llama-server",
-          "to": "llm/llama-server"
-        }
-      ]
-    },
-    "linux": {
-      "icon": "assets/icon.png",
-      "target": [
-        "AppImage"
-      ],
-      "extraResources": [
-        {
-          "from": "resources/llm/linux/llama-server",
-          "to": "llm/llama-server"
-        }
-      ]
-    }
   }
 }
