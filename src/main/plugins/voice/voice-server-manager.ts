@@ -158,8 +158,18 @@ export class VoiceServerManager extends EventEmitter {
   private async runSetup(
     onProgress: ((p: VoiceSetupProgress) => void) | undefined
   ): Promise<void> {
+    // Progress reporter. Terminal steps ('done' / 'error') must not rewrite
+    // installState back to 'installing' — the caller owns the final transition
+    // to 'installed' or 'error', and clobbering it here is what previously left
+    // the setup wizard pinned open after a successful run.
     const report = (p: VoiceSetupProgress) => {
-      this.updateStatus({ step: p.message, installState: p.step === 'error' ? 'error' : 'installing' })
+      if (p.step === 'error') {
+        this.updateStatus({ step: p.message, installState: 'error' })
+      } else if (p.step === 'done') {
+        this.updateStatus({ step: p.message })
+      } else {
+        this.updateStatus({ step: p.message, installState: 'installing' })
+      }
       onProgress?.(p)
       this.broadcastProgress(p)
     }

@@ -166,7 +166,13 @@
 
 .voice-setup-overlay {
   position: fixed;
-  inset: 0;
+  /* Start below the titlebar so its Close button remains clickable even if
+     the wizard gets stuck in an unexpected state. The titlebar height is
+     32px (see .voice-titlebar). */
+  top: 32px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;

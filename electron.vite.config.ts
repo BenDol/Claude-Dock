@@ -2,6 +2,34 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'child_process'
 import { resolve } from 'path'
+import * as fs from 'fs'
+import * as path from 'path'
+
+/**
+ * Copies the voice plugin's Python runtime into the main-process build output.
+ *
+ * The Python scripts are spawned as a subprocess at runtime, so they must
+ * travel with every build — not just packaged installers. By landing them in
+ * out/main/voice-python/, they get bundled into app.asar (unpacked via
+ * electron-builder's asarUnpack rule) and are available to `electron-vite dev`
+ * as well. This replaces the earlier extraResources-only strategy, which
+ * silently dropped the Python bundle when electron-builder wasn't part of the
+ * build pipeline.
+ */
+function copyVoicePythonPlugin() {
+  return {
+    name: 'dock-copy-voice-python',
+    closeBundle() {
+      const src = path.resolve(__dirname, 'src/main/plugins/voice/python')
+      const dst = path.resolve(__dirname, 'out/main/voice-python')
+      if (!fs.existsSync(src)) {
+        throw new Error(`[copy-voice-python] source missing: ${src}`)
+      }
+      fs.rmSync(dst, { recursive: true, force: true })
+      fs.cpSync(src, dst, { recursive: true })
+    }
+  }
+}
 
 function getBuildInfo() {
   try {
@@ -57,7 +85,7 @@ const pluginBuildShas: Record<string, string> = {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin(), copyVoicePythonPlugin()],
     define: {
       __BUILD_SHA__: JSON.stringify(fullSha),
       __DEV__: JSON.stringify(isDev),

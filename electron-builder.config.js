@@ -37,11 +37,15 @@ module.exports = {
     buildEnvProfile: envProfile
   },
   extraResources: [
-    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' },
-    // Voice plugin Python scripts — resolved at runtime via process.resourcesPath.
-    { from: 'src/main/plugins/voice/python', to: 'voice-python' }
+    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' }
   ],
-  asarUnpack: ['node_modules/node-pty/**'],
+  // Voice plugin Python scripts are copied into out/main/voice-python/ by
+  // electron-vite, then unpacked from app.asar so they exist as real files
+  // on disk (required because Python is spawned as a subprocess).
+  asarUnpack: [
+    'node_modules/node-pty/**',
+    'out/main/voice-python/**'
+  ],
   win: {
     icon: 'assets/icon.png',
     target: ['nsis', 'portable'],

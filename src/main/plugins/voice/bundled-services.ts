@@ -14,13 +14,18 @@ import { NotificationManager } from '../../notification-manager'
 import type { VoiceServices, VoiceNotificationPayload } from './services'
 
 function resolveBundledPythonDir(): string {
-  // In production the python/ folder is shipped via electron-builder's
-  // extraResources to <resources>/voice-python/. In dev we load straight
-  // from source so edits to .py files don't need a rebuild.
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'voice-python')
+  // The voice Python runtime is copied alongside the main bundle by the
+  // `copyVoicePythonPlugin` step in electron.vite.config.ts, so it lives at
+  // <bundle>/voice-python/ in every build — including plain `electron-vite
+  // build` without electron-builder. In a packaged app the bundle is inside
+  // app.asar, but spawn() cannot execute from within asar; electron-builder's
+  // `asarUnpack` rule extracts voice-python to app.asar.unpacked/<same path>/
+  // on install, so we swap the segment when we detect it.
+  const bundled = path.join(__dirname, 'voice-python')
+  if (app.isPackaged && bundled.includes(`${path.sep}app.asar${path.sep}`)) {
+    return bundled.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`)
   }
-  return path.join(app.getAppPath(), 'src', 'main', 'plugins', 'voice', 'python')
+  return bundled
 }
 
 function voiceDataDir(): string {

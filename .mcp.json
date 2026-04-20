@@ -1,10 +1,13 @@
 {
   "mcpServers": {
-    "claude-dock": {
+    "claude-dock-uat": {
       "command": "node",
       "args": [
         ".claude/claude-dock-mcp.cjs"
-      ]
+      ],
+      "env": {
+        "DOCK_DATA_DIR": "C:\\Users\\dolb9\\AppData\\Roaming\\claude-dock\\dock-link"
+      }
     }
   }
 }
