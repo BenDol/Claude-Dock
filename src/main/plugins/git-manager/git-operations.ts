@@ -358,12 +358,18 @@ export async function getStatus(cwd: string, fast?: boolean): Promise<GitStatusR
           oldPath = entries[++i] // next null-separated entry is the original path
         }
 
+        // Submodule sub-field format: S<c><m><u> where c='C' means the recorded
+        // commit moved (stageable), m='M' means dirty tracked content (not stageable
+        // at the parent level), u='U' means untracked content. Rewinds and divergent
+        // updates still set c='C', so this is the correct stageability signal.
+        const submoduleCommitChanged = isSubmodule && sub[1] === 'C' ? true : undefined
         const fileEntry: GitFileStatusEntry = {
           path,
           indexStatus: x,
           workTreeStatus: y,
           oldPath,
-          isSubmodule: isSubmodule || undefined
+          isSubmodule: isSubmodule || undefined,
+          submoduleCommitChanged
         }
 
         if (x !== '.' && x !== '?') {

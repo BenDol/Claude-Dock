@@ -40,7 +40,7 @@ const standaloneFileHistory = params.get('fileHistory') || ''
 function countStageableChanges(status: GitStatusResult | null): number {
   if (!status) return 0
   const stageableUnstaged = [...status.unstaged, ...status.untracked].filter(
-    (f) => !f.isSubmodule || (f.submoduleAhead ?? 0) > 0
+    (f) => !f.isSubmodule || f.submoduleCommitChanged === true
   )
   return status.staged.length + stageableUnstaged.length
 }
@@ -5080,7 +5080,7 @@ const VirtualFileList: React.FC<{
                     }}
                     title="Show in folder"
                   ><ShowInFolderIcon /></button>
-                  {f.isSubmodule && !((f.submoduleAhead ?? 0) > 0 || (f.submoduleBehind ?? 0) > 0) && (
+                  {f.isSubmodule && !f.submoduleCommitChanged && (
                     <span className="gm-file-submodule-label">submodule</span>
                   )}
                 </span>
@@ -5735,7 +5735,7 @@ const WorkingChanges: React.FC<{
   // are visual indicators — they shouldn't count toward change totals
   // or be included in Stage All operations.
   const isStageable = (f: GitFileStatusEntry) =>
-    !f.isSubmodule || (f.submoduleAhead ?? 0) > 0
+    !f.isSubmodule || f.submoduleCommitChanged === true
   const stageableUnstaged = allUnstaged.filter(isStageable)
   const stageableCount = status.staged.length + stageableUnstaged.length
 
