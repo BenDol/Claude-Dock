@@ -30,6 +30,8 @@ interface DockState {
   pendingWorktrees: Map<string, string>
   /** Maps terminal ID → session ID for manual resume (user-provided session ID) */
   manualResumeIds: Map<string, string>
+  /** Terminal IDs that should auto-open the worktree popover on first mount */
+  autoOpenWorktreeIds: Set<string>
   /** Shell events detected from ##DOCK_EVENT## markers */
   shellEvents: Array<{
     id: string
@@ -63,6 +65,8 @@ interface DockState {
   setTerminalWorktree: (id: string, worktreePath: string | null) => void
   setPendingWorktree: (id: string, branch: string | null) => void
   setManualResumeId: (id: string, sessionId: string | null) => void
+  markAutoOpenWorktree: (id: string) => void
+  consumeAutoOpenWorktree: (id: string) => boolean
   addShellEvent: (event: { sessionId: string; shellId: string; type: string; payload: any; timestamp: number }) => void
   dismissShellEvent: (id: string) => void
   clearShellEvents: () => void
@@ -88,6 +92,7 @@ export const useDockStore = create<DockState>((set, get) => ({
   terminalWorktrees: new Map<string, string>(),
   pendingWorktrees: new Map<string, string>(),
   manualResumeIds: new Map<string, string>(),
+  autoOpenWorktreeIds: new Set<string>(),
   shellEvents: [],
   ignoredEventHashes: [],
 
@@ -119,7 +124,9 @@ export const useDockStore = create<DockState>((set, get) => ({
       pendingWorktrees.delete(id)
       const manualResumeIds = new Map(state.manualResumeIds)
       manualResumeIds.delete(id)
-      return { terminals, focusedTerminalId, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds }
+      const autoOpenWorktreeIds = new Set(state.autoOpenWorktreeIds)
+      autoOpenWorktreeIds.delete(id)
+      return { terminals, focusedTerminalId, claudeTaskTerminals, claudeTaskFlags, claudePersistentTaskTerminals, pendingWorktrees, manualResumeIds, autoOpenWorktreeIds }
     }),
 
   setTerminalTitle: (id, title) =>
@@ -233,6 +240,21 @@ export const useDockStore = create<DockState>((set, get) => ({
     }
     return { manualResumeIds }
   }),
+
+  markAutoOpenWorktree: (id) => set((state) => {
+    const next = new Set(state.autoOpenWorktreeIds)
+    next.add(id)
+    return { autoOpenWorktreeIds: next }
+  }),
+
+  consumeAutoOpenWorktree: (id) => {
+    const state = get()
+    if (!state.autoOpenWorktreeIds.has(id)) return false
+    const next = new Set(state.autoOpenWorktreeIds)
+    next.delete(id)
+    set({ autoOpenWorktreeIds: next })
+    return true
+  },
 
   addShellEvent: (event) => set((state) => {
     // Skip events the user has ignored by hash

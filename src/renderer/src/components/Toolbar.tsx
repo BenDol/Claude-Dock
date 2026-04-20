@@ -16,6 +16,7 @@ import { sanitizeSvg } from '../lib/svg-sanitize'
 interface ToolbarProps {
   projectDir: string
   onAddTerminal: () => void
+  onAddWorktreeTerminal: () => void
   onRestoreLastClosed: () => void
   onAddTerminalWithSession: (sessionId: string) => void
   onOpenSettings: (opts?: { tab?: string; section?: string }) => void
@@ -42,6 +43,14 @@ const PlusIcon: React.FC = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+)
+
+const WorktreePlusIcon: React.FC = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="22" x2="12" y2="10" />
+    <polyline points="6 4 12 10 18 4" />
+    <line x1="12" y1="10" x2="12" y2="2" />
   </svg>
 )
 
@@ -108,11 +117,27 @@ const FolderIcon: React.FC = () => (
 )
 
 
-const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreLastClosed, onAddTerminalWithSession, onOpenSettings, onOpenBugReport }) => {
+const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorktreeTerminal, onRestoreLastClosed, onAddTerminalWithSession, onOpenSettings, onOpenBugReport }) => {
   const toolbarRef = useRef<HTMLDivElement>(null)
   useToolbarNavigation(toolbarRef)
 
   const terminalCount = useDockStore((s) => s.terminals.length)
+  // Track alt/ctrl so the + button morphs into a "new worktree terminal" button
+  const [worktreeMode, setWorktreeMode] = useState(false)
+  useEffect(() => {
+    const update = (e: KeyboardEvent | MouseEvent) => setWorktreeMode(e.altKey || e.ctrlKey || e.metaKey)
+    const clear = () => setWorktreeMode(false)
+    window.addEventListener('keydown', update)
+    window.addEventListener('keyup', update)
+    window.addEventListener('mousemove', update)
+    window.addEventListener('blur', clear)
+    return () => {
+      window.removeEventListener('keydown', update)
+      window.removeEventListener('keyup', update)
+      window.removeEventListener('mousemove', update)
+      window.removeEventListener('blur', clear)
+    }
+  }, [])
   const linkedEnabled = useSettingsStore((s) => s.settings.linked?.enabled ?? false)
   // MCP status: null = loading, 'not_installed' | 'installed_inactive' | 'installed_active'
   const [mcpStatus, setMcpStatus] = useState<'not_installed' | 'installed_inactive' | 'installed_active' | null>(null)
@@ -374,9 +399,28 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onRestoreL
           >
             <HistoryIcon />
           </button>
-          <button data-toolbar-btn tabIndex={-1} className="toolbar-btn toolbar-btn-icon toolbar-add-btn" onClick={onAddTerminal} title="New terminal (Ctrl+T)">
-            <PlusIcon />
-          </button>
+          <div className="toolbar-add-btn-wrapper">
+            <button
+              data-toolbar-btn
+              tabIndex={-1}
+              className={`toolbar-btn toolbar-btn-icon toolbar-add-btn${worktreeMode ? ' toolbar-add-btn-worktree' : ''}`}
+              onClick={(e) => (e.altKey || e.ctrlKey || e.metaKey ? onAddWorktreeTerminal() : onAddTerminal())}
+              title={worktreeMode ? 'New worktree terminal' : 'New terminal (Ctrl+T)'}
+            >
+              {worktreeMode ? <WorktreePlusIcon /> : <PlusIcon />}
+            </button>
+            <div className="toolbar-add-popout">
+              <button
+                data-toolbar-btn
+                tabIndex={-1}
+                className="toolbar-btn toolbar-btn-icon toolbar-add-popout-btn"
+                onClick={onAddWorktreeTerminal}
+                title="New worktree terminal"
+              >
+                <WorktreePlusIcon />
+              </button>
+            </div>
+          </div>
         </div>
         {getToolbarActions().filter((a) => enabledPlugins === null || enabledPlugins.has(a.id)).map((action) => (
           <button

@@ -1150,6 +1150,16 @@ function DockApp() {
     addTerminal(id)
   }, [addTerminal])
 
+  const handleAddWorktreeTerminal = useCallback(() => {
+    const id = `term-${nextTermId++}-${Date.now()}-wt`
+    const store = useDockStore.getState()
+    // Block PTY spawn until the user picks a branch from the popover.
+    // The sentinel branch name is recognised by TerminalView's loading state.
+    store.setPendingWorktree(id, '__awaiting__')
+    store.markAutoOpenWorktree(id)
+    addTerminal(id)
+  }, [addTerminal])
+
   const handleRestoreLastClosed = useCallback(async () => {
     const sessionId = await getDockApi().terminal.popClosedSession()
     if (!sessionId) return
@@ -1187,6 +1197,7 @@ function DockApp() {
       <Toolbar
         projectDir={projectDir}
         onAddTerminal={handleAddTerminal}
+        onAddWorktreeTerminal={handleAddWorktreeTerminal}
         onRestoreLastClosed={handleRestoreLastClosed}
         onAddTerminalWithSession={handleAddTerminalWithSession}
         onOpenSettings={(opts) => setShowSettings(opts || {})}

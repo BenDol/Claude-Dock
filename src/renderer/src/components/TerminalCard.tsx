@@ -249,23 +249,68 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
     setWtLoading(false)
   }, [projectDir])
 
+  // If this terminal was created via the toolbar's "new worktree terminal"
+  // action, auto-open the worktree popover so the user can pick a branch.
+  // The PTY spawn is blocked by pendingWorktrees=='__awaiting__' until a branch
+  // is picked; if the user cancels, we discard the placeholder terminal.
+  const autoOpenHandledRef = useRef(false)
+  const awaitingBranchRef = useRef(false)
+  useEffect(() => {
+    if (autoOpenHandledRef.current) return
+    const consumed = useDockStore.getState().consumeAutoOpenWorktree(terminalId)
+    if (!consumed) return
+    autoOpenHandledRef.current = true
+    awaitingBranchRef.current = true
+    const t = setTimeout(() => { openWorktreePopover() }, 0)
+    return () => clearTimeout(t)
+  }, [terminalId, openWorktreePopover])
+
+  // If the popover closes while this terminal is still awaiting a branch pick,
+  // the user cancelled — drop the placeholder terminal.
+  useEffect(() => {
+    if (!awaitingBranchRef.current) return
+    if (worktreePopover) return
+    const state = useDockStore.getState()
+    if (state.pendingWorktrees.get(terminalId) === '__awaiting__') {
+      awaitingBranchRef.current = false
+      state.removeTerminal(terminalId)
+    }
+  }, [worktreePopover, terminalId])
+
   const spawnWorktreeTerminal = useCallback((wtPath: string) => {
+    // If this card was spawned awaiting a branch, adopt the picked worktree here.
+    if (awaitingBranchRef.current) {
+      awaitingBranchRef.current = false
+      setTerminalWorktree(terminalId, wtPath)
+      setPendingWorktree(terminalId, null)
+      return
+    }
     const nextId = `term-${Date.now()}-wt`
     // Set worktree path BEFORE adding terminal so the spawn useEffect picks it up
     setTerminalWorktree(nextId, wtPath)
     // Use setTimeout to ensure the store update from setTerminalWorktree is committed
     // before addTerminal triggers the new TerminalCard mount + spawn useEffect
     setTimeout(() => addTerminal(nextId), 0)
-  }, [addTerminal, setTerminalWorktree])
+  }, [addTerminal, setTerminalWorktree, setPendingWorktree, terminalId])
 
   const handleCreateWorktree = useCallback(async (branch: string) => {
     setWorktreePopover(false)
 
-    // Immediately create a terminal card with a loading indicator.
-    // The PTY spawn is deferred until pendingWorktrees is cleared.
-    const nextId = `term-${Date.now()}-wt`
-    setPendingWorktree(nextId, branch)
-    addTerminal(nextId)
+    // If this card was spawned from the toolbar's "new worktree terminal"
+    // button, its PTY is blocked on the '__awaiting__' sentinel — reuse it
+    // instead of spawning a second card.
+    let nextId: string
+    if (awaitingBranchRef.current) {
+      awaitingBranchRef.current = false
+      nextId = terminalId
+      setPendingWorktree(nextId, branch)
+    } else {
+      // Immediately create a terminal card with a loading indicator.
+      // The PTY spawn is deferred until pendingWorktrees is cleared.
+      nextId = `term-${Date.now()}-wt`
+      setPendingWorktree(nextId, branch)
+      addTerminal(nextId)
+    }
 
     const api = getDockApi()
     try {

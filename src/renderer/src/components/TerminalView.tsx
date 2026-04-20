@@ -239,7 +239,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ terminalId, isFocused }) =>
       {(loading || pendingWorktreeBranch) && (
         <div className="terminal-loading">
           <div className="terminal-spinner" />
-          <span>{pendingWorktreeBranch ? `Creating worktree (${pendingWorktreeBranch.replace(/^[^/]+\//, '')})...` : isResumed ? 'Resuming session...' : 'Starting claude...'}</span>
+          <span>{pendingWorktreeBranch === '__awaiting__' ? 'Select a branch for the new worktree...' : pendingWorktreeBranch ? `Creating worktree (${pendingWorktreeBranch.replace(/^[^/]+\//, '')})...` : isResumed ? 'Resuming session...' : 'Starting claude...'}</span>
         </div>
       )}
       {searchOpen && (
