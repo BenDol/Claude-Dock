@@ -1,13 +1,20 @@
 /**
  * Page-zoom helpers for the Voice plugin window.
  *
- * `document.documentElement.style.zoom` is a non-standard CSS property but is
- * stable in Chromium (and therefore Electron). It scales pixel values for
- * descendants — including `position: fixed` overlays — so the setup-overlay
- * `top: 38px` offset stays aligned with the titlebar at any zoom level.
+ * `zoom` is a non-standard CSS property but is stable in Chromium/Electron.
+ * We expose it as a CSS custom property (`--voice-zoom`) on the document
+ * root and apply it only to the scrollable body (`.voice-content`) and the
+ * setup overlay — NOT to the whole document. Scoping it this way means:
+ *   - chrome (titlebar / status header / tab bar) stays at natural size
+ *     so `position: fixed` offsets like the setup card's `top: 38px` still
+ *     line up with the unzoomed titlebar;
+ *   - the scrollable region's children scale up with zoom while the region
+ *     itself keeps its flex-computed size, so `overflow: auto` correctly
+ *     triggers a scrollbar when zoomed content exceeds the viewport.
  *
- * Split out so the entry can apply the saved zoom *before* React mounts,
- * which avoids a flash of unzoomed content on every window open.
+ * Using a custom property (instead of writing `zoom` on a specific element)
+ * lets us apply the saved zoom *before* React mounts — no flash of unzoomed
+ * content on every window open.
  */
 
 const ZOOM_KEY = 'voice-zoom'
@@ -31,8 +38,7 @@ export function readSavedZoom(): number {
 export function applyZoom(z: number): number {
   const clamped = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
   if (typeof document !== 'undefined' && document.documentElement) {
-    // The DOM property is `zoom` despite the type defs not always exposing it.
-    ;(document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = String(clamped)
+    document.documentElement.style.setProperty('--voice-zoom', String(clamped))
   }
   try { localStorage.setItem(ZOOM_KEY, String(clamped)) } catch { /* ignore */ }
   return clamped

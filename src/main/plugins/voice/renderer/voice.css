@@ -143,6 +143,10 @@ html, body, #root {
      wider than the window and we want a scrollbar instead of clipping. */
   overflow: auto;
   padding: 16px;
+  /* Zoom is scoped to the scrollable body (not the whole document) so that
+     zoomed content overflows this container and triggers the scrollbar,
+     while the titlebar/status/tab chrome stays at natural size. */
+  zoom: var(--voice-zoom, 1);
 }
 
 .voice-section {
@@ -251,6 +255,9 @@ html, body, #root {
   margin: auto;
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  /* Match .voice-content — the card scales with zoom while the fixed overlay
+     keeps its `top: 38px` alignment with the (unzoomed) titlebar. */
+  zoom: var(--voice-zoom, 1);
 }
 .voice-setup-card h2 { margin: 0 0 8px 0; font-size: 18px; }
 .voice-setup-card .sub { color: var(--text-secondary, #a0a0a8); margin: 0 0 20px 0; font-size: 12px; }
