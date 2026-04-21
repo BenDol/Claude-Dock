@@ -10,6 +10,7 @@ import { GRID_RESOLUTION } from '../lib/grid-math'
 
 // Register global shell event listener (once, at grid level)
 let shellEventListenerRegistered = false
+let worktreeChangedListenerRegistered = false
 
 const DockGrid: React.FC = () => {
   const terminals = useDockStore((s) => s.terminals)
@@ -28,6 +29,16 @@ const DockGrid: React.FC = () => {
     shellEventListenerRegistered = true
     getDockApi().shell.onShellEvent((_e: any, event: any) => {
       useDockStore.getState().addShellEvent(event)
+    })
+  }, [])
+
+  // Listen for worktree-changed events pushed by the main process when the
+  // MCP server reports a terminal has switched into (or out of) a git worktree.
+  useEffect(() => {
+    if (worktreeChangedListenerRegistered) return
+    worktreeChangedListenerRegistered = true
+    getDockApi().terminal.onWorktreeChanged((terminalId: string, worktreePath: string | null) => {
+      useDockStore.getState().setTerminalWorktree(terminalId, worktreePath)
     })
   }, [])
 
