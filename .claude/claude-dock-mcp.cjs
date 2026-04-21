@@ -14,6 +14,7 @@
  *   dock_run_in_shell    — Run a command in the dock's shell panel (opens it if closed)
  *   dock_read_shell      — Read recent output from a shell panel
  *   dock_list_shells     — List all open shell panels for a session (or all sessions)
+ *   dock_notify_worktree — Notify the Dock that your terminal switched to/from a git worktree
  *   dock_send_message    — Send a message to another terminal (requires messaging enabled)
  *   dock_check_messages  — Check for messages sent to this terminal (requires messaging enabled)
  *
@@ -408,7 +409,9 @@ async function handleMessage(msg) {
             'Get a summary of what other Claude Dock terminals are currently working on. ' +
             'Use this at the start of a task when the .linked file exists in the project root ' +
             'to coordinate with other terminals and avoid conflicts. ' +
-            "Pass project_dir to filter results and session_id to also receive messages.",
+            'Pass project_dir to filter results and session_id to also receive messages. ' +
+            'If your terminal is working in a git worktree, also pass current_cwd so the Dock ' +
+            'can retroactively detect the worktree and show the worktree action button.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -419,6 +422,10 @@ async function handleMessage(msg) {
               session_id: {
                 type: 'string',
                 description: 'Your session ID. When provided, unread messages for you are appended to the output.'
+              },
+              current_cwd: {
+                type: 'string',
+                description: 'Optional: your terminal\'s current working directory. If it differs from project_dir (e.g. you\'re in a git worktree), the Dock will validate it and, if it\'s a real worktree, update the UI to reflect this. Prefer the explicit dock_notify_worktree tool when you know you\'ve switched worktrees; this parameter is a safety net.'
               }
             },
             required: []
@@ -674,6 +681,38 @@ async function handleMessage(msg) {
             },
             required: ['session_id', 'terminal_id', 'prompt']
           }
+        },
+        {
+          name: 'dock_notify_worktree',
+          description:
+            'Notify the Dock that YOUR terminal has switched into (or out of) a git worktree. ' +
+            'Call this after changing the terminal\'s working directory to a worktree (e.g. via ' +
+            '`git worktree add && cd <path>`) so the Dock shows the worktree action button and ' +
+            'routes resolve/remove operations to the correct worktree. Pass worktree_path=null to ' +
+            'clear the association when switching back to the main repo. The path is validated on ' +
+            'the Dock side — it must be an absolute path that exists on disk and has a .git marker.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: {
+                type: 'string',
+                description: 'YOUR session ID (required).'
+              },
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project directory (the main repo). Used to route to the correct dock window.'
+              },
+              worktree_path: {
+                type: ['string', 'null'],
+                description: 'Absolute path to the worktree the terminal is now working in. Pass null/empty to clear and return to the main repo.'
+              },
+              branch: {
+                type: 'string',
+                description: 'Optional branch name associated with the worktree (informational, for logs).'
+              }
+            },
+            required: ['session_id']
+          }
         }
       ]
 
@@ -742,6 +781,42 @@ async function handleMessage(msg) {
         case 'dock_status': {
           // Bind session on first dock_status call (typically the first tool call)
           if (args.session_id) bindSession(args.session_id)
+          // Passive worktree fallback: if the caller passes their current_cwd and it
+          // differs from the project_dir, surface it to the Dock as a worktree
+          // notification. The Dock validates the path (must be a git worktree on
+          // disk) and drops it if invalid. This catches cases where Claude
+          // forgot to call dock_notify_worktree after switching directories.
+          if (args.session_id && args.current_cwd && typeof args.current_cwd === 'string') {
+            const cwd = args.current_cwd.trim()
+            const projDir = args.project_dir ? String(args.project_dir).trim() : null
+            const cwdNorm = normalizePath(cwd)
+            const projNorm = projDir ? normalizePath(projDir) : null
+            if (cwdNorm && (!projNorm || cwdNorm !== projNorm)) {
+              try {
+                const entry = {
+                  id: crypto.randomUUID(),
+                  op: 'worktree_changed',
+                  projectDir: projDir || null,
+                  sessionId: args.session_id,
+                  worktreePath: cwd,
+                  branch: null,
+                  timestamp: Date.now()
+                }
+                // Only enqueue if project_dir is known (the Dock watcher filters by it).
+                if (entry.projectDir) {
+                  let commands = []
+                  try {
+                    commands = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf-8'))
+                    if (!Array.isArray(commands)) commands = []
+                  } catch { /* file doesn't exist yet */ }
+                  const cutoff = Date.now() - 30000
+                  commands = commands.filter((c) => c.timestamp > cutoff)
+                  commands.push(entry)
+                  fs.writeFileSync(terminalCommandsFile, JSON.stringify(commands, null, 2))
+                }
+              } catch { /* best-effort; don't fail dock_status on this */ }
+            }
+          }
           const status = formatDockStatus(args.project_dir || null, args.session_id || null)
           return jsonRpcResponse(id, {
             content: [{ type: 'text', text: status }]
@@ -1447,6 +1522,62 @@ async function handleMessage(msg) {
           } catch (err) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `Failed to write prompt command: ${err.message || err}` }],
+              isError: true
+            })
+          }
+        }
+
+        case 'dock_notify_worktree': {
+          const { session_id, project_dir, worktree_path, branch } = args
+          const check = validateSessionBinding(session_id)
+          if (!check.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: check.error }],
+              isError: true
+            })
+          }
+          // Normalize path arg: empty string or null means "clear".
+          const normPath = typeof worktree_path === 'string' && worktree_path.trim().length > 0
+            ? worktree_path.trim()
+            : null
+          // Resolve project_dir, falling back to the session's dock.
+          let resolvedProjectDir = project_dir || null
+          if (!resolvedProjectDir) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedProjectDir = term.projectDir
+          }
+          if (!resolvedProjectDir) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Cannot route worktree notification: no project_dir supplied and session_id is not bound to any dock.' }],
+              isError: true
+            })
+          }
+          try {
+            const entry = {
+              id: crypto.randomUUID(),
+              op: 'worktree_changed',
+              projectDir: resolvedProjectDir,
+              sessionId: session_id,
+              worktreePath: normPath,
+              branch: typeof branch === 'string' && branch.trim() ? branch.trim() : null,
+              timestamp: Date.now()
+            }
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+            const cutoff = Date.now() - 30000
+            commands = commands.filter((c) => c.timestamp > cutoff)
+            commands.push(entry)
+            fs.writeFileSync(terminalCommandsFile, JSON.stringify(commands, null, 2))
+            const msg = normPath
+              ? `Notified Dock: terminal is now on worktree ${normPath}${branch ? ` (branch ${branch})` : ''}. The worktree button should appear within ~1s; if the path is invalid the notification is silently dropped.`
+              : `Notified Dock: terminal has returned to the main repo.`
+            return jsonRpcResponse(id, { content: [{ type: 'text', text: msg }] })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to write worktree notification: ${err.message || err}` }],
               isError: true
             })
           }

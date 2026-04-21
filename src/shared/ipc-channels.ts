@@ -296,6 +296,7 @@ export const IPC = {
   PLUGIN_UPDATE_STATE_CHANGED: 'pluginUpdate:stateChanged',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit',
+  TERMINAL_WORKTREE_CHANGED: 'terminal:worktreeChanged', // Main -> Renderer: terminal's worktree path changed (via MCP)
   SETTINGS_CHANGED: 'settings:changed',
   UPDATER_PROGRESS: 'updater:progress',
   NOTIFICATION_SHOW: 'notification:show',

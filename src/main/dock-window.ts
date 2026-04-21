@@ -407,6 +407,63 @@ export class DockWindow {
                 this.ptyManager.write(cmd.terminalId, submit ? cmd.prompt + '\r' : cmd.prompt)
                 break
               }
+              case 'worktree_changed': {
+                // Payload: { sessionId?, terminalId?, worktreePath } — worktreePath may be
+                // null/empty to clear the terminal's worktree association. Either sessionId
+                // or terminalId identifies the target terminal; sessionId is preferred so
+                // MCP callers don't need to know internal terminal IDs.
+                const rawPath = cmd.worktreePath
+                const worktreePath: string | null =
+                  typeof rawPath === 'string' && rawPath.trim().length > 0 ? rawPath.trim() : null
+
+                // Sanity check the path on the main process — don't trust MCP blindly.
+                if (worktreePath !== null) {
+                  // Must be absolute (Unix / or Windows drive letter).
+                  const isAbsolute = /^[a-zA-Z]:[\\/]|^\//.test(worktreePath)
+                  if (!isAbsolute) {
+                    log(`[terminal-command] worktree_changed rejected: path is not absolute (${worktreePath})`)
+                    break
+                  }
+                  // Refuse to treat the main project dir as a worktree.
+                  const normPath = worktreePath.replace(/\\/g, '/').toLowerCase()
+                  if (normPath === normProjectDir || normPath === normProjectDir + '/') {
+                    log(`[terminal-command] worktree_changed rejected: path equals project dir (${worktreePath})`)
+                    break
+                  }
+                  // Must exist on disk and look like a git worktree (presence of .git file or directory).
+                  try {
+                    if (!fs.existsSync(worktreePath) || !fs.existsSync(path.join(worktreePath, '.git'))) {
+                      log(`[terminal-command] worktree_changed rejected: not a git worktree at ${worktreePath}`)
+                      break
+                    }
+                  } catch (err) {
+                    logError(`[terminal-command] worktree_changed path check failed for ${worktreePath}`, err)
+                    break
+                  }
+                }
+
+                // Resolve target terminal: prefer explicit terminalId, then sessionId, then
+                // fall back to the first alive terminal in this dock.
+                let targetTerminalId: string | null = null
+                if (typeof cmd.terminalId === 'string' && this.ptyManager.has(cmd.terminalId)) {
+                  targetTerminalId = cmd.terminalId
+                } else if (typeof cmd.sessionId === 'string') {
+                  targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
+                }
+                if (!targetTerminalId) {
+                  targetTerminalId = this.ptyManager.findFirstAliveTerminal()
+                  if (targetTerminalId) {
+                    log(`[terminal-command] worktree_changed session ${String(cmd.sessionId).slice(0, 8)} not found, falling back to ${targetTerminalId}`)
+                  } else {
+                    log(`[terminal-command] worktree_changed rejected: no alive terminals in this dock`)
+                    break
+                  }
+                }
+
+                log(`[terminal-command] worktree_changed ${targetTerminalId} -> ${worktreePath ?? '(cleared)'}`)
+                this.window.webContents.send(IPC.TERMINAL_WORKTREE_CHANGED, targetTerminalId, worktreePath)
+                break
+              }
               default:
                 log(`[terminal-command] unknown op: ${cmd.op}`)
             }

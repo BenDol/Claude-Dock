@@ -149,6 +149,7 @@ export interface DockApi {
     popClosedSession: () => Promise<string | null>
     onData: (callback: (terminalId: string, data: string) => void) => () => void
     onExit: (callback: (terminalId: string, exitCode: number) => void) => () => void
+    onWorktreeChanged: (callback: (terminalId: string, worktreePath: string | null) => void) => () => void
   }
   shell: {
     spawn: (shellId: string, shellType?: string) => Promise<boolean>
@@ -617,6 +618,13 @@ const dockApi: DockApi = {
       }
       ipcRenderer.on(IPC.TERMINAL_EXIT, handler)
       return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, handler)
+    },
+    onWorktreeChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, terminalId: string, worktreePath: string | null) => {
+        callback(terminalId, worktreePath)
+      }
+      ipcRenderer.on(IPC.TERMINAL_WORKTREE_CHANGED, handler)
+      return () => ipcRenderer.removeListener(IPC.TERMINAL_WORKTREE_CHANGED, handler)
     }
   },
   shell: {
