@@ -135,12 +135,14 @@ jobs:
           node-version: 20
 
       # uiohook-napi needs X11 + libXtst dev headers to compile on Linux.
+      # libxt-dev provides X11/Intrinsic.h, required by libuiohook's X11 backend.
       - name: Install Linux native build dependencies
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libx11-dev \
+            libxt-dev \
             libxtst-dev \
             libxkbfile-dev \
             libxinerama-dev \
