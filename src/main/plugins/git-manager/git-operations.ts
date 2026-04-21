@@ -880,7 +880,8 @@ export async function deleteRemoteBranch(cwd: string, remoteBranch: string): Pro
   if (slashIdx < 0) throw new Error(`Invalid remote branch format: ${remoteBranch}`)
   const remote = remoteBranch.slice(0, slashIdx)
   const branch = remoteBranch.slice(slashIdx + 1)
-  await gitExec(cwd, ['push', remote, '--delete', branch], 30000)
+  // No timeout — remote delete goes through git push; slow connections must be allowed to complete.
+  await gitExec(cwd, ['push', remote, '--delete', branch], 0)
 }
 
 // --- Discard / Delete ---
@@ -1080,9 +1081,10 @@ export async function renameBranch(cwd: string, oldName: string, newName: string
       const { stdout } = await gitExec(cwd, ['config', `branch.${oldName}.remote`], 5000)
       if (stdout.trim()) remote = stdout.trim()
     } catch { /* default to origin */ }
-    // Delete old remote branch, push new one with tracking
-    await gitExec(cwd, ['push', remote, '--delete', oldName], REMOTE_OP_TIMEOUT)
-    await gitExec(cwd, ['push', '--set-upstream', remote, newName], REMOTE_OP_TIMEOUT)
+    // Delete old remote branch, push new one with tracking.  No timeout —
+    // large pushes over slow connections must be allowed to complete.
+    await gitExec(cwd, ['push', remote, '--delete', oldName], 0)
+    await gitExec(cwd, ['push', '--set-upstream', remote, newName], 0)
   }
 }
 
@@ -1138,13 +1140,8 @@ export async function pullAdvanced(
   return (stdout + stderr).trim()
 }
 
-// Push/pull timeout for non-streaming operations (fetch, rename-push, tag-push)
-const REMOTE_OP_TIMEOUT = 300000
-
-// Activity timeout for streaming push: resets whenever git produces output.
-// Only triggers when the connection goes completely silent — a large push on
-// slow internet will keep resetting this as long as data is flowing.
-const PUSH_ACTIVITY_TIMEOUT = 120000 // 2 minutes of inactivity
+// Pushes have no timeout — large files over slow connections must be allowed
+// to complete, even if they take hours.  Users can cancel via cancelPush().
 
 export interface PushProgress {
   phase: string      // e.g. 'Enumerating objects', 'Writing objects'
@@ -1169,30 +1166,16 @@ function gitPushStreaming(
     activePushProcess = proc
     let stdout = ''
     let stderr = ''
-    let killed = false
 
-    // Activity-based timeout: resets every time git produces output.
-    // A large push over slow internet keeps resetting as long as data flows.
-    // Only triggers when the connection goes completely silent.
-    let activityTimer: ReturnType<typeof setTimeout> | null = null
-    const resetActivityTimer = () => {
-      if (activityTimer) clearTimeout(activityTimer)
-      activityTimer = setTimeout(() => {
-        killed = true
-        proc.kill()
-        reject(new Error('git push timed out — no activity for 2 minutes'))
-      }, PUSH_ACTIVITY_TIMEOUT)
-    }
-    resetActivityTimer()
+    // No timeout — pushes of large files over slow connections must be
+    // allowed to complete.  Users can cancel explicitly via cancelPush().
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
-      resetActivityTimer()
     })
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
-      resetActivityTimer()
 
       if (!onProgress) return
       // Parse git progress lines (they use \r for in-place updates)
@@ -1212,9 +1195,7 @@ function gitPushStreaming(
     })
 
     proc.on('close', (code) => {
-      if (activityTimer) clearTimeout(activityTimer)
       activePushProcess = null
-      if (killed) return
       if (code === 0) {
         resolve((stdout + stderr).trim())
       } else {
@@ -1224,7 +1205,6 @@ function gitPushStreaming(
     })
 
     proc.on('error', (err) => {
-      if (activityTimer) clearTimeout(activityTimer)
       activePushProcess = null
       reject(err)
     })
@@ -1269,7 +1249,8 @@ export async function pushWithTags(cwd: string, onProgress?: (progress: PushProg
 export async function pushTag(cwd: string, tagName: string, force?: boolean): Promise<void> {
   const args = ['push', 'origin', `refs/tags/${tagName}`]
   if (force) args.push('--force')
-  await gitExec(cwd, args, REMOTE_OP_TIMEOUT)
+  // No timeout — large tag pushes over slow connections must be allowed to complete.
+  await gitExec(cwd, args, 0)
 }
 
 export async function fetch(cwd: string): Promise<string> {
