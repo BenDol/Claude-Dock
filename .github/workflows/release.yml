@@ -134,6 +134,19 @@ jobs:
         with:
           node-version: 20
 
+      # uiohook-napi needs X11 + libXtst dev headers to compile on Linux.
+      - name: Install Linux native build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxtst-dev \
+            libxkbfile-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxrandr-dev
+
       - name: Cache node_modules & Electron
         id: cache-deps
         uses: actions/cache@v4

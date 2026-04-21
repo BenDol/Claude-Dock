@@ -165,6 +165,19 @@ jobs:
         with:
           node-version: 20
 
+      # uiohook-napi needs X11 + libXtst dev headers to compile on Linux.
+      - name: Install Linux native build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxtst-dev \
+            libxkbfile-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxrandr-dev
+
       # Cache node_modules (including compiled native modules like node-pty)
       # and electron/electron-builder downloads. On cache hit this skips
       # npm ci entirely, saving ~2-3 minutes on Windows.
