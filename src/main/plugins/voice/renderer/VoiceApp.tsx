@@ -333,7 +333,7 @@ export default function VoiceApp() {
           <div className="voice-error-card">{status.lastError}</div>
         )}
 
-        {tab === 'hotkey' && <HotkeyTab cfg={cfg} patch={patch} />}
+        {tab === 'hotkey' && <HotkeyTab cfg={cfg} patch={patch} status={status} />}
         {tab === 'recording' && (
           <RecordingTab
             cfg={cfg}
@@ -365,11 +365,28 @@ export default function VoiceApp() {
 
 /* --------------------------------- tabs -------------------------------- */
 
-function HotkeyTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
+function HotkeyTab({ cfg, patch, status }: { cfg: VoiceConfig; patch: PatchFn; status: VoiceRuntimeStatus }) {
   type Mode = VoiceConfig['hotkey']['mode']
   type Scope = VoiceConfig['hotkey']['scope']
+  // Hotkey support is Windows-only: the Python `keyboard` package is unusable
+  // on macOS and requires root on Linux. We still render the editor so users
+  // who share settings between machines can configure a binding, but we show
+  // a banner explaining that only the /voice slash command (MCP) path is
+  // functional on non-Windows.
+  const hotkeySupported = status.hotkeySupported
   return (
     <>
+      {!hotkeySupported && (
+        <div
+          className="voice-error-card"
+          style={{ background: 'rgba(180, 140, 0, 0.12)', borderColor: 'rgba(180, 140, 0, 0.6)', color: 'var(--text-primary)' }}
+        >
+          <strong>Global hotkey is not available on {status.platform === 'darwin' ? 'macOS' : status.platform === 'linux' ? 'Linux' : status.platform}.</strong>{' '}
+          The underlying key-capture library is Windows-only (and requires root on Linux).
+          Voice still works through the <code>/voice</code> slash command in Claude — the MCP server is registered globally and runs on all platforms.
+          The settings below are preserved for when Voice is used from a Windows machine.
+        </div>
+      )}
       <div className="voice-section">
         <h3>Hotkey</h3>
         <div className="voice-field">
@@ -378,6 +395,7 @@ function HotkeyTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
             type="checkbox"
             checked={cfg.hotkey.enabled}
             onChange={(e) => patch({ hotkey: { enabled: e.target.checked } })}
+            disabled={!hotkeySupported}
           />
         </div>
         <div className="voice-field">

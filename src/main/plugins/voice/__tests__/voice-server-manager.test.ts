@@ -93,6 +93,14 @@ function resetSingleton() {
   ;(VoiceServerManager as any).instance = null
 }
 
+// startDaemon() now short-circuits on non-Windows hosts (hotkey is Windows-only).
+// Pin `process.platform` to 'win32' for the tests that exercise daemon spawn,
+// and restore the host platform afterwards so the suite is OS-agnostic on CI.
+const realPlatform = process.platform
+function setPlatform(p: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: p, configurable: true })
+}
+
 describe('voice-server-manager', () => {
   beforeEach(() => {
     resetSingleton()
@@ -100,10 +108,12 @@ describe('voice-server-manager', () => {
     serviceLogs.length = 0
     notifyCalls.length = 0
     fakeChildren.length = 0
+    setPlatform('win32')
   })
 
   afterEach(() => {
     resetSingleton()
+    setPlatform(realPlatform)
   })
 
   it('ignores empty project dir on enable', async () => {
@@ -222,5 +232,32 @@ describe('voice-server-manager', () => {
     const s1 = mgr.getStatus()
     ;(s1 as any).refCount = 999
     expect(mgr.getStatus().refCount).not.toBe(999)
+  })
+
+  it('does not spawn daemon on non-Windows hosts', async () => {
+    // Hotkey daemon is Windows-only (keyboard lib unsupported elsewhere).
+    // On macOS/Linux the manager should short-circuit cleanly and surface
+    // a 'disabled' state pointing users at the MCP /voice command.
+    setPlatform('darwin')
+    runtimeState.exists = true
+    resetSingleton()
+    const mgr = VoiceServerManager.getInstance()
+    await mgr.onProjectEnabled('/proj/a')
+    await new Promise((r) => setTimeout(r, 550))
+    expect(fakeChildren.length).toBe(0)
+    const s = mgr.getStatus()
+    expect(s.daemonState).toBe('disabled')
+    expect(s.hotkeySupported).toBe(false)
+    expect(s.platform).toBe('darwin')
+    expect(s.lastError).toMatch(/Windows-only/)
+  })
+
+  it('reports hotkeySupported: true on Windows', async () => {
+    setPlatform('win32')
+    resetSingleton()
+    const mgr = VoiceServerManager.getInstance()
+    const s = mgr.getStatus()
+    expect(s.hotkeySupported).toBe(true)
+    expect(s.platform).toBe('win32')
   })
 })

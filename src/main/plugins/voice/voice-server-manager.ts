@@ -66,7 +66,9 @@ export class VoiceServerManager extends EventEmitter {
     lastError: null,
     step: 'Idle',
     pythonPath: null,
-    mcpRegisteredPath: null
+    mcpRegisteredPath: null,
+    platform: process.platform,
+    hotkeySupported: process.platform === 'win32'
   }
 
   private setupPromise: Promise<void> | null = null
@@ -262,6 +264,28 @@ export class VoiceServerManager extends EventEmitter {
       svc().log('[voice-manager] startDaemon called but daemon already running')
       return
     }
+
+    // The global hotkey daemon relies on the Python `keyboard` package, which
+    // is Windows-only in practice — it is unsupported on macOS and requires
+    // root on Linux. Attempting to spawn the daemon elsewhere fails during
+    // import / hotkey-register, which the crash-restart loop then treats as a
+    // genuine crash and retries three times before giving up noisily. Short-
+    // circuit here so non-Windows users see a clear "use /voice instead" state
+    // instead of a cryptic cascade of restart notifications. The MCP server
+    // path (server.py, registered in ~/.claude.json) is cross-platform and
+    // remains fully functional on macOS and Linux.
+    if (process.platform !== 'win32') {
+      this.updateStatus({
+        daemonState: 'disabled',
+        step: 'Hotkey not supported on this OS',
+        lastError: process.platform === 'darwin'
+          ? 'Global hotkey is Windows-only. Use the /voice slash command in Claude — the MCP server works on macOS.'
+          : 'Global hotkey is Windows-only (Linux `keyboard` needs root). Use the /voice slash command in Claude — the MCP server works on Linux.'
+      })
+      svc().log(`[voice-manager] hotkey daemon skipped on ${process.platform} — MCP path remains active`)
+      return
+    }
+
     const hotkeyEnabled = getVoiceConfig().hotkey.enabled
     if (!hotkeyEnabled) {
       this.updateStatus({ daemonState: 'disabled', step: 'Hotkey disabled' })

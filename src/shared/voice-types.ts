@@ -147,6 +147,21 @@ export interface VoiceRuntimeStatus {
   pythonPath: string | null
   /** Absolute path to the registered MCP server entry in ~/.claude.json, null if not registered. */
   mcpRegisteredPath: string | null
+  /**
+   * Host OS as reported by the main process (`process.platform`). Exposed in
+   * the status payload so the renderer can conditionally gate UI — notably
+   * the hotkey configuration, which only operates on Windows. Kept here
+   * rather than a separate IPC because every consumer that cares about
+   * platform already subscribes to status updates.
+   */
+  platform: NodeJS.Platform
+  /**
+   * True when the hotkey daemon can actually function on the current OS.
+   * False on macOS/Linux where the `keyboard` library is unsupported or
+   * requires root. UI uses this to surface a clear "hotkey not available"
+   * banner and direct users to the MCP / slash-command path.
+   */
+  hotkeySupported: boolean
 }
 
 export interface VoiceSetupProgress {

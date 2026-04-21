@@ -241,6 +241,37 @@ async function sha256OfFile(file: string): Promise<string> {
   })
 }
 
+/**
+ * Fetch the sidecar `.sha256` that python-build-standalone publishes alongside
+ * each release asset (e.g. `<asset>.tar.gz.sha256`). Returns the hex digest or
+ * null if the sidecar is unreachable / malformed.
+ *
+ * Note: a sidecar fetched from the same origin as the asset only protects
+ * against *transport* corruption (truncation, mid-flight bit flips). It does
+ * not defend against an origin compromise — for that you need a hash pinned
+ * in source. We fall back to sidecar verification when `rel.sha256` is empty
+ * so fresh checkouts still install, but pinning stays the long-term goal.
+ */
+async function fetchSidecarSha256(url: string): Promise<string | null> {
+  const sidecar = `${url}.sha256`
+  try {
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const resp = await net.fetch(sidecar, { redirect: 'follow', signal: controller.signal })
+      if (!resp.ok) return null
+      const body = (await resp.text()).trim()
+      // Sidecars can be either "<hex>" or "<hex>  <filename>"
+      const m = body.match(/^([0-9a-fA-F]{64})\b/)
+      return m ? m[1].toLowerCase() : null
+    } finally {
+      clearTimeout(t)
+    }
+  } catch {
+    return null
+  }
+}
+
 async function extractTarGz(archive: string, destDir: string): Promise<void> {
   // Use system `tar` — available on Windows 10+, macOS, and all Linux distros.
   // Piping through tar avoids pulling a heavyweight JS tar dep.
@@ -275,9 +306,12 @@ export async function installEmbeddedPython(
     })
   })
 
-  // Require a pinned sha256 unless the user explicitly opts out via env var.
-  // TODO: pin real SHA-256 values from the python-build-standalone release
-  //       assets (each .tar.gz has a matching .sha256 file on the GitHub release).
+  // Integrity verification. Preferred path: pinned SHA-256 in source (strongest).
+  // Fallback: sidecar `.sha256` fetched from the same release (catches
+  // transport corruption). Opt-out only via explicit env var for recovery.
+  // TODO(security): pin real SHA-256 values for each platform release so the
+  //   install is protected against a compromised GitHub origin as well as
+  //   transport corruption. Values live at <url>.sha256 on the release page.
   if (rel.sha256) {
     onProgress({ step: 'download-python', pct: 96, message: 'Verifying checksum…' })
     const got = await sha256OfFile(tmpArchive)
@@ -288,11 +322,22 @@ export async function installEmbeddedPython(
   } else if (process.env.DOCK_VOICE_SKIP_CHECKSUM === '1') {
     svc().log('[voice-runtime] DOCK_VOICE_SKIP_CHECKSUM=1 — skipping checksum verification')
   } else {
-    try { fs.unlinkSync(tmpArchive) } catch { /* ignore */ }
-    throw new Error(
-      `no pinned sha256 for ${releaseKey()} — refusing to install unverified Python runtime. ` +
-      `Set DOCK_VOICE_SKIP_CHECKSUM=1 to override (not recommended).`
-    )
+    onProgress({ step: 'download-python', pct: 96, message: 'Fetching sidecar checksum…' })
+    const sidecar = await fetchSidecarSha256(rel.url)
+    if (!sidecar) {
+      try { fs.unlinkSync(tmpArchive) } catch { /* ignore */ }
+      throw new Error(
+        `no pinned sha256 for ${releaseKey()} and sidecar checksum unreachable at ${rel.url}.sha256. ` +
+        `Check your network / proxy, or set DOCK_VOICE_SKIP_CHECKSUM=1 to override (not recommended).`
+      )
+    }
+    onProgress({ step: 'download-python', pct: 97, message: 'Verifying checksum…' })
+    const got = await sha256OfFile(tmpArchive)
+    if (got.toLowerCase() !== sidecar) {
+      try { fs.unlinkSync(tmpArchive) } catch { /* ignore */ }
+      throw new Error(`sidecar checksum mismatch: expected ${sidecar} got ${got}`)
+    }
+    svc().log(`[voice-runtime] verified download against sidecar ${sidecar}`)
   }
 
   onProgress({ step: 'download-python', pct: 98, message: 'Extracting Python runtime…' })
