@@ -48,6 +48,31 @@ export class VoicePlugin implements DockPlugin {
       VoiceServerManager.getInstance().onProjectClosed(projectDir)
     })
 
+    // Hot-reload recovery. VoiceServerManager is a singleton that survives
+    // plugin disposal — its `enabled` project set is preserved. When the
+    // plugin is hot-reloaded (plugin update or dev file-watcher), dispose()
+    // stopped the daemon but nothing re-triggers the `plugin:enabled` /
+    // `project:postOpen` events that normally spawn it. Restart here so new
+    // Python / TS code takes effect without the user hitting "Restart daemon".
+    // On fresh app start `refCount` is 0, so this is a no-op.
+    const mgr = VoiceServerManager.getInstance()
+    if (mgr.getStatus().refCount > 0) {
+      getServices().log('[voice] hot-reload detected — restarting daemon to pick up updated code')
+      void (async () => {
+        try {
+          // Await the in-flight stop from dispose() before spawning a fresh
+          // daemon — stopDaemon() is idempotent via its stopInFlight promise.
+          await mgr.stopDaemon(true)
+          // Matches applySettings(): give Windows a moment to release the
+          // global hotkey handle before re-registering.
+          await new Promise((r) => setTimeout(r, 200))
+          await mgr.startDaemon()
+        } catch (err) {
+          getServices().logError('[voice] daemon restart after hot-reload failed', err)
+        }
+      })()
+    }
+
     getServices().log('[voice] plugin registered')
   }
 

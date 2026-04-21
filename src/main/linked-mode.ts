@@ -73,6 +73,18 @@ function getMcpServerSourcePath(): string {
   return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.cjs')
 }
 
+/**
+ * When the linked project IS the dock source repo itself, its own
+ * `resources/claude-dock-mcp.cjs` is the authoritative copy — typically
+ * newer than whatever the installed (stable) dock binary ships with.
+ * Prefer it so opening the dock from a stable build doesn't revert the
+ * in-progress MCP server edits back to the packaged version.
+ */
+function getProjectOwnMcpSourcePath(projectDir: string): string | null {
+  const candidate = path.join(projectDir, 'resources', 'claude-dock-mcp.cjs')
+  return fs.existsSync(candidate) ? candidate : null
+}
+
 function getDockConfigPath(): string {
   return path.join(getDataDir(), 'dock-config.json')
 }
@@ -335,8 +347,10 @@ export function isMcpInstalled(projectDir: string): boolean {
 
 export function installMcp(projectDir: string): { success: boolean; error?: string } {
   try {
-    // 1. Copy MCP server script into project (.claude/ directory)
-    const src = getMcpServerSourcePath()
+    // 1. Copy MCP server script into project (.claude/ directory). Prefer
+    //    the project's own resources/claude-dock-mcp.cjs when it exists —
+    //    the dock source repo is self-hosting and its copy is authoritative.
+    const src = getProjectOwnMcpSourcePath(projectDir) ?? getMcpServerSourcePath()
     const dest = getProjectMcpScriptPath(projectDir)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
 
@@ -546,8 +560,11 @@ export function migrateProjectIfNeeded(projectDir: string): void {
     const needsRewrite =
       !isAlreadyCjs || !hasDataDirEnv || !correctDataDir || !isOnProfileKey
 
-    // Always keep the on-disk script up-to-date with the packaged copy
-    const src = getMcpServerSourcePath()
+    // Keep the on-disk script up-to-date with the authoritative copy.
+    // Dock-source-repo self-host: if the project has its own
+    // resources/claude-dock-mcp.cjs, treat that as the source of truth so a
+    // stable build opening this repo doesn't clobber in-progress MCP edits.
+    const src = getProjectOwnMcpSourcePath(projectDir) ?? getMcpServerSourcePath()
     const dest = getProjectMcpScriptPath(projectDir)
     if (fs.existsSync(src)) {
       fs.mkdirSync(path.dirname(dest), { recursive: true })
