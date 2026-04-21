@@ -145,7 +145,7 @@ const MessageView: React.FC<{ message: CoordinatorMessage }> = ({ message }) => 
     return (
       <div className={'coord-message ' + (message.isError ? 'tool-error' : 'tool')}>
         <div className={'coord-msg-role ' + (message.isError ? 'tool-error' : 'tool')}>
-          <span>{message.toolName}{message.isError ? ' — error' : ''}</span>
+          <span>{displayToolName(message.toolName)}{message.isError ? ' — error' : ''}</span>
           <span className="coord-msg-time">{formatTime(message.timestamp)}</span>
         </div>
         <div className="coord-msg-body">{formatToolContent(message.content)}</div>
@@ -177,8 +177,8 @@ const MessageView: React.FC<{ message: CoordinatorMessage }> = ({ message }) => 
       {message.toolCalls && message.toolCalls.length > 0 && (
         <div className="coord-toolcall-pill-row">
           {message.toolCalls.map((tc) => (
-            <span key={tc.id} className="coord-toolcall-pill" title={renderArgs(tc.args)}>
-              → {tc.name}
+            <span key={tc.id} className="coord-toolcall-pill" title={`${tc.name}\n${renderArgs(tc.args)}`}>
+              → {displayToolName(tc.name)}
             </span>
           ))}
         </div>
@@ -198,6 +198,21 @@ function renderArgs(args: unknown): string {
   } catch {
     return String(args)
   }
+}
+
+/**
+ * Strip the `mcp__<serverKey>__` prefix that the SDK backend uses for its
+ * MCP-routed tool names so the transcript shows a readable label instead of
+ * `mcp__claude-dock-uat__dock_list_terminals`. The raw name is still passed
+ * to the tooltip/title for debugging.
+ */
+function displayToolName(name: string): string {
+  if (name.startsWith('mcp__')) {
+    const rest = name.slice('mcp__'.length)
+    const idx = rest.indexOf('__')
+    if (idx >= 0) return rest.slice(idx + 2)
+  }
+  return name
 }
 
 function formatToolContent(content: string): string {

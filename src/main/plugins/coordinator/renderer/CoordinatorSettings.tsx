@@ -7,7 +7,7 @@
  * duplicate provider presets in the renderer.
  */
 
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { CoordinatorProviderId } from '../../../../shared/coordinator-types'
 import { useCoordinatorStore } from './coordinator-store'
 
@@ -20,6 +20,7 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
   const setConfigPatch = useCoordinatorStore((s) => s.setConfigPatch)
   const testConnection = useCoordinatorStore((s) => s.testConnection)
   const resetConfig = useCoordinatorStore((s) => s.resetConfig)
+  const resetSessionId = useCoordinatorStore((s) => s.resetSessionId)
 
   const selectedPreset = useMemo(
     () => providers.find((p) => p.id === config?.provider),
@@ -43,13 +44,33 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
     [providers, setConfigPatch]
   )
 
+  // ESC-to-close + focus the panel on mount so the keydown handler is live
+  // even before the user interacts. Stops native `confirm()` from stealing
+  // focus permanently — on close we restore to the previously focused element.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    rootRef.current?.focus()
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      previouslyFocused?.focus?.()
+    }
+  }, [onClose])
+
   if (!config) return null
 
   return (
-    <div className="coord-settings">
+    <div className="coord-settings" ref={rootRef} tabIndex={-1} role="dialog" aria-label="Coordinator settings">
       <div className="coord-settings-header">
         <h3>Coordinator Settings</h3>
-        <button className="coord-header-btn" onClick={onClose} title="Close">
+        <button className="coord-header-btn" onClick={onClose} title="Close (Esc)">
           <CloseIcon />
         </button>
       </div>
@@ -216,6 +237,19 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           >
             Reset to defaults
           </button>
+          {isSdkBackend && (
+            <button
+              className="coord-test-btn"
+              onClick={() => {
+                if (confirm('Start a fresh Claude SDK session? Chat history is kept; only the hidden-session link is cleared.')) {
+                  void resetSessionId()
+                }
+              }}
+              title="Starts a new hidden Claude session on the next message. Chat history is preserved."
+            >
+              Reset SDK session
+            </button>
+          )}
         </div>
       </div>
     </div>

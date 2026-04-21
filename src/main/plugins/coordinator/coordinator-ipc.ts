@@ -20,7 +20,8 @@ import {
 } from './coordinator-settings-store'
 import {
   getHistory,
-  clearHistory
+  clearHistory,
+  clearLatestSessionId
 } from './coordinator-chat-store'
 import { getServices } from './services'
 import {
@@ -170,6 +171,12 @@ export function registerCoordinatorIpc(): void {
     clearHistory(dir)
   })
 
+  ipcMain.handle(IPC.COORDINATOR_RESET_SESSION_ID, async (_e, projectDir: unknown) => {
+    const dir = assertProjectDir(projectDir)
+    clearLatestSessionId(dir)
+    svc().log('[coordinator] reset SDK session id', dir)
+  })
+
   ipcMain.handle(
     IPC.COORDINATOR_SEND_MESSAGE,
     async (_e, projectDir: unknown, userText: unknown) => {
@@ -236,6 +243,7 @@ export function disposeCoordinatorIpc(): void {
     IPC.COORDINATOR_TEST_PROVIDER,
     IPC.COORDINATOR_GET_HISTORY,
     IPC.COORDINATOR_CLEAR_HISTORY,
+    IPC.COORDINATOR_RESET_SESSION_ID,
     IPC.COORDINATOR_SEND_MESSAGE,
     IPC.COORDINATOR_CANCEL,
     IPC.COORDINATOR_LIST_TERMINALS,

@@ -97,6 +97,13 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
     }
   )
 
+  svc.log(
+    '[coordinator] runTurn',
+    `project=${projectDir}`,
+    `provider=${provider.id}`,
+    `passthrough=${provider.passthrough}`
+  )
+
   const systemPrompt = buildSystemPrompt({
     enforceWorktreeInPrompt: config.enforceWorktreeInPrompt,
     projectDir,
