@@ -361,15 +361,25 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     const theme = getEffectiveTerminalColors(settings)
     const { cursorRow, cursorCol } = renderPinnedRows(term, rowCount, theme, rowsHost)
 
-    // Derive row height + cell width from xterm's DOM so the overlay aligns pixel-
-    // perfectly with real rows. Fall back to font-metric math if the DOM query fails.
+    // Derive row height, cell width, and horizontal alignment from xterm's DOM
+    // so the overlay aligns pixel-perfectly with real rows. Fall back to font-
+    // metric math if the DOM query fails.
     const rowEl = container.querySelector('.xterm-rows > div') as HTMLElement | null
     let rowHeight = Math.round(settings.terminal.fontSize * settings.terminal.lineHeight)
     let cellWidth = settings.terminal.fontSize * 0.6
+    let footerLeft: number | null = null
+    let footerWidth: number | null = null
     if (rowEl) {
       const rect = rowEl.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
       if (rect.height > 0) rowHeight = rect.height
       if (rect.width > 0 && term.cols > 0) cellWidth = rect.width / term.cols
+      if (rect.width > 0 && containerRect.width > 0) {
+        // Align the footer to xterm-rows so wide lines don't clip past the
+        // scrollbar gutter and the cursor lands on the right cell.
+        footerLeft = rect.left - containerRect.left
+        footerWidth = rect.width
+      }
     }
 
     // Must match `padding-top` in global.css `.pinned-footer`. Absolutely-
@@ -385,6 +395,11 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     footer.style.background = theme.background
     footer.style.color = theme.foreground
     footer.style.height = `${footerHeight}px`
+    if (footerLeft != null && footerWidth != null) {
+      footer.style.left = `${footerLeft}px`
+      footer.style.right = 'auto'
+      footer.style.width = `${footerWidth}px`
+    }
     setButtonBottom(footerHeight)
 
     if (cursor) {
@@ -975,6 +990,20 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   // if toggled on while scrolled up, show.
   useEffect(() => {
     schedulePinnedRefresh()
+  }, [pinInputBox, schedulePinnedRefresh])
+
+  // Safety-net refresh poller. `onWriteParsed` is the primary trigger, but there
+  // are edge cases where buffer state transitions (Claude's spinner ending,
+  // tool-call block collapsing, TUI redraws) do not map 1:1 to a parse event
+  // that we observe — so the footer can get stuck at a stale height until the
+  // next PTY byte nudges it. A cheap 300ms poll while the feature is active
+  // guarantees the footer re-measures and re-renders on every state transition.
+  useEffect(() => {
+    if (!pinInputBox) return
+    const id = window.setInterval(() => {
+      if (scrolledUpRef.current) schedulePinnedRefresh()
+    }, 300)
+    return () => window.clearInterval(id)
   }, [pinInputBox, schedulePinnedRefresh])
 
   // Re-fit after grid reposition — force fit since container size always changes

@@ -356,9 +356,20 @@ export async function createVenv(basePython: string): Promise<void> {
   // (e.g. site-packages/pip) are missing while others linger from the old
   // install. We previously logged-and-continued, which left the user with a
   // half-broken environment that silently failed `verifyInstall`.
+  //
+  // Windows specifically suffers from transient ENOTEMPTY/EBUSY during
+  // recursive deletes of large trees (pycache files briefly hold their
+  // parent dir busy). `maxRetries`/`retryDelay` give the FS a chance to
+  // settle before we give up — the value is conservative because the
+  // alternative is a hard user-facing failure.
   if (fs.existsSync(venv)) {
     try {
-      fs.rmSync(venv, { recursive: true, force: true })
+      fs.rmSync(venv, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 200
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       svc().logError(`[voice-runtime] could not remove stale venv: ${msg}`)
@@ -486,11 +497,29 @@ export interface EnsureRuntimeResult {
 /**
  * High-level helper: ensure venv + deps are ready, installing an embedded
  * Python if no suitable system one is available. Progress is streamed.
+ *
+ * Idempotent: if an existing venv already passes `verifyInstall`, we skip
+ * the wipe-and-reinstall entirely. Recreating a healthy venv on every app
+ * launch is both wasteful and risky — the recursive delete races with
+ * Windows' file system on `__pycache__` cleanup, and a partial wipe can
+ * leave a corrupted environment behind.
  */
 export async function ensureRuntime(
   requirementsPath: string,
   onProgress: (p: VoiceSetupProgress) => void
 ): Promise<EnsureRuntimeResult> {
+  // Fast path: if the venv already exists and verifies cleanly, just use it.
+  // We still want a `pythonPath` to report, but we don't need to reinstall.
+  if (runtimeExists()) {
+    onProgress({ step: 'verify', pct: 0, message: 'Checking existing install…' })
+    const verify = await verifyInstall()
+    if (verify.ok) {
+      onProgress({ step: 'verify', pct: 100, message: 'Existing install is healthy.' })
+      return { pythonPath: getVenvPython(), venvPython: getVenvPython() }
+    }
+    svc().log(`[voice-runtime] existing venv missing modules: ${verify.missing.join(', ')} — reinstalling`)
+  }
+
   onProgress({ step: 'detect', pct: 0, message: 'Looking for Python 3.10+…' })
   let base = await detectSystemPython()
   let basePath: string

@@ -136,8 +136,18 @@ export function detectInputBoxRows(
     const first = text[0]
     if (/[A-Za-z0-9]/.test(first)) break
     if (first === ' ' || first === '\t') {
-      extra = i
-      continue
+      // Indented row. Only a sub-bullet of the active tool call counts as
+      // continuation — arbitrary indented content (diff output, wrapped
+      // prose, code listings) is a boundary.
+      const stripped = text.replace(/^\s+/, '')
+      const marker = stripped[0]
+      // L / ⎿ (U+23BF) / └ (U+2514) — Claude Code tool-call sub-bullets.
+      // `(` — parenthesised hint lines like `(ctrl+b to run in background)`.
+      if (marker === 'L' || marker === '⎿' || marker === '└' || marker === '(') {
+        extra = i
+        continue
+      }
+      break
     }
     // Non-alnum, non-space first char = a `●`/`*`/`·`-style bullet row.
     // Allow exactly one (the active tool-call header); the next one is a

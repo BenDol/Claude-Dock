@@ -88,11 +88,32 @@ class FasterWhisperLocal(Transcriber):
             raise ImportError(
                 "faster-whisper is not installed.  Run:  pip install faster-whisper"
             )
-        self._model = WhisperModel(
-            self._model_size,
-            device=self._device,
-            compute_type=self._compute_type,
-        )
+        # `device='auto'` (and 'cuda') asks ctranslate2 to load CUDA libraries
+        # eagerly. On Windows boxes without CUDA installed this throws
+        # "Library cublas64_12.dll is not found" and the user gets no
+        # transcription at all. Fall back to CPU automatically so a missing
+        # GPU is a soft downgrade instead of a hard failure.
+        try:
+            self._model = WhisperModel(
+                self._model_size,
+                device=self._device,
+                compute_type=self._compute_type,
+            )
+        except Exception as e:  # noqa: BLE001 — ctranslate2 raises generic RuntimeError
+            msg = str(e)
+            if self._device != "cpu" and (
+                "cublas" in msg.lower() or "cuda" in msg.lower() or "gpu" in msg.lower()
+            ):
+                # CPU-only fallback — int8 is the safe compute_type for CPU.
+                self._device = "cpu"
+                self._compute_type = "int8"
+                self._model = WhisperModel(
+                    self._model_size,
+                    device=self._device,
+                    compute_type=self._compute_type,
+                )
+            else:
+                raise
 
     @property
     def name(self) -> str:

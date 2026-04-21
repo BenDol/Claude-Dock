@@ -1,16 +1,23 @@
 /* Voice plugin window styling. Uses CSS variables from global.css so it
    picks up light/dark theme automatically via applyThemeToDocument. */
 
+/* Global CSS pins html/body/#root to `overflow: hidden`, which is correct for
+   the main dock but traps zoomed content in this plugin window — when the user
+   zooms past 1.0 the document grows past the viewport and no scrollbar appears.
+   Allow document-level scrolling here so the whole layout stays reachable. */
+html, body, #root {
+  overflow: auto;
+}
+
 .voice-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   background: var(--bg-primary, #0f0f14);
   color: var(--text-primary, #e5e5e5);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   -webkit-app-region: no-drag;
-  overflow: hidden;
 }
 
 .voice-titlebar {
