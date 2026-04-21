@@ -439,12 +439,33 @@ def _run_daemon():
             controller = pkb.Controller()
             paste_modifier = pkb.Key.cmd if sys.platform == "darwin" else pkb.Key.ctrl
             if text:
+                # When auto-pasting, snapshot the user's current clipboard and
+                # restore it after the paste completes — otherwise every hotkey
+                # fire silently wipes whatever they had copied. pyperclip only
+                # handles text; non-text clipboard content (images, rich HTML)
+                # cannot be preserved and will still be lost.
+                prior_clipboard = None
+                if auto_paste:
+                    try:
+                        prior_clipboard = pyperclip.paste()
+                    except Exception as exc:
+                        _log(f"Could not read prior clipboard (won't restore): {exc}")
+
                 pyperclip.copy(text)
                 if auto_paste:
                     time.sleep(0.05)
                     with controller.pressed(paste_modifier):
                         controller.press("v")
                         controller.release("v")
+                    # Wait long enough for the focused app to consume the paste
+                    # before restoring the prior clipboard — otherwise the app
+                    # races and pastes the restored value instead.
+                    time.sleep(0.15)
+                    if prior_clipboard is not None and prior_clipboard != text:
+                        try:
+                            pyperclip.copy(prior_clipboard)
+                        except Exception as exc:
+                            _log(f"Could not restore prior clipboard: {exc}")
             if should_send:
                 time.sleep(0.3)
                 controller.press(pkb.Key.enter)
