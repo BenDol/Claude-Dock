@@ -37,14 +37,18 @@ module.exports = {
     buildEnvProfile: envProfile
   },
   extraResources: [
-    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' }
+    { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' },
+    // Voice plugin Python scripts must live outside app.asar because Python
+    // is spawned as a subprocess and cannot read from inside the archive.
+    // `asarUnpack` was unreliable here (globbing under `out/**/*` silently
+    // dropped these files on the user's install), so we copy them directly
+    // into resources/voice-python/ where `process.resourcesPath` resolves
+    // them at runtime. electron-vite still copies the same tree into
+    // out/main/voice-python/ for `electron-vite dev`.
+    { from: 'src/main/plugins/voice/python', to: 'voice-python' }
   ],
-  // Voice plugin Python scripts are copied into out/main/voice-python/ by
-  // electron-vite, then unpacked from app.asar so they exist as real files
-  // on disk (required because Python is spawned as a subprocess).
   asarUnpack: [
-    'node_modules/node-pty/**',
-    'out/main/voice-python/**'
+    'node_modules/node-pty/**'
   ],
   win: {
     icon: 'assets/icon.png',
