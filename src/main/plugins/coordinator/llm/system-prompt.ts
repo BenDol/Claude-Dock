@@ -14,6 +14,8 @@
  * SDK's `maxTurns` option rather than a rule in the prompt.
  */
 
+import { getMcpEntryName } from '../../../../shared/env-profile'
+
 export interface SystemPromptOptions {
   enforceWorktreeInPrompt: boolean
   /** Project directory the coordinator is operating on. */
@@ -47,7 +49,11 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
    each dispatched task is allowed to touch to avoid edit collisions.`
 
   if (opts.backend === 'sdk') {
-    const key = opts.mcpServerKey ?? 'claude-dock-uat'
+    // Fallback to the active profile's entry name rather than hardcoding
+    // `claude-dock-uat`. The registry already passes the key explicitly, but
+    // a silent UAT fallback would silently break prod/dev builds if a future
+    // caller forgot the argument.
+    const key = opts.mcpServerKey ?? getMcpEntryName()
     const tList = sdkToolName(key, 'dock_list_terminals')
     const tSpawn = sdkToolName(key, 'dock_spawn_terminal')
     const tPrompt = sdkToolName(key, 'dock_prompt_terminal')
