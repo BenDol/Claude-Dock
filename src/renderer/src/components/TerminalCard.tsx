@@ -728,9 +728,11 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
                 <ShellIcon />
               </button>
             )}
-            <button ref={wtBtnRef} className={`worktree-toggle-bottom${worktreePath || pendingWorktreeBranch ? ' worktree-toggle-active' : ''}`} onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : pendingWorktreeBranch ? `Creating worktree (${pendingWorktreeBranch.replace(/^[^/]+\//, '')})...` : 'Start a git worktree'}>
-              <WorktreeIcon />
-            </button>
+            {(worktreePath || pendingWorktreeBranch) && (
+              <button ref={wtBtnRef} className="worktree-toggle-bottom worktree-toggle-active" onClick={openWorktreePopover} title={worktreePath ? `Worktree: ${worktreePath}` : `Creating worktree (${pendingWorktreeBranch!.replace(/^[^/]+\//, '')})...`}>
+                <WorktreeIcon />
+              </button>
+            )}
           </div>
           {shellEventsEnabled && (
             <Suspense fallback={null}>
