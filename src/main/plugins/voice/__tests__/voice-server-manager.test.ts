@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 
-// Mock electron before it's touched
+// Mock electron before it's touched. `detectHotkeySupport()` lazy-requires
+// `systemPreferences.isTrustedAccessibilityClient` on macOS — tests flip
+// `accessibilityState.trusted` per-test without re-mocking. The state object is
+// `vi.hoisted()` so it exists when the mock factory runs (factories are hoisted
+// above normal top-level declarations).
+const { accessibilityState } = vi.hoisted(() => ({
+  accessibilityState: { trusted: true }
+}))
 vi.mock('electron', () => ({
   BrowserWindow: {
     getAllWindows: () => []
+  },
+  systemPreferences: {
+    isTrustedAccessibilityClient: (_prompt: boolean) => accessibilityState.trusted
   }
 }))
 
@@ -93,12 +103,30 @@ function resetSingleton() {
   ;(VoiceServerManager as any).instance = null
 }
 
-// startDaemon() now short-circuits on non-Windows hosts (hotkey is Windows-only).
-// Pin `process.platform` to 'win32' for the tests that exercise daemon spawn,
-// and restore the host platform afterwards so the suite is OS-agnostic on CI.
+// startDaemon() consults `detectHotkeySupport()` on every call. Pin
+// `process.platform` (and related env vars on Linux) per-test so we can exercise
+// the full Windows / macOS-granted / macOS-missing / Linux-X11 / Linux-Wayland
+// support matrix without the host OS bleeding in.
 const realPlatform = process.platform
+const realXdgSession = process.env.XDG_SESSION_TYPE
+const realWaylandDisplay = process.env.WAYLAND_DISPLAY
 function setPlatform(p: NodeJS.Platform): void {
   Object.defineProperty(process, 'platform', { value: p, configurable: true })
+}
+function setLinuxSession(type: 'x11' | 'wayland'): void {
+  if (type === 'wayland') {
+    process.env.XDG_SESSION_TYPE = 'wayland'
+    process.env.WAYLAND_DISPLAY = 'wayland-0'
+  } else {
+    process.env.XDG_SESSION_TYPE = 'x11'
+    delete process.env.WAYLAND_DISPLAY
+  }
+}
+function restoreLinuxSession(): void {
+  if (realXdgSession === undefined) delete process.env.XDG_SESSION_TYPE
+  else process.env.XDG_SESSION_TYPE = realXdgSession
+  if (realWaylandDisplay === undefined) delete process.env.WAYLAND_DISPLAY
+  else process.env.WAYLAND_DISPLAY = realWaylandDisplay
 }
 
 describe('voice-server-manager', () => {
@@ -108,12 +136,15 @@ describe('voice-server-manager', () => {
     serviceLogs.length = 0
     notifyCalls.length = 0
     fakeChildren.length = 0
+    accessibilityState.trusted = true
+    restoreLinuxSession()
     setPlatform('win32')
   })
 
   afterEach(() => {
     resetSingleton()
     setPlatform(realPlatform)
+    restoreLinuxSession()
   })
 
   it('ignores empty project dir on enable', async () => {
@@ -234,11 +265,33 @@ describe('voice-server-manager', () => {
     expect(mgr.getStatus().refCount).not.toBe(999)
   })
 
-  it('does not spawn daemon on non-Windows hosts', async () => {
-    // Hotkey daemon is Windows-only (keyboard lib unsupported elsewhere).
-    // On macOS/Linux the manager should short-circuit cleanly and surface
-    // a 'disabled' state pointing users at the MCP /voice command.
+  it('reports hotkeySupport: supported on Windows', () => {
+    setPlatform('win32')
+    resetSingleton()
+    const mgr = VoiceServerManager.getInstance()
+    const s = mgr.getStatus()
+    expect(s.hotkeySupport).toBe('supported')
+    expect(s.platform).toBe('win32')
+  })
+
+  it('spawns daemon on macOS when Accessibility permission is granted', async () => {
     setPlatform('darwin')
+    accessibilityState.trusted = true
+    runtimeState.exists = true
+    resetSingleton()
+    const mgr = VoiceServerManager.getInstance()
+    await mgr.onProjectEnabled('/proj/a')
+    await new Promise((r) => setTimeout(r, 550))
+    expect(fakeChildren.length).toBe(1)
+    const s = mgr.getStatus()
+    expect(s.hotkeySupport).toBe('supported')
+    expect(s.daemonState).toBe('running')
+    expect(s.platform).toBe('darwin')
+  })
+
+  it('refuses to spawn on macOS when Accessibility permission is missing', async () => {
+    setPlatform('darwin')
+    accessibilityState.trusted = false
     runtimeState.exists = true
     resetSingleton()
     const mgr = VoiceServerManager.getInstance()
@@ -247,17 +300,39 @@ describe('voice-server-manager', () => {
     expect(fakeChildren.length).toBe(0)
     const s = mgr.getStatus()
     expect(s.daemonState).toBe('disabled')
-    expect(s.hotkeySupported).toBe(false)
+    expect(s.hotkeySupport).toBe('needs-permission')
     expect(s.platform).toBe('darwin')
-    expect(s.lastError).toMatch(/Windows-only/)
+    expect(s.lastError).toMatch(/Accessibility/i)
   })
 
-  it('reports hotkeySupported: true on Windows', async () => {
-    setPlatform('win32')
+  it('spawns daemon on Linux under X11', async () => {
+    setPlatform('linux')
+    setLinuxSession('x11')
+    runtimeState.exists = true
     resetSingleton()
     const mgr = VoiceServerManager.getInstance()
+    await mgr.onProjectEnabled('/proj/a')
+    await new Promise((r) => setTimeout(r, 550))
+    expect(fakeChildren.length).toBe(1)
     const s = mgr.getStatus()
-    expect(s.hotkeySupported).toBe(true)
-    expect(s.platform).toBe('win32')
+    expect(s.hotkeySupport).toBe('supported')
+    expect(s.daemonState).toBe('running')
+    expect(s.platform).toBe('linux')
+  })
+
+  it('refuses to spawn on Linux under Wayland', async () => {
+    setPlatform('linux')
+    setLinuxSession('wayland')
+    runtimeState.exists = true
+    resetSingleton()
+    const mgr = VoiceServerManager.getInstance()
+    await mgr.onProjectEnabled('/proj/a')
+    await new Promise((r) => setTimeout(r, 550))
+    expect(fakeChildren.length).toBe(0)
+    const s = mgr.getStatus()
+    expect(s.daemonState).toBe('disabled')
+    expect(s.hotkeySupport).toBe('wayland')
+    expect(s.platform).toBe('linux')
+    expect(s.lastError).toMatch(/Wayland/i)
   })
 })

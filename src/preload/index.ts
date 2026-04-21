@@ -500,6 +500,7 @@ export interface DockApi {
     restartDaemon: () => Promise<{ success: boolean; error?: string }>
     openLogs: () => Promise<void>
     copyDiagnostics: () => Promise<string>
+    openAccessibilitySettings: () => Promise<boolean>
   }
   testRunner: {
     open: (projectDir: string) => Promise<void>
@@ -1055,7 +1056,8 @@ const dockApi: DockApi = {
     },
     restartDaemon: () => ipcRenderer.invoke(IPC.VOICE_RESTART_DAEMON),
     openLogs: () => ipcRenderer.invoke(IPC.VOICE_OPEN_LOGS),
-    copyDiagnostics: () => ipcRenderer.invoke(IPC.VOICE_COPY_DIAGNOSTICS)
+    copyDiagnostics: () => ipcRenderer.invoke(IPC.VOICE_COPY_DIAGNOSTICS),
+    openAccessibilitySettings: () => ipcRenderer.invoke(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS)
   },
   testRunner: {
     open: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_OPEN, projectDir),

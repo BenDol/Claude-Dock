@@ -14,7 +14,7 @@
  *     and server.py can read it.
  */
 
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, systemPreferences } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -38,7 +38,8 @@ import type {
   VoiceRuntimeStatus,
   VoiceSetupProgress,
   VoiceDaemonState,
-  VoiceInstallState
+  VoiceInstallState,
+  VoiceHotkeySupport
 } from '../../../shared/voice-types'
 
 const svc = () => getServices()
@@ -46,6 +47,47 @@ const svc = () => getServices()
 const MAX_RESTARTS = 3
 const RESTART_WINDOW_MS = 60_000
 const SETUP_OVERALL_TIMEOUT_MS = 15 * 60_000
+
+/**
+ * Classify this host's ability to run the hotkey daemon. Recomputed on every
+ * `startDaemon()` call so macOS users who grant Accessibility permission
+ * mid-session pick it up without a restart.
+ */
+export function detectHotkeySupport(): VoiceHotkeySupport {
+  if (process.platform === 'win32') return 'supported'
+  if (process.platform === 'darwin') {
+    try {
+      return systemPreferences.isTrustedAccessibilityClient(false)
+        ? 'supported'
+        : 'needs-permission'
+    } catch {
+      // If systemPreferences can't be reached (e.g. from a pure node test
+      // harness), assume permission is missing — the daemon would fail the
+      // same way, better to keep the UI in a safe state.
+      return 'needs-permission'
+    }
+  }
+  if (process.platform === 'linux') {
+    const wayland =
+      (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland' ||
+      Boolean(process.env.WAYLAND_DISPLAY)
+    return wayland ? 'wayland' : 'supported'
+  }
+  return 'unsupported'
+}
+
+function hotkeySupportMessage(s: VoiceHotkeySupport): string {
+  switch (s) {
+    case 'needs-permission':
+      return 'Dock needs Accessibility permission to use the global hotkey. Grant it in System Settings → Privacy & Security → Accessibility, then click Re-check.'
+    case 'wayland':
+      return 'Global hotkey isn\'t available on Wayland. Use the /voice slash command in Claude — the MCP server works on Wayland.'
+    case 'unsupported':
+      return 'Global hotkey isn\'t supported on this platform. Use the /voice slash command in Claude.'
+    default:
+      return ''
+  }
+}
 
 export class VoiceServerManager extends EventEmitter {
   private static instance: VoiceServerManager | null = null
@@ -68,7 +110,7 @@ export class VoiceServerManager extends EventEmitter {
     pythonPath: null,
     mcpRegisteredPath: null,
     platform: process.platform,
-    hotkeySupported: process.platform === 'win32'
+    hotkeySupport: detectHotkeySupport()
   }
 
   private setupPromise: Promise<void> | null = null
@@ -265,24 +307,24 @@ export class VoiceServerManager extends EventEmitter {
       return
     }
 
-    // The global hotkey daemon relies on the Python `keyboard` package, which
-    // is Windows-only in practice — it is unsupported on macOS and requires
-    // root on Linux. Attempting to spawn the daemon elsewhere fails during
-    // import / hotkey-register, which the crash-restart loop then treats as a
-    // genuine crash and retries three times before giving up noisily. Short-
-    // circuit here so non-Windows users see a clear "use /voice instead" state
-    // instead of a cryptic cascade of restart notifications. The MCP server
-    // path (server.py, registered in ~/.claude.json) is cross-platform and
-    // remains fully functional on macOS and Linux.
-    if (process.platform !== 'win32') {
+    // Re-check per-OS support on every start so macOS users who just granted
+    // Accessibility permission can retry without restarting Dock. Wayland,
+    // missing permission, and exotic platforms keep the daemon in a clean
+    // 'disabled' state so the MCP path continues to work and the UI can show
+    // a targeted banner instead of a crash-restart cascade.
+    const hotkeySupport = detectHotkeySupport()
+    this.updateStatus({ hotkeySupport })
+    if (hotkeySupport !== 'supported') {
+      const step =
+        hotkeySupport === 'needs-permission' ? 'Awaiting Accessibility permission' :
+        hotkeySupport === 'wayland' ? 'Hotkey unsupported on Wayland' :
+        'Hotkey unsupported on this OS'
       this.updateStatus({
         daemonState: 'disabled',
-        step: 'Hotkey not supported on this OS',
-        lastError: process.platform === 'darwin'
-          ? 'Global hotkey is Windows-only. Use the /voice slash command in Claude — the MCP server works on macOS.'
-          : 'Global hotkey is Windows-only (Linux `keyboard` needs root). Use the /voice slash command in Claude — the MCP server works on Linux.'
+        step,
+        lastError: hotkeySupportMessage(hotkeySupport)
       })
-      svc().log(`[voice-manager] hotkey daemon skipped on ${process.platform} — MCP path remains active`)
+      svc().log(`[voice-manager] hotkey daemon skipped (${hotkeySupport}) on ${process.platform} — MCP path remains active`)
       return
     }
 
@@ -366,7 +408,7 @@ export class VoiceServerManager extends EventEmitter {
     })
 
     // Treat "still running after a short grace period" as success — python
-    // needs a moment to import keyboard / sounddevice before it's listening.
+    // needs a moment to import pynput / sounddevice before it's listening.
     await new Promise((resolve) => setTimeout(resolve, 500))
     if (this.daemon && !this.daemon.killed) {
       this.updateStatus({

@@ -290,6 +290,23 @@ print(json.dumps({'text': text}))
     }
   })
 
+  ipcMain.handle(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS, async () => {
+    // macOS-only: deep-link to the Accessibility privacy pane. Other OSes
+    // don't need this permission so we return early and leave the caller a
+    // falsy result to render whatever fallback copy they want.
+    if (process.platform !== 'darwin') {
+      svc().log(`[voice-ipc] openAccessibilitySettings called on ${process.platform} — no-op`)
+      return false
+    }
+    try {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+      return true
+    } catch (err) {
+      svc().logError('[voice-ipc] openAccessibilitySettings failed', err)
+      return false
+    }
+  })
+
   ipcMain.handle(IPC.VOICE_COPY_DIAGNOSTICS, async () => {
     const cfg = getVoiceConfig()
     const status = mgr().getStatus()
@@ -341,7 +358,8 @@ export function disposeVoiceIpc(): void {
     IPC.VOICE_MCP_RESOLVE_CONFLICT,
     IPC.VOICE_RESTART_DAEMON,
     IPC.VOICE_OPEN_LOGS,
-    IPC.VOICE_COPY_DIAGNOSTICS
+    IPC.VOICE_COPY_DIAGNOSTICS,
+    IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS
   ]
   for (const ch of channels) {
     try { ipcMain.removeHandler(ch) } catch { /* ignore */ }

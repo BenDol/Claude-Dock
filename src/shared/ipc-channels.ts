@@ -377,5 +377,6 @@ export const IPC = {
   VOICE_MCP_RESOLVE_CONFLICT: 'voice:mcpResolveConflict',
   VOICE_OPEN_LOGS: 'voice:openLogs',
   VOICE_COPY_DIAGNOSTICS: 'voice:copyDiagnostics',
-  VOICE_RESTART_DAEMON: 'voice:restartDaemon'
+  VOICE_RESTART_DAEMON: 'voice:restartDaemon',
+  VOICE_OPEN_ACCESSIBILITY_SETTINGS: 'voice:openAccessibilitySettings'
 } as const
