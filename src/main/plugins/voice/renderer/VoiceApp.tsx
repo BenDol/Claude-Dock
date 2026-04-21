@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import './voice.css'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import {
+  applySavedZoom,
+  applyZoom,
+  isEditableTarget,
+  ZOOM_STEP
+} from './voice-zoom'
 import type {
   VoiceConfig,
   VoiceRuntimeStatus,
@@ -183,32 +189,25 @@ export default function VoiceApp() {
     }
   }, [api, loadAll])
 
-  // Zoom: Ctrl+MouseWheel and Ctrl++/-/0 with per-window persistence.
-  // Mirrors the memory-plugin approach so plugin windows feel consistent.
+  // Zoom: Ctrl+MouseWheel and Ctrl++/-/0 with per-window persistence. The
+  // initial zoom is applied synchronously by the entry (see voice-zoom.ts) so
+  // there is no flash of unzoomed content; this effect only re-applies it for
+  // the in-app render path and installs the input listeners. Keyboard
+  // shortcuts are skipped while typing into inputs/textareas/contenteditable
+  // to avoid stealing Ctrl+0/Ctrl+- combos the user expects to act on text.
   useEffect(() => {
-    const ZOOM_KEY = 'voice-zoom'
-    const MIN_ZOOM = 0.6
-    const MAX_ZOOM = 1.6
-    const STEP = 0.1
-    const saved = localStorage.getItem(ZOOM_KEY)
-    let zoom = saved ? parseFloat(saved) : 1
-    if (isNaN(zoom) || zoom < MIN_ZOOM || zoom > MAX_ZOOM) zoom = 1
-    document.documentElement.style.zoom = String(zoom)
-    const applyZoom = (z: number) => {
-      zoom = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
-      document.documentElement.style.zoom = String(zoom)
-      localStorage.setItem(ZOOM_KEY, String(zoom))
-    }
+    let zoom = applySavedZoom()
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      applyZoom(zoom + (e.deltaY < 0 ? STEP : -STEP))
+      zoom = applyZoom(zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
     }
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
-      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + STEP) }
-      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - STEP) }
-      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
+      if (isEditableTarget(e.target)) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); zoom = applyZoom(zoom + ZOOM_STEP) }
+      else if (e.key === '-') { e.preventDefault(); zoom = applyZoom(zoom - ZOOM_STEP) }
+      else if (e.key === '0') { e.preventDefault(); zoom = applyZoom(1) }
     }
     window.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('keydown', onKeyDown)

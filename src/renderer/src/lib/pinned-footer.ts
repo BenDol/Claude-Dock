@@ -108,10 +108,16 @@ export function detectInputBoxRows(
     extra = i
   }
 
-  // Walk further upward from the anchor through live-context continuation rows
-  // (`● Thinking` headers, indented sub-bullets, etc). Stop at prose, a `>`
-  // user prompt, or two consecutive blanks.
+  // Walk further upward from the anchor to include the *currently active* tool
+  // call: its indented sub-bullets (`  L ...`, `  (ctrl+b ...)`), plus exactly
+  // ONE bullet-glyph header row (`● Bash(...)`, `● Searching for X files…`).
+  //
+  // A second bullet row above that is the previous turn's tool or prose
+  // response — it must not enter the pinned region, otherwise the footer
+  // swallows scrollback all the way up to the prior `●`/`●` boundary.
+  // Prose (alnum first char) and user prompts are hard boundaries.
   consecBlanks = 0
+  let headerSeen = false
   for (let i = anchorOffset + 1; i <= maxContextAbove; i++) {
     const off = topBorderOffset + i
     const y = baseY + rows - 1 - off
@@ -126,7 +132,18 @@ export function detectInputBoxRows(
       continue
     }
     consecBlanks = 0
-    if (!isLiveContextContinuation(text)) break
+    if (isUserPromptRow(text)) break
+    const first = text[0]
+    if (/[A-Za-z0-9]/.test(first)) break
+    if (first === ' ' || first === '\t') {
+      extra = i
+      continue
+    }
+    // Non-alnum, non-space first char = a `●`/`*`/`·`-style bullet row.
+    // Allow exactly one (the active tool-call header); the next one is a
+    // boundary.
+    if (headerSeen) break
+    headerSeen = true
     extra = i
   }
 
@@ -164,21 +181,6 @@ function isSpinnerRow(s: string): boolean {
   if (/[\sA-Za-z0-9]/.test(first)) return false
   if (first === '\u2026') return false
   return SPINNER_PATTERN.test(trimmed)
-}
-
-/**
- * Rows that sit within a live-tasks block alongside a spinner anchor —
- * the `● Thinking` header, indented sub-bullets, blank padding. Anything
- * starting with a letter or a user-prompt chevron is treated as a boundary
- * and terminates the walk.
- */
-function isLiveContextContinuation(s: string): boolean {
-  if (isBlankRow(s)) return true
-  if (isUserPromptRow(s)) return false
-  const first = s[0]
-  if (first === ' ' || first === '\t') return true
-  if (/[A-Za-z0-9]/.test(first)) return false
-  return true
 }
 
 /**

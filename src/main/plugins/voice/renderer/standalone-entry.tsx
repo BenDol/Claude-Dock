@@ -12,6 +12,11 @@ import './voice.css'
 import VoiceApp from './VoiceApp'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import { applyThemeToDocument } from '@dock-renderer/lib/theme'
+import { applySavedZoom } from './voice-zoom'
+
+// Apply persisted zoom synchronously, before React mounts, so the user does
+// not see an un-zoomed flash on every reopen.
+applySavedZoom()
 
 function StandaloneApp() {
   useEffect(() => {

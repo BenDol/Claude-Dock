@@ -33,5 +33,21 @@ registerToolbarAction({
   title: 'Voice',
   icon: React.createElement(MicIcon),
   onClick: () => getDockApi().voice.open(),
-  order: 56
+  order: 56,
+  // Red when the voice service can't run (install missing/errored, or daemon
+  // crashed/stopped — which also catches "mic not available" since the daemon
+  // exits when it can't open an input device). Yellow while installing or
+  // starting up. Hidden once the daemon is running (or the user has explicitly
+  // disabled the hotkey, which still leaves the MCP server usable).
+  getStatusDot: async () => {
+    try {
+      const s = await getDockApi().voice.getStatus()
+      if (s.installState === 'installing' || s.daemonState === 'starting') return 'in_progress'
+      if (s.installState === 'missing' || s.installState === 'error' || s.installState === 'unknown') return 'failure'
+      if (s.daemonState === 'crashed' || s.daemonState === 'stopped') return 'failure'
+      return null
+    } catch {
+      return null
+    }
+  }
 })
