@@ -41,8 +41,67 @@ const SERVER_IDLE_TIMEOUT = 5 * 60_000 // 5 minutes
 const IDLE_CHECK_INTERVAL = 60_000 // check every minute
 const HEALTH_POLL_INTERVAL = 500
 
+// Allowed context sizes (tokens). Larger = more headroom for big prompts but
+// linearly more KV-cache RAM. KV cache for qwen2.5-coder-0.5b q4_k_m ≈ 0.25 MB
+// per token, so 16384 ctx ≈ 4 GB. Base model weight footprint is ~500 MB.
+const CTX_TIERS = [2048, 4096, 8192, 16384] as const
+const DEFAULT_CTX_SIZE = 4096
+// Approx KV bytes per token for this model (empirical — q4_k_m has small KV).
+// Using a conservative estimate: 256 KB/token.
+const KV_BYTES_PER_TOKEN = 256 * 1024
+
 function getLlmDir(): string {
   return path.join(app.getPath('userData'), 'llm')
+}
+
+/**
+ * Pick an llm ctx-size based on available system memory.
+ *
+ * Strategy: pair the size tier to BOTH total RAM (machine class) and current
+ * free RAM (don't starve other apps). We take the minimum of the two caps.
+ *
+ *   - totalmem  < 4 GB  → cap at 2048
+ *   - totalmem  < 8 GB  → cap at 4096
+ *   - totalmem < 16 GB  → cap at 8192
+ *   - totalmem ≥ 16 GB  → cap at 16384
+ *
+ * Then reduce further if free memory can't comfortably hold the KV cache
+ * (we want ~1 GB headroom on top of the KV reservation). Returns one of
+ * CTX_TIERS (a known-good value for --ctx-size).
+ */
+let cachedContextSize: number | null = null
+
+function pickContextSize(): number {
+  if (cachedContextSize !== null) return cachedContextSize
+  try {
+    const totalBytes = os.totalmem()
+    const freeBytes = os.freemem()
+    const totalGB = totalBytes / (1024 ** 3)
+    const freeGB = freeBytes / (1024 ** 3)
+
+    let byTotal: number
+    if (totalGB < 4) byTotal = 2048
+    else if (totalGB < 8) byTotal = 4096
+    else if (totalGB < 16) byTotal = 8192
+    else byTotal = 16384
+
+    // Leave ~1.5 GB headroom for other apps + model weights (~500 MB).
+    const usableFreeBytes = Math.max(0, freeBytes - 1.5 * 1024 ** 3)
+    const maxTokensByFree = Math.floor(usableFreeBytes / KV_BYTES_PER_TOKEN)
+    let byFree = CTX_TIERS[0]
+    for (const tier of CTX_TIERS) {
+      if (tier <= maxTokensByFree) byFree = tier
+    }
+
+    const picked = Math.min(byTotal, byFree)
+    log(`[local-llm] pickContextSize: total=${totalGB.toFixed(1)}GB free=${freeGB.toFixed(1)}GB byTotal=${byTotal} byFree=${byFree} picked=${picked}`)
+    cachedContextSize = picked
+    return picked
+  } catch (err) {
+    logError('[local-llm] pickContextSize failed, using default:', err)
+    cachedContextSize = DEFAULT_CTX_SIZE
+    return DEFAULT_CTX_SIZE
+  }
 }
 
 export class LocalLlmManager {
@@ -50,6 +109,7 @@ export class LocalLlmManager {
 
   private serverProcess: ChildProcess | null = null
   private serverPort = 0
+  private currentContextSize = DEFAULT_CTX_SIZE
   private lastRequestTime = 0
   private idleTimer: ReturnType<typeof setInterval> | null = null
   private downloadPromise: Promise<void> | null = null
@@ -115,6 +175,16 @@ export class LocalLlmManager {
 
   isServerRunning(): boolean {
     return this.serverProcess !== null && this.serverProcess.exitCode === null
+  }
+
+  /**
+   * Context size (tokens) the server is currently configured with. Valid after
+   * ensureServer() resolves; otherwise returns the memory-derived target so
+   * callers can budget prompts before the server is warm.
+   */
+  getContextSize(): number {
+    if (this.isServerRunning()) return this.currentContextSize
+    return pickContextSize()
   }
 
   isDownloading(): boolean {
@@ -361,13 +431,14 @@ export class LocalLlmManager {
     }
 
     this.serverPort = await this.findFreePort()
+    this.currentContextSize = pickContextSize()
 
-    log(`[local-llm] Starting llama-server on port ${this.serverPort}`)
+    log(`[local-llm] Starting llama-server on port ${this.serverPort} ctx=${this.currentContextSize}`)
 
     const args = [
       '-m', this.getModelPath(),
       '--port', String(this.serverPort),
-      '--ctx-size', '4096',
+      '--ctx-size', String(this.currentContextSize),
       '-ngl', '0',
       '--threads', String(Math.min(4, os.cpus().length)),
       '--log-disable'
@@ -495,7 +566,7 @@ export class LocalLlmManager {
 
   // -- Inference --
 
-  async generate(prompt: string): Promise<string> {
+  async generate(prompt: string, opts?: { maxTokens?: number }): Promise<string> {
     await this.ensureServer()
     this.lastRequestTime = Date.now()
 
@@ -503,10 +574,12 @@ export class LocalLlmManager {
     // we can verify responses belong to their request (not a stale leftover).
     const reqId = Math.random().toString(36).slice(2, 10)
 
+    const maxTokens = Math.max(1, opts?.maxTokens ?? 400)
+
     const body = JSON.stringify({
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
-      max_tokens: 400,
+      max_tokens: maxTokens,
       stream: false,
       frequency_penalty: 1.2,
       presence_penalty: 0.6,
@@ -518,7 +591,7 @@ export class LocalLlmManager {
       seed: -1
     })
 
-    log(`[local-llm] req=${reqId} tokens=${prompt.length}ch`)
+    log(`[local-llm] req=${reqId} promptChars=${prompt.length} maxTokens=${maxTokens} ctx=${this.currentContextSize}`)
 
     const response = await new Promise<string>((resolve, reject) => {
       const req = http.request({

@@ -1813,11 +1813,322 @@ function buildCommitPrompt(stat: string, diff: string): string {
   ].join('\n')
 }
 
-async function generateViaLocalLlm(stat: string, diff: string): Promise<string> {
+// ─── Local-LLM commit message pipeline ─────────────────────────────
+// The following helpers are used ONLY by generateViaLocalLlm. The cloud /
+// Claude paths continue to use the simpler buildCommitPrompt() above because
+// Haiku has a 200K-token context and doesn't need per-file budgeting.
+
+interface StagedFileInfo {
+  /** git --name-status code: A, M, D, R100, C95, etc. (first char is meaningful) */
+  status: string
+  path: string
+  /** For renames/copies: the original path; otherwise undefined. */
+  origPath?: string
+}
+
+interface FileDiffChunk {
+  path: string
+  status: string
+  body: string
+}
+
+/**
+ * Parse `git diff --cached --name-status -z` output (NUL-terminated) into
+ * structured entries. For R/C entries the format is:
+ *   <status>\0<old-path>\0<new-path>\0
+ * For other statuses:
+ *   <status>\0<path>\0
+ */
+function parseNameStatus(raw: string): StagedFileInfo[] {
+  if (!raw) return []
+  // Strip trailing NUL to avoid an empty final token
+  const text = raw.endsWith('\0') ? raw.slice(0, -1) : raw
+  const parts = text.split('\0')
+  const out: StagedFileInfo[] = []
+  let i = 0
+  while (i < parts.length) {
+    const status = parts[i]
+    if (!status) { i++; continue }
+    const code = status[0]
+    if (code === 'R' || code === 'C') {
+      const orig = parts[i + 1] ?? ''
+      const next = parts[i + 2] ?? ''
+      if (next) out.push({ status, path: next, origPath: orig })
+      i += 3
+    } else {
+      const p = parts[i + 1] ?? ''
+      if (p) out.push({ status, path: p })
+      i += 2
+    }
+  }
+  return out
+}
+
+/** Human-readable status for prompt text: M/A/D/R/C etc. → word form. */
+function statusLabel(status: string): string {
+  const c = (status[0] ?? '').toUpperCase()
+  switch (c) {
+    case 'A': return 'added'
+    case 'M': return 'modified'
+    case 'D': return 'deleted'
+    case 'R': return 'renamed'
+    case 'C': return 'copied'
+    case 'T': return 'type-changed'
+    case 'U': return 'unmerged'
+    default: return 'changed'
+  }
+}
+
+/**
+ * Split a combined `git diff --cached` output into per-file chunks using the
+ * `diff --git a/... b/...` boundary. Each chunk retains its full header so it
+ * is syntactically valid on its own.
+ */
+function extractFileDiffs(diff: string): FileDiffChunk[] {
+  if (!diff) return []
+  // Ignore any trailer we appended (like "(Data files changed but diff excluded: ...)")
+  const firstHeader = diff.search(/^diff --git /m)
+  if (firstHeader < 0) return []
+  const body = diff.slice(firstHeader)
+  // Split keeping the "diff --git " markers; split on a zero-width lookahead.
+  const chunks = body.split(/(?=^diff --git )/m).map((s) => s.replace(/\s+$/, ''))
+  const out: FileDiffChunk[] = []
+  for (const chunk of chunks) {
+    if (!chunk.startsWith('diff --git ')) continue
+    // diff --git a/<old> b/<new>
+    const m = chunk.match(/^diff --git a\/(.+?) b\/(.+?)$/m)
+    const p = m ? m[2] : ''
+    // Status is populated later by merging with name-status; leave blank here.
+    out.push({ path: p, status: '', body: chunk })
+  }
+  return out
+}
+
+/**
+ * Compute a diff character budget for the local LLM based on its current
+ * context size (tokens). Heuristic: ~4 chars/token, reserve ~30% of ctx for
+ * the system prompt + instructions + response. Cap at 24000 to avoid huge
+ * single-shot prompts that small models can't reason over anyway.
+ */
+function computeDiffBudget(ctxTokens: number): number {
+  const approxChars = ctxTokens * 4
+  const budget = Math.floor(approxChars * 0.65)
+  return Math.max(2000, Math.min(24000, budget))
+}
+
+/**
+ * Distribute the diff budget across per-file chunks. Files smaller than their
+ * fair share get their full diff; remaining budget is split evenly among the
+ * larger files, truncating each with a trailing "... (truncated)" marker.
+ */
+function buildPerFileBudgetedDiff(chunks: FileDiffChunk[], budget: number): string {
+  if (chunks.length === 0) return ''
+  const remaining = new Set(chunks.map((_, i) => i))
+  const allocated = new Map<number, string>()
+  let budgetLeft = budget
+
+  // Iterate: give small files their full body; if none fits the current
+  // per-file fair share, split the remaining budget evenly among the rest.
+  let changed = true
+  while (changed && remaining.size > 0) {
+    changed = false
+    const fairShare = Math.floor(budgetLeft / remaining.size)
+    if (fairShare <= 200) break
+    for (const i of Array.from(remaining)) {
+      const chunk = chunks[i]
+      if (chunk.body.length <= fairShare) {
+        allocated.set(i, chunk.body)
+        budgetLeft -= chunk.body.length
+        remaining.delete(i)
+        changed = true
+      }
+    }
+  }
+
+  if (remaining.size > 0) {
+    const fairShare = Math.max(400, Math.floor(budgetLeft / remaining.size))
+    for (const i of remaining) {
+      const chunk = chunks[i]
+      const truncated = chunk.body.slice(0, fairShare) + '\n... (truncated)'
+      allocated.set(i, truncated)
+    }
+  }
+
+  // Reassemble in original order
+  return chunks.map((_, i) => allocated.get(i) ?? '').filter(Boolean).join('\n')
+}
+
+/**
+ * Build the single-shot prompt used for small commits in the local LLM.
+ * Adds an explicit numbered file checklist so the model can't forget files
+ * when summarizing — each bullet in the response should correspond to at
+ * least one file on the checklist.
+ */
+function buildLocalCommitPrompt(stat: string, diff: string, fileInfos: StagedFileInfo[]): string {
+  const checklistLines: string[] = []
+  if (fileInfos.length > 0) {
+    const checklist = fileInfos
+      .map((f, i) => {
+        const label = statusLabel(f.status)
+        const rename = f.origPath && f.origPath !== f.path ? ` (from ${f.origPath})` : ''
+        return `  ${i + 1}. [${label}] ${f.path}${rename}`
+      })
+      .join('\n')
+    checklistLines.push(
+      'File checklist — every listed file must be represented (covered by the summary for uniform changes, or as its own bullet for distinct changes):',
+      checklist,
+      ''
+    )
+  }
+
+  return [
+    COMMIT_MSG_PROMPT,
+    '',
+    '---',
+    '',
+    'Staged changes (file stats):',
+    stat.trim(),
+    '',
+    ...checklistLines,
+    'Diff (per-file, budgeted):',
+    diff,
+    '',
+    'Write the commit message for the staged changes above. Reference the actual file names, functions, and symbols that appear in the stats and diff — do not invent any topic that is not present in the diff. Cover every distinct change — do not describe only one area when multiple unrelated files changed. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
+  ].join('\n')
+}
+
+/**
+ * Multi-pass phase 1 prompt: summarize ONE file's diff in one short line.
+ * The output of this is fed to buildCombineSummariesPrompt below.
+ */
+function buildPerFileSummaryPrompt(info: StagedFileInfo, body: string): string {
+  const label = statusLabel(info.status)
+  const renameLine = info.origPath && info.origPath !== info.path
+    ? `Renamed from: ${info.origPath}\n`
+    : ''
+  return [
+    `Summarize this single staged file change in ONE short line (max 120 chars).`,
+    'Describe what changed and why (if derivable from the diff). Do not use conventional-commit prefixes like "feat:" or "fix:" — just plain prose. No quotes, no code fences, no preamble.',
+    '',
+    `File: ${info.path}`,
+    `Change type: ${label}`,
+    renameLine + `Diff:`,
+    body,
+    '',
+    'One-line summary:'
+  ].join('\n')
+}
+
+/**
+ * Multi-pass phase 2 prompt: combine per-file summaries into one commit
+ * message. No raw diff — just the synthesized summaries — which keeps the
+ * combine step well within ctx even for large commits.
+ */
+function buildCombineSummariesPrompt(stat: string, summaries: Array<{ info: StagedFileInfo; text: string }>): string {
+  const list = summaries.map((s, i) => {
+    const label = statusLabel(s.info.status)
+    return `  ${i + 1}. [${label}] ${s.info.path}: ${s.text}`
+  }).join('\n')
+
+  return [
+    COMMIT_MSG_PROMPT,
+    '',
+    '---',
+    '',
+    'Staged changes (file stats):',
+    stat.trim(),
+    '',
+    'Per-file change summaries (already analyzed — combine these into ONE commit message):',
+    list,
+    '',
+    'Write a single commit message that covers ALL of the per-file summaries above. The bullet list in the message must reflect every distinct change — do not collapse unrelated files into a single bullet, and do not drop any. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
+  ].join('\n')
+}
+
+/**
+ * Local-LLM commit message generation with per-file budgeting and optional
+ * multi-pass for large commits. The cloud providers continue to use the
+ * simpler buildCommitPrompt() path.
+ *
+ *   - Small commits (≤6 files AND diff ≤ 1.5× budget): single-shot with
+ *     per-file budgeted diff and an explicit file checklist.
+ *   - Large commits: phase 1 summarizes each file individually; phase 2
+ *     combines the summaries into one commit message.
+ */
+async function generateViaLocalLlm(stat: string, diff: string, fileInfos: StagedFileInfo[]): Promise<string> {
   const { LocalLlmManager } = await import('../../local-llm')
-  const raw = await LocalLlmManager.getInstance().generate(buildCommitPrompt(stat, diff))
-  const msg = cleanCommitMessage(raw)
-  if (!msg) throw new Error('Empty response from local LLM')
+  const llm = LocalLlmManager.getInstance()
+  const ctxTokens = llm.getContextSize()
+  const budget = computeDiffBudget(ctxTokens)
+
+  const chunks = extractFileDiffs(diff)
+  // Merge status info into chunks by path (best effort — fileInfos is authoritative)
+  const statusByPath = new Map<string, string>()
+  for (const f of fileInfos) statusByPath.set(f.path, f.status)
+  for (const c of chunks) c.status = statusByPath.get(c.path) ?? ''
+
+  const totalDiffLen = diff.length
+  const fileCount = fileInfos.length || chunks.length
+  const needsMultiPass = fileCount > 6 || totalDiffLen > Math.floor(budget * 1.5)
+
+  getServices().log(
+    `[git-manager] local-llm: ctx=${ctxTokens} budget=${budget} files=${fileCount} diffLen=${totalDiffLen} multiPass=${needsMultiPass}`
+  )
+
+  if (!needsMultiPass) {
+    const budgeted = buildPerFileBudgetedDiff(chunks, budget)
+    const prompt = buildLocalCommitPrompt(stat, budgeted || diff, fileInfos)
+    const raw = await llm.generate(prompt, { maxTokens: 400 })
+    const msg = cleanCommitMessage(raw)
+    if (!msg) throw new Error('Empty response from local LLM')
+    return msg
+  }
+
+  // --- Multi-pass ---
+  // Phase 1: per-file summaries. Budget each file individually so its prompt
+  // fits comfortably (~half the diff budget for the diff, model handles the
+  // rest). Run sequentially to avoid overwhelming the single-worker llama
+  // server — parallel requests would interleave KV cache state.
+  const perFileDiffBudget = Math.max(1500, Math.floor(budget / 2))
+  const summaries: Array<{ info: StagedFileInfo; text: string }> = []
+  const chunkByPath = new Map<string, FileDiffChunk>()
+  for (const c of chunks) chunkByPath.set(c.path, c)
+
+  for (const info of fileInfos) {
+    const chunk = chunkByPath.get(info.path)
+    const body = chunk
+      ? (chunk.body.length > perFileDiffBudget
+          ? chunk.body.slice(0, perFileDiffBudget) + '\n... (truncated)'
+          : chunk.body)
+      : `(no diff available — status: ${statusLabel(info.status)})`
+    try {
+      const raw = await llm.generate(buildPerFileSummaryPrompt(info, body), { maxTokens: 96 })
+      const line = (raw || '')
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.length > 0) ?? ''
+      // Strip surrounding quotes/backticks/leading bullets the model may add
+      const cleaned = line
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^[-*]\s+/, '')
+        .replace(/^```[^\n]*$/g, '')
+        .trim()
+      if (cleaned) summaries.push({ info, text: cleaned })
+    } catch (err) {
+      getServices().log(`[git-manager] per-file summary failed for ${info.path}: ${err instanceof Error ? err.message : String(err)}`)
+      // Skip this file; combine pass will still mention the others.
+    }
+  }
+
+  if (summaries.length === 0) {
+    throw new Error('Local LLM produced no per-file summaries')
+  }
+
+  // Phase 2: combine. No raw diff — just the synthesized lines.
+  const combinePrompt = buildCombineSummariesPrompt(stat, summaries)
+  const combined = await llm.generate(combinePrompt, { maxTokens: 500 })
+  const msg = cleanCommitMessage(combined)
+  if (!msg) throw new Error('Empty response from local LLM (combine pass)')
   return msg
 }
 
@@ -1910,17 +2221,22 @@ function getDataFileExcludes(_cwd: string): string[] {
 }
 
 export async function generateCommitMessage(cwd: string): Promise<string> {
-  // Get staged file list, stat, and diff.
-  // Cap diff fetch at 8KB — LLM providers only use 4000 chars anyway, and
-  // fetching multi-MB diffs wastes memory on repos with large binary/data changes.
-  const MAX_DIFF_BYTES = 8 * 1024
-  const [namesResult, statResult, diffResult] = await Promise.all([
+  // Get staged file list, stat, name-status, and diff.
+  // Cap diff fetch at 128 KB — the local LLM now does per-file budgeting and
+  // multi-pass summarization for large commits, so fetching more context pays
+  // off. The cloud path still truncates to 4000 chars inside buildCommitPrompt.
+  const MAX_DIFF_BYTES = 128 * 1024
+  const [namesResult, statResult, nameStatusResult, diffResult] = await Promise.all([
     gitExec(cwd, ['diff', '--cached', '--name-only'], 5000),
     gitExec(cwd, ['diff', '--cached', '--stat', '--no-color'], 10000),
-    // Exclude large data files from the diff to avoid overwhelming the LLM
+    // NUL-separated --name-status so we can reliably recover rename pairs
+    gitExec(cwd, ['diff', '--cached', '--name-status', '-z'], 5000),
+    // Exclude large data files from the diff to avoid overwhelming the LLM.
+    // core.quotePath=false keeps paths with spaces/unicode unquoted so they
+    // match the raw paths returned by `--name-status -z` in extractFileDiffs.
     new Promise<{ stdout: string; stderr: string }>((resolve) => {
-      const args = ['diff', '--cached', '--no-color', '--unified=1', '--', '.', ...getDataFileExcludes(cwd)]
-      execFile('git', args, { cwd, timeout: 10000, maxBuffer: MAX_DIFF_BYTES }, (err, stdout) => {
+      const args = ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--unified=1', '--', '.', ...getDataFileExcludes(cwd)]
+      execFile('git', args, { cwd, timeout: 15000, maxBuffer: MAX_DIFF_BYTES }, (err, stdout) => {
         // maxBuffer exceeded just means we got a partial diff — that's fine
         resolve({ stdout: stdout || '', stderr: '' })
       })
@@ -1938,13 +2254,15 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
     diff += `\n\n(Data files changed but diff excluded: ${dataFiles.join(', ')})`
   }
 
-  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars, dataFiles=${dataFiles.length}`)
+  const fileInfos = parseNameStatus(nameStatusResult.stdout)
+
+  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars, files=${fileInfos.length}, dataFiles=${dataFiles.length}`)
   const t0 = Date.now()
 
   // Race available providers — local LLM is always primary
   const providers: Promise<string>[] = []
 
-  providers.push(generateViaLocalLlm(stat, diff).then((r) => {
+  providers.push(generateViaLocalLlm(stat, diff, fileInfos).then((r) => {
     getServices().log(`[git-manager] Local LLM responded in ${Date.now() - t0}ms`)
     return r
   }))
