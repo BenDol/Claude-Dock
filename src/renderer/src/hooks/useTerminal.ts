@@ -362,25 +362,34 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     const { cursorRow, cursorCol } = renderPinnedRows(term, rowCount, theme, rowsHost, bottomOffset)
 
     // Derive row height, cell width, and horizontal alignment from xterm's DOM
-    // so the overlay aligns pixel-perfectly with the real rendering. We query
-    // `.xterm-screen` (always present and sized to cols * cellWidth in both
-    // canvas and DOM renderers) rather than `.xterm-rows > div`, which is
-    // zero-height accessibility markup under the canvas renderer.
+    // so the overlay aligns pixel-perfectly with the real rendering.
+    //
+    // `.xterm-screen` fills the xterm content area (including the scrollbar
+    // gutter on the right), so its width is slightly larger than the actual
+    // `cols * cellWidth` grid — using it for footer width made the footer
+    // extend past the rendered text and let long input lines clip past the
+    // terminal's right edge.
+    //
+    // Canvases inside `.xterm-screen` (created by CanvasAddon) are sized
+    // exactly to `cols * cellWidth` in CSS pixels, so we measure one of them
+    // for precise dimensions. Fallbacks: `.xterm-screen` rect, then font-
+    // metric math.
     const screenEl = container.querySelector('.xterm-screen') as HTMLElement | null
+    const canvasEl = screenEl?.querySelector('canvas') as HTMLCanvasElement | null
     let rowHeight = Math.round(settings.terminal.fontSize * settings.terminal.lineHeight)
     let cellWidth = settings.terminal.fontSize * 0.6
     let footerLeft: number | null = null
     let footerWidth: number | null = null
     if (screenEl && term.cols > 0 && term.rows > 0) {
-      const rect = screenEl.getBoundingClientRect()
       const containerRect = container.getBoundingClientRect()
-      if (rect.height > 0) rowHeight = rect.height / term.rows
-      if (rect.width > 0) cellWidth = rect.width / term.cols
-      if (rect.width > 0 && containerRect.width > 0) {
-        // Align the footer to the screen so wide lines don't clip past the
-        // scrollbar gutter and the cursor lands on the right cell.
-        footerLeft = rect.left - containerRect.left
-        footerWidth = rect.width
+      // Prefer the canvas for size (exact cell grid), screen for left offset.
+      const sizeRect = canvasEl ? canvasEl.getBoundingClientRect() : screenEl.getBoundingClientRect()
+      const screenRect = screenEl.getBoundingClientRect()
+      if (sizeRect.height > 0) rowHeight = sizeRect.height / term.rows
+      if (sizeRect.width > 0) cellWidth = sizeRect.width / term.cols
+      if (sizeRect.width > 0 && containerRect.width > 0) {
+        footerLeft = screenRect.left - containerRect.left
+        footerWidth = sizeRect.width
       }
     }
 
