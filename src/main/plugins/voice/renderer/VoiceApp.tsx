@@ -273,7 +273,9 @@ export default function VoiceApp() {
   if (!cfg || !status) {
     return (
       <div className="voice-root">
-        <div className="voice-content">Loading…</div>
+        <div className="voice-content">
+          <div className="voice-content-inner">Loading…</div>
+        </div>
       </div>
     )
   }
@@ -330,26 +332,28 @@ export default function VoiceApp() {
       </div>
 
       <div className="voice-content">
-        {status.lastError && (
-          <div className="voice-error-card">{status.lastError}</div>
-        )}
+        <div className="voice-content-inner">
+          {status.lastError && (
+            <div className="voice-error-card">{status.lastError}</div>
+          )}
 
-        {tab === 'hotkey' && <HotkeyTab cfg={cfg} patch={patch} status={status} />}
-        {tab === 'recording' && (
-          <RecordingTab
-            cfg={cfg}
-            patch={patch}
-            onTest={runTest}
-            onRefreshDevices={loadDevices}
-            testing={testing}
-            testResult={testResult}
-            devices={devices}
-            devicesLoading={devicesLoading}
-            devicesError={devicesError}
-          />
-        )}
-        {tab === 'transcriber' && <TranscriberTab cfg={cfg} patch={patch} />}
-        {tab === 'setup' && <SetupTab cfg={cfg} status={status} onRunSetup={runSetup} onUninstall={() => api.voice.setup.uninstall()} />}
+          {tab === 'hotkey' && <HotkeyTab cfg={cfg} patch={patch} status={status} />}
+          {tab === 'recording' && (
+            <RecordingTab
+              cfg={cfg}
+              patch={patch}
+              onTest={runTest}
+              onRefreshDevices={loadDevices}
+              testing={testing}
+              testResult={testResult}
+              devices={devices}
+              devicesLoading={devicesLoading}
+              devicesError={devicesError}
+            />
+          )}
+          {tab === 'transcriber' && <TranscriberTab cfg={cfg} patch={patch} />}
+          {tab === 'setup' && <SetupTab cfg={cfg} status={status} onRunSetup={runSetup} onUninstall={() => api.voice.setup.uninstall()} />}
+        </div>
       </div>
 
       {(setupNeeded || status.installState === 'installing') && (

@@ -4,6 +4,7 @@
  */
 
 import { app } from 'electron'
+import * as fs from 'fs'
 import * as path from 'path'
 import { log, logError } from '../../logger'
 import { getSettings } from '../../settings-store'
@@ -14,6 +15,22 @@ import { NotificationManager } from '../../notification-manager'
 import type { VoiceServices, VoiceNotificationPayload } from './services'
 
 function resolveBundledPythonDir(): string {
+  // Plugin updates can deliver an updated python/ tree alongside the JS
+  // bundle (see scripts/generate-plugin-archive.js `extraDirs`). When the
+  // plugin-updater has installed an override for voice, prefer its python/
+  // directory — otherwise the on-disk Python (shipped with the original
+  // app install) goes out of sync with the freshly-updated TS bundle that
+  // drives it, producing mismatches like `VoiceRecorder.__init__() got an
+  // unexpected keyword argument 'device'`.
+  const overridePython = path.join(
+    app.getPath('userData'),
+    'plugin-overrides',
+    'voice',
+    'python'
+  )
+  if (fs.existsSync(overridePython)) {
+    return overridePython
+  }
   // In packaged builds the Python runtime ships via electron-builder's
   // `extraResources`, which copies src/main/plugins/voice/python/ into
   // <install>/resources/voice-python/. `asarUnpack` was attempted first but

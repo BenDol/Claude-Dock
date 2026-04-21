@@ -143,9 +143,14 @@ html, body, #root {
      wider than the window and we want a scrollbar instead of clipping. */
   overflow: auto;
   padding: 16px;
-  /* Zoom is scoped to the scrollable body (not the whole document) so that
-     zoomed content overflows this container and triggers the scrollbar,
-     while the titlebar/status/tab chrome stays at natural size. */
+  /* Zoom lives on .voice-content-inner, NOT on this element: applying `zoom`
+     directly to a flex child that also owns `overflow: auto` causes
+     Chromium to miscompute scrollHeight on tab switches and short/tall
+     content changes, so the scrollbar sometimes fails to appear. The inner
+     wrapper pattern keeps the scroll container at its natural (pre-zoom)
+     size while its children scale. */
+}
+.voice-content-inner {
   zoom: var(--voice-zoom, 1);
 }
 
