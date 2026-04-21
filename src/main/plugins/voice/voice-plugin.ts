@@ -4,6 +4,8 @@ import { registerVoiceIpc, disposeVoiceIpc } from './voice-ipc'
 import { VoiceWindowManager } from './voice-window'
 import { VoiceServerManager } from './voice-server-manager'
 import { getServices } from './services'
+import { DockManager } from '../../dock-manager'
+import { PluginManager } from '../plugin-manager'
 
 export { setServices } from './services'
 
@@ -48,25 +50,36 @@ export class VoicePlugin implements DockPlugin {
       VoiceServerManager.getInstance().onProjectClosed(projectDir)
     })
 
-    // Hot-reload recovery. VoiceServerManager is a singleton that survives
-    // plugin disposal — its `enabled` project set is preserved. When the
-    // plugin is hot-reloaded (plugin update or dev file-watcher), dispose()
-    // stopped the daemon but nothing re-triggers the `plugin:enabled` /
-    // `project:postOpen` events that normally spawn it. Restart here so new
-    // Python / TS code takes effect without the user hitting "Restart daemon".
-    // On fresh app start `refCount` is 0, so this is a no-op.
-    const mgr = VoiceServerManager.getInstance()
-    if (mgr.getStatus().refCount > 0) {
-      getServices().log('[voice] hot-reload detected — restarting daemon to pick up updated code')
+    // Hot-reload recovery. Built plugins are bundled into a single index.js
+    // — when the plugin-updater cache-busts and re-requires that bundle, the
+    // VoiceServerManager class is freshly evaluated with a zeroed `static
+    // instance`, so its `enabled` set is empty and `refCount` is 0 even when
+    // the user had voice active for several open projects. Rebuild the
+    // enabled set from DockManager + PluginManager — both live in the main
+    // app, not the plugin bundle, so they survive the cache-bust. On a fresh
+    // app start the dock map is empty and this loop is a no-op; the normal
+    // plugin:enabled / project:postOpen events drive spawn instead.
+    const enabledProjects = DockManager.getInstance()
+      .getAllDocks()
+      .map((d) => d.projectDir)
+      .filter((dir) => PluginManager.getInstance().isEnabled(dir, this.id))
+
+    if (enabledProjects.length > 0) {
+      getServices().log(
+        `[voice] hot-reload detected — re-enabling voice for ${enabledProjects.length} project(s) to pick up updated code`
+      )
       void (async () => {
         try {
-          // Await the in-flight stop from dispose() before spawning a fresh
-          // daemon — stopDaemon() is idempotent via its stopInFlight promise.
-          await mgr.stopDaemon(true)
-          // Matches applySettings(): give Windows a moment to release the
-          // global hotkey handle before re-registering.
+          // Give Windows a moment to release the global hotkey handle that
+          // the old daemon held before we respawn and re-register it
+          // (matches applySettings()). The old dispose() already initiated
+          // the kill fire-and-forget.
           await new Promise((r) => setTimeout(r, 200))
-          await mgr.startDaemon()
+          for (const dir of enabledProjects) {
+            // First call flips refCount 0→1 and spawns the daemon; subsequent
+            // calls just add to the enabled set. onProjectEnabled is idempotent.
+            await VoiceServerManager.getInstance().onProjectEnabled(dir)
+          }
         } catch (err) {
           getServices().logError('[voice] daemon restart after hot-reload failed', err)
         }

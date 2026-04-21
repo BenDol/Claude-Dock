@@ -442,8 +442,11 @@ def _run_daemon():
                 # When auto-pasting, snapshot the user's current clipboard and
                 # restore it after the paste completes — otherwise every hotkey
                 # fire silently wipes whatever they had copied. pyperclip only
-                # handles text; non-text clipboard content (images, rich HTML)
-                # cannot be preserved and will still be lost.
+                # handles text; when the clipboard holds an image or other
+                # non-text format, paste() returns "" — treat that as "nothing
+                # to restore" so we don't overwrite the image with an empty
+                # string (the image stays on the clipboard until the user
+                # copies something else).
                 prior_clipboard = None
                 if auto_paste:
                     try:
@@ -461,7 +464,7 @@ def _run_daemon():
                     # before restoring the prior clipboard — otherwise the app
                     # races and pastes the restored value instead.
                     time.sleep(0.15)
-                    if prior_clipboard is not None and prior_clipboard != text:
+                    if prior_clipboard and prior_clipboard != text:
                         try:
                             pyperclip.copy(prior_clipboard)
                         except Exception as exc:
