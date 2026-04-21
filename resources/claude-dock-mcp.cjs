@@ -36,6 +36,10 @@ const messagesFile = path.join(dataDir, 'dock-messages.json')
 const shellCommandsFile = path.join(dataDir, 'dock-shell-commands.json')
 const shellOutputFile = path.join(dataDir, 'dock-shell-output.json')
 
+// Terminal-level commands (spawn/close/prompt a Claude terminal, not a shell panel).
+// Separate inbox from shellCommandsFile so the dock watchers stay focused.
+const terminalCommandsFile = path.join(dataDir, 'dock-terminal-commands.json')
+
 const MESSAGE_TTL = 3600000 // 1 hour
 const pendingEventsFile = path.join(dataDir, 'dock-pending-events.json')
 
@@ -560,6 +564,115 @@ async function handleMessage(msg) {
               }
             },
             required: ['session_id', 'shell_id']
+          }
+        },
+        {
+          name: 'dock_list_terminals',
+          description:
+            'List the Claude terminals in a dock window. Use this to discover terminal IDs ' +
+            'before calling dock_prompt_terminal, dock_close_terminal, or dock_spawn_terminal. ' +
+            'Returns each terminal\'s ID, title, session ID, idle/alive state, and a short preview ' +
+            'of its recent output.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project whose dock should be listed.'
+              },
+              session_id: {
+                type: 'string',
+                description: 'YOUR session ID. When omitted the tool lists terminals for every dock visible to this MCP server.'
+              }
+            },
+            required: []
+          }
+        },
+        {
+          name: 'dock_spawn_terminal',
+          description:
+            'Ask the dock to open a new Claude terminal. Returns immediately — call dock_list_terminals ' +
+            'after ~500ms to discover the new terminal\'s ID. Use this before dispatching multiple ' +
+            'parallel tasks, so each task has its own idle terminal to consume.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the target project directory.'
+              },
+              session_id: {
+                type: 'string',
+                description: 'YOUR session ID (required).'
+              },
+              title: {
+                type: 'string',
+                description: 'Optional title hint for the new terminal.'
+              },
+              cwd: {
+                type: 'string',
+                description: 'Optional working directory override. Defaults to the project directory.'
+              }
+            },
+            required: ['session_id']
+          }
+        },
+        {
+          name: 'dock_close_terminal',
+          description:
+            'Close (kill) a Claude terminal. Use dock_list_terminals first to find the correct terminal ID. ' +
+            'Only terminals in the caller\'s own project can be closed.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project whose terminal should be closed.'
+              },
+              session_id: {
+                type: 'string',
+                description: 'YOUR session ID (required).'
+              },
+              terminal_id: {
+                type: 'string',
+                description: 'ID of the terminal to close (from dock_list_terminals).'
+              }
+            },
+            required: ['session_id', 'terminal_id']
+          }
+        },
+        {
+          name: 'dock_prompt_terminal',
+          description:
+            'Send a prompt to a Claude terminal. Writes the text into the terminal\'s input and, unless ' +
+            'submit=false, presses Enter. This is how a coordinating Claude instance dispatches work ' +
+            'to another terminal. Keep prompts short, concrete, and self-contained — the target ' +
+            'terminal already has full project context.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              project_dir: {
+                type: 'string',
+                description: 'Absolute path to the project whose terminal should receive the prompt.'
+              },
+              session_id: {
+                type: 'string',
+                description: 'YOUR session ID (required).'
+              },
+              terminal_id: {
+                type: 'string',
+                description: 'ID of the target terminal (from dock_list_terminals).'
+              },
+              prompt: {
+                type: 'string',
+                description: 'The text to send to the terminal.'
+              },
+              submit: {
+                type: 'boolean',
+                description: 'Whether to press Enter after the prompt. Default: true.'
+              }
+            },
+            required: ['session_id', 'terminal_id', 'prompt']
           }
         }
       ]
@@ -1123,6 +1236,217 @@ async function handleMessage(msg) {
           } catch (err) {
             return jsonRpcResponse(id, {
               content: [{ type: 'text', text: `Failed to clear shell: ${err.message || err}` }],
+              isError: true
+            })
+          }
+        }
+
+        case 'dock_list_terminals': {
+          if (args.session_id) {
+            const check = validateSessionBinding(args.session_id)
+            if (!check.ok) {
+              return jsonRpcResponse(id, {
+                content: [{ type: 'text', text: check.error }],
+                isError: true
+              })
+            }
+          }
+          const activity = readActivity()
+          if (!activity || !activity.docks || Object.keys(activity.docks).length === 0) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'No Claude Dock windows are open.' }]
+            })
+          }
+          const wantDir = args.project_dir ? normalizePath(args.project_dir) : null
+          const out = []
+          for (const dockEntry of Object.values(activity.docks)) {
+            if (wantDir && normalizePath(dockEntry.projectDir) !== wantDir) continue
+            const terms = (dockEntry.terminals || []).filter((t) => t && !t.id.startsWith('shell:'))
+            if (terms.length === 0) continue
+            out.push(`Project: ${dockEntry.projectDir}`)
+            for (const t of terms) {
+              const idleMs = Date.now() - (t.lastUpdate || 0)
+              const idleSec = Math.round(idleMs / 1000)
+              const preview = (t.recentLines || [])
+                .slice(-2)
+                .join(' ⏎ ')
+                .replace(/\s+/g, ' ')
+                .slice(0, 160)
+              out.push(`  - id=${t.id}`)
+              out.push(`    title: ${t.title || '(untitled)'}`)
+              out.push(`    sessionId: ${t.sessionId || '(unknown)'}`)
+              out.push(`    alive: ${t.isAlive ? 'yes' : 'no'}, idle: ${idleSec}s`)
+              if (preview) out.push(`    last: ${preview}`)
+            }
+            out.push('')
+          }
+          if (out.length === 0) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: args.project_dir ? `No terminals found for project ${args.project_dir}.` : 'No terminals are open.' }]
+            })
+          }
+          return jsonRpcResponse(id, {
+            content: [{ type: 'text', text: out.join('\n').trimEnd() }]
+          })
+        }
+
+        case 'dock_spawn_terminal': {
+          const { session_id, project_dir, title, cwd } = args
+          const check = validateSessionBinding(session_id)
+          if (!check.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: check.error }],
+              isError: true
+            })
+          }
+          let resolvedProjectDir = project_dir || null
+          if (!resolvedProjectDir) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedProjectDir = term.projectDir
+          }
+          if (!resolvedProjectDir) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Cannot route spawn: no project_dir supplied and session_id is not bound to any dock.' }],
+              isError: true
+            })
+          }
+          try {
+            const entry = {
+              id: crypto.randomUUID(),
+              op: 'spawn',
+              projectDir: resolvedProjectDir,
+              sessionId: session_id,
+              title: title || null,
+              cwd: cwd || null,
+              timestamp: Date.now()
+            }
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+            const cutoff = Date.now() - 30000
+            commands = commands.filter((c) => c.timestamp > cutoff)
+            commands.push(entry)
+            fs.writeFileSync(terminalCommandsFile, JSON.stringify(commands, null, 2))
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Spawn requested for ${resolvedProjectDir}. Call dock_list_terminals in ~500ms to discover the new terminal ID.` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to write spawn command: ${err.message || err}` }],
+              isError: true
+            })
+          }
+        }
+
+        case 'dock_close_terminal': {
+          const { session_id, project_dir, terminal_id } = args
+          if (!terminal_id) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameter: terminal_id.' }],
+              isError: true
+            })
+          }
+          const check = validateSessionBinding(session_id)
+          if (!check.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: check.error }],
+              isError: true
+            })
+          }
+          let resolvedProjectDir = project_dir || null
+          if (!resolvedProjectDir) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedProjectDir = term.projectDir
+          }
+          if (!resolvedProjectDir) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Cannot route close: no project_dir supplied and session_id is not bound to any dock.' }],
+              isError: true
+            })
+          }
+          try {
+            const entry = {
+              id: crypto.randomUUID(),
+              op: 'close',
+              projectDir: resolvedProjectDir,
+              sessionId: session_id,
+              terminalId: terminal_id,
+              timestamp: Date.now()
+            }
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+            const cutoff = Date.now() - 30000
+            commands = commands.filter((c) => c.timestamp > cutoff)
+            commands.push(entry)
+            fs.writeFileSync(terminalCommandsFile, JSON.stringify(commands, null, 2))
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Close requested for terminal ${terminal_id}.` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to write close command: ${err.message || err}` }],
+              isError: true
+            })
+          }
+        }
+
+        case 'dock_prompt_terminal': {
+          const { session_id, project_dir, terminal_id, prompt, submit } = args
+          if (!terminal_id || typeof prompt !== 'string') {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Missing required parameters: terminal_id, prompt.' }],
+              isError: true
+            })
+          }
+          const check = validateSessionBinding(session_id)
+          if (!check.ok) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: check.error }],
+              isError: true
+            })
+          }
+          let resolvedProjectDir = project_dir || null
+          if (!resolvedProjectDir) {
+            const term = resolveTerminal(session_id, null)
+            if (term && term.projectDir) resolvedProjectDir = term.projectDir
+          }
+          if (!resolvedProjectDir) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: 'Cannot route prompt: no project_dir supplied and session_id is not bound to any dock.' }],
+              isError: true
+            })
+          }
+          try {
+            const entry = {
+              id: crypto.randomUUID(),
+              op: 'prompt',
+              projectDir: resolvedProjectDir,
+              sessionId: session_id,
+              terminalId: terminal_id,
+              prompt,
+              submit: submit !== false,
+              timestamp: Date.now()
+            }
+            let commands = []
+            try {
+              commands = JSON.parse(fs.readFileSync(terminalCommandsFile, 'utf-8'))
+              if (!Array.isArray(commands)) commands = []
+            } catch { /* file doesn't exist yet */ }
+            const cutoff = Date.now() - 30000
+            commands = commands.filter((c) => c.timestamp > cutoff)
+            commands.push(entry)
+            fs.writeFileSync(terminalCommandsFile, JSON.stringify(commands, null, 2))
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Prompt sent to terminal ${terminal_id}${submit === false ? ' (not submitted)' : ''}.` }]
+            })
+          } catch (err) {
+            return jsonRpcResponse(id, {
+              content: [{ type: 'text', text: `Failed to write prompt command: ${err.message || err}` }],
               isError: true
             })
           }

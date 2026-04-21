@@ -377,5 +377,29 @@ export const IPC = {
   VOICE_MCP_RESOLVE_CONFLICT: 'voice:mcpResolveConflict',
   VOICE_OPEN_LOGS: 'voice:openLogs',
   VOICE_COPY_DIAGNOSTICS: 'voice:copyDiagnostics',
-  VOICE_RESTART_DAEMON: 'voice:restartDaemon'
+  VOICE_RESTART_DAEMON: 'voice:restartDaemon',
+
+  // Coordinator Plugin
+  COORDINATOR_OPEN: 'coordinator:open',
+  COORDINATOR_FOCUS: 'coordinator:focus',
+  COORDINATOR_GET_WINDOW_MODE: 'coordinator:getWindowMode',
+  COORDINATOR_GET_CONFIG: 'coordinator:getConfig',
+  COORDINATOR_SET_CONFIG: 'coordinator:setConfig',
+  COORDINATOR_RESET_CONFIG: 'coordinator:resetConfig',
+  COORDINATOR_LIST_PROVIDERS: 'coordinator:listProviders',
+  COORDINATOR_TEST_PROVIDER: 'coordinator:testProvider',
+  COORDINATOR_GET_HISTORY: 'coordinator:getHistory',
+  COORDINATOR_CLEAR_HISTORY: 'coordinator:clearHistory',
+  COORDINATOR_SEND_MESSAGE: 'coordinator:sendMessage',
+  COORDINATOR_CANCEL: 'coordinator:cancel',
+  COORDINATOR_LIST_TERMINALS: 'coordinator:listTerminals',
+  COORDINATOR_HOTKEY_STATUS: 'coordinator:hotkeyStatus',
+  // Round-trip: main asks renderer to spawn a terminal (renderer creates the ID via its store)
+  COORDINATOR_SPAWN_TERMINAL_REQUEST: 'coordinator:spawnTerminalRequest',
+  COORDINATOR_SPAWN_TERMINAL_REPLY: 'coordinator:spawnTerminalReply',
+  // Main -> Renderer (send)
+  COORDINATOR_STREAM: 'coordinator:stream',
+  COORDINATOR_TURN_STATUS: 'coordinator:turnStatus',
+  COORDINATOR_FOCUS_INPUT: 'coordinator:focusInput',
+  COORDINATOR_OPEN_REQUEST: 'coordinator:openRequest'
 } as const

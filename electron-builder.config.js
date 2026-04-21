@@ -48,7 +48,12 @@ module.exports = {
     { from: 'src/main/plugins/voice/python', to: 'voice-python' }
   ],
   asarUnpack: [
-    'node_modules/node-pty/**'
+    'node_modules/node-pty/**',
+    // uiohook-napi ships a native .node binary per platform; Node cannot
+    // require() native modules from inside app.asar, so they must live on disk.
+    // Without this, the coordinator's Shift+Shift hotkey silently falls back
+    // to the globalShortcut path in packaged builds.
+    'node_modules/uiohook-napi/**'
   ],
   win: {
     icon: 'assets/icon.png',

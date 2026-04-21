@@ -39,7 +39,12 @@ const BUILTIN_PLUGINS = [
     rendererEntry: 'src/main/plugins/voice/renderer/standalone-entry.tsx' },
   // workspace renders inside the dock window (not its own BrowserWindow),
   // so renderer changes require a full app update — cannot be hot-updated.
-  { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true }
+  { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true },
+  // coordinator renders primarily inside the dock window (docked panel).
+  // A floating-window bundle ships alongside for the detached mode.
+  { id: 'coordinator', srcDir: 'coordinator', entry: 'coordinator-plugin.ts',
+    rendererEntry: 'src/main/plugins/coordinator/renderer/standalone-entry.tsx',
+    requiresAppUpdate: true }
 ]
 
 /**

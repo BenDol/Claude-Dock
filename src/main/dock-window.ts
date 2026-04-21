@@ -11,7 +11,7 @@ import { getSettings, setSetting } from './settings-store'
 import { ProjectSettingsWatcher } from './project-settings'
 import { ActivityTracker } from './activity-tracker'
 import { IdleNotifier } from './idle-notifier'
-import { log } from './logger'
+import { log, logError } from './logger'
 import { CrashReporter } from './crash-reporter'
 import { getTitleSuffix } from '../shared/env-profile'
 
@@ -29,7 +29,9 @@ export class DockWindow {
   private readonly idleNotifier: IdleNotifier
   private readonly projectSettingsWatcher: ProjectSettingsWatcher
   private shellCommandWatcher: ReturnType<typeof setInterval> | null = null
+  private terminalCommandWatcher: ReturnType<typeof setInterval> | null = null
   private processedCommandIds = new Set<string>()
+  private processedTerminalCommandIds = new Set<string>()
   private savedResumeIds: string[]
   private outputBuffers = new Map<string, string>()
   /** Buffered shell panel output per shell ID, written to shared file for MCP access */
@@ -94,6 +96,7 @@ export class DockWindow {
 
     // Poll for MCP shell commands (file-based bridge from claude-dock-mcp.js)
     this.startShellCommandWatcher()
+    this.startTerminalCommandWatcher()
 
     this.ptyManager = new PtyManager(
       (terminalId, data) => {
@@ -229,6 +232,7 @@ export class DockWindow {
       this.ptyManager.killAll()
       this.projectSettingsWatcher.stop()
       if (this.shellCommandWatcher) clearInterval(this.shellCommandWatcher)
+      if (this.terminalCommandWatcher) clearInterval(this.terminalCommandWatcher)
       try { ActivityTracker.getInstance().removeDock(this.id) } catch (e) { log(`ActivityTracker.removeDock error: ${e}`) }
       try { this.idleNotifier.dispose() } catch (e) { log(`IdleNotifier.dispose error: ${e}`) }
     })
@@ -326,6 +330,102 @@ export class DockWindow {
         // File read/parse errors are expected (race with MCP writer)
       }
     }, 500) // Poll every 500ms
+  }
+
+  /**
+   * Poll dock-terminal-commands.json for terminal-level commands (spawn/close/prompt)
+   * sent by the MCP server. Mirrors the shell-command watcher's contract: entries
+   * are matched to this dock by projectDir and each command id is processed once.
+   */
+  private startTerminalCommandWatcher(): void {
+    const cmdFile = path.join(
+      app.getPath('userData'),
+      'dock-terminal-commands.json'
+    )
+    const normProjectDir = this.projectDir.replace(/\\/g, '/').toLowerCase()
+
+    this.terminalCommandWatcher = setInterval(() => {
+      try {
+        if (!fs.existsSync(cmdFile)) return
+        const raw = fs.readFileSync(cmdFile, 'utf-8')
+        const commands = JSON.parse(raw)
+        if (!Array.isArray(commands)) return
+
+        const cutoff = Date.now() - 30000
+
+        for (const cmd of commands) {
+          if (!cmd || !cmd.id || !cmd.op) continue
+          if (cmd.timestamp < cutoff) continue
+          if (this.processedTerminalCommandIds.has(cmd.id)) continue
+          if (!cmd.projectDir) continue
+          const normCmd = String(cmd.projectDir).replace(/\\/g, '/').toLowerCase()
+          if (normCmd !== normProjectDir && !normProjectDir.startsWith(normCmd + '/')) continue
+
+          this.processedTerminalCommandIds.add(cmd.id)
+          if (this.window.isDestroyed()) continue
+
+          try {
+            switch (cmd.op) {
+              case 'spawn': {
+                // Reuse the coordinator spawn round-trip: the renderer already
+                // listens for this channel and mints the terminal ID from its
+                // store. The correlation ID is required by the channel contract
+                // but we ignore the reply — MCP callers discover the new ID
+                // via dock_list_terminals rather than waiting on a response file.
+                log(`[terminal-command] spawn for ${this.projectDir}${cmd.title ? ` (title=${cmd.title})` : ''}`)
+                this.window.webContents.send(
+                  IPC.COORDINATOR_SPAWN_TERMINAL_REQUEST,
+                  cmd.id,
+                  { title: cmd.title || undefined, cwd: cmd.cwd || undefined }
+                )
+                break
+              }
+              case 'close': {
+                if (typeof cmd.terminalId !== 'string') {
+                  log(`[terminal-command] close rejected: missing terminalId`)
+                  break
+                }
+                if (!this.ptyManager.has(cmd.terminalId)) {
+                  log(`[terminal-command] close rejected: terminal ${cmd.terminalId} not in this dock`)
+                  break
+                }
+                log(`[terminal-command] close ${cmd.terminalId}`)
+                this.ptyManager.kill(cmd.terminalId)
+                break
+              }
+              case 'prompt': {
+                if (typeof cmd.terminalId !== 'string' || typeof cmd.prompt !== 'string') {
+                  log(`[terminal-command] prompt rejected: missing terminalId or prompt`)
+                  break
+                }
+                if (!this.ptyManager.has(cmd.terminalId)) {
+                  log(`[terminal-command] prompt rejected: terminal ${cmd.terminalId} not in this dock`)
+                  break
+                }
+                const submit = cmd.submit !== false
+                log(`[terminal-command] prompt ${cmd.terminalId} (submit=${submit}, len=${cmd.prompt.length})`)
+                this.ptyManager.write(cmd.terminalId, submit ? cmd.prompt + '\r' : cmd.prompt)
+                break
+              }
+              default:
+                log(`[terminal-command] unknown op: ${cmd.op}`)
+            }
+          } catch (err) {
+            logError(`[terminal-command] ${cmd.op} failed`, err)
+          }
+        }
+
+        if (this.processedTerminalCommandIds.size > 100) {
+          const ids = commands.map((c: any) => c && c.id).filter(Boolean)
+          const activeIds = new Set(ids)
+          for (const id of this.processedTerminalCommandIds) {
+            if (!activeIds.has(id)) this.processedTerminalCommandIds.delete(id)
+          }
+        }
+      } catch {
+        // File read/parse errors are expected (race with MCP writer)
+      }
+    }, 500)
   }
 
   // Max shell output to keep per shell (~50KB)

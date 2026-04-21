@@ -35,6 +35,9 @@
     "react-grid-layout": "^1.5.0",
     "zustand": "^5.0.3"
   },
+  "optionalDependencies": {
+    "uiohook-napi": "^1.5.4"
+  },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
     "@electron/rebuild": "^3.7.1",

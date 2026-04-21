@@ -70,6 +70,30 @@ import type {
   MemorySearchOptions,
   MemoryMessageListOptions
 } from '../shared/memory-types'
+import type {
+  CoordinatorConfig,
+  CoordinatorHotkeyStatus,
+  CoordinatorMessage,
+  CoordinatorProviderPreset,
+  CoordinatorStreamEvent,
+  CoordinatorTerminalSummary,
+  CoordinatorTurnStatus,
+  CoordinatorWindowMode
+} from '../shared/coordinator-types'
+
+export type { CoordinatorHotkeyStatus }
+
+export interface CoordinatorTestConnectionResult {
+  ok: boolean
+  error?: string
+  model?: string
+  latencyMs?: number
+}
+
+export interface CoordinatorSpawnTerminalRequest {
+  correlationId: string
+  options: { title?: string; cwd?: string }
+}
 
 export interface UpdateInfo {
   available: boolean
@@ -500,6 +524,28 @@ export interface DockApi {
     restartDaemon: () => Promise<{ success: boolean; error?: string }>
     openLogs: () => Promise<void>
     copyDiagnostics: () => Promise<string>
+  }
+  coordinator: {
+    open: (projectDir: string) => Promise<void>
+    focus: (projectDir: string) => Promise<void>
+    getWindowMode: () => Promise<CoordinatorWindowMode>
+    getConfig: () => Promise<CoordinatorConfig>
+    setConfig: (patch: Partial<CoordinatorConfig>) => Promise<CoordinatorConfig>
+    resetConfig: () => Promise<CoordinatorConfig>
+    listProviders: () => Promise<CoordinatorProviderPreset[]>
+    testProvider: () => Promise<CoordinatorTestConnectionResult>
+    getHistory: (projectDir: string) => Promise<CoordinatorMessage[]>
+    clearHistory: (projectDir: string) => Promise<void>
+    sendMessage: (projectDir: string, userText: string) => Promise<void>
+    cancel: (projectDir: string) => Promise<void>
+    listTerminals: (projectDir: string) => Promise<CoordinatorTerminalSummary[]>
+    hotkeyStatus: () => Promise<CoordinatorHotkeyStatus>
+    onStream: (cb: (ev: CoordinatorStreamEvent) => void) => () => void
+    onTurnStatus: (cb: (s: CoordinatorTurnStatus) => void) => () => void
+    onFocusInput: (cb: (projectDir: string) => void) => () => void
+    onOpenRequest: (cb: (projectDir: string) => void) => () => void
+    onSpawnTerminalRequest: (cb: (req: CoordinatorSpawnTerminalRequest) => void) => () => void
+    replySpawnTerminal: (correlationId: string, terminalId: string | null, error?: string) => void
   }
   testRunner: {
     open: (projectDir: string) => Promise<void>
@@ -1056,6 +1102,54 @@ const dockApi: DockApi = {
     restartDaemon: () => ipcRenderer.invoke(IPC.VOICE_RESTART_DAEMON),
     openLogs: () => ipcRenderer.invoke(IPC.VOICE_OPEN_LOGS),
     copyDiagnostics: () => ipcRenderer.invoke(IPC.VOICE_COPY_DIAGNOSTICS)
+  },
+  coordinator: {
+    open: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_OPEN, projectDir),
+    focus: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_FOCUS, projectDir),
+    getWindowMode: () => ipcRenderer.invoke(IPC.COORDINATOR_GET_WINDOW_MODE),
+    getConfig: () => ipcRenderer.invoke(IPC.COORDINATOR_GET_CONFIG),
+    setConfig: (patch) => ipcRenderer.invoke(IPC.COORDINATOR_SET_CONFIG, patch),
+    resetConfig: () => ipcRenderer.invoke(IPC.COORDINATOR_RESET_CONFIG),
+    listProviders: () => ipcRenderer.invoke(IPC.COORDINATOR_LIST_PROVIDERS),
+    testProvider: () => ipcRenderer.invoke(IPC.COORDINATOR_TEST_PROVIDER),
+    getHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_GET_HISTORY, projectDir),
+    clearHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CLEAR_HISTORY, projectDir),
+    sendMessage: (projectDir, userText) => ipcRenderer.invoke(IPC.COORDINATOR_SEND_MESSAGE, projectDir, userText),
+    cancel: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CANCEL, projectDir),
+    listTerminals: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_LIST_TERMINALS, projectDir),
+    hotkeyStatus: () => ipcRenderer.invoke(IPC.COORDINATOR_HOTKEY_STATUS),
+    onStream: (cb) => {
+      const handler = (_e: Electron.IpcRendererEvent, ev: CoordinatorStreamEvent) => cb(ev)
+      ipcRenderer.on(IPC.COORDINATOR_STREAM, handler)
+      return () => ipcRenderer.removeListener(IPC.COORDINATOR_STREAM, handler)
+    },
+    onTurnStatus: (cb) => {
+      const handler = (_e: Electron.IpcRendererEvent, s: CoordinatorTurnStatus) => cb(s)
+      ipcRenderer.on(IPC.COORDINATOR_TURN_STATUS, handler)
+      return () => ipcRenderer.removeListener(IPC.COORDINATOR_TURN_STATUS, handler)
+    },
+    onFocusInput: (cb) => {
+      const handler = (_e: Electron.IpcRendererEvent, projectDir: string) => cb(projectDir)
+      ipcRenderer.on(IPC.COORDINATOR_FOCUS_INPUT, handler)
+      return () => ipcRenderer.removeListener(IPC.COORDINATOR_FOCUS_INPUT, handler)
+    },
+    onOpenRequest: (cb) => {
+      const handler = (_e: Electron.IpcRendererEvent, projectDir: string) => cb(projectDir)
+      ipcRenderer.on(IPC.COORDINATOR_OPEN_REQUEST, handler)
+      return () => ipcRenderer.removeListener(IPC.COORDINATOR_OPEN_REQUEST, handler)
+    },
+    onSpawnTerminalRequest: (cb) => {
+      const handler = (
+        _e: Electron.IpcRendererEvent,
+        correlationId: string,
+        options: { title?: string; cwd?: string }
+      ) => cb({ correlationId, options: options || {} })
+      ipcRenderer.on(IPC.COORDINATOR_SPAWN_TERMINAL_REQUEST, handler)
+      return () => ipcRenderer.removeListener(IPC.COORDINATOR_SPAWN_TERMINAL_REQUEST, handler)
+    },
+    replySpawnTerminal: (correlationId, terminalId, error) => {
+      ipcRenderer.send(IPC.COORDINATOR_SPAWN_TERMINAL_REPLY, correlationId, terminalId, error)
+    }
   },
   testRunner: {
     open: (projectDir) => ipcRenderer.invoke(IPC.TEST_RUNNER_OPEN, projectDir),
