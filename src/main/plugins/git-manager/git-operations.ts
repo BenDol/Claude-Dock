@@ -3137,8 +3137,63 @@ export async function removeWorktree(cwd: string, worktreePath: string, force?: 
   getServices().log(`[git-manager] removeWorktree: path=${worktreePath} force=${!!force} cwd=${cwd}`)
   const args = ['worktree', 'remove', worktreePath]
   if (force) args.push('--force')
-  await gitExec(cwd, args, 15000)
-  getServices().log(`[git-manager] removeWorktree: removed ${worktreePath}`)
+  let gitErr: Error | null = null
+  try {
+    await gitExec(cwd, args, 15000)
+    getServices().log(`[git-manager] removeWorktree: removed ${worktreePath}`)
+  } catch (err) {
+    gitErr = err instanceof Error ? err : new Error(String(err))
+    getServices().log(`[git-manager] removeWorktree: git reported error, checking post-state: ${gitErr.message}`)
+  }
+
+  // Whether git succeeded or not, reconcile the post-state. The common Windows
+  // failure mode is that git removes the .git/worktrees/ metadata but fails to
+  // rmdir the worktree directory because a file inside is locked (e.g., a
+  // terminal cd'd into it, an editor watching it, or long/busy paths under
+  // node_modules). In that case the worktree is effectively gone from git's
+  // perspective and reporting an error to the user is misleading.
+  const normalizedTarget = path.resolve(worktreePath).toLowerCase()
+  let stillRegistered = false
+  try {
+    const { stdout } = await gitExec(cwd, ['worktree', 'list', '--porcelain'], 10000)
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        const p = line.slice(9).trim()
+        if (path.resolve(p).toLowerCase() === normalizedTarget) {
+          stillRegistered = true
+          break
+        }
+      }
+    }
+  } catch {
+    // If we can't list worktrees, fall back to the original error path.
+    if (gitErr) throw gitErr
+    return
+  }
+
+  if (stillRegistered) {
+    // Git genuinely failed to remove it — surface the original error.
+    if (gitErr) throw gitErr
+    throw new Error(`Worktree still registered after remove: ${worktreePath}`)
+  }
+
+  // Metadata is gone. Try to prune and clean up any leftover on-disk directory
+  // so a subsequent `worktree add` to the same path doesn't trip over cruft.
+  try {
+    await gitExec(cwd, ['worktree', 'prune'], 10000)
+  } catch (pruneErr) {
+    getServices().log(`[git-manager] removeWorktree: prune after partial remove failed: ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`)
+  }
+  try {
+    if (fs.existsSync(worktreePath)) {
+      fs.rmSync(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      getServices().log(`[git-manager] removeWorktree: filesystem cleanup removed ${worktreePath}`)
+    }
+  } catch (rmErr) {
+    // Leftover dir but git considers worktree gone — log but don't surface.
+    getServices().log(`[git-manager] removeWorktree: leftover directory could not be deleted (likely locked files): ${rmErr instanceof Error ? rmErr.message : String(rmErr)}`)
+  }
+  getServices().log(`[git-manager] removeWorktree: reconciled removal of ${worktreePath}${gitErr ? ' (git reported error but metadata was gone)' : ''}`)
 }
 
 /**
