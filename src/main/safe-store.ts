@@ -69,7 +69,11 @@ export function safeRead<T>(fn: () => T): T | undefined {
  * Creates an electron-store instance that recovers from corrupt JSON files.
  * If the store file is corrupt, it backs it up and starts fresh.
  */
-export function createSafeStore<T extends Record<string, unknown>>(
+// Matches electron-store's own `Store<T extends Record<string, any>>` constraint.
+// Using `Record<string, unknown>` here was stricter than electron-store itself and
+// rejected plain interfaces (TS does not auto-widen interfaces to an index signature
+// of `unknown` values, though it does for `any`).
+export function createSafeStore<T extends Record<string, any>>(
   opts: ConstructorParameters<typeof Store<T>>[0]
 ): Store<T> {
   try {

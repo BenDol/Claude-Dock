@@ -89,21 +89,76 @@ export function registerVoiceIpc(): void {
 
   ipcMain.handle(IPC.VOICE_LIST_DEVICES, async () => {
     const py = getVenvPython()
-    if (!fs.existsSync(py)) return { output: '', error: 'Voice runtime not installed' }
+    if (!fs.existsSync(py)) return { devices: [], output: '', error: 'Voice runtime not installed' }
+    // Emit both a structured JSON blob (for the device picker) and the raw
+    // query_devices() text (for the diagnostic pane). Fenced with sentinels
+    // so a stray stderr/log line on stdout can't break parsing.
+    const script = `
+import json
+import sounddevice as sd
+devs = sd.query_devices()
+try:
+    default = sd.default.device
+except Exception:
+    default = (None, None)
+default_in = default[0] if isinstance(default, (list, tuple)) else default
+
+def _host_name(d):
+    h = d.get('hostapi')
+    if not isinstance(h, int):
+        return ''
+    try:
+        return sd.query_hostapis(h).get('name', '')
+    except Exception:
+        return ''
+
+entries = []
+for i, d in enumerate(devs):
+    # Wrap each device build so one bad entry doesn't break the whole list —
+    # sounddevice occasionally returns malformed metadata for virtual devices.
+    try:
+        if int(d.get('max_input_channels', 0)) <= 0:
+            continue
+        entries.append({
+            'index': i,
+            'name': d.get('name', f'device {i}'),
+            'hostApi': _host_name(d),
+            'maxInputChannels': int(d.get('max_input_channels', 0)),
+            'defaultSampleRate': float(d.get('default_samplerate', 0.0) or 0.0),
+            'isDefault': i == default_in,
+        })
+    except Exception:
+        continue
+print('<<VOICE_JSON>>')
+print(json.dumps(entries))
+print('<<VOICE_END>>')
+print(str(devs))
+`
     return new Promise((resolve) => {
       execFile(
         py,
-        [
-          '-c',
-          'import sounddevice as sd\nprint(sd.query_devices())'
-        ],
+        ['-c', script],
         { timeout: 15000, windowsHide: true },
         (err, stdout, stderr) => {
           if (err) {
             svc().logError('[voice-ipc] list devices failed', err)
-            resolve({ output: '', error: stderr || String(err) })
-          } else {
-            resolve({ output: String(stdout) })
+            resolve({ devices: [], output: '', error: stderr || String(err) })
+            return
+          }
+          const out = String(stdout)
+          const jsonStart = out.indexOf('<<VOICE_JSON>>')
+          const jsonEnd = out.indexOf('<<VOICE_END>>')
+          if (jsonStart < 0 || jsonEnd < 0 || jsonEnd < jsonStart) {
+            resolve({ devices: [], output: out, error: 'Could not parse device list' })
+            return
+          }
+          const jsonBlob = out.slice(jsonStart + '<<VOICE_JSON>>'.length, jsonEnd).trim()
+          const tail = out.slice(jsonEnd + '<<VOICE_END>>'.length).trim()
+          try {
+            const devices = JSON.parse(jsonBlob)
+            resolve({ devices, output: tail })
+          } catch (parseErr) {
+            resolve({ devices: [], output: tail, error: `parse: ${String(parseErr)}` })
           }
         }
       )
@@ -132,6 +187,7 @@ rec = VoiceRecorder(
     sample_rate=cfg['recording']['sample_rate'],
     channels=cfg['recording']['channels'],
     speech_threshold=cfg['recording']['speech_threshold'],
+    device=cfg['recording'].get('input_device'),
 )
 rec.start()
 import time; time.sleep(${dur})

@@ -19,12 +19,21 @@ interface ServiceEntry {
 
 const entries = new Map<string, ServiceEntry>()
 
-export function registerServiceFactory(
+/**
+ * Generic over the plugin's services type so call sites pass typed
+ * `(s: XServices) => void` without TS variance complaints. Internally the
+ * registry erases the type — `injectPluginServices` pairs a factory's output
+ * with its own setServices, so the erasure is safe at the use site.
+ */
+export function registerServiceFactory<T>(
   pluginId: string,
-  factory: () => unknown,
-  setServices: (services: unknown) => void
+  factory: () => T,
+  setServices: (services: T) => void
 ): void {
-  entries.set(pluginId, { factory, setServices })
+  entries.set(pluginId, {
+    factory: factory as () => unknown,
+    setServices: setServices as (services: unknown) => void
+  })
 }
 
 export function getServiceEntry(pluginId: string): ServiceEntry | undefined {

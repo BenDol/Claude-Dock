@@ -39,7 +39,8 @@ import type {
   VoiceRuntimeStatus,
   VoiceSetupProgress,
   VoiceMcpStatus,
-  VoiceMcpConflictAction
+  VoiceMcpConflictAction,
+  VoiceListDevicesResult
 } from '../shared/voice-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 import type { LastSessionEntry } from '../shared/last-session-types'
@@ -486,7 +487,7 @@ export interface DockApi {
     resetSettings: () => Promise<VoiceConfig>
     getStatus: () => Promise<VoiceRuntimeStatus>
     onStatusChanged: (cb: (s: VoiceRuntimeStatus) => void) => () => void
-    listDevices: () => Promise<{ output: string; error?: string }>
+    listDevices: () => Promise<VoiceListDevicesResult>
     testRecord: (seconds: number) => Promise<{ text?: string; error?: string }>
     setup: {
       detect: () => Promise<{ path: string; version: string } | null>

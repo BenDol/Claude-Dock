@@ -36,6 +36,12 @@ export interface VoiceRecordingConfig {
   speech_threshold: number
   auto_stop_on_silence: boolean
   max_seconds: number
+  /**
+   * Input device for recording. `null` (the default) lets sounddevice pick the
+   * system default. A number is an index into `sd.query_devices()`; a string
+   * is matched as a substring against the device name.
+   */
+  input_device: number | string | null
 }
 
 export type VoiceHotkeyMode = 'toggle' | 'hold'
@@ -92,7 +98,8 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     channels: 1,
     speech_threshold: 20,
     auto_stop_on_silence: false,
-    max_seconds: 300
+    max_seconds: 300,
+    input_device: null
   },
   hotkey: {
     enabled: true,
@@ -162,3 +169,22 @@ export interface VoiceMcpStatus {
 }
 
 export type VoiceMcpConflictAction = 'overwrite' | 'rename' | 'cancel'
+
+/** Single input device entry returned by VOICE_LIST_DEVICES. */
+export interface VoiceInputDevice {
+  /** Index into sounddevice's device list — stable within a host API boundary. */
+  index: number
+  name: string
+  hostApi: string
+  maxInputChannels: number
+  defaultSampleRate: number
+  /** True when this is the system default input device. */
+  isDefault: boolean
+}
+
+export interface VoiceListDevicesResult {
+  devices: VoiceInputDevice[]
+  /** Raw sd.query_devices() text, preserved for the diagnostic pane. */
+  output: string
+  error?: string
+}

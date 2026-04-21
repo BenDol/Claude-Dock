@@ -27,11 +27,16 @@ class VoiceRecorder:
         channels: int = 1,
         speech_threshold: float = 500,
         on_levels=None,
+        device=None,
     ):
         self.sample_rate = sample_rate
         self.channels = channels
         self.speech_threshold = speech_threshold
         self.on_levels = on_levels  # callback(levels: list[float])
+        # sounddevice accepts None (system default), an int index, or a
+        # substring match against the device name. Dock passes the user's
+        # choice straight through — empty strings mean "system default".
+        self.device = device if device not in ("", None) else None
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._is_recording = False
@@ -48,6 +53,7 @@ class VoiceRecorder:
             dtype="int16",
             callback=self._toggle_cb,
             blocksize=1024,
+            device=self.device,
         )
         self._stream.start()
 
@@ -136,6 +142,7 @@ class VoiceRecorder:
             dtype="int16",
             callback=callback,
             blocksize=1024,
+            device=self.device,
         ):
             while not done.is_set():
                 done.wait(timeout=0.3)

@@ -202,6 +202,7 @@ def _run_daemon():
         channels=rec_cfg.get("channels", 1),
         speech_threshold=rec_cfg.get("speech_threshold", 500),
         on_levels=overlay.set_levels,
+        device=rec_cfg.get("input_device"),
     )
 
     try:

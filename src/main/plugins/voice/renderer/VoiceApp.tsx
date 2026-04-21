@@ -12,7 +12,8 @@ import type {
   VoiceRuntimeStatus,
   VoiceSetupProgress,
   VoiceDaemonState,
-  VoiceInstallState
+  VoiceInstallState,
+  VoiceInputDevice
 } from '../../../../shared/voice-types'
 
 type Tab = 'hotkey' | 'recording' | 'transcriber' | 'setup'
@@ -162,7 +163,9 @@ export default function VoiceApp() {
   const [setupLog, setSetupLog] = useState<string[]>([])
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string>('')
-  const [deviceInfo, setDeviceInfo] = useState<string>('')
+  const [devices, setDevices] = useState<VoiceInputDevice[]>([])
+  const [devicesLoading, setDevicesLoading] = useState(false)
+  const [devicesError, setDevicesError] = useState<string>('')
 
   const api = useMemo(() => getDockApi(), [])
 
@@ -244,10 +247,27 @@ export default function VoiceApp() {
     }
   }
 
-  const listDevices = async () => {
-    const r = await api.voice.listDevices()
-    setDeviceInfo(r.error ? `Error: ${r.error}` : r.output)
-  }
+  const loadDevices = useCallback(async () => {
+    setDevicesLoading(true)
+    setDevicesError('')
+    try {
+      const r = await api.voice.listDevices()
+      setDevices(r.devices ?? [])
+      if (r.error) setDevicesError(r.error)
+    } catch (err) {
+      setDevicesError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDevicesLoading(false)
+    }
+  }, [api])
+
+  // Populate the device list the first time the Recording tab is visited so
+  // the picker has real options instead of just "system default".
+  useEffect(() => {
+    if (tab === 'recording' && devices.length === 0 && !devicesLoading && !devicesError) {
+      loadDevices().catch(() => { /* already surfaced via devicesError */ })
+    }
+  }, [tab, devices.length, devicesLoading, devicesError, loadDevices])
 
   if (!cfg || !status) {
     return (
@@ -319,10 +339,12 @@ export default function VoiceApp() {
             cfg={cfg}
             patch={patch}
             onTest={runTest}
-            onListDevices={listDevices}
+            onRefreshDevices={loadDevices}
             testing={testing}
             testResult={testResult}
-            deviceInfo={deviceInfo}
+            devices={devices}
+            devicesLoading={devicesLoading}
+            devicesError={devicesError}
           />
         )}
         {tab === 'transcriber' && <TranscriberTab cfg={cfg} patch={patch} />}
@@ -450,18 +472,84 @@ function HotkeyTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
 }
 
 function RecordingTab({
-  cfg, patch, onTest, onListDevices, testing, testResult, deviceInfo
+  cfg, patch, onTest, onRefreshDevices, testing, testResult, devices, devicesLoading, devicesError
 }: {
   cfg: VoiceConfig
   patch: PatchFn
   onTest: () => void
-  onListDevices: () => void
+  onRefreshDevices: () => void
   testing: boolean
   testResult: string
-  deviceInfo: string
+  devices: VoiceInputDevice[]
+  devicesLoading: boolean
+  devicesError: string
 }) {
+  // The select's <option> values are strings; map "" back to null for the
+  // stored config so the Python side sees "system default" as absent rather
+  // than an empty-string device name.
+  const selectedValue = cfg.recording.input_device == null
+    ? ''
+    : String(cfg.recording.input_device)
+
+  const handleDeviceChange = (raw: string) => {
+    if (raw === '') {
+      patch({ recording: { input_device: null } })
+      return
+    }
+    const asNum = Number(raw)
+    patch({ recording: { input_device: Number.isFinite(asNum) ? asNum : raw } })
+  }
+
+  // Render the stored device even if the detected list doesn't include it
+  // (saved index may have shifted after a reboot / USB mic reconnect).
+  const selectedNotInList = cfg.recording.input_device != null
+    && !devices.some((d) => String(d.index) === selectedValue)
+
   return (
     <>
+      <div className="voice-section">
+        <h3>Input device</h3>
+        <div className="voice-field">
+          <label>Microphone</label>
+          <div className="voice-row" style={{ flex: 1, minWidth: 0, flexWrap: 'wrap' }}>
+            <select
+              value={selectedValue}
+              onChange={(e) => handleDeviceChange(e.target.value)}
+              style={{ flex: '1 1 200px', minWidth: 0 }}
+            >
+              <option value="">System default</option>
+              {devices.map((d) => (
+                <option key={d.index} value={d.index}>
+                  {d.isDefault ? '★ ' : ''}{d.name}{d.hostApi ? ` (${d.hostApi})` : ''}
+                </option>
+              ))}
+              {selectedNotInList && (
+                <option value={selectedValue}>
+                  {typeof cfg.recording.input_device === 'string'
+                    ? `${cfg.recording.input_device} (not detected)`
+                    : `Device #${String(cfg.recording.input_device)} (not detected)`}
+                </option>
+              )}
+            </select>
+            <button
+              className="voice-btn"
+              onClick={onRefreshDevices}
+              disabled={devicesLoading}
+              title="Rescan input devices"
+            >
+              {devicesLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+        <div className="voice-field">
+          <span />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            "System default" follows the OS default microphone. Pick a specific device to pin it across reboots.
+          </span>
+        </div>
+        {devicesError && <div className="voice-error-card">{devicesError}</div>}
+      </div>
+
       <div className="voice-section">
         <h3>Recording</h3>
         <div className="voice-field">
@@ -508,14 +596,12 @@ function RecordingTab({
       </div>
 
       <div className="voice-section">
-        <h3>Devices</h3>
+        <h3>Test</h3>
         <div className="voice-row">
-          <button className="voice-btn" onClick={onListDevices}>List microphones</button>
           <button className="voice-btn primary" onClick={onTest} disabled={testing}>
             {testing ? 'Recording 3 s…' : 'Test recording'}
           </button>
         </div>
-        {deviceInfo && <pre className="voice-setup-log" style={{ marginTop: 10 }}>{deviceInfo}</pre>}
         {testResult && (
           <div style={{ marginTop: 10, background: 'var(--bg-tertiary)', padding: 10, borderRadius: 4 }}>
             <strong>Result:</strong> {testResult}

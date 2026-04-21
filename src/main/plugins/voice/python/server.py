@@ -115,6 +115,7 @@ def _init_components():
             sample_rate=rec_cfg.get("sample_rate", 16000),
             channels=rec_cfg.get("channels", 1),
             speech_threshold=rec_cfg.get("speech_threshold", 500),
+            device=rec_cfg.get("input_device"),
         )
 
         _components["transcriber"] = create_transcriber(config.get("transcriber", {}))
