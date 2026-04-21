@@ -127,7 +127,10 @@
 
 .voice-content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0; /* let flex children own their own scrollbars */
+  /* Allow both axes to scroll: under page zoom, fixed-width fields can grow
+     wider than the window and we want a scrollbar instead of clipping. */
+  overflow: auto;
   padding: 16px;
 }
 
@@ -217,8 +220,12 @@
   left: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
-  align-items: center;
+  /* flex-start so a card taller than the viewport (e.g. under zoom) is
+     readable from the top; combined with overflow: auto below, the overlay
+     itself scrolls instead of clipping the card. */
+  align-items: flex-start;
   justify-content: center;
+  overflow: auto;
   z-index: 100;
   padding: 20px;
 }
@@ -228,6 +235,9 @@
   border-radius: 8px;
   max-width: 620px;
   width: 100%;
+  /* Avoid the card growing taller than the overlay viewport on small windows;
+     internal sections (e.g. .voice-setup-log) still scroll on their own. */
+  margin: auto;
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.6);
 }

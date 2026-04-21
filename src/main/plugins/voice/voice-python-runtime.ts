@@ -351,9 +351,21 @@ export async function createVenv(basePython: string): Promise<void> {
   const venv = getVenvDir()
   fs.mkdirSync(path.dirname(venv), { recursive: true })
   // Remove any stale venv first — safer than trying to repair a broken one.
+  // Failure here MUST be fatal: layering a fresh `python -m venv` on top of a
+  // partially-removed directory produces a corrupted venv where some files
+  // (e.g. site-packages/pip) are missing while others linger from the old
+  // install. We previously logged-and-continued, which left the user with a
+  // half-broken environment that silently failed `verifyInstall`.
   if (fs.existsSync(venv)) {
-    try { fs.rmSync(venv, { recursive: true, force: true }) } catch (err) {
-      svc().logError(`[voice-runtime] could not remove stale venv: ${String(err)}`)
+    try {
+      fs.rmSync(venv, { recursive: true, force: true })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      svc().logError(`[voice-runtime] could not remove stale venv: ${msg}`)
+      throw new Error(
+        `Could not remove existing venv at ${venv} — likely a Python process is still holding files open. ` +
+        `Close any running voice daemon / Claude CLI sessions and retry. (${msg})`
+      )
     }
   }
 
@@ -413,15 +425,12 @@ export async function installDependencies(
   if (!fs.existsSync(pip)) throw new Error(`venv python missing at ${pip}`)
   if (!fs.existsSync(requirementsPath)) throw new Error(`requirements.txt not found: ${requirementsPath}`)
 
-  onProgress({ step: 'install-deps', pct: 0, message: 'Upgrading pip…' })
-  const upgrade = await execFileAsync(pip, ['-m', 'pip', 'install', '--upgrade', 'pip'], {
-    timeout: 120_000
-  })
-  if (upgrade.code !== 0) {
-    svc().logError('[voice-runtime] pip upgrade failed', upgrade)
-    // Non-fatal — the bundled pip is usually good enough.
-  }
-
+  // We deliberately do NOT run `pip install --upgrade pip` here — on Windows
+  // the upgrade can race with the running pip launcher and leave the venv
+  // with `pip.exe` present but the `pip` *module* missing from site-packages,
+  // which then breaks every subsequent `python -m pip ...` call. The bundled
+  // pip that ships with `python -m venv` is more than recent enough for our
+  // requirements.
   onProgress({ step: 'install-deps', pct: 5, message: 'Installing dependencies…' })
   let currentPackage = ''
   const { code } = await spawnStreaming(
