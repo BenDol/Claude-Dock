@@ -26,6 +26,8 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
     [providers, config?.provider]
   )
 
+  const isSdkBackend = config?.provider === 'claude-sdk'
+
   const onProviderChange = useCallback(
     (providerId: CoordinatorProviderId) => {
       const preset = providers.find((p) => p.id === providerId)
@@ -80,6 +82,12 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
               </a>
             </span>
           )}
+          {isSdkBackend && (
+            <span className="hint">
+              Uses your existing Claude Code subscription via the Claude Agent SDK — no API key
+              required. The coordinator runs tools internally through the dock MCP server.
+            </span>
+          )}
         </div>
 
         {selectedPreset?.requiresApiKey && (
@@ -114,33 +122,37 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         )}
 
-        <div className="coord-field">
-          <label htmlFor="coord-model">Model</label>
-          <input
-            id="coord-model"
-            type="text"
-            value={config.model}
-            onChange={(e) => void setConfigPatch({ model: e.target.value })}
-            spellCheck={false}
-          />
-          {selectedPreset && (
-            <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
-          )}
-        </div>
+        {!isSdkBackend && (
+          <div className="coord-field">
+            <label htmlFor="coord-model">Model</label>
+            <input
+              id="coord-model"
+              type="text"
+              value={config.model}
+              onChange={(e) => void setConfigPatch({ model: e.target.value })}
+              spellCheck={false}
+            />
+            {selectedPreset && (
+              <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
+            )}
+          </div>
+        )}
 
-        <div className="coord-field">
-          <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
-          <input
-            id="coord-temp"
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={config.temperature}
-            onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
-          />
-          <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
-        </div>
+        {!isSdkBackend && (
+          <div className="coord-field">
+            <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
+            <input
+              id="coord-temp"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={config.temperature}
+              onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
+            />
+            <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
+          </div>
+        )}
 
         <div className="coord-field-row">
           <button

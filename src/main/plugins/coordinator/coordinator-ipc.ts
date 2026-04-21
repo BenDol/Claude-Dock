@@ -31,6 +31,7 @@ import { CoordinatorWindowManager } from './coordinator-window'
 import { CoordinatorHotkeyService } from './coordinator-hotkey'
 import { listProviderPresets, createProvider } from './llm/registry'
 import { runTurn } from './orchestrator/orchestrator'
+import { getDataDir, getMcpServerSourcePath } from '../../linked-mode'
 import type {
   CoordinatorConfig,
   CoordinatorMessage,
@@ -134,11 +135,22 @@ export function registerCoordinatorIpc(): void {
   ipcMain.handle(IPC.COORDINATOR_TEST_PROVIDER, async () => {
     const cfg = getCoordinatorConfig()
     try {
-      const provider = createProvider(cfg.provider, {
-        apiKey: cfg.apiKey,
-        baseUrl: cfg.baseUrl || undefined,
-        defaultModel: cfg.model
-      })
+      const provider = createProvider(
+        cfg.provider,
+        {
+          apiKey: cfg.apiKey,
+          baseUrl: cfg.baseUrl || undefined,
+          defaultModel: cfg.model
+        },
+        {
+          // SDK testConnection doesn't touch MCP/session state, but the
+          // factory still captures these in closure — pass sane defaults.
+          projectDir: process.cwd(),
+          dockDataDir: getDataDir(),
+          mcpScriptPath: getMcpServerSourcePath(),
+          maxToolSteps: cfg.maxToolStepsPerTurn
+        }
+      )
       return await provider.testConnection()
     } catch (err) {
       return { ok: false, error: (err as Error).message }
