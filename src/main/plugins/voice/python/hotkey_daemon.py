@@ -439,18 +439,22 @@ def _run_daemon():
             controller = pkb.Controller()
             paste_modifier = pkb.Key.cmd if sys.platform == "darwin" else pkb.Key.ctrl
             if text:
-                # When auto-pasting, snapshot the user's current clipboard and
-                # restore it after the paste completes — otherwise every hotkey
-                # fire silently wipes whatever they had copied. pyperclip only
-                # handles text; when the clipboard holds an image or other
-                # non-text format, paste() returns "" — treat that as "nothing
-                # to restore" so we don't overwrite the image with an empty
-                # string (the image stays on the clipboard until the user
-                # copies something else).
+                # When auto-pasting, snapshot the user's clipboard and restore
+                # it after the paste completes — otherwise every hotkey fire
+                # silently wipes whatever they had copied. pyperclip only
+                # reads text; when the clipboard held an image or other
+                # non-text format, paste() returns "" AND our subsequent
+                # copy(text) has already overwritten that content (pyperclip
+                # wipes all formats before writing). So once the paste is
+                # done, restoring "" by copy("") clears the voice text —
+                # leaving an empty clipboard behind instead of the transcript
+                # leaking into the user's next paste.
                 prior_clipboard = None
+                snapshot_ok = False
                 if auto_paste:
                     try:
                         prior_clipboard = pyperclip.paste()
+                        snapshot_ok = True
                     except Exception as exc:
                         _log(f"Could not read prior clipboard (won't restore): {exc}")
 
@@ -464,7 +468,11 @@ def _run_daemon():
                     # before restoring the prior clipboard — otherwise the app
                     # races and pastes the restored value instead.
                     time.sleep(0.15)
-                    if prior_clipboard and prior_clipboard != text:
+                    # Only restore when the snapshot succeeded. When it
+                    # failed we'd be writing an uninitialised value, so
+                    # leave the clipboard alone (fail-safe). When the
+                    # prior matches `text` there's nothing to restore.
+                    if snapshot_ok and prior_clipboard != text:
                         try:
                             pyperclip.copy(prior_clipboard)
                         except Exception as exc:
