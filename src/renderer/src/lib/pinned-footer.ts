@@ -68,19 +68,54 @@ export function detectInputBoxRows(
     }
   }
 
-  // Phase 1: walk from the bottom-most content row upward, remembering the
-  // highest border.
-  let topBorderOffset = -1
+  // Phase 1: locate the input box. Walk up to find the nearest border (the
+  // box's *bottom* border), then continue up a short distance to find the
+  // *top* border of the same box.
+  //
+  // Must NOT keep walking to the topmost border in the whole scan range —
+  // prior tool output above the box (e.g. a markdown table with ─ separators,
+  // a code block rendered with box-drawing, another pinned panel) also
+  // contains border rows, and picking those balloons the footer all the way
+  // up into scrollback.
+  let bottomBorderOffset = -1
   for (let off = bottomOffset; off < scan; off++) {
     const y = baseY + rows - 1 - off
     if (y < 0) break
     const line = buf.getLine(y)
     if (!line) continue
     if (isBorderRow(line.translateToString(true))) {
-      topBorderOffset = off
+      bottomBorderOffset = off
+      break
     }
   }
-  if (topBorderOffset < 0) return { rowCount: 0, bottomOffset: 0 }
+  if (bottomBorderOffset < 0) return { rowCount: 0, bottomOffset: 0 }
+
+  // Claude's input box rarely exceeds ~16 rows, even for pasted multi-line
+  // input; cap the top-border search at that distance so a distant table
+  // border can never be mistaken for this box's top.
+  const maxBoxHeight = 16
+  let topBorderOffset = bottomBorderOffset
+  for (
+    let off = bottomBorderOffset + 1;
+    off < scan && off <= bottomBorderOffset + maxBoxHeight;
+    off++
+  ) {
+    const y = baseY + rows - 1 - off
+    if (y < 0) break
+    const line = buf.getLine(y)
+    if (!line) continue
+    const text = line.translateToString(true)
+    if (isBorderRow(text)) {
+      topBorderOffset = off
+      break
+    }
+    // Input-box interior rows start with the vertical bar + space or the
+    // chevron + space. Anything starting with an alnum or with a bullet-glyph
+    // that isn't a chevron/vertical means we've walked past the box — stop so
+    // we don't mistake the NEXT outer border for this box's top.
+    if (isBoxInteriorRow(text)) continue
+    break
+  }
 
   // Phase 2: only extend the pinned region upward when Claude Code is actively
   // running — the ONLY reliable signal is a spinner status line whose first
@@ -228,6 +263,25 @@ function isSpinnerRow(s: string): boolean {
 const USER_PROMPT_CHEVRONS = /^[>\u203A\u276F\u25B8\u25B6\u2192]\s/
 function isUserPromptRow(s: string): boolean {
   return USER_PROMPT_CHEVRONS.test(s)
+}
+
+/**
+ * An input-box interior row. Used to decide whether to keep searching upward
+ * for the box's top border: only keep going if the current row *could* be the
+ * inside of the same box.
+ *
+ * Accepts the vertical bar (`│` U+2502, ASCII `|`) at the start, the chevron
+ * the user prompt uses (`>` / `›` / `❯`), or fully blank rows. Rejects rows
+ * starting with alnum characters or with unrelated bullet glyphs.
+ */
+function isBoxInteriorRow(s: string): boolean {
+  if (isBlankRow(s)) return true
+  const trimmed = s.replace(/^\s+/, '')
+  if (trimmed.length === 0) return true
+  const c = trimmed[0]
+  if (c === '│' || c === '|') return true
+  if (c === '>' || c === '›' || c === '❯' || c === '▸' || c === '▶') return true
+  return false
 }
 
 /** A row is a border if it contains a long run of ─ or a high density of them. */
