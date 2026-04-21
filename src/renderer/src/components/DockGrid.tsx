@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useEffect, useState } from 'react'
+import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react'
 import ReactGridLayout from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import TerminalCard from './TerminalCard'
@@ -22,6 +22,14 @@ const DockGrid: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
   const [containerHeight, setContainerHeight] = useState(600)
+
+  // Bumped after every drag stop so the layout prop we hand to RGL is
+  // deep-unequal to what RGL cached internally.  This forces RGL's
+  // getDerivedStateFromProps to re-sync its internal layout back to our
+  // canonical one, even when the drag did not result in a swap.  Without
+  // this, RGL holds onto its mid-drag compacted state and the grid looks
+  // "wonky" until something else changes the layout reference.
+  const [layoutNonce, setLayoutNonce] = useState(0)
 
   // Listen for shell events from the main process (once globally)
   useEffect(() => {
@@ -105,24 +113,52 @@ const DockGrid: React.FC = () => {
   const totalGap = gapSize * (rows - 1)
   const rowHeight = Math.floor((containerHeight - totalGap) / rows)
 
-  // On drag stop, find which terminal occupies the drop position and swap
+  // On drag stop, always resolve the drop to the nearest slot (by center
+  // distance).  Swap if the nearest slot belongs to another terminal; no-op
+  // if the dragged terminal is closest to its own slot.  Either way, bump
+  // the layout nonce so RGL re-syncs to our canonical layout — this kills
+  // the "item sits between slots" bug where a partial drag left RGL's
+  // internal state drifted from ours.
   const onDragStop = useCallback(
     (_layout: ReactGridLayout.Layout[], _oldItem: ReactGridLayout.Layout, newItem: ReactGridLayout.Layout) => {
       const draggedId = newItem.i
-      const targetItem = layout.find(
-        (l) =>
-          l.i !== draggedId &&
-          newItem.x >= l.x && newItem.x < l.x + l.w &&
-          newItem.y >= l.y && newItem.y < l.y + l.h
-      )
-      if (targetItem) {
-        swapTerminals(draggedId, targetItem.i)
+      const dropCenterX = newItem.x + newItem.w / 2
+      const dropCenterY = newItem.y + newItem.h / 2
+
+      const ownSlot = layout.find((l) => l.i === draggedId)
+      const ownDist = ownSlot
+        ? Math.hypot(
+            dropCenterX - (ownSlot.x + ownSlot.w / 2),
+            dropCenterY - (ownSlot.y + ownSlot.h / 2)
+          )
+        : Infinity
+
+      let bestTarget: ReactGridLayout.Layout | null = null
+      let bestDist = Infinity
+      for (const slot of layout) {
+        if (slot.i === draggedId) continue
+        const d = Math.hypot(
+          dropCenterX - (slot.x + slot.w / 2),
+          dropCenterY - (slot.y + slot.h / 2)
+        )
+        if (d < bestDist) {
+          bestDist = d
+          bestTarget = slot
+        }
+      }
+
+      if (bestTarget && bestDist < ownDist) {
+        swapTerminals(draggedId, bestTarget.i)
         // Persist new order to sessions.json
         const newOrder = useDockStore.getState().terminals.map((t) => t.id)
         getDockApi().terminal.syncOrder(newOrder)
         // Scroll all terminals to bottom after reposition
         setTimeout(() => window.dispatchEvent(new Event('terminals-repositioned')), 100)
       }
+
+      // Force RGL to re-sync its internal state to our canonical layout,
+      // even on no-op drops.  See layoutNonce comment above.
+      setLayoutNonce((n) => n + 1)
     },
     [layout, swapTerminals]
   )
@@ -188,13 +224,22 @@ const DockGrid: React.FC = () => {
     }
   }
 
+  // Tag each layout item with the current nonce so the layout prop is
+  // deep-unequal to RGL's cached propsLayout after a drag, forcing resync.
+  // The _nonce field is ignored by RGL but participates in fast-equals'
+  // deep comparison (see node_modules/react-grid-layout/build/ReactGridLayout.js).
+  const rglLayout = useMemo(
+    () => layout.map((l) => ({ ...l, _nonce: layoutNonce })),
+    [layout, layoutNonce]
+  )
+
   if (terminals.length === 0) return null
 
   return (
     <div className="dock-grid-container" ref={containerRef}>
       <ReactGridLayout
         className="dock-grid"
-        layout={layout}
+        layout={rglLayout}
         cols={cols}
         rowHeight={rowHeight}
         width={containerWidth}
