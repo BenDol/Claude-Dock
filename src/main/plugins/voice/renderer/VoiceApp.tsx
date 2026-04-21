@@ -183,6 +183,41 @@ export default function VoiceApp() {
     }
   }, [api, loadAll])
 
+  // Zoom: Ctrl+MouseWheel and Ctrl++/-/0 with per-window persistence.
+  // Mirrors the memory-plugin approach so plugin windows feel consistent.
+  useEffect(() => {
+    const ZOOM_KEY = 'voice-zoom'
+    const MIN_ZOOM = 0.6
+    const MAX_ZOOM = 1.6
+    const STEP = 0.1
+    const saved = localStorage.getItem(ZOOM_KEY)
+    let zoom = saved ? parseFloat(saved) : 1
+    if (isNaN(zoom) || zoom < MIN_ZOOM || zoom > MAX_ZOOM) zoom = 1
+    document.documentElement.style.zoom = String(zoom)
+    const applyZoom = (z: number) => {
+      zoom = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      document.documentElement.style.zoom = String(zoom)
+      localStorage.setItem(ZOOM_KEY, String(zoom))
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      applyZoom(zoom + (e.deltaY < 0 ? STEP : -STEP))
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(zoom + STEP) }
+      else if (e.key === '-') { e.preventDefault(); applyZoom(zoom - STEP) }
+      else if (e.key === '0') { e.preventDefault(); applyZoom(1) }
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
   const patch: PatchFn = useCallback(async (p) => {
     const merged = await api.voice.setSettings(p)
     setCfg(merged)
@@ -225,11 +260,34 @@ export default function VoiceApp() {
 
   return (
     <div className="voice-root">
-      <div className="voice-titlebar">
-        <span className="voice-title">Voice</span>
-        <div className="voice-title-actions">
-          <button className="voice-btn" onClick={() => api.voice.openLogs()}>Logs</button>
-          <button className="voice-btn" onClick={() => api.voice.close()}>Close</button>
+      <div className="voice-titlebar" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
+        <div className="voice-titlebar-left" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <h1>Voice</h1>
+        </div>
+        <div className="voice-titlebar-controls" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button
+            className="voice-titlebar-btn voice-titlebar-action"
+            onClick={() => api.voice.openLogs()}
+            title="Open logs"
+          >
+            Logs
+          </button>
+          <div className="voice-titlebar-separator" />
+          <button
+            className="voice-titlebar-btn"
+            onClick={() => api.win.minimize()}
+            title="Minimize"
+          >&#x2015;</button>
+          <button
+            className="voice-titlebar-btn"
+            onClick={() => api.win.maximize()}
+            title="Maximize"
+          >&#9744;</button>
+          <button
+            className="voice-titlebar-btn close"
+            onClick={() => api.voice.close()}
+            title="Close"
+          >&#10005;</button>
         </div>
       </div>
 

@@ -14,18 +14,60 @@
 }
 
 .voice-titlebar {
-  height: 32px;
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
+  gap: 12px;
+  padding-left: 16px;
+  height: 38px;
   background: var(--bg-secondary, #1a1a22);
   border-bottom: 1px solid var(--border-color, #2a2a33);
   -webkit-app-region: drag;
+  flex-shrink: 0;
 }
-.voice-titlebar .voice-title { font-weight: 600; font-size: 12px; }
-.voice-titlebar .voice-title-actions { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+.voice-titlebar h1 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  color: var(--text-primary, #e5e5e5);
+}
+.voice-titlebar-left { display: flex; align-items: center; gap: 12px; }
+.voice-titlebar-controls {
+  display: flex;
+  align-self: stretch;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+.voice-titlebar-separator {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-color, #2a2a33);
+}
+.voice-titlebar-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #a0a0a8);
+  cursor: pointer;
+  width: 46px;
+  height: 100%;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+}
+.voice-titlebar-btn:hover { background: var(--bg-hover, #272730); color: var(--text-primary, #e5e5e5); }
+.voice-titlebar-btn.close:hover { background: #e81123; color: white; }
+.voice-titlebar-btn.voice-titlebar-action {
+  width: auto;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin: 0 4px;
+  align-self: center;
+  height: auto;
+}
 
 .voice-header {
   padding: 12px 16px;
@@ -168,8 +210,8 @@
   position: fixed;
   /* Start below the titlebar so its Close button remains clickable even if
      the wizard gets stuck in an unexpected state. The titlebar height is
-     32px (see .voice-titlebar). */
-  top: 32px;
+     38px (see .voice-titlebar). */
+  top: 38px;
   right: 0;
   bottom: 0;
   left: 0;
