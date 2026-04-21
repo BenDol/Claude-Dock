@@ -22,11 +22,20 @@ export class VoicePlugin implements DockPlugin {
     registerVoiceIpc()
 
     // Ref-counted daemon: first enable spawns, last disable stops.
+    // `plugin:enabled` only fires on user toggle — `project:postOpen` fires
+    // (filtered to enabled plugins) when a project loads with voice already
+    // enabled from a prior session. Both feed the same idempotent ref-count.
     bus.on('plugin:enabled', this.id, ({ projectDir, pluginId }) => {
       if (pluginId !== this.id) return
       VoiceServerManager.getInstance()
         .onProjectEnabled(projectDir)
         .catch((err) => getServices().logError('[voice] onProjectEnabled failed', err))
+    })
+
+    bus.on('project:postOpen', this.id, ({ projectDir }) => {
+      VoiceServerManager.getInstance()
+        .onProjectEnabled(projectDir)
+        .catch((err) => getServices().logError('[voice] onProjectEnabled (postOpen) failed', err))
     })
 
     bus.on('plugin:disabled', this.id, ({ projectDir, pluginId }) => {
