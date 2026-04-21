@@ -351,7 +351,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       return
     }
 
-    const rowCount = detectInputBoxRows(term)
+    const { rowCount, bottomOffset } = detectInputBoxRows(term)
     if (rowCount <= 0) {
       footer.classList.remove('visible')
       setButtonBottom(0)
@@ -359,23 +359,25 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     }
 
     const theme = getEffectiveTerminalColors(settings)
-    const { cursorRow, cursorCol } = renderPinnedRows(term, rowCount, theme, rowsHost)
+    const { cursorRow, cursorCol } = renderPinnedRows(term, rowCount, theme, rowsHost, bottomOffset)
 
     // Derive row height, cell width, and horizontal alignment from xterm's DOM
-    // so the overlay aligns pixel-perfectly with real rows. Fall back to font-
-    // metric math if the DOM query fails.
-    const rowEl = container.querySelector('.xterm-rows > div') as HTMLElement | null
+    // so the overlay aligns pixel-perfectly with the real rendering. We query
+    // `.xterm-screen` (always present and sized to cols * cellWidth in both
+    // canvas and DOM renderers) rather than `.xterm-rows > div`, which is
+    // zero-height accessibility markup under the canvas renderer.
+    const screenEl = container.querySelector('.xterm-screen') as HTMLElement | null
     let rowHeight = Math.round(settings.terminal.fontSize * settings.terminal.lineHeight)
     let cellWidth = settings.terminal.fontSize * 0.6
     let footerLeft: number | null = null
     let footerWidth: number | null = null
-    if (rowEl) {
-      const rect = rowEl.getBoundingClientRect()
+    if (screenEl && term.cols > 0 && term.rows > 0) {
+      const rect = screenEl.getBoundingClientRect()
       const containerRect = container.getBoundingClientRect()
-      if (rect.height > 0) rowHeight = rect.height
-      if (rect.width > 0 && term.cols > 0) cellWidth = rect.width / term.cols
+      if (rect.height > 0) rowHeight = rect.height / term.rows
+      if (rect.width > 0) cellWidth = rect.width / term.cols
       if (rect.width > 0 && containerRect.width > 0) {
-        // Align the footer to xterm-rows so wide lines don't clip past the
+        // Align the footer to the screen so wide lines don't clip past the
         // scrollbar gutter and the cursor lands on the right cell.
         footerLeft = rect.left - containerRect.left
         footerWidth = rect.width

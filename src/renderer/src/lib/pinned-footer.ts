@@ -20,6 +20,15 @@ export interface PinnedFooterRender {
   cursorRow: number | null // row offset within pinned rows, or null if cursor is outside
 }
 
+export interface PinnedFooterRange {
+  rowCount: number
+  // Offset from the live-buffer bottom to the lowest row that should be pinned.
+  // Claude Code's TUI leaves trailing blank rows below the hint line; including
+  // them makes the overlay tall with mostly empty space. We strip them so the
+  // footer's visible height matches its actual content.
+  bottomOffset: number
+}
+
 /**
  * Scan the bottom of the live buffer for Claude Code's input box and the
  * "live context" block that sits directly above it — the thinking/status line
@@ -37,15 +46,32 @@ export function detectInputBoxRows(
   term: Terminal,
   maxScan = 24,
   maxContextAbove = 20
-): number {
+): PinnedFooterRange {
   const buf = term.buffer.active
   const rows = term.rows
   const baseY = buf.baseY
   const scan = Math.min(maxScan, rows)
 
-  // Phase 1: walk from the bottom upward, remembering the highest border.
-  let topBorderOffset = -1
+  // Phase 0: find the offset of the bottom-most non-blank row. Claude Code's
+  // TUI draws its input box mid-screen and leaves the rows below the hint line
+  // blank — without trimming, the pinned footer ends up with many rows of
+  // empty black space below the actual content.
+  let bottomOffset = 0
   for (let off = 0; off < scan; off++) {
+    const y = baseY + rows - 1 - off
+    if (y < 0) break
+    const line = buf.getLine(y)
+    if (!line) continue
+    if (!isBlankRow(line.translateToString(true))) {
+      bottomOffset = off
+      break
+    }
+  }
+
+  // Phase 1: walk from the bottom-most content row upward, remembering the
+  // highest border.
+  let topBorderOffset = -1
+  for (let off = bottomOffset; off < scan; off++) {
     const y = baseY + rows - 1 - off
     if (y < 0) break
     const line = buf.getLine(y)
@@ -54,7 +80,7 @@ export function detectInputBoxRows(
       topBorderOffset = off
     }
   }
-  if (topBorderOffset < 0) return 0
+  if (topBorderOffset < 0) return { rowCount: 0, bottomOffset: 0 }
 
   // Phase 2: only extend the pinned region upward when Claude Code is actively
   // running — the ONLY reliable signal is a spinner status line whose first
@@ -83,7 +109,7 @@ export function detectInputBoxRows(
     if (text.length > 0 && /[A-Za-z0-9]/.test(text[0])) break
     if (isSpinnerRow(text)) anchorOffset = i
   }
-  if (anchorOffset < 0) return clampFooterRows(topBorderOffset + 1, rows)
+  if (anchorOffset < 0) return clampFooterRange(topBorderOffset + 1 - bottomOffset, bottomOffset, rows)
 
   // Walk from just-above-border up to the anchor, tracking the *last* row that
   // actually contains content. This is the fix for the "footer stays tall after
@@ -157,14 +183,14 @@ export function detectInputBoxRows(
     extra = i
   }
 
-  return clampFooterRows(topBorderOffset + 1 + extra, rows)
+  return clampFooterRange(topBorderOffset + 1 + extra - bottomOffset, bottomOffset, rows)
 }
 
 /** Cap the pinned region at 50% of the terminal viewport so it can never hide
  *  most of the user's scrollback. Also bounded to a minimum of 1 row. */
-function clampFooterRows(rowCount: number, termRows: number): number {
+function clampFooterRange(rowCount: number, bottomOffset: number, termRows: number): PinnedFooterRange {
   const maxRows = Math.max(1, Math.floor(termRows / 2))
-  return Math.min(rowCount, maxRows)
+  return { rowCount: Math.max(1, Math.min(rowCount, maxRows)), bottomOffset }
 }
 
 function isBlankRow(s: string): boolean {
@@ -223,13 +249,14 @@ export function renderPinnedRows(
   term: Terminal,
   rowCount: number,
   theme: TerminalColors,
-  target: HTMLElement
+  target: HTMLElement,
+  bottomOffset = 0
 ): PinnedFooterRender {
   const buf = term.buffer.active
   const rows = term.rows
   const cols = term.cols
   const baseY = buf.baseY
-  const startY = baseY + rows - rowCount
+  const startY = baseY + rows - rowCount - bottomOffset
 
   // Cursor in absolute buffer coords
   const cursorAbsY = baseY + buf.cursorY
