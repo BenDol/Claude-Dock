@@ -1277,7 +1277,7 @@ const GitManagerApp: React.FC = () => {
   const [pushing, setPushing] = useState(false)
   const [pushCancelling, setPushCancelling] = useState(false)
   const pushCancelledRef = useRef(false)
-  const [pushProgress, setPushProgress] = useState<{ phase: string; percent: number; detail: string } | null>(null)
+  const [pushProgress, setPushProgress] = useState<PushProgressState | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [checkingOutBranch, setCheckingOutBranch] = useState<string | null>(null)
 
@@ -8002,12 +8002,44 @@ const PUSH_ACTION_LABELS: Record<PushAction, string> = {
 
 const PUSH_DEFAULT_KEY = 'gm-default-push-action'
 
+type PushStage = 'enumerate' | 'count' | 'compress' | 'write' | 'resolve' | 'hook' | 'waiting' | 'starting' | 'unknown'
+
+type PushProgressState = {
+  stage: PushStage
+  phase: string
+  percent: number
+  phasePercent: number
+  detail: string
+  remote: boolean
+  count?: number
+  throughput?: string
+}
+
+/** Short human label for the button while a push is in-flight. */
+function pushStageLabel(p: PushProgressState): string {
+  switch (p.stage) {
+    case 'enumerate':
+      return p.count ? `Enumerating ${p.count.toLocaleString()}` : 'Enumerating'
+    case 'count':     return `Counting ${p.phasePercent}%`
+    case 'compress':  return `Compressing ${p.phasePercent}%`
+    case 'write':     return p.throughput
+      ? `Uploading ${p.phasePercent}% • ${p.throughput}`
+      : `Uploading ${p.phasePercent}%`
+    case 'resolve':   return `Resolving ${p.phasePercent}%${p.remote ? ' (remote)' : ''}`
+    case 'hook':      return 'Pre-push hook…'
+    case 'waiting':   return p.remote ? 'Waiting on server…' : 'Waiting…'
+    case 'starting':  return 'Starting…'
+    case 'unknown':
+    default:          return 'Pushing…'
+  }
+}
+
 const PushSplitButton: React.FC<{
   activeDir: string
   currentBranch?: { name: string; ahead?: number; behind?: number; remote?: string; tracking?: string } | null
   pushing: boolean
   pushCancelling: boolean
-  pushProgress: { phase: string; percent: number; detail: string } | null
+  pushProgress: PushProgressState | null
   onPush: (action: PushAction) => void
   onCancelPush: () => void
 }> = React.memo(({ activeDir, currentBranch, pushing, pushCancelling, pushProgress, onPush, onCancelPush }) => {
@@ -8034,11 +8066,15 @@ const PushSplitButton: React.FC<{
   return (
     <div className="gm-pull-split" style={{ position: 'relative' }}>
       <button
-        className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}`}
+        className={`gm-toolbar-btn${pushing ? ' gm-toolbar-btn-pushing' : ''}${pushProgress ? ` gm-push-stage-${pushProgress.stage}` : ''}`}
         onClick={pushing && !pushCancelling ? onCancelPush : (!pushing ? () => { setDropdownOpen(false); onPush(isPublish ? 'push' : defaultAction) } : undefined)}
         disabled={pushCancelling}
         title={pushing
-          ? (pushCancelling ? 'Cancelling push...' : pushProgress ? `${pushProgress.phase}: ${pushProgress.percent}% — ${pushProgress.detail}\nClick to cancel` : 'Pushing... Click to cancel')
+          ? (pushCancelling
+              ? 'Cancelling push...'
+              : pushProgress
+                ? `${pushStageLabel(pushProgress)} — ${pushProgress.percent}% overall\n${pushProgress.detail}\nClick to cancel`
+                : 'Pushing... Click to cancel')
           : (isPublish ? 'Publish branch to origin' : `${label}${currentBranch?.ahead ? ` (${currentBranch.ahead} ahead)` : ''}${currentBranch?.behind ? ` (${currentBranch.behind} behind)` : ''}`)}
       >
         {pushing ? <span className="gm-toolbar-spinner" /> : <PushIcon />}
@@ -8046,12 +8082,19 @@ const PushSplitButton: React.FC<{
           ? (pushCancelling
             ? 'Cancelling…'
             : pushProgress
-              ? <><span className="gm-push-phase">{pushProgress.phase.replace(/ objects$/, '')} {pushProgress.percent}%</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
+              ? <><span className="gm-push-phase">{pushStageLabel(pushProgress)}</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>
               : <><span>Pushing…</span><span className="gm-push-cancel-hint" title="Cancel push">✕</span></>)
           : label}
         {!pushing && currentBranch?.ahead ? <span className="gm-toolbar-count gm-toolbar-count-ahead">{currentBranch.ahead}</span> : null}
         {!pushing && currentBranch?.behind ? <span className="gm-toolbar-count gm-toolbar-count-behind">{currentBranch.behind}</span> : null}
-        {pushing && <div className="gm-push-btn-fill" style={pushProgress ? { width: `${pushProgress.percent}%` } : undefined} />}
+        {pushing && (
+          <div
+            className="gm-push-btn-fill"
+            style={pushProgress && pushProgress.stage !== 'waiting' && pushProgress.stage !== 'hook' && pushProgress.stage !== 'starting'
+              ? { width: `${pushProgress.percent}%` }
+              : undefined}
+          />
+        )}
       </button>
       {!pushing && (
         <button className="gm-pull-split-arrow" onClick={() => setDropdownOpen((p) => !p)} title="Push options">

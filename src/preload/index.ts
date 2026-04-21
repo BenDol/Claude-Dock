@@ -272,12 +272,21 @@ export interface DockApi {
     deleteBranch: (projectDir: string, name: string, force?: boolean, options?: { deleteRemote?: boolean; deleteLocal?: boolean }) => Promise<{ success: boolean; error?: string }>
     pull: (projectDir: string, mode?: 'merge' | 'rebase') => Promise<{ success: boolean; output?: string; error?: string }>
     pullAdvanced: (projectDir: string, remote: string, branch: string, rebase: boolean, autostash: boolean, tags: boolean, prune: boolean) => Promise<{ success: boolean; output?: string; error?: string }>
-    push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
-    pushForceWithLease: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
-    pushWithTags: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
+    push: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string; cancelled?: boolean }>
+    pushForceWithLease: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string; cancelled?: boolean }>
+    pushWithTags: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string; cancelled?: boolean }>
     pushTag: (projectDir: string, tagName: string, force?: boolean) => Promise<{ success: boolean; error?: string }>
     cancelPush: () => Promise<{ cancelled: boolean }>
-    onPushProgress: (callback: (progress: { phase: string; percent: number; detail: string }) => void) => () => void
+    onPushProgress: (callback: (progress: {
+      stage: 'enumerate' | 'count' | 'compress' | 'write' | 'resolve' | 'hook' | 'waiting' | 'starting' | 'unknown'
+      phase: string
+      percent: number
+      phasePercent: number
+      detail: string
+      remote: boolean
+      count?: number
+      throughput?: string
+    }) => void) => () => void
     fetch: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetchSimple: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
     fetchAll: (projectDir: string) => Promise<{ success: boolean; output?: string; error?: string }>
@@ -793,7 +802,7 @@ const dockApi: DockApi = {
     pushTag: (projectDir, tagName, force?) => ipcRenderer.invoke(IPC.GIT_MGR_PUSH_TAG, projectDir, tagName, force),
     cancelPush: () => ipcRenderer.invoke(IPC.GIT_MGR_CANCEL_PUSH),
     onPushProgress: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, progress: { phase: string; percent: number; detail: string }) => callback(progress)
+      const handler = (_event: Electron.IpcRendererEvent, progress: Parameters<typeof callback>[0]) => callback(progress)
       ipcRenderer.on('git-manager:push-progress', handler)
       return () => ipcRenderer.removeListener('git-manager:push-progress', handler)
     },

@@ -48,39 +48,70 @@
 
 .gm-toolbar-btn-pushing {
   color: #e0af68 !important;
-  border-color: rgba(224, 175, 104, 0.3) !important;
+  border-color: rgba(224, 175, 104, 0.4) !important;
   border-radius: 0 !important;
   position: relative;
   overflow: hidden;
+  /* Ensure the button establishes a stacking context so the fill sits
+     behind the label but above the button's background. Previously the
+     fill used z-index: -1 which pushed it behind the button chrome on
+     some platforms and made it invisible. */
   z-index: 0;
+  isolation: isolate;
 }
 
 .gm-toolbar-btn-pushing:hover {
   color: #f7768e !important;
-  border-color: rgba(247, 118, 142, 0.3) !important;
+  border-color: rgba(247, 118, 142, 0.4) !important;
 }
 
-/* Background fill that sweeps across the button to show progress */
+/* Background fill that sweeps across the button to show progress. Sits
+   behind the label/icon (which have an implicit stacking context via the
+   button), but inside the button's own stacking context (isolation:isolate
+   above) so it can't escape to negative z. */
 .gm-push-btn-fill {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   border-radius: inherit;
-  background: rgba(224, 175, 104, 0.15);
-  transition: width 0.4s ease;
+  background: rgba(224, 175, 104, 0.28);
+  transition: width 0.4s ease, background 0.2s ease;
+  pointer-events: none;
   /* Indeterminate: pulsing glow when no width is set */
   width: 100%;
   animation: gm-push-pulse 1.6s ease-in-out infinite;
 }
 
+/* Keep the button's label/icon on top of the fill */
+.gm-toolbar-btn-pushing > :not(.gm-push-btn-fill) {
+  position: relative;
+  z-index: 1;
+}
+
 /* When inline style sets a width, disable the pulse and show determinate fill */
 .gm-push-btn-fill[style] {
   animation: none;
-  background: rgba(224, 175, 104, 0.18);
+  background: rgba(224, 175, 104, 0.35);
+}
+
+/* Stage-specific tints so the user can glance-read where we are */
+.gm-push-stage-waiting .gm-push-btn-fill,
+.gm-push-stage-hook .gm-push-btn-fill,
+.gm-push-stage-starting .gm-push-btn-fill {
+  /* Indeterminate stages: keep pulsing */
+  background: rgba(122, 162, 247, 0.22) !important;
+  animation: gm-push-pulse 1.6s ease-in-out infinite !important;
+  width: 100% !important;
+}
+.gm-push-stage-write .gm-push-btn-fill[style] {
+  background: rgba(158, 206, 106, 0.38); /* upload = green */
+}
+.gm-push-stage-resolve .gm-push-btn-fill[style] {
+  background: rgba(187, 154, 247, 0.35); /* server-side = purple */
 }
 
 @keyframes gm-push-pulse {
-  0%, 100% { opacity: 0.25; }
+  0%, 100% { opacity: 0.3; }
   50%      { opacity: 1; }
 }
 

@@ -1143,14 +1143,63 @@ export async function pullAdvanced(
 // Pushes have no timeout — large files over slow connections must be allowed
 // to complete, even if they take hours.  Users can cancel via cancelPush().
 
+/**
+ * Push progress stage. Lets the UI pick a meaningful label even when git
+ * isn't emitting a percent (enumerate) or is emitting nothing at all
+ * (waiting on server, running a pre-push hook).
+ */
+export type PushStage =
+  | 'enumerate'   // "Enumerating objects: N" — counter, no %
+  | 'count'       // "Counting objects: N%"
+  | 'compress'    // "Compressing objects: N%"
+  | 'write'       // "Writing objects: N%"  ← the real upload
+  | 'resolve'     // "remote: Resolving deltas: N%"
+  | 'hook'        // stderr output that doesn't look like git itself (pre-push hook)
+  | 'waiting'     // >HEARTBEAT_MS of silence after activity started
+  | 'starting'    // spawned but no output yet
+  | 'unknown'
+
 export interface PushProgress {
-  phase: string      // e.g. 'Enumerating objects', 'Writing objects'
-  percent: number    // 0-100
-  detail: string     // full line from git
+  stage: PushStage
+  phase: string         // human label, "remote: " stripped
+  percent: number       // 0–100 OVERALL push progress (weighted across stages)
+  phasePercent: number  // 0–100 within the current stage, from git
+  detail: string        // last raw line from git (for tooltip / diagnostics)
+  remote: boolean       // true for server-side phases (resolve deltas)
+  count?: number        // object count for 'enumerate'
+  throughput?: string   // "1.50 MiB/s" parsed from 'Writing objects' lines
 }
 
-/** Active push process — stored so it can be cancelled */
-let activePushProcess: ChildProcess | null = null
+/**
+ * Weights for mapping per-stage percent into a single overall percent.
+ * These are approximate — the real distribution depends on repo size and
+ * network speed — but the goal is a bar that mostly moves forward and
+ * never jumps back to zero as git transitions between phases.
+ */
+const PUSH_STAGE_WEIGHTS: Record<Exclude<PushStage, 'hook' | 'waiting' | 'starting' | 'unknown'>, { start: number; span: number }> = {
+  enumerate: { start: 0,  span: 5  },
+  count:     { start: 5,  span: 10 },
+  compress:  { start: 15, span: 15 },
+  write:     { start: 30, span: 55 }, // the upload dominates — weight it heavily
+  resolve:   { start: 85, span: 15 }
+}
+
+/** Heartbeat: how long of stderr silence before we announce "Waiting…" */
+const PUSH_HEARTBEAT_MS = 10_000
+/** Cancel watchdog: how long after a cancel before we escalate / give up */
+const PUSH_CANCEL_WATCHDOG_MS = 5_000
+
+/**
+ * Active push process handle — kept alive until the close event fires so
+ * a duplicate cancelPush() call doesn't silently no-op. `cancelled` is
+ * sticky; we use it to suppress the "exited non-zero" rejection when we
+ * ourselves killed the process.
+ */
+interface ActivePush {
+  proc: ChildProcess
+  cancelled: boolean
+}
+let activePush: ActivePush | null = null
 
 /**
  * Spawn git with streaming stderr for progress.
@@ -1161,63 +1210,264 @@ function gitPushStreaming(
   args: string[],
   onProgress?: (progress: PushProgress) => void
 ): Promise<string> {
+  const svc = getServices()
   return new Promise((resolve, reject) => {
-    const proc = spawn('git', args, { cwd })
-    activePushProcess = proc
+    // stdio: ignore stdin so git can never block on user input (credential
+    // prompts, etc.) — it'll fail fast with an auth error instead of hanging.
+    const proc = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const handle: ActivePush = { proc, cancelled: false }
+    activePush = handle
     let stdout = ''
     let stderr = ''
+    let lastStderrAt = Date.now()
+    let announcedWaiting = false
+    let lastStage: PushStage = 'starting'
+    let lastPhasePercent = 0
 
     // No timeout — pushes of large files over slow connections must be
-    // allowed to complete.  Users can cancel explicitly via cancelPush().
+    // allowed to complete. Users can cancel explicitly via cancelPush().
+
+    const emit = (p: PushProgress) => {
+      lastStage = p.stage
+      lastPhasePercent = p.phasePercent
+      announcedWaiting = false
+      onProgress?.(p)
+    }
+
+    const heartbeat = onProgress
+      ? setInterval(() => {
+          if (announcedWaiting) return
+          if (Date.now() - lastStderrAt < PUSH_HEARTBEAT_MS) return
+          // Stuck — tell the UI. Keep lastStage as context (e.g. if we got
+          // to 'write' 100% and then went silent, the user sees "Waiting on
+          // server…" rather than a frozen 100% bar).
+          announcedWaiting = true
+          const { percent } = computeOverall(lastStage, lastPhasePercent)
+          onProgress({
+            stage: 'waiting',
+            phase: lastStage === 'starting' ? 'Waiting on git' : 'Waiting on server',
+            percent,
+            phasePercent: lastPhasePercent,
+            detail: lastStage === 'starting'
+              ? 'No output yet — may be waiting on auth or pre-push hook'
+              : 'Server is processing the upload',
+            remote: lastStage === 'write' || lastStage === 'resolve'
+          })
+        }, 1000)
+      : null
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
     })
+
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
       stderr += text
+      lastStderrAt = Date.now()
 
       if (!onProgress) return
-      // Parse git progress lines (they use \r for in-place updates)
+      // Git uses \r for in-place updates and \n for new lines. Split on
+      // both so we see every frame. Some lines may be partial mid-chunk
+      // — that's fine, the next chunk will carry the completion.
       for (const line of text.split(/[\r\n]+/)) {
         const trimmed = line.trim()
         if (!trimmed) continue
-        // Match: "Phase: NN% (X/Y), ..." or "Phase: NN%"
-        const match = trimmed.match(/^(.+?):\s+(\d+)%/)
-        if (match) {
-          onProgress({
-            phase: match[1].trim(),
-            percent: parseInt(match[2], 10),
-            detail: trimmed
-          })
-        }
+        const parsed = parsePushLine(trimmed)
+        if (parsed) emit(parsed)
       }
     })
 
-    proc.on('close', (code) => {
-      activePushProcess = null
+    proc.on('close', (code, signal) => {
+      if (heartbeat) clearInterval(heartbeat)
+      const wasCancelled = handle.cancelled
+      if (activePush === handle) activePush = null
+
+      if (wasCancelled) {
+        // User-initiated cancel: reject with a sentinel so the UI can
+        // suppress the error toast but callers still know it didn't succeed.
+        const err = new Error('Push cancelled')
+        ;(err as any).cancelled = true
+        reject(err)
+        return
+      }
+
       if (code === 0) {
         resolve((stdout + stderr).trim())
       } else {
-        const err = new Error(`Command failed: git ${args.join(' ')}\n${stderr.trim()}`)
+        const err = new Error(
+          `Command failed: git ${args.join(' ')} (code=${code}, signal=${signal ?? 'none'})\n${stderr.trim()}`
+        )
         reject(err)
       }
     })
 
     proc.on('error', (err) => {
-      activePushProcess = null
+      if (heartbeat) clearInterval(heartbeat)
+      if (activePush === handle) activePush = null
+      svc.logError('[git-manager] push spawn error', err)
       reject(err)
     })
   })
 }
 
-export function cancelPush(): boolean {
-  if (activePushProcess) {
-    activePushProcess.kill()
-    activePushProcess = null
-    return true
+/**
+ * Parse a single stderr line from `git push --progress` into a structured
+ * progress frame. Returns null if the line doesn't carry any useful info
+ * (debug noise, blank separators, etc.).
+ *
+ * Handles:
+ *   - "Enumerating objects: 12345, done."
+ *   - "Counting objects:  55% (11/20)"
+ *   - "Compressing objects:  40% (8/20), done."
+ *   - "Writing objects:  45% (9/20), 2.00 MiB | 1.50 MiB/s"
+ *   - "remote: Resolving deltas:  50% (15/30)"
+ *   - arbitrary pre-push hook output → stage: 'hook'
+ */
+export function parsePushLine(line: string): PushProgress | null {
+  const isRemote = /^remote:\s*/i.test(line)
+  const body = isRemote ? line.replace(/^remote:\s*/i, '').trim() : line
+
+  // Bytes-transferred throughput appears on 'Writing objects' lines as
+  // "..., 2.00 MiB | 1.50 MiB/s" (or KiB/s, GiB/s).
+  const rateMatch = body.match(/\|\s*([\d.]+\s*[KMG]i?B\/s)\s*$/i)
+  const throughput = rateMatch ? rateMatch[1].replace(/\s+/g, '') : undefined
+
+  // Stage 1: percent-based phase — "Phase: NN% (X/Y)"
+  const pct = body.match(/^(.+?):\s+(\d+)%/)
+  if (pct) {
+    const phaseName = pct[1].trim()
+    const phasePercent = Math.max(0, Math.min(100, parseInt(pct[2], 10)))
+    const stage = mapStage(phaseName, isRemote)
+    const { percent } = computeOverall(stage, phasePercent)
+    return {
+      stage,
+      phase: phaseName,
+      percent,
+      phasePercent,
+      detail: line,
+      remote: isRemote,
+      throughput: stage === 'write' ? throughput : undefined
+    }
   }
-  return false
+
+  // Stage 2: counter-based enumerate — "Enumerating objects: 12345, done."
+  const enumMatch = body.match(/^Enumerating objects:\s+(\d+)/i)
+  if (enumMatch) {
+    const count = parseInt(enumMatch[1], 10)
+    return {
+      stage: 'enumerate',
+      phase: 'Enumerating objects',
+      percent: PUSH_STAGE_WEIGHTS.enumerate.start, // indeterminate — hold at stage start
+      phasePercent: 0,
+      detail: line,
+      remote: false,
+      count
+    }
+  }
+
+  // Stage 3: recognized-but-uninteresting git info lines — ignore them so
+  // they don't get misclassified as hook output. Keep this list tight: only
+  // lines we're sure come from git itself.
+  if (
+    /^Delta compression using /i.test(body) ||
+    /^Total \d+ /i.test(body) ||
+    /^To [^\s]+$/i.test(body) ||          // "To github.com:foo/bar.git"
+    /^\s*[0-9a-f]{7,}\.\.[0-9a-f]{7,}\s+/.test(body) ||  // "  abc1234..def5678  branch -> branch"
+    /^\s*\*\s+\[new branch\]/i.test(body) ||
+    /^Everything up-to-date$/i.test(body) ||
+    /^remote: /i.test(line)               // any other remote: noise we haven't decoded
+  ) {
+    return null
+  }
+
+  // Stage 4: anything else before we've seen real git output is probably a
+  // pre-push hook writing to stderr (husky, lint-staged, lefthook, etc.).
+  // Surface it so the user knows the push itself hasn't started yet.
+  return {
+    stage: 'hook',
+    phase: 'Running pre-push hook',
+    percent: 0,
+    phasePercent: 0,
+    detail: line,
+    remote: false
+  }
+}
+
+function mapStage(phaseName: string, isRemote: boolean): PushStage {
+  const n = phaseName.toLowerCase()
+  if (n.startsWith('counting')) return 'count'
+  if (n.startsWith('compressing')) return 'compress'
+  if (n.startsWith('writing')) return 'write'
+  if (isRemote && n.startsWith('resolving')) return 'resolve'
+  if (n.startsWith('resolving')) return 'resolve' // some git builds don't prefix with remote:
+  return 'unknown'
+}
+
+function computeOverall(stage: PushStage, phasePercent: number): { percent: number } {
+  const w = (PUSH_STAGE_WEIGHTS as Record<string, { start: number; span: number } | undefined>)[stage]
+  if (!w) return { percent: 0 }
+  const pct = Math.max(0, Math.min(100, phasePercent))
+  return { percent: Math.round(w.start + (w.span * pct) / 100) }
+}
+
+/**
+ * Cancel the active push. Returns true if a push was running.
+ *
+ * Killing git is harder than it looks:
+ *   - git spawns helper processes (git-remote-http.exe, ssh, credential
+ *     helpers, pre-push hooks). Sending SIGTERM to only the parent often
+ *     leaves these children alive and the stderr pipe open, so Node's
+ *     'close' event never fires and the UI sits on "Cancelling…" forever.
+ *   - On Windows there are no POSIX signals; Node's kill() calls
+ *     TerminateProcess on the parent pid but doesn't walk the tree.
+ *
+ * The fix: tree-kill via taskkill /T on Windows, and escalate SIGTERM →
+ * SIGKILL on Unix. A watchdog timer force-resets state if git still
+ * doesn't die — otherwise the Voice-style "daemon stuck" ghost we'd see
+ * would block all future pushes.
+ */
+export function cancelPush(): boolean {
+  const handle = activePush
+  if (!handle) return false
+  const svc = getServices()
+  handle.cancelled = true
+  const { proc } = handle
+  const pid = proc.pid
+
+  svc.log(`[git-manager] cancelPush: killing push pid=${pid ?? '?'} on ${process.platform}`)
+
+  if (process.platform === 'win32' && pid !== undefined) {
+    // /T = tree, /F = force. Walks child processes so git-remote-* and
+    // any pre-push hook helpers get killed too.
+    execFile('taskkill', ['/pid', String(pid), '/T', '/F'], (err) => {
+      if (err) svc.logError('[git-manager] taskkill failed — falling back to proc.kill', err)
+    })
+    // Belt-and-suspenders: also send the Node-level kill in case taskkill
+    // takes a moment to dispatch.
+    try { proc.kill() } catch { /* already gone */ }
+  } else {
+    // Unix: SIGTERM, then SIGKILL after 2s if still alive.
+    try { proc.kill('SIGTERM') } catch { /* already gone */ }
+    setTimeout(() => {
+      if (activePush !== handle) return // already exited
+      try { proc.kill('SIGKILL') } catch { /* already gone */ }
+    }, 2_000)
+  }
+
+  // Watchdog: if 'close' still hasn't fired in 5s, assume we're wedged.
+  // Force-detach so a fresh push can start. The old process may still be
+  // a zombie but it won't block new work.
+  setTimeout(() => {
+    if (activePush === handle) {
+      svc.logError(
+        `[git-manager] cancelPush: watchdog expired — process pid=${pid ?? '?'} did not exit in ${PUSH_CANCEL_WATCHDOG_MS}ms; detaching`,
+        null
+      )
+      activePush = null
+    }
+  }, PUSH_CANCEL_WATCHDOG_MS)
+
+  return true
 }
 
 export async function push(cwd: string, onProgress?: (progress: PushProgress) => void): Promise<string> {

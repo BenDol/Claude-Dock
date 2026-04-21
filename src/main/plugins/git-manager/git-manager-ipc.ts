@@ -220,16 +220,58 @@ export function registerGitManagerIpc(): void {
     }
   })
 
+  /**
+   * Build a throttled push-progress emitter for a given webContents.
+   * Git fires stderr frames 30+ times a second during the Writing phase,
+   * and every frame triggers a React re-render of the push button. Cap
+   * the rate to ~10 Hz (with immediate flush on stage change so phase
+   * transitions feel crisp).
+   */
+  const makeProgressEmitter = (win: BrowserWindow | null) => {
+    let lastSentAt = 0
+    let lastStage: gitOps.PushStage | null = null
+    let pending: gitOps.PushProgress | null = null
+    let timer: NodeJS.Timeout | null = null
+    const MIN_INTERVAL_MS = 100
+
+    const flush = () => {
+      timer = null
+      if (!pending) return
+      if (!win || win.isDestroyed()) { pending = null; return }
+      win.webContents.send('git-manager:push-progress', pending)
+      lastSentAt = Date.now()
+      lastStage = pending.stage
+      pending = null
+    }
+
+    return (progress: gitOps.PushProgress) => {
+      if (!win || win.isDestroyed()) return
+      const now = Date.now()
+      const stageChanged = progress.stage !== lastStage
+      // Always emit stage changes and terminal (100%) frames immediately —
+      // those are the ones users care about seeing crisply.
+      const immediate = stageChanged || progress.phasePercent === 100 || progress.stage === 'waiting' || progress.stage === 'hook'
+      if (immediate || now - lastSentAt >= MIN_INTERVAL_MS) {
+        pending = progress
+        if (timer) { clearTimeout(timer); timer = null }
+        flush()
+        return
+      }
+      pending = progress
+      if (!timer) timer = setTimeout(flush, MIN_INTERVAL_MS - (now - lastSentAt))
+    }
+  }
+
   ipcMain.handle(IPC.GIT_MGR_PUSH, async (event, projectDir: string) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender)
-      const output = await gitOps.push(projectDir, (progress) => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('git-manager:push-progress', progress)
-        }
-      })
+      const emit = makeProgressEmitter(win)
+      const output = await gitOps.push(projectDir, emit)
       return { success: true, output }
     } catch (err) {
+      if ((err as { cancelled?: boolean })?.cancelled) {
+        return { success: false, error: 'Push cancelled', cancelled: true }
+      }
       getServices().logError('[git-manager] push failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Push failed' }
     }
@@ -238,13 +280,13 @@ export function registerGitManagerIpc(): void {
   ipcMain.handle(IPC.GIT_MGR_PUSH_FORCE_WITH_LEASE, async (event, projectDir: string) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender)
-      const output = await gitOps.pushForceWithLease(projectDir, (progress) => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('git-manager:push-progress', progress)
-        }
-      })
+      const emit = makeProgressEmitter(win)
+      const output = await gitOps.pushForceWithLease(projectDir, emit)
       return { success: true, output }
     } catch (err) {
+      if ((err as { cancelled?: boolean })?.cancelled) {
+        return { success: false, error: 'Push cancelled', cancelled: true }
+      }
       getServices().logError('[git-manager] push --force-with-lease failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Force push failed' }
     }
@@ -253,13 +295,13 @@ export function registerGitManagerIpc(): void {
   ipcMain.handle(IPC.GIT_MGR_PUSH_WITH_TAGS, async (event, projectDir: string) => {
     try {
       const win = BrowserWindow.fromWebContents(event.sender)
-      const output = await gitOps.pushWithTags(projectDir, (progress) => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('git-manager:push-progress', progress)
-        }
-      })
+      const emit = makeProgressEmitter(win)
+      const output = await gitOps.pushWithTags(projectDir, emit)
       return { success: true, output }
     } catch (err) {
+      if ((err as { cancelled?: boolean })?.cancelled) {
+        return { success: false, error: 'Push cancelled', cancelled: true }
+      }
       getServices().logError('[git-manager] push --follow-tags failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Push with tags failed' }
     }

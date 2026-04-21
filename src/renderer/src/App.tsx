@@ -13,7 +13,7 @@ import { useEditorStore } from './stores/editor-store'
 import { useSettingsStore } from './stores/settings-store'
 import { getDockApi } from './lib/ipc-bridge'
 import { applyThemeToDocument } from './lib/theme'
-import { computeAutoLayout, findAdjacentTerminal, findTerminalFromToolbar, TOOLBAR_FOCUS_ID, type Direction } from './lib/grid-math'
+import { computeAutoLayout, computePortraitLayout, findAdjacentTerminal, findTerminalFromToolbar, TOOLBAR_FOCUS_ID, type Direction } from './lib/grid-math'
 import { getPluginViews } from './plugin-views'
 import { useInputContextMenu } from './hooks/useInputContextMenu'
 import type { ClaudeTaskRequest, CiFixTask, ReferenceThisTask, MergeResolveTask, IssueFixTask, TaskPermissions } from '../../shared/claude-task-types'
@@ -1238,12 +1238,57 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
   onClose: () => void
 }) {
   const terminals = useDockStore((s) => s.terminals)
+  const maxColumns = useSettingsStore((s) => s.settings.grid.maxColumns)
+  const viewportMode = useSettingsStore((s) => s.settings.grid.viewportMode ?? 'auto')
   const [selected, setSelected] = useState<string | null>(null) // null = new terminal
   const [contextText, setContextText] = useState('')
   const [permMode, setPermMode] = useState(defaultPermissions.permissionMode)
   const [allowedTools, setAllowedTools] = useState<Set<string>>(new Set(defaultPermissions.allowedTools))
   const [showPerms, setShowPerms] = useState(false)
   const [useSession, setUseSession] = useState(false)
+
+  // Measure the real dock grid so the picker mini-map mirrors it.
+  const [dockSize, setDockSize] = useState<{ width: number; height: number } | null>(null)
+  useEffect(() => {
+    const el = document.querySelector('.dock-grid-container')
+    if (el instanceof HTMLElement) {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setDockSize({ width: rect.width, height: rect.height })
+      }
+    }
+  }, [])
+
+  // Match the same orientation detection useGridLayout uses so the mini-map
+  // reflects whichever mode the dock is currently in.
+  const orientation: 'landscape' | 'portrait' = useMemo(() => {
+    if (viewportMode === 'landscape') return 'landscape'
+    if (viewportMode === 'portrait') return 'portrait'
+    if (!dockSize) return 'landscape'
+    return (dockSize.height > dockSize.width || dockSize.width < 500) ? 'portrait' : 'landscape'
+  }, [viewportMode, dockSize])
+
+  // Compute the layout exactly the way the dock does — including spanning
+  // rules (e.g., 3-terminal layouts where one cell spans two rows). Custom
+  // column/row ratios from manual resize aren't mirrored; the picker shows
+  // default equal ratios.
+  const { cols: gridCols, rows: gridRows, layout: miniLayout } = useMemo(() => {
+    const ids = terminals.map((t) => t.id)
+    const { cols, layout } = orientation === 'portrait'
+      ? computePortraitLayout(ids)
+      : computeAutoLayout(ids, maxColumns)
+    const rows = layout.length > 0 ? Math.max(...layout.map((l) => l.y + l.h)) : 1
+    return { cols, rows, layout }
+  }, [terminals, orientation, maxColumns])
+
+  // Pin the mini-map to a square bounding box so both orientations fit the
+  // modal consistently. Landscape → wide & short, portrait → narrow & tall.
+  const MINI_MAX = 300
+  const { miniW, miniH } = useMemo(() => {
+    const aspect = dockSize ? dockSize.width / Math.max(1, dockSize.height) : 16 / 9
+    if (aspect >= 1) return { miniW: MINI_MAX, miniH: Math.max(80, Math.round(MINI_MAX / aspect)) }
+    return { miniW: Math.max(80, Math.round(MINI_MAX * aspect)), miniH: MINI_MAX }
+  }, [dockSize])
 
   const backdropRef = useRef<HTMLDivElement>(null)
 
@@ -1285,31 +1330,42 @@ function TerminalPicker({ taskLabel, defaultPermissions, onSelect, onClose }: {
           <span className="tp-title">{taskLabel} — Send to terminal</span>
           <button className="tp-close" onClick={onClose}>{'\u2715'}</button>
         </div>
-        <div className="tp-grid">
-          {terminals.map((term) => {
-            const isSelected = selected === term.id
-            const isAlive = term.isAlive
-            return (
-              <button
-                key={term.id}
-                className={`tp-cell${isSelected ? ' tp-cell-selected' : ''}${!isAlive ? ' tp-cell-dead' : ''}`}
-                onClick={() => setSelected(term.id)}
-                disabled={!isAlive}
-                title={term.title || ''}
-              >
-                <span className="tp-cell-num">{term.title?.replace(/\D/g, '') || '?'}</span>
-                <span className="tp-cell-label">{term.title || 'Terminal'}</span>
-              </button>
-            )
-          })}
+        {terminals.length > 0 && (
+          <div className="tp-grid" style={{ width: miniW, height: miniH }}>
+            {miniLayout.map((l) => {
+              const term = terminals.find((t) => t.id === l.i)
+              if (!term) return null
+              const isSelected = selected === term.id
+              const isAlive = term.isAlive
+              return (
+                <button
+                  key={term.id}
+                  className={`tp-cell${isSelected ? ' tp-cell-selected' : ''}${!isAlive ? ' tp-cell-dead' : ''}`}
+                  onClick={() => setSelected(term.id)}
+                  disabled={!isAlive}
+                  title={term.title || ''}
+                  style={{
+                    left: `${(l.x / gridCols) * 100}%`,
+                    top: `${(l.y / gridRows) * 100}%`,
+                    width: `${(l.w / gridCols) * 100}%`,
+                    height: `${(l.h / gridRows) * 100}%`
+                  }}
+                >
+                  <span className="tp-cell-num">{term.title?.replace(/\D/g, '') || '?'}</span>
+                  <span className="tp-cell-label">{term.title || 'Terminal'}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <div className="tp-new-row">
           <button
-            key="__new__"
             className={`tp-cell tp-cell-new${selected === null ? ' tp-cell-selected' : ''}`}
             onClick={() => setSelected(null)}
             title="Create new terminal"
           >
             <span className="tp-cell-icon">+</span>
-            <span className="tp-cell-label">New</span>
+            <span className="tp-cell-label">New Terminal</span>
           </button>
         </div>
         <div className="tp-context">

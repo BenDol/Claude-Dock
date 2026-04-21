@@ -399,15 +399,17 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
           >
             <HistoryIcon />
           </button>
-          <button
-            data-toolbar-btn
-            tabIndex={-1}
-            className="toolbar-btn toolbar-btn-icon toolbar-add-resume toolbar-add-worktree"
-            onClick={onAddWorktreeTerminal}
-            title="New worktree terminal"
-          >
-            <WorktreePlusIcon />
-          </button>
+          {!worktreeMode && (
+            <button
+              data-toolbar-btn
+              tabIndex={-1}
+              className="toolbar-btn toolbar-btn-icon toolbar-add-resume toolbar-add-worktree"
+              onClick={onAddWorktreeTerminal}
+              title="New worktree terminal"
+            >
+              <WorktreePlusIcon />
+            </button>
+          )}
           <button
             data-toolbar-btn
             tabIndex={-1}

@@ -723,10 +723,18 @@ body {
 }
 
 .tp-grid {
+  position: relative;
+  margin: 14px auto 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  /* width/height set inline to match the real dock's aspect ratio */
+}
+
+.tp-new-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 14px;
+  justify-content: center;
+  padding: 0 14px 14px;
 }
 
 .tp-cell {
@@ -745,6 +753,19 @@ body {
   transition: border-color 0.12s, background 0.12s;
   color: var(--text-secondary);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Inside the mini-map, cells are absolutely positioned to mirror the real
+   grid — their width/height come from inline style as percentages. Their
+   2px borders overlap at seams, which gives natural visual separation
+   without pushing cells outside the container. */
+.tp-grid .tp-cell {
+  position: absolute;
+  width: auto;
+  height: auto;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
 .tp-cell:hover:not(:disabled) {
