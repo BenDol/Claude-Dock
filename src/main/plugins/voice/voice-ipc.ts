@@ -172,16 +172,22 @@ print(str(devs))
     const numSeconds = typeof seconds === 'number' && Number.isFinite(seconds) ? seconds : 3
     const cfg = getVoiceConfig()
     const dur = Math.max(1, Math.min(30, Math.floor(numSeconds) || 3))
+    // Embed the config as base64-encoded JSON and decode inside Python. Raw
+    // `JSON.stringify(obj)` interpolation produces `true`/`false`/`null` tokens
+    // that Python can't parse (`NameError: name 'false' is not defined`), and
+    // string escapes differ between JSON and Python source. Base64 sidesteps
+    // both problems — no quoting, no token translation.
+    const cfgJsonB64 = Buffer.from(
+      JSON.stringify({ recording: cfg.recording, transcriber: cfg.transcriber }),
+      'utf8'
+    ).toString('base64')
     const script = `
-import json, sys, os, tempfile
+import json, sys, os, tempfile, base64
 sys.path.insert(0, ${JSON.stringify(svc().paths.pythonDir)})
 from src.recorder import VoiceRecorder
 from src.transcriber import create_transcriber
 
-cfg = ${JSON.stringify({
-      recording: cfg.recording,
-      transcriber: cfg.transcriber
-    })}
+cfg = json.loads(base64.b64decode(${JSON.stringify(cfgJsonB64)}).decode('utf-8'))
 
 rec = VoiceRecorder(
     sample_rate=cfg['recording']['sample_rate'],
@@ -290,6 +296,23 @@ print(json.dumps({'text': text}))
     }
   })
 
+  ipcMain.handle(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS, async () => {
+    // macOS-only: deep-link to the Accessibility privacy pane. Other OSes
+    // don't need this permission so we return early and leave the caller a
+    // falsy result to render whatever fallback copy they want.
+    if (process.platform !== 'darwin') {
+      svc().log(`[voice-ipc] openAccessibilitySettings called on ${process.platform} — no-op`)
+      return false
+    }
+    try {
+      await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+      return true
+    } catch (err) {
+      svc().logError('[voice-ipc] openAccessibilitySettings failed', err)
+      return false
+    }
+  })
+
   ipcMain.handle(IPC.VOICE_COPY_DIAGNOSTICS, async () => {
     const cfg = getVoiceConfig()
     const status = mgr().getStatus()
@@ -341,7 +364,8 @@ export function disposeVoiceIpc(): void {
     IPC.VOICE_MCP_RESOLVE_CONFLICT,
     IPC.VOICE_RESTART_DAEMON,
     IPC.VOICE_OPEN_LOGS,
-    IPC.VOICE_COPY_DIAGNOSTICS
+    IPC.VOICE_COPY_DIAGNOSTICS,
+    IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS
   ]
   for (const ch of channels) {
     try { ipcMain.removeHandler(ch) } catch { /* ignore */ }

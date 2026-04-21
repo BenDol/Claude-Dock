@@ -1,18 +1,20 @@
 /* Voice plugin window styling. Uses CSS variables from global.css so it
    picks up light/dark theme automatically via applyThemeToDocument. */
 
-/* Global CSS pins html/body/#root to `overflow: hidden`, which is correct for
-   the main dock but traps zoomed content in this plugin window — when the user
-   zooms past 1.0 the document grows past the viewport and no scrollbar appears.
-   Allow document-level scrolling here so the whole layout stays reachable. */
+/* Pin the document to the viewport. The titlebar / status header / tab bar
+   live in the flex column at fixed height (flex-shrink: 0) and `.voice-content`
+   owns all scrolling. This keeps the header visible when the user scrolls the
+   tab body or zooms past 1.0 — scrolling happens inside `.voice-content`
+   instead of pushing the titlebar off-screen. */
 html, body, #root {
-  overflow: auto;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .voice-root {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
   background: var(--bg-primary, #0f0f14);
   color: var(--text-primary, #e5e5e5);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -83,6 +85,7 @@ html, body, #root {
   gap: 12px;
   border-bottom: 1px solid var(--border-color, #2a2a33);
   background: var(--bg-primary, #0f0f14);
+  flex-shrink: 0;
 }
 
 .voice-status-chip {
@@ -115,6 +118,7 @@ html, body, #root {
   border-bottom: 1px solid var(--border-color, #2a2a33);
   padding: 0 12px;
   background: var(--bg-primary, #0f0f14);
+  flex-shrink: 0;
 }
 .voice-tab {
   padding: 10px 14px;

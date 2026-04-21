@@ -132,6 +132,16 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
 export type VoiceDaemonState = 'stopped' | 'starting' | 'running' | 'crashed' | 'disabled'
 export type VoiceInstallState = 'unknown' | 'missing' | 'installing' | 'installed' | 'error'
 
+/**
+ * Per-OS capability of the global hotkey daemon. Replaces the old boolean
+ * `hotkeySupported` so the UI can show a targeted banner / action per state:
+ *   - `supported`        : daemon can run (Windows, Linux/X11, macOS with permission)
+ *   - `needs-permission` : macOS without Accessibility permission yet
+ *   - `wayland`          : Linux/Wayland — no global hooks available
+ *   - `unsupported`      : exotic platform we haven't tested
+ */
+export type VoiceHotkeySupport = 'supported' | 'needs-permission' | 'wayland' | 'unsupported'
+
 export interface VoiceRuntimeStatus {
   daemonState: VoiceDaemonState
   installState: VoiceInstallState
@@ -149,19 +159,15 @@ export interface VoiceRuntimeStatus {
   mcpRegisteredPath: string | null
   /**
    * Host OS as reported by the main process (`process.platform`). Exposed in
-   * the status payload so the renderer can conditionally gate UI — notably
-   * the hotkey configuration, which only operates on Windows. Kept here
-   * rather than a separate IPC because every consumer that cares about
-   * platform already subscribes to status updates.
+   * the status payload so the renderer can render per-OS copy without an extra
+   * IPC round-trip.
    */
   platform: NodeJS.Platform
   /**
-   * True when the hotkey daemon can actually function on the current OS.
-   * False on macOS/Linux where the `keyboard` library is unsupported or
-   * requires root. UI uses this to surface a clear "hotkey not available"
-   * banner and direct users to the MCP / slash-command path.
+   * Capability of the global hotkey daemon on this host. Drives the HotkeyTab
+   * banner and the "Enabled" checkbox gating. See `VoiceHotkeySupport`.
    */
-  hotkeySupported: boolean
+  hotkeySupport: VoiceHotkeySupport
 }
 
 export interface VoiceSetupProgress {

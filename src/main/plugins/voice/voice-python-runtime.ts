@@ -523,8 +523,7 @@ export async function verifyInstall(): Promise<{ ok: boolean; missing: string[] 
   const py = getVenvPython()
   if (!fs.existsSync(py)) return { ok: false, missing: ['<venv-python>'] }
 
-  const required = ['mcp', 'sounddevice', 'numpy', 'faster_whisper', 'pyperclip']
-  if (process.platform === 'win32') required.push('keyboard')
+  const required = ['mcp', 'sounddevice', 'numpy', 'faster_whisper', 'pyperclip', 'pynput']
 
   const missing: string[] = []
   for (const mod of required) {

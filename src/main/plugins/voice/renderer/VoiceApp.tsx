@@ -13,7 +13,8 @@ import type {
   VoiceSetupProgress,
   VoiceDaemonState,
   VoiceInstallState,
-  VoiceInputDevice
+  VoiceInputDevice,
+  VoiceHotkeySupport
 } from '../../../../shared/voice-types'
 
 type Tab = 'hotkey' | 'recording' | 'transcriber' | 'setup'
@@ -365,28 +366,75 @@ export default function VoiceApp() {
 
 /* --------------------------------- tabs -------------------------------- */
 
+function HotkeySupportBanner({ support, platform }: { support: VoiceHotkeySupport; platform: NodeJS.Platform }) {
+  if (support === 'supported') return null
+
+  const [rechecking, setRechecking] = useState(false)
+  const amber = { background: 'rgba(180, 140, 0, 0.12)', borderColor: 'rgba(180, 140, 0, 0.6)', color: 'var(--text-primary)' }
+
+  const onOpenSettings = useCallback(async () => {
+    try { await getDockApi().voice.openAccessibilitySettings() } catch { /* ignore — best effort */ }
+  }, [])
+
+  const onRecheck = useCallback(async () => {
+    setRechecking(true)
+    try {
+      // Re-query status first so the banner updates instantly, then ask the
+      // manager to try restarting the daemon. restartDaemon() is a no-op if
+      // the permission is still missing.
+      await getDockApi().voice.getStatus()
+      await getDockApi().voice.restartDaemon()
+    } catch { /* ignore */ }
+    setRechecking(false)
+  }, [])
+
+  if (support === 'needs-permission') {
+    return (
+      <div className="voice-error-card" style={amber}>
+        <strong>Grant Accessibility permission to use the global hotkey.</strong>{' '}
+        macOS requires explicit permission for any app that listens for global keystrokes.
+        Open <em>System Settings → Privacy &amp; Security → Accessibility</em> and enable <strong>Claude Dock</strong>, then click Re-check.
+        The <code>/voice</code> MCP command works now regardless of permission.
+        <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+          <button onClick={onOpenSettings}>Open System Settings</button>
+          <button onClick={onRecheck} disabled={rechecking}>{rechecking ? 'Re-checking…' : 'Re-check'}</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (support === 'wayland') {
+    return (
+      <div className="voice-error-card" style={amber}>
+        <strong>Global hotkey isn't available on Wayland.</strong>{' '}
+        No Linux library can reliably hook global keystrokes under Wayland without a compositor-specific portal.
+        Use the <code>/voice</code> slash command in Claude — the MCP server works on Wayland.
+        The settings below remain editable so they sync to machines running X11 or Windows.
+      </div>
+    )
+  }
+
+  // 'unsupported' fallback
+  const osLabel = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : platform
+  return (
+    <div className="voice-error-card" style={amber}>
+      <strong>Global hotkey isn't supported on {osLabel}.</strong>{' '}
+      Voice still works through the <code>/voice</code> slash command in Claude — the MCP server is registered globally.
+    </div>
+  )
+}
+
 function HotkeyTab({ cfg, patch, status }: { cfg: VoiceConfig; patch: PatchFn; status: VoiceRuntimeStatus }) {
   type Mode = VoiceConfig['hotkey']['mode']
   type Scope = VoiceConfig['hotkey']['scope']
-  // Hotkey support is Windows-only: the Python `keyboard` package is unusable
-  // on macOS and requires root on Linux. We still render the editor so users
-  // who share settings between machines can configure a binding, but we show
-  // a banner explaining that only the /voice slash command (MCP) path is
-  // functional on non-Windows.
-  const hotkeySupported = status.hotkeySupported
+  // Hotkey capability varies by OS — see `VoiceHotkeySupport`. The editor
+  // always renders so users can configure bindings that sync to other
+  // machines, but the "Enabled" toggle and banner adapt to this host's state.
+  const hotkeySupport = status.hotkeySupport
+  const hotkeySupported = hotkeySupport === 'supported'
   return (
     <>
-      {!hotkeySupported && (
-        <div
-          className="voice-error-card"
-          style={{ background: 'rgba(180, 140, 0, 0.12)', borderColor: 'rgba(180, 140, 0, 0.6)', color: 'var(--text-primary)' }}
-        >
-          <strong>Global hotkey is not available on {status.platform === 'darwin' ? 'macOS' : status.platform === 'linux' ? 'Linux' : status.platform}.</strong>{' '}
-          The underlying key-capture library is Windows-only (and requires root on Linux).
-          Voice still works through the <code>/voice</code> slash command in Claude — the MCP server is registered globally and runs on all platforms.
-          The settings below are preserved for when Voice is used from a Windows machine.
-        </div>
-      )}
+      <HotkeySupportBanner support={hotkeySupport} platform={status.platform} />
       <div className="voice-section">
         <h3>Hotkey</h3>
         <div className="voice-field">
@@ -752,6 +800,10 @@ function SetupTab({
   onRunSetup: () => void
   onUninstall: () => void
 }) {
+  // Once install has finished, surface any per-OS hotkey capability issue here
+  // too (e.g. macOS permission, Linux/Wayland). This completes the setup story:
+  // install deps -> grant permission -> done.
+  const showHotkeyBanner = status.installState === 'installed' && status.hotkeySupport !== 'supported'
   return (
     <>
       <div className="voice-section">
@@ -759,6 +811,7 @@ function SetupTab({
         <div className="voice-field"><label>State</label><span>{status.installState}</span></div>
         <div className="voice-field"><label>Python</label><span>{status.pythonPath ?? 'not set'}</span></div>
         <div className="voice-field"><label>MCP entry</label><span>{status.mcpRegisteredPath ?? 'not registered'}</span></div>
+        <div className="voice-field"><label>Hotkey support</label><span>{status.hotkeySupport}</span></div>
         <div className="voice-row" style={{ marginTop: 10 }}>
           <button className="voice-btn primary" onClick={onRunSetup}>
             {status.installState === 'installed' ? 'Reinstall' : 'Run setup'}
@@ -768,6 +821,12 @@ function SetupTab({
           )}
         </div>
       </div>
+      {showHotkeyBanner && (
+        <div className="voice-section">
+          <h3>Hotkey permission</h3>
+          <HotkeySupportBanner support={status.hotkeySupport} platform={status.platform} />
+        </div>
+      )}
     </>
   )
 }

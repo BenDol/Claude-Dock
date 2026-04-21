@@ -378,6 +378,7 @@ export const IPC = {
   VOICE_OPEN_LOGS: 'voice:openLogs',
   VOICE_COPY_DIAGNOSTICS: 'voice:copyDiagnostics',
   VOICE_RESTART_DAEMON: 'voice:restartDaemon',
+  VOICE_OPEN_ACCESSIBILITY_SETTINGS: 'voice:openAccessibilitySettings',
 
   // Coordinator Plugin
   COORDINATOR_OPEN: 'coordinator:open',

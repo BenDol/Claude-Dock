@@ -176,17 +176,27 @@ def _run_daemon():
 
     # ---- load components ---- #
 
+    # Wayland provides no reliable global-hook API. The main process also gates
+    # this, but check again here so a daemon launched from a stale X11 session
+    # into Wayland exits cleanly rather than silently not firing.
+    if sys.platform.startswith("linux"):
+        if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
+            _log("Wayland session detected — global hotkeys unsupported, exiting. Use /voice MCP command instead.")
+            return
+
     try:
-        import keyboard as kb
+        from pynput import keyboard as pkb
     except ImportError:
-        _log("'keyboard' package not installed — exiting")
+        _log("'pynput' package not installed — exiting")
         return
     except Exception as exc:
-        # keyboard library needs root on Linux and doesn't work on macOS
-        _log(f"keyboard init failed: {exc}")
-        if os.name != "nt":
-            _log("NOTE: The 'keyboard' library requires root on Linux "
-                 "and is unsupported on macOS. Use /voice command instead.")
+        _log(f"pynput init failed: {exc}")
+        return
+
+    try:
+        from src.hotkey_parser import parse_binding, modifiers_satisfied
+    except Exception as exc:
+        _log(f"Hotkey parser import failed: {exc}")
         return
 
     from src.recorder import VoiceRecorder
@@ -419,16 +429,47 @@ def _run_daemon():
                     _log(f"Auto-send keyword '{kw}' detected")
                     break
 
+        # Paste via pynput Controller. Ctrl+V on Windows/Linux, Cmd+V on macOS.
+        # NB: unlike the legacy `keyboard` lib, pynput cannot "suppress" the
+        # trigger key from reaching the focused app on Windows. For
+        # modifier+letter bindings (alt+q, ctrl+shift+v) this is usually
+        # harmless — the modifier alone doesn't produce input.
         try:
             import pyperclip
+            controller = pkb.Controller()
+            paste_modifier = pkb.Key.cmd if sys.platform == "darwin" else pkb.Key.ctrl
             if text:
+                # When auto-pasting, snapshot the user's current clipboard and
+                # restore it after the paste completes — otherwise every hotkey
+                # fire silently wipes whatever they had copied. pyperclip only
+                # handles text; non-text clipboard content (images, rich HTML)
+                # cannot be preserved and will still be lost.
+                prior_clipboard = None
+                if auto_paste:
+                    try:
+                        prior_clipboard = pyperclip.paste()
+                    except Exception as exc:
+                        _log(f"Could not read prior clipboard (won't restore): {exc}")
+
                 pyperclip.copy(text)
                 if auto_paste:
                     time.sleep(0.05)
-                    kb.send("ctrl+v")
+                    with controller.pressed(paste_modifier):
+                        controller.press("v")
+                        controller.release("v")
+                    # Wait long enough for the focused app to consume the paste
+                    # before restoring the prior clipboard — otherwise the app
+                    # races and pastes the restored value instead.
+                    time.sleep(0.15)
+                    if prior_clipboard is not None and prior_clipboard != text:
+                        try:
+                            pyperclip.copy(prior_clipboard)
+                        except Exception as exc:
+                            _log(f"Could not restore prior clipboard: {exc}")
             if should_send:
                 time.sleep(0.3)
-                kb.press_and_release("enter")
+                controller.press(pkb.Key.enter)
+                controller.release(pkb.Key.enter)
         except Exception as exc:
             _log(f"Paste error: {exc}")
             _beep(220, 300)
@@ -440,27 +481,72 @@ def _run_daemon():
 
     # ---- register and block ---- #
 
-    suppress = scope != "focused"
-
     try:
-        if mode == "hold":
-            # Hold mode: start on press, stop on release of the trigger key
-            # Parse the trigger key (last key in the binding, e.g. "q" from "alt+q")
-            trigger_key = binding.split("+")[-1].strip()
-            kb.add_hotkey(binding, on_hold_press, suppress=suppress, trigger_on_release=False)
-            kb.on_release(lambda e: on_hold_release(e) if e.name == trigger_key else None)
-            _log(f"Hotkey [{binding}] active (hold mode, trigger={trigger_key}, scope={scope}) — waiting for input")
-        else:
-            kb.add_hotkey(binding, on_hotkey, suppress=suppress)
-            _log(f"Hotkey [{binding}] active (toggle mode, scope={scope}) — waiting for input")
+        modifier_groups, trigger = parse_binding(binding)
     except Exception as exc:
-        _log(f"Failed to register hotkey: {exc}")
+        _log(f"Failed to parse hotkey binding {binding!r}: {exc}")
         return
 
+    held: set = set()
+    last_fire = [0.0]            # mutable cell for toggle-debounce timestamp
+    trigger_armed = [False]      # hold-mode: True between press and release
+
+    def _is_trigger(key) -> bool:
+        # KeyCode equality is char-based; Key equality handles the named ones.
+        return key == trigger
+
+    def _on_press(key):
+        try:
+            held.add(key)
+            if not _is_trigger(key):
+                return
+            if not modifiers_satisfied(held, modifier_groups):
+                return
+
+            if mode == "hold":
+                if trigger_armed[0]:
+                    return  # auto-repeat while held
+                trigger_armed[0] = True
+                on_hold_press()
+            else:
+                now = time.monotonic()
+                if now - last_fire[0] < 0.25:
+                    return  # debounce auto-repeat
+                last_fire[0] = now
+                on_hotkey()
+        except Exception as exc:
+            _log(f"Hotkey press handler error: {exc}")
+
+    def _on_release(key):
+        try:
+            held.discard(key)
+            if mode == "hold" and _is_trigger(key) and trigger_armed[0]:
+                trigger_armed[0] = False
+                on_hold_release(key)
+        except Exception as exc:
+            _log(f"Hotkey release handler error: {exc}")
+
     try:
-        kb.wait()
+        listener = pkb.Listener(on_press=_on_press, on_release=_on_release)
+        listener.start()
+    except Exception as exc:
+        _log(f"Failed to start hotkey listener: {exc}")
+        if sys.platform == "darwin":
+            _log("NOTE: On macOS, Dock needs Accessibility permission. "
+                 "Grant it in System Settings → Privacy & Security → Accessibility.")
+        return
+
+    _log(f"Hotkey [{binding}] active ({mode} mode, scope={scope}) — waiting for input")
+
+    try:
+        listener.join()
     except KeyboardInterrupt:
         pass
+    finally:
+        try:
+            listener.stop()
+        except Exception:
+            pass
 
     _log("Daemon exiting")
 
