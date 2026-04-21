@@ -36,7 +36,15 @@ const BUILTIN_PLUGINS = [
   { id: 'memory', srcDir: 'memory', entry: 'memory-plugin.ts',
     rendererEntry: 'src/main/plugins/memory/renderer/standalone-entry.tsx' },
   { id: 'voice', srcDir: 'voice', entry: 'voice-plugin.ts',
-    rendererEntry: 'src/main/plugins/voice/renderer/standalone-entry.tsx' },
+    rendererEntry: 'src/main/plugins/voice/renderer/standalone-entry.tsx',
+    // The voice plugin ships a Python runtime (hotkey daemon + MCP server)
+    // that the TS bundle drives. New TS that calls a new Python signature
+    // (e.g. `VoiceRecorder(device=...)`) breaks users whose on-disk Python
+    // is from an older app build. Ship python/ inside the plugin archive
+    // so hot-updates deliver matched TS + Python together — the main
+    // process's `resolveBundledPythonDir()` prefers this over the app-shipped
+    // copy when the override exists.
+    extraDirs: ['python'] },
   // workspace renders inside the dock window (not its own BrowserWindow),
   // so renderer changes require a full app update — cannot be hot-updated.
   { id: 'workspace', srcDir: 'workspace', entry: 'workspace-plugin.ts', requiresAppUpdate: true },
@@ -221,6 +229,35 @@ function main() {
             fs.rmSync(rendererStaging, { recursive: true })
           }
         }
+      }
+    }
+
+    // Copy any auxiliary directories (e.g. voice's python/) into the staging
+    // dir. These ship alongside index.js so plugin-only hot-updates can
+    // deliver non-JS assets that stay in sync with the TS that calls them.
+    if (Array.isArray(plugin.extraDirs)) {
+      for (const rel of plugin.extraDirs) {
+        const fromDir = path.join(srcDir, rel)
+        if (!fs.existsSync(fromDir)) {
+          console.warn(`  ${plugin.id}: extra dir ${rel} not found, skipping`)
+          continue
+        }
+        const toDir = path.join(pluginStaging, rel)
+        // Exclude build/cache artifacts that would bloat the archive or
+        // pollute the content hash. Python runtimes compile __pycache__
+        // directories and .pyc files on first import — those are local
+        // state, not source.
+        const exclude = new Set(['__pycache__', '.venv', 'node_modules'])
+        fs.cpSync(fromDir, toDir, {
+          recursive: true,
+          filter: (src) => {
+            const name = path.basename(src)
+            if (exclude.has(name)) return false
+            if (name.endsWith('.pyc')) return false
+            return true
+          }
+        })
+        console.log(`  Copied ${rel}/ for ${plugin.id}`)
       }
     }
 
