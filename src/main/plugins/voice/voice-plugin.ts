@@ -69,6 +69,25 @@ export class VoicePlugin implements DockPlugin {
 
     registerVoiceIpc()
 
+    // Populate GPU capability eagerly, independent of workspace enable state.
+    //
+    // Two scenarios converge here:
+    //  1. Fresh app start with no projects yet enabled — the voice window can
+    //     still be opened (e.g. to configure settings) and must show accurate
+    //     NVIDIA capability in the device dropdown.
+    //  2. Hot-reload after a plugin update — the new VoiceServerManager has
+    //     a fresh `status.gpu = UNKNOWN_VOICE_GPU_STATUS` (hasNvidiaGpu=false).
+    //     Before this call, `refreshGpuStatus` was only triggered from
+    //     `onProjectEnabled(first=true)`, which didn't fire if no project
+    //     re-enabled after reload — the UI stayed stuck at "cuda — no NVIDIA
+    //     GPU" even on hosts with a CUDA-capable GPU.
+    //
+    // Fire-and-forget: `refreshGpuStatus` probes `nvidia-smi` with a 5s
+    // timeout and must not block plugin registration.
+    void VoiceServerManager.getInstance()
+      .refreshGpuStatus()
+      .catch((err) => getServices().logError('[voice] initial refreshGpuStatus failed', err))
+
     // Ref-counted daemon: first enable spawns, last disable stops.
     // `plugin:enabled` only fires on user toggle — `project:postOpen` fires
     // (filtered to enabled plugins) when a project loads with voice already
