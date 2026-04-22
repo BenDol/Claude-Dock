@@ -327,6 +327,10 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const filePasteRef = useRef(setFilePasteData)
   filePasteRef.current = setFilePasteData
 
+  // Pending corrective-fit timers scheduled after term.open. Must be cleared
+  // on unmount so fit() doesn't fire against a disposed terminal.
+  const correctiveFitTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+
   const settings = useSettingsStore((s) => s.settings)
   // Granular selectors for the settings effect to avoid re-fitting on unrelated changes
   const termFontFamily = useSettingsStore((s) => s.settings.terminal.fontFamily)
@@ -701,13 +705,13 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
           getDockApi().terminal.resize(terminalId, newCols, newRows)
         }
       }
-      setTimeout(() => {
+      correctiveFitTimersRef.current.push(setTimeout(() => {
         correctiveFit()
         // If container still not sized after initial fit, retry once more after layout animation
         if (containerRef.current && (containerRef.current.clientWidth < 10 || containerRef.current.clientHeight < 10)) {
-          setTimeout(correctiveFit, 800)
+          correctiveFitTimersRef.current.push(setTimeout(correctiveFit, 800))
         }
-      }, 200)
+      }, 200))
 
       termRef.current = term
       fitAddonRef.current = fitAddon
@@ -989,10 +993,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   // Cleanup
   useEffect(() => {
     return () => {
-      termRef.current?.dispose()
+      const term = termRef.current
       termRef.current = null
       fitAddonRef.current = null
+      searchAddonRef.current = null
       if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+      if (scrollBtnTimerRef.current) clearTimeout(scrollBtnTimerRef.current)
+      for (const id of correctiveFitTimersRef.current) clearTimeout(id)
+      correctiveFitTimersRef.current = []
       if (pinnedRafRef.current != null) {
         cancelAnimationFrame(pinnedRafRef.current)
         pinnedRafRef.current = null
@@ -1001,6 +1010,20 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       pinnedFooterRef.current = null
       pinnedRowsRef.current = null
       pinnedCursorRef.current = null
+      // Defer dispose by one tick so xterm's Viewport-constructor
+      // `setTimeout(() => syncScrollArea())` can fire against a still-live
+      // RenderService. Without this, rapid mount/unmount (e.g. during the
+      // worktree-terminal flow) triggers:
+      //   TypeError: Cannot read properties of undefined (reading 'dimensions')
+      // in Viewport.syncScrollArea → RenderService.dimensions, because
+      // MutableDisposable._value is cleared on RenderService.dispose().
+      if (term) {
+        setTimeout(() => {
+          try { term.dispose() } catch (err) {
+            try { getDockApi().debug.write(`[useTerminal] deferred dispose error: ${String(err)}`) } catch { /* IPC dead */ }
+          }
+        }, 0)
+      }
     }
   }, [])
 
