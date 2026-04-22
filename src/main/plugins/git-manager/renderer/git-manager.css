@@ -1926,6 +1926,94 @@
   line-height: 1.4;
 }
 
+/* "In: main, origin/main, …" chips — which branches contain the selected commit */
+.gm-detail-branches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+}
+
+.gm-detail-branches-loading {
+  color: var(--text-secondary);
+  font-style: italic;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.gm-detail-branches-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.gm-detail-branch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  white-space: nowrap;
+  line-height: 1.4;
+  font-family: var(--font-mono, monospace);
+  font-size: inherit;
+}
+
+/* Button variant used when onBranchClick is wired — overrides UA button defaults
+ * so it reads as a pill, not an OS button. */
+button.gm-detail-branch-chip {
+  font: inherit;
+  cursor: pointer;
+}
+
+.gm-detail-branch-chip-clickable:hover {
+  background: var(--bg-hover, var(--bg-secondary));
+  border-color: var(--accent-color, #7aa2f7);
+}
+
+.gm-detail-branch-chip-clickable:focus-visible {
+  outline: 2px solid var(--accent-color, #7aa2f7);
+  outline-offset: 1px;
+}
+
+.gm-detail-branch-chip-remote {
+  color: var(--text-secondary);
+  background: transparent;
+  border-style: dashed;
+}
+
+.gm-detail-branch-chip-head {
+  border-color: var(--accent-color, #7aa2f7);
+  color: var(--accent-color, #7aa2f7);
+}
+
+.gm-detail-branch-head-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.gm-detail-branches-more {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.gm-detail-branches-more:hover {
+  color: var(--accent-color, #7aa2f7);
+  text-decoration: underline;
+}
+
 /* Detail view tabs (Diff / File Tree) */
 .gm-detail-view-tabs {
   display: flex;

@@ -20,6 +20,16 @@ export interface GitBranchInfo {
   behind: number
 }
 
+/** Branch-membership info for a single commit ("which branches contain this commit?"). */
+export interface GitBranchesForCommit {
+  /** Local branches, short names (e.g. `main`, `feature/foo`). HEAD is flagged separately. */
+  local: string[]
+  /** Remote branches, short names with the remote prefix (e.g. `origin/main`). */
+  remote: string[]
+  /** Short name of the currently checked-out local branch, if it contains the commit. */
+  head: string | null
+}
+
 /** File status from git status --porcelain */
 export interface GitFileStatusEntry {
   path: string

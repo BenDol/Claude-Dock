@@ -2249,6 +2249,7 @@ const GitManagerApp: React.FC = () => {
                 onClose={handleCloseDetail}
                 onError={handleSmartError}
                 onRefresh={refresh}
+                onBranchClick={navigateToBranch}
               />
             </div>
           </>
@@ -4309,6 +4310,87 @@ const FileTreeContextMenu: React.FC<{
   )
 }
 
+/**
+ * Compact "In: main, origin/main, feature-x, …" strip under the commit meta.
+ * Shows up to COLLAPSED_LIMIT refs inline and expands the rest on demand so
+ * a commit reachable from dozens of release branches doesn't blow out the
+ * detail panel. Null data = still loading (renders a muted placeholder);
+ * empty local+remote = reachable from no ref (HEAD-only situation, unusual
+ * but real for mid-rebase commits) — we render nothing in that case.
+ *
+ * When `onBranchClick` is provided each chip becomes a button that jumps the
+ * commit log to the tip of that branch; otherwise chips render as plain
+ * spans (used by standalone commit viewer windows where the main log isn't
+ * in scope).
+ */
+const CommitBranchesSection: React.FC<{
+  data: { local: string[]; remote: string[]; head: string | null } | null
+  expanded: boolean
+  onToggle: () => void
+  onBranchClick?: (branchName: string) => void
+}> = ({ data, expanded, onToggle, onBranchClick }) => {
+  const COLLAPSED_LIMIT = 8
+  if (data === null) {
+    return <div className="gm-detail-branches gm-detail-branches-loading">Loading branches…</div>
+  }
+  const total = data.local.length + data.remote.length
+  if (total === 0) return null
+
+  type Chip = { name: string; kind: 'local' | 'remote'; isHead: boolean }
+  const chips: Chip[] = [
+    ...data.local.map<Chip>((n) => ({ name: n, kind: 'local', isHead: n === data.head })),
+    ...data.remote.map<Chip>((n) => ({ name: n, kind: 'remote', isHead: false }))
+  ]
+  const visible = expanded ? chips : chips.slice(0, COLLAPSED_LIMIT)
+  const hidden = chips.length - visible.length
+
+  return (
+    <div className="gm-detail-branches">
+      <span className="gm-detail-branches-label">In:</span>
+      {visible.map((c) => {
+        const className =
+          'gm-detail-branch-chip'
+          + (c.kind === 'remote' ? ' gm-detail-branch-chip-remote' : '')
+          + (c.isHead ? ' gm-detail-branch-chip-head' : '')
+          + (onBranchClick ? ' gm-detail-branch-chip-clickable' : '')
+        const title = c.isHead
+          ? `${c.name} (HEAD)${onBranchClick ? ' — click to jump to branch tip' : ''}`
+          : onBranchClick ? `${c.name} — click to jump to branch tip` : c.name
+        const inner = (
+          <>
+            {c.isHead && <span className="gm-detail-branch-head-dot" aria-hidden="true" />}
+            {c.name}
+          </>
+        )
+        if (onBranchClick) {
+          return (
+            <button
+              key={`${c.kind}:${c.name}`}
+              type="button"
+              className={className}
+              title={title}
+              onClick={() => onBranchClick(c.name)}
+            >
+              {inner}
+            </button>
+          )
+        }
+        return (
+          <span key={`${c.kind}:${c.name}`} className={className} title={title}>
+            {inner}
+          </span>
+        )
+      })}
+      {hidden > 0 && !expanded && (
+        <button className="gm-detail-branches-more" onClick={onToggle}>+{hidden} more</button>
+      )}
+      {expanded && chips.length > COLLAPSED_LIMIT && (
+        <button className="gm-detail-branches-more" onClick={onToggle}>Show less</button>
+      )}
+    </div>
+  )
+}
+
 const CommitDetailPanel: React.FC<{
   detail: GitCommitDetail
   projectDir: string
@@ -4319,7 +4401,9 @@ const CommitDetailPanel: React.FC<{
   onError?: (msg: string) => void
   onRefresh?: () => void
   hideClose?: boolean
-}> = React.memo(({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh, hideClose }) => {
+  /** Optional — if provided, branch chips become buttons that jump the log to that branch. */
+  onBranchClick?: (branchName: string) => void
+}> = React.memo(({ detail, projectDir, syntaxHL, scrollToFileAndLine, onScrollToHandled, onClose, onError, onRefresh, hideClose, onBranchClick }) => {
   const api = getDockApi()
   const [selectedLines, setSelectedLines] = useState<Set<string>>(new Set())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; fileIdx: number } | null>(null)
@@ -4336,6 +4420,31 @@ const CommitDetailPanel: React.FC<{
   const [hoveredFileIdx, setHoveredFileIdx] = useState<number | null>(null)
   const activeFilterIdx = focusedFileIdx ?? hoveredFileIdx
   const [detailView, setDetailView] = useState<'diff' | 'tree'>('diff')
+  // "Branches containing this commit" — fetched lazily per selected commit.
+  // A monotonic token guards against out-of-order responses when the user
+  // scrolls rapidly through the log (mirrors the selectGenRef pattern used
+  // by the parent detail fetch).
+  const [branchesForCommit, setBranchesForCommit] = useState<{
+    local: string[]
+    remote: string[]
+    head: string | null
+  } | null>(null)
+  const [branchesExpanded, setBranchesExpanded] = useState(false)
+  const branchesTokenRef = useRef(0)
+
+  useEffect(() => {
+    const token = ++branchesTokenRef.current
+    setBranchesForCommit(null)
+    setBranchesExpanded(false)
+    if (!detail.hash || !projectDir) return
+    api.gitManager.getBranchesForCommit(projectDir, detail.hash).then((res) => {
+      if (token !== branchesTokenRef.current) return
+      setBranchesForCommit(res)
+    }).catch(() => {
+      if (token !== branchesTokenRef.current) return
+      setBranchesForCommit({ local: [], remote: [], head: null })
+    })
+  }, [api, detail.hash, projectDir])
 
   const handleResetFile = useCallback(async (filePath: string) => {
     if (!window.confirm(`Reset "${filePath}" to its state before this commit?`)) return
@@ -4638,6 +4747,12 @@ const CommitDetailPanel: React.FC<{
         <div className="gm-detail-subject">{detail.subject}</div>
         {detail.body && <div className="gm-detail-body">{detail.body}</div>}
       </div>
+      <CommitBranchesSection
+        data={branchesForCommit}
+        expanded={branchesExpanded}
+        onToggle={() => setBranchesExpanded((v) => !v)}
+        onBranchClick={onBranchClick}
+      />
       <div className="gm-detail-view-tabs">
         <button className={`gm-detail-view-tab${detailView === 'diff' ? ' gm-detail-view-tab-active' : ''}`} onClick={() => setDetailView('diff')}>Diff</button>
         <button className={`gm-detail-view-tab${detailView === 'tree' ? ' gm-detail-view-tab-active' : ''}`} onClick={() => setDetailView('tree')}>File Tree</button>

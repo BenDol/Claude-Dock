@@ -27,7 +27,8 @@ import type {
   GitWorktreeInfo,
   ResolveWorktreeOptions,
   ResolveWorktreeResult,
-  PruneWorktreesResult
+  PruneWorktreesResult,
+  GitBranchesForCommit
 } from '../../../shared/git-manager-types'
 import { getServices } from './services'
 
@@ -1069,6 +1070,100 @@ export async function getTags(cwd: string): Promise<GitTagInfo[]> {
     })
   } catch {
     return []
+  }
+}
+
+/**
+ * Bounded, per-(repo,commit) TTL cache for getBranchesForCommit. Commit
+ * ancestry is immutable, but ref-set-containing it is not — new branches
+ * can be created and remotes can be updated — so we cap freshness at 30s.
+ * FIFO eviction at 500 entries keeps memory bounded even if a user scrolls
+ * a very long log. Exported for test-only cache invalidation.
+ */
+const BRANCHES_FOR_COMMIT_CACHE = new Map<string, { value: GitBranchesForCommit; expiresAt: number }>()
+const BRANCHES_FOR_COMMIT_CACHE_TTL_MS = 30_000
+const BRANCHES_FOR_COMMIT_CACHE_MAX = 500
+
+export function clearBranchesForCommitCache(): void {
+  BRANCHES_FOR_COMMIT_CACHE.clear()
+}
+
+/**
+ * List every local and remote branch that contains the given commit, plus the
+ * name of the currently-checked-out branch if it's among them. One call to
+ * `git for-each-ref --contains=<hash>` under `refs/heads` + `refs/remotes`
+ * — cheaper than two separate `git branch --contains` invocations and keeps
+ * the HEAD marker in the same payload.
+ *
+ * Results are cached per `(cwd, hash)` for 30s so rapid arrow-key scrolling
+ * through the commit log doesn't re-hammer git.
+ *
+ * Silent failure (returns empty lists) is intentional: this runs on every
+ * commit selection in the log, so a transient git error shouldn't surface
+ * a blocking UI state. Caller can distinguish "no results" from "errored"
+ * only by the absence/presence of local+remote entries; that tradeoff is
+ * deliberate and matches how getTags() above handles the same scenario.
+ */
+export async function getBranchesForCommit(cwd: string, hash: string): Promise<GitBranchesForCommit> {
+  const empty: GitBranchesForCommit = { local: [], remote: [], head: null }
+  if (!hash) return empty
+
+  const cacheKey = `${cwd}\x00${hash}`
+  const cached = BRANCHES_FOR_COMMIT_CACHE.get(cacheKey)
+  const now = Date.now()
+  if (cached && cached.expiresAt > now) return cached.value
+  if (cached) BRANCHES_FOR_COMMIT_CACHE.delete(cacheKey) // expired — drop
+
+  try {
+    const { stdout } = await gitExec(cwd, [
+      'for-each-ref',
+      `--contains=${hash}`,
+      '--format=%(refname)%09%(HEAD)',
+      'refs/heads',
+      'refs/remotes'
+    ], 15000)
+
+    const local: string[] = []
+    const remote: string[] = []
+    let head: string | null = null
+    if (stdout.trim()) {
+      for (const line of stdout.split('\n')) {
+        if (!line) continue
+        const [ref, marker] = line.split('\t')
+        if (!ref) continue
+        if (ref.startsWith('refs/heads/')) {
+          const name = ref.slice('refs/heads/'.length)
+          local.push(name)
+          if (marker === '*') head = name
+        } else if (ref.startsWith('refs/remotes/')) {
+          const name = ref.slice('refs/remotes/'.length)
+          // Skip the symbolic remote HEAD (e.g. `origin/HEAD`) — it's not a branch, just a pointer.
+          if (name.endsWith('/HEAD')) continue
+          remote.push(name)
+        }
+      }
+      // Stable ordering: local (HEAD first, then alpha), then remote (alpha).
+      local.sort((a, b) => {
+        if (a === head) return -1
+        if (b === head) return 1
+        return a.localeCompare(b)
+      })
+      remote.sort((a, b) => a.localeCompare(b))
+    }
+
+    const result: GitBranchesForCommit = { local, remote, head }
+
+    // FIFO eviction: drop the oldest entry once we blow past the cap. Map iteration
+    // order is insertion order, so .keys().next() is the oldest.
+    if (BRANCHES_FOR_COMMIT_CACHE.size >= BRANCHES_FOR_COMMIT_CACHE_MAX) {
+      const oldest = BRANCHES_FOR_COMMIT_CACHE.keys().next().value
+      if (oldest !== undefined) BRANCHES_FOR_COMMIT_CACHE.delete(oldest)
+    }
+    BRANCHES_FOR_COMMIT_CACHE.set(cacheKey, { value: result, expiresAt: now + BRANCHES_FOR_COMMIT_CACHE_TTL_MS })
+    return result
+  } catch (err) {
+    getServices().logError('[git-manager] getBranchesForCommit failed:', err)
+    return empty
   }
 }
 
