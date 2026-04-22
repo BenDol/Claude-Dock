@@ -1328,16 +1328,42 @@ body {
 
 .editor-tab-bar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   height: var(--toolbar-height);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  overflow-x: auto;
   flex-shrink: 0;
+  min-width: 0;
 }
 
-.editor-tab-bar::-webkit-scrollbar {
+.editor-tabs-scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.editor-tabs-scroll::-webkit-scrollbar {
   height: 3px;
+}
+
+.editor-tabs-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+}
+
+.editor-tab-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  /* Shadow on the left so tabs visibly pass beneath the sticky actions */
+  box-shadow: -6px 0 6px -4px rgba(0, 0, 0, 0.35);
+  position: relative;
+  z-index: 1;
+  padding-left: 4px;
 }
 
 .editor-tab {
@@ -1406,10 +1432,6 @@ body {
 .editor-tab-close:hover {
   color: var(--text-primary);
   background: var(--hover-color, rgba(255,255,255,0.1));
-}
-
-.editor-tab-spacer {
-  flex: 1;
 }
 
 .editor-nav-btn {

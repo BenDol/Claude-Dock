@@ -133,6 +133,8 @@ const EditorOverlay: React.FC = () => {
   const tabModelPathsRef = useRef(new Set<string>())
   const saveRef = useRef<() => void>(() => {})
   const tabBarRef = useRef<HTMLDivElement>(null)
+  const tabsScrollRef = useRef<HTMLDivElement>(null)
+  const activeTabElRef = useRef<HTMLDivElement>(null)
   const dragStartPos = useRef<{ x: number; y: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -186,6 +188,47 @@ const EditorOverlay: React.FC = () => {
       overlayEl.removeEventListener('keydown', onKeyDown, { capture: true } as any)
     }
   }, [fontSize, applyFontSize])
+
+  // Translate vertical mouse wheel to horizontal scroll on the tab list.
+  // Passive: false because we preventDefault when we actually consume the scroll.
+  // Skips ctrl/meta (zoom) and shift (native horizontal scroll) so other
+  // behaviors keep working. Tied to the tabsScrollRef element directly so it
+  // doesn't intercept wheel events outside the scroll area.
+  useEffect(() => {
+    const el = tabsScrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return
+      // Nothing to scroll — let the event fall through (no-op).
+      if (el.scrollWidth <= el.clientWidth) return
+      // Use the dominant axis. Some mice/trackpads already emit deltaX.
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+      if (delta === 0) return
+      e.preventDefault()
+      // deltaMode 1 = line, 2 = page — normalize to pixels.
+      const mult = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1
+      el.scrollLeft += delta * mult
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // Keep the active tab visible when it changes (e.g. via keyboard, nav back/forward,
+  // or file open from outside). Click-to-activate already implies visibility.
+  useEffect(() => {
+    const el = activeTabElRef.current
+    const scroll = tabsScrollRef.current
+    if (!el || !scroll) return
+    const elLeft = el.offsetLeft
+    const elRight = elLeft + el.offsetWidth
+    const viewLeft = scroll.scrollLeft
+    const viewRight = viewLeft + scroll.clientWidth
+    if (elLeft < viewLeft) {
+      scroll.scrollLeft = elLeft
+    } else if (elRight > viewRight) {
+      scroll.scrollLeft = elRight - scroll.clientWidth
+    }
+  }, [activeTabId])
 
   // Theme — observe data-theme attribute for live changes
   const [theme, setTheme] = useState(() =>
@@ -348,7 +391,22 @@ const EditorOverlay: React.FC = () => {
     }
   }, [handleNavBack, handleNavForward])
 
-  // Keyboard shortcuts — Ctrl+S and Ctrl+W
+  // Switch to the previous/next open tab, preserving cursor-position history
+  // (same push semantics as clicking a tab). Wraps around at the ends.
+  const switchTabByOffset = useCallback((offset: number) => {
+    const { tabs: currentTabs, activeTabId: curId } = useEditorStore.getState()
+    if (currentTabs.length < 2 || !curId) return
+    const curIdx = currentTabs.findIndex((t) => t.id === curId)
+    if (curIdx < 0) return
+    const nextIdx = (curIdx + offset + currentTabs.length) % currentTabs.length
+    const nextTab = currentTabs[nextIdx]
+    if (!nextTab || nextTab.id === curId) return
+    const pos = editorRef.current?.getPosition()
+    if (pos) useEditorStore.getState().pushNavPosition(curId, pos.lineNumber, pos.column)
+    setActiveTab(nextTab.id)
+  }, [setActiveTab])
+
+  // Keyboard shortcuts — Ctrl+S, Ctrl+W, Ctrl+Shift+V, Alt+Left/Right (tab switch)
   // Don't handle Escape here — let Monaco use it for its own UI (search close, etc.)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -367,19 +425,16 @@ const EditorOverlay: React.FC = () => {
         const tab = useEditorStore.getState().tabs.find((t) => t.id === useEditorStore.getState().activeTabId)
         if (tab?.language === 'markdown') setPreviewMode((p) => !p)
       }
-      // Alt+Left = navigate back, Alt+Right = navigate forward
-      if (e.altKey && e.key === 'ArrowLeft') {
+      // Alt+Left / Alt+Right = switch to previous / next open tab.
+      // Cursor-position history stays on Mouse4/Mouse5 and the toolbar buttons.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault()
-        handleNavBack()
-      }
-      if (e.altKey && e.key === 'ArrowRight') {
-        e.preventDefault()
-        handleNavForward()
+        switchTabByOffset(e.key === 'ArrowLeft' ? -1 : 1)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [handleCloseTab])
+  }, [handleCloseTab, switchTabByOffset])
 
   // When active tab changes, focus the editor and reveal pending position
   useEffect(() => {
@@ -576,54 +631,58 @@ const EditorOverlay: React.FC = () => {
 
   return (
     <div className="editor-overlay">
-      {/* Tab bar */}
+      {/* Tab bar — tabs scroll horizontally beneath sticky right-side action buttons */}
       <div className="editor-tab-bar" ref={tabBarRef} onDragLeave={() => setDragOverIdx(null)}>
-        {tabs.map((tab, idx) => {
-          const isDirty = tab.content !== tab.savedContent
-          const isActive = tab.id === activeTabId
-          const isDropTarget = dragOverIdx === idx
-          return (
-            <div
-              key={tab.id}
-              className={`editor-tab${isActive ? ' editor-tab-active' : ''}${isDropTarget ? ' editor-tab-drop-target' : ''}`}
-              onClick={() => {
-                // Push current position before switching tabs
-                const pos = editorRef.current?.getPosition()
-                const { activeTabId: curId } = useEditorStore.getState()
-                if (curId && curId !== tab.id && pos) {
-                  useEditorStore.getState().pushNavPosition(curId, pos.lineNumber, pos.column)
-                }
-                setActiveTab(tab.id)
-              }}
-              onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }}
-              title={tab.relativePath}
-              draggable
-              onDragStart={(e) => handleTabDragStart(e, tab.id, idx)}
-              onDragOver={(e) => handleTabDragOver(e, idx)}
-              onDrop={(e) => handleTabDrop(e, idx)}
-              onDragEnd={(e) => handleTabDragEnd(e, tab.id)}
+        <div className="editor-tabs-scroll" ref={tabsScrollRef}>
+          {tabs.map((tab, idx) => {
+            const isDirty = tab.content !== tab.savedContent
+            const isActive = tab.id === activeTabId
+            const isDropTarget = dragOverIdx === idx
+            return (
+              <div
+                key={tab.id}
+                ref={isActive ? activeTabElRef : undefined}
+                className={`editor-tab${isActive ? ' editor-tab-active' : ''}${isDropTarget ? ' editor-tab-drop-target' : ''}`}
+                onClick={() => {
+                  // Push current position before switching tabs
+                  const pos = editorRef.current?.getPosition()
+                  const { activeTabId: curId } = useEditorStore.getState()
+                  if (curId && curId !== tab.id && pos) {
+                    useEditorStore.getState().pushNavPosition(curId, pos.lineNumber, pos.column)
+                  }
+                  setActiveTab(tab.id)
+                }}
+                onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }}
+                title={tab.relativePath}
+                draggable
+                onDragStart={(e) => handleTabDragStart(e, tab.id, idx)}
+                onDragOver={(e) => handleTabDragOver(e, idx)}
+                onDrop={(e) => handleTabDrop(e, idx)}
+                onDragEnd={(e) => handleTabDragEnd(e, tab.id)}
+              >
+                <span className="editor-tab-name">{tab.fileName}</span>
+                {isDirty && <span className="editor-tab-dirty">●</span>}
+                <button className="editor-tab-close" draggable={false} onClick={(e) => handleCloseTab(tab.id, e)}>×</button>
+              </div>
+            )
+          })}
+        </div>
+        <div className="editor-tab-actions">
+          {activeTab?.language === 'markdown' && (
+            <button
+              className={`editor-nav-btn editor-preview-btn${previewMode ? ' editor-preview-btn-active' : ''}`}
+              onClick={() => setPreviewMode((p) => !p)}
+              title={previewMode ? 'Show source (Ctrl+Shift+V)' : 'Preview markdown (Ctrl+Shift+V)'}
             >
-              <span className="editor-tab-name">{tab.fileName}</span>
-              {isDirty && <span className="editor-tab-dirty">●</span>}
-              <button className="editor-tab-close" draggable={false} onClick={(e) => handleCloseTab(tab.id, e)}>×</button>
-            </div>
-          )
-        })}
-        <div className="editor-tab-spacer" />
-        {activeTab?.language === 'markdown' && (
-          <button
-            className={`editor-nav-btn editor-preview-btn${previewMode ? ' editor-preview-btn-active' : ''}`}
-            onClick={() => setPreviewMode((p) => !p)}
-            title={previewMode ? 'Show source (Ctrl+Shift+V)' : 'Preview markdown (Ctrl+Shift+V)'}
-          >
-            {previewMode ? '\u{2328}' : '\u{1F441}'}
-          </button>
-        )}
-        <button className="editor-nav-btn" onClick={handleNavBack} disabled={navBackCount === 0} title="Go Back (Alt+Left / Mouse4)">&#8592;</button>
-        <button className="editor-nav-btn" onClick={handleNavForward} disabled={navForwardCount === 0} title="Go Forward (Alt+Right / Mouse5)">&#8594;</button>
-        {saving && <span className="editor-saving">Saving...</span>}
-        {saveError && <span className="editor-save-error">{saveError}</span>}
-        <button className="editor-close-all" onClick={handleCloseAll} title="Close all tabs">×</button>
+              {previewMode ? '\u{2328}' : '\u{1F441}'}
+            </button>
+          )}
+          <button className="editor-nav-btn" onClick={handleNavBack} disabled={navBackCount === 0} title="Go Back (Mouse4)">&#8592;</button>
+          <button className="editor-nav-btn" onClick={handleNavForward} disabled={navForwardCount === 0} title="Go Forward (Mouse5)">&#8594;</button>
+          {saving && <span className="editor-saving">Saving...</span>}
+          {saveError && <span className="editor-save-error">{saveError}</span>}
+          <button className="editor-close-all" onClick={handleCloseAll} title="Close all tabs">×</button>
+        </div>
       </div>
 
       {/* Editor body */}
