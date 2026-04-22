@@ -51,7 +51,7 @@ describe('generate-plugin-archive.js', () => {
 
     const manifest = JSON.parse(fs.readFileSync(updatePath, 'utf-8'))
 
-    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
+    for (const pluginId of ['git-manager', 'voice']) {
       expect(manifest.plugins[pluginId]).toBeDefined()
       const entry = manifest.plugins[pluginId]
       expect(entry.version).toBeDefined()
@@ -72,7 +72,7 @@ describe('generate-plugin-archive.js', () => {
     // The per-plugin buildSha should be the last commit touching that plugin's src dir.
     // Skip plugins with no git history (uncommitted) — they fall back to a content
     // hash in generate-plugin-archive.js.
-    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
+    for (const pluginId of ['git-manager', 'voice']) {
       const entry = manifest.plugins[pluginId]
       const srcDir = `src/main/plugins/${pluginId}`
 
@@ -142,7 +142,7 @@ describe('generate-plugin-archive.js', () => {
     execSync(`node "${SCRIPT}"`, { cwd: ROOT, encoding: 'utf-8', timeout: 25000 })
     const run2 = JSON.parse(fs.readFileSync(updatePath, 'utf-8'))
 
-    for (const pluginId of ['git-sync', 'git-manager', 'voice']) {
+    for (const pluginId of ['git-manager', 'voice']) {
       expect(run1.plugins[pluginId].hash).toBe(run2.plugins[pluginId].hash)
     }
   })

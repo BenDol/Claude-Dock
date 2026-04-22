@@ -38,14 +38,14 @@ describe('plugin override loading', () => {
 
   describe('meta.json validation', () => {
     it('meta.json must exist for override to load', () => {
-      const overrideDir = path.join(tempDir, 'git-sync')
+      const overrideDir = path.join(tempDir, 'voice')
       fs.mkdirSync(overrideDir, { recursive: true })
       // No meta.json — should not be considered valid
       expect(fs.existsSync(path.join(overrideDir, 'meta.json'))).toBe(false)
     })
 
     it('meta.json must contain valid hash', () => {
-      const overrideDir = path.join(tempDir, 'git-sync')
+      const overrideDir = path.join(tempDir, 'voice')
       fs.mkdirSync(overrideDir, { recursive: true })
       const meta = { version: '2.0.0', buildSha: 'abc', hash: 'expected-hash', installedAt: Date.now() }
       fs.writeFileSync(path.join(overrideDir, 'meta.json'), JSON.stringify(meta))
@@ -56,7 +56,7 @@ describe('plugin override loading', () => {
     })
 
     it('index.js must exist for override to be loadable', () => {
-      const overrideDir = path.join(tempDir, 'git-sync')
+      const overrideDir = path.join(tempDir, 'voice')
       fs.mkdirSync(overrideDir, { recursive: true })
       const meta = { version: '2.0.0', buildSha: 'abc', hash: 'h', installedAt: 0 }
       fs.writeFileSync(path.join(overrideDir, 'meta.json'), JSON.stringify(meta))
@@ -81,13 +81,13 @@ describe('plugin override loading', () => {
 
   describe('override directory structure', () => {
     it('creates valid override directory with all required files', () => {
-      const overrideDir = path.join(tempDir, 'git-sync')
+      const overrideDir = path.join(tempDir, 'voice')
       fs.mkdirSync(overrideDir, { recursive: true })
 
       // Write all required files
       fs.writeFileSync(path.join(overrideDir, 'index.js'), 'module.exports = {}')
       fs.writeFileSync(path.join(overrideDir, 'plugin.json'), JSON.stringify({
-        id: 'git-sync', name: 'Git Sync', version: '2.0.0', description: '', defaultEnabled: false, main: 'index.js'
+        id: 'voice', name: 'Voice', version: '2.0.0', description: '', defaultEnabled: false, main: 'index.js'
       }))
       fs.writeFileSync(path.join(overrideDir, 'meta.json'), JSON.stringify({
         version: '2.0.0', buildSha: 'abc', hash: 'def', installedAt: Date.now()
@@ -100,7 +100,7 @@ describe('plugin override loading', () => {
     })
 
     it('override cleanup removes entire directory', () => {
-      const overrideDir = path.join(tempDir, 'git-sync')
+      const overrideDir = path.join(tempDir, 'voice')
       fs.mkdirSync(overrideDir, { recursive: true })
       fs.writeFileSync(path.join(overrideDir, 'index.js'), 'module.exports = {}')
       fs.writeFileSync(path.join(overrideDir, 'meta.json'), '{}')

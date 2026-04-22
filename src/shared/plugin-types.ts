@@ -1,4 +1,4 @@
-/** Unique identifier for a plugin (e.g. 'git-sync') */
+/** Unique identifier for a plugin (e.g. 'git-manager') */
 export type PluginId = string
 
 /** Per-project plugin state stored in electron-store */

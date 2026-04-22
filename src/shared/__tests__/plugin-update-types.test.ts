@@ -15,11 +15,11 @@ describe('plugin-update-types', () => {
         buildSha: 'abc123def456',
         buildDate: '2026-03-16',
         plugins: {
-          'git-sync': {
+          'voice': {
             version: '2.0.0',
             buildSha: 'plugin-sha',
             hash: 'content-hash',
-            archivePath: 'git-sync/',
+            archivePath: 'voice/',
             changelog: 'New features',
             minAppVersion: '1.0.0',
             requiresAppUpdate: false
@@ -27,7 +27,7 @@ describe('plugin-update-types', () => {
         }
       }
       expect(manifest.schemaVersion).toBe(1)
-      expect(manifest.plugins['git-sync'].version).toBe('2.0.0')
+      expect(manifest.plugins['voice'].version).toBe('2.0.0')
     })
 
     it('allows optional fields to be undefined', () => {
@@ -68,15 +68,15 @@ describe('plugin-update-types', () => {
 
     it('accepts valid update entry', () => {
       const entry: PluginUpdateEntry = {
-        pluginId: 'git-sync',
-        pluginName: 'Git Sync',
+        pluginId: 'voice',
+        pluginName: 'Voice',
         source: 'builtin',
         currentVersion: '1.0.0',
         newVersion: '2.0.0',
         changelog: 'New features',
         downloadUrl: 'https://example.com/plugins.zip',
         hash: 'abc123',
-        archivePath: 'git-sync/',
+        archivePath: 'voice/',
         requiresAppUpdate: false,
         status: 'available'
       }
@@ -86,8 +86,8 @@ describe('plugin-update-types', () => {
 
     it('tracks download progress', () => {
       const entry: PluginUpdateEntry = {
-        pluginId: 'git-sync',
-        pluginName: 'Git Sync',
+        pluginId: 'voice',
+        pluginName: 'Voice',
         source: 'builtin',
         currentVersion: '1.0.0',
         newVersion: '2.0.0',
@@ -103,8 +103,8 @@ describe('plugin-update-types', () => {
 
     it('tracks error on failure', () => {
       const entry: PluginUpdateEntry = {
-        pluginId: 'git-sync',
-        pluginName: 'Git Sync',
+        pluginId: 'voice',
+        pluginName: 'Voice',
         source: 'builtin',
         currentVersion: '1.0.0',
         newVersion: '2.0.0',

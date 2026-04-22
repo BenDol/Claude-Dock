@@ -166,7 +166,7 @@ export function registerPlugins(): void {
   const manager = PluginManager.getInstance()
 
   // Phase 1: Register essential (non-lazy) built-in plugins synchronously.
-  // These need to be ready before any project window opens (e.g. git-sync hooks preOpen).
+  // These need to be ready before any project window opens (e.g. plugins that hook preOpen).
   const deferred: DockPlugin[] = []
 
   for (const [path, mod] of Object.entries(pluginModules)) {
