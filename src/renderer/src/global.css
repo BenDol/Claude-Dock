@@ -1312,6 +1312,9 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
+  /* Contain horizontal overflow so a very wide tab bar can't push the
+     sticky action buttons off-screen. */
+  overflow: hidden;
 }
 
 .editor-overlay-loading {
@@ -1334,12 +1337,21 @@ body {
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
   min-width: 0;
+  /* Constrain the row so the flex algorithm inside has a finite width —
+     otherwise the tabs-scroll can grow with its content and push the
+     sticky actions off to the right. */
+  width: 100%;
+  overflow: hidden;
 }
 
 .editor-tabs-scroll {
   display: flex;
   align-items: stretch;
-  flex: 1 1 auto;
+  /* flex-basis: 0 (not auto) — take the remaining space after .editor-tab-actions
+     is reserved, regardless of how wide the inner tabs actually are. With
+     flex-basis: auto the initial size was content-width, which let the row
+     overflow on heavy tab counts even though min-width: 0 was set. */
+  flex: 1 1 0;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -1569,6 +1581,37 @@ body {
 .editor-preview-btn-active {
   color: var(--accent-color) !important;
   background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+}
+
+/* Editor tab context menu */
+.editor-ctx-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 200;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.editor-ctx-item {
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.editor-ctx-item:hover {
+  background: var(--bg-tertiary);
+}
+.editor-ctx-item-disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+.editor-ctx-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
 }
 
 /* Markdown preview panel */
