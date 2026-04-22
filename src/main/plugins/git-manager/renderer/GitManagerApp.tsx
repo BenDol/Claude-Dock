@@ -1547,11 +1547,21 @@ const GitManagerApp: React.FC = () => {
   }, [activeDir, resetRepoState])
 
   const navigateToWorktree = useCallback((wt: GitWorktreeInfo) => {
-    setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    const normalize = (p: string): string => p.replace(/\\/g, '/').toLowerCase().replace(/\/$/, '')
+    const normActive = normalize(activeDir)
+    if (normalize(wt.path) === normActive) return
     wcBusyRef.current = false
     resetRepoState()
+    // Worktrees are peers of the repo root, not nested inside one another.
+    // When already in a worktree, switching to a sibling worktree must swap
+    // `activeDir` without stacking the previous worktree onto the breadcrumb
+    // (which would render `<root> / <prev-wt> / <new-wt>`).
+    const currentIsWorktree = worktrees.some((w) => normalize(w.path) === normActive)
+    if (!currentIsWorktree) {
+      setNavStack((prev) => [...prev, { dir: activeDir, label: activeDir.split(/[/\\]/).pop() || activeDir }])
+    }
     setActiveDir(wt.path)
-  }, [activeDir, resetRepoState])
+  }, [activeDir, worktrees, resetRepoState])
 
   const navigateBack = useCallback(() => {
     setNavStack((prev) => {

@@ -70,6 +70,10 @@ const MAX_WORKSPACE_MODELS = 80
 // because Monaco's global state (models, extraLibs, providers) is never torn down.
 let langServicesInited = false
 
+// True when this overlay is rendered inside the detached editor BrowserWindow.
+// Used to hide the "undock" action, which only makes sense in the dock window.
+const isDetachedEditorWindow = new URLSearchParams(window.location.search).has('detachedEditor')
+
 // ── Markdown Preview ─────────────────────────────────────────────────────────
 
 let markedConfigured = false
@@ -409,6 +413,33 @@ const EditorOverlay: React.FC = () => {
     if (dirty && !confirm('Some files have unsaved changes. Close all?')) return
     closeAllTabs()
   }, [closeAllTabs])
+
+  // Move every open tab to the detached editor window. Mirrors the per-tab
+  // drag-out flow in handleTabDragEnd, but for all tabs at once.
+  const handleUndockAll = useCallback(async () => {
+    const currentTabs = useEditorStore.getState().tabs
+    if (currentTabs.length === 0) return
+    const dirty = currentTabs.filter((t) => t.content !== t.savedContent)
+    if (dirty.length > 0) {
+      const names = dirty.map((t) => t.fileName).join(', ')
+      if (!confirm(`Unsaved changes in: ${names}\nUndock anyway? Changes will move with the tabs but stay unsaved.`)) return
+    }
+    const pd = projectDir || currentTabs[0]?.projectDir
+    if (!pd) return
+    const snapshot = currentTabs.map((t) => ({ ...t }))
+    const tabData = JSON.stringify(snapshot)
+    closeAllTabs()
+    try {
+      const res = await getDockApi().workspace.detachEditor(pd, tabData)
+      if (!res?.success) throw new Error(res?.error || 'Undock failed')
+    } catch (err) {
+      console.error('[EditorOverlay] undock failed:', err)
+      const store = useEditorStore.getState()
+      for (const tab of snapshot) {
+        store.openFile(tab.projectDir, tab.relativePath, tab.content)
+      }
+    }
+  }, [projectDir, closeAllTabs])
 
   // Tab reorder via drag
   const handleTabDragStart = useCallback((e: React.DragEvent, tabId: string, idx: number) => {
@@ -814,6 +845,19 @@ const EditorOverlay: React.FC = () => {
           <button className="editor-nav-btn" onClick={handleNavForward} disabled={navForwardCount === 0} title="Go Forward (Mouse5)">&#8594;</button>
           {saving && <span className="editor-saving">Saving...</span>}
           {saveError && <span className="editor-save-error">{saveError}</span>}
+          {!isDetachedEditorWindow && (
+            <button
+              className="editor-nav-btn editor-undock-btn"
+              onClick={handleUndockAll}
+              title="Undock editor to a separate window"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 3h6v6" />
+                <path d="M10 14 21 3" />
+                <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+              </svg>
+            </button>
+          )}
           <button className="editor-close-all" onClick={handleCloseAll} title="Close all tabs">×</button>
         </div>
       </div>

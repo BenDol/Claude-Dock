@@ -1468,6 +1468,13 @@ body {
   cursor: default;
 }
 
+.editor-undock-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+}
+
 .editor-close-all {
   background: none;
   border: none;
