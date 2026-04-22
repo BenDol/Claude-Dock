@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { ChatDelta, ChatRequest } from '../llm/provider'
 
 // The SDK's query() is replaced with a test double that emits a scripted
@@ -9,6 +9,20 @@ const mockQuery = vi.fn()
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (args: any) => mockQuery(args)
 }))
+
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  }
+}))
+
+// `fs` is mocked so `resolveClaudeBinaryPath` tests can script which candidate
+// paths "exist". `existsSync` defaults to false; tests override per case.
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs')
+  return { ...actual, existsSync: vi.fn().mockReturnValue(false) }
+})
 
 import { createClaudeSdkProvider } from '../llm/claude-sdk'
 
@@ -210,5 +224,85 @@ describe('claude-sdk provider', () => {
     const provider = createClaudeSdkProvider(makeDeps())
     expect(provider.passthrough).toBe(true)
     expect(provider.id).toBe('claude-sdk')
+  })
+})
+
+// --- resolveClaudeBinaryPath ---
+// Isolated from the provider tests because this helper has a memoized
+// companion (`getClaudeBinaryPath`) — calling that across tests would pollute
+// the cache. The `resolveClaudeBinaryPath` export is bypasses the cache.
+
+import { resolveClaudeBinaryPath } from '../llm/claude-sdk'
+import * as fs from 'fs'
+import * as path from 'path'
+
+describe('resolveClaudeBinaryPath', () => {
+  const origPlatform = process.platform
+  const origArch = process.arch
+  const existsSync = vi.mocked(fs.existsSync)
+
+  beforeEach(() => {
+    existsSync.mockReset()
+    existsSync.mockReturnValue(false)
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: origPlatform })
+    Object.defineProperty(process, 'arch', { value: origArch })
+  })
+
+  it('returns undefined when no candidate path exists', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    expect(resolveClaudeBinaryPath()).toBeUndefined()
+  })
+
+  it('returns the dev-tree node_modules path when that is the only file that exists', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    const expected = path.join(process.cwd(), 'node_modules', '@anthropic-ai', 'claude-agent-sdk-win32-x64', 'claude.exe')
+    existsSync.mockImplementation((p) => p === expected)
+    expect(resolveClaudeBinaryPath()).toBe(expected)
+  })
+
+  it('on linux, tries the -musl sibling before the base package', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    // Both siblings are "present" — verify the musl one wins (first hop).
+    existsSync.mockImplementation((p) =>
+      String(p).includes('claude-agent-sdk-linux-x64-musl')
+      || String(p).includes('claude-agent-sdk-linux-x64')
+    )
+    const resolved = resolveClaudeBinaryPath()
+    expect(resolved).toBeDefined()
+    expect(resolved).toContain('claude-agent-sdk-linux-x64-musl')
+  })
+
+  it('falls back to the non-musl sibling when only the base package is present', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    Object.defineProperty(process, 'arch', { value: 'arm64' })
+    existsSync.mockImplementation((p) => {
+      const s = String(p).replace(/\\/g, '/')
+      return s.includes('claude-agent-sdk-linux-arm64/claude')
+        && !s.includes('musl')
+    })
+    const resolved = resolveClaudeBinaryPath()
+    expect(resolved).toBeDefined()
+    expect(resolved).toContain('claude-agent-sdk-linux-arm64')
+    expect(resolved).not.toContain('musl')
+  })
+
+  it('appends .exe on win32 and nothing on non-win32', () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    Object.defineProperty(process, 'arch', { value: 'arm64' })
+    existsSync.mockReturnValue(true)
+    const darwinPath = resolveClaudeBinaryPath()
+    expect(darwinPath).toContain('claude-agent-sdk-darwin-arm64')
+    expect(darwinPath?.endsWith('claude')).toBe(true)
+
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    const winPath = resolveClaudeBinaryPath()
+    expect(winPath?.endsWith('claude.exe')).toBe(true)
   })
 })

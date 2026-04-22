@@ -58,11 +58,13 @@ module.exports = {
     // executable via platform-specific optional-dependency packages
     // (e.g. claude-agent-sdk-win32-x64/claude.exe). The SDK resolves it with
     // require.resolve and then spawns it with child_process — which cannot
-    // launch a binary from inside app.asar. The glob below is explicit about
-    // the <platform>-<arch> combinations we expect npm to install, so future
-    // `@anthropic-ai/claude-agent-sdk-*` siblings (docs, types, etc.) won't
-    // be unpacked accidentally.
-    'node_modules/@anthropic-ai/claude-agent-sdk-{win32,darwin,linux}-{x64,arm64}/**'
+    // launch a binary from inside app.asar. The globs below are explicit
+    // about the <platform>-<arch> combinations we expect npm to install, so
+    // future `@anthropic-ai/claude-agent-sdk-*` siblings (docs, types, etc.)
+    // won't be unpacked accidentally. The musl entry is needed for Alpine /
+    // musl-libc Linux installs (AppImage), where npm picks the -musl sibling.
+    'node_modules/@anthropic-ai/claude-agent-sdk-{win32,darwin,linux}-{x64,arm64}/**',
+    'node_modules/@anthropic-ai/claude-agent-sdk-linux-{x64,arm64}-musl/**'
   ],
   win: {
     icon: 'assets/icon.png',

@@ -15,6 +15,65 @@ import type {
 import { useCoordinatorStore, providerNeedsApiKey } from './coordinator-store'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 
+// Per-panel zoom — mirrors workspace plugin. Keeps the coordinator's visual
+// density independent of the dock's global zoom so dense chat history stays
+// readable without shrinking the rest of the dock.
+const ZOOM_KEY = 'coordinator-zoom'
+const MIN_ZOOM = 0.6
+const MAX_ZOOM = 1.8
+const ZOOM_STEP = 0.05
+
+function usePanelZoom(): React.RefObject<HTMLDivElement | null> {
+  const panelRootRef = useRef<HTMLDivElement | null>(null)
+  const zoomRef = useRef(1)
+
+  // useLayoutEffect (not useEffect) so the saved zoom is applied before the
+  // first paint — avoids the one-frame unscaled flash on mount.
+  useLayoutEffect(() => {
+    const saved = localStorage.getItem(ZOOM_KEY)
+    if (saved) {
+      const z = parseFloat(saved)
+      zoomRef.current = (isNaN(z) || z < MIN_ZOOM || z > MAX_ZOOM) ? 1 : z
+    } else {
+      const dockZoom = parseFloat(document.documentElement.style.zoom) || 1
+      zoomRef.current = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, dockZoom))
+    }
+    if (panelRootRef.current) panelRootRef.current.style.zoom = String(zoomRef.current)
+
+    const applyZoom = (z: number): void => {
+      zoomRef.current = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z)) * 100) / 100
+      if (panelRootRef.current) panelRootRef.current.style.zoom = String(zoomRef.current)
+      localStorage.setItem(ZOOM_KEY, String(zoomRef.current))
+    }
+
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey && !e.metaKey) return
+      if (!panelRootRef.current?.contains(e.target as Node)) return
+      e.preventDefault()
+      e.stopPropagation()
+      applyZoom(zoomRef.current + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
+    }
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (!panelRootRef.current?.contains(document.activeElement) && !panelRootRef.current?.matches(':hover')) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopPropagation(); applyZoom(zoomRef.current + ZOOM_STEP) }
+      else if (e.key === '-') { e.preventDefault(); e.stopPropagation(); applyZoom(zoomRef.current - ZOOM_STEP) }
+      else if (e.key === '0') { e.preventDefault(); e.stopPropagation(); applyZoom(1) }
+    }
+
+    // Capture phase — intercept before the dock's global zoom handler runs.
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
+      window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
+    }
+  }, [])
+
+  return panelRootRef
+}
+
 const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   const init = useCoordinatorStore((s) => s.init)
   const dispose = useCoordinatorStore((s) => s.dispose)
@@ -30,6 +89,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const panelRootRef = usePanelZoom()
 
   const openSettingsWindow = (): void => {
     // Dedicated settings BrowserWindow (see CoordinatorSettingsWindowManager).
@@ -74,7 +134,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   if (!config) {
     return (
-      <div className="coord-root">
+      <div className="coord-root" ref={panelRootRef}>
         <div className="coord-empty">Loading…</div>
       </div>
     )
@@ -85,14 +145,14 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
 
   if (needsSetup) {
     return (
-      <div className="coord-root">
+      <div className="coord-root" ref={panelRootRef}>
         <SetupPlaceholder onOpenSettings={openSettingsWindow} />
       </div>
     )
   }
 
   return (
-    <div className="coord-root">
+    <div className="coord-root" ref={panelRootRef}>
       <StatusRow
         terminals={terminals}
         turnActive={turnActive}
