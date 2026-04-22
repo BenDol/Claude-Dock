@@ -60,6 +60,7 @@ interface CoordinatorState {
   sendMessage: (userText: string) => Promise<void>
   cancel: () => Promise<void>
   clearHistory: () => Promise<void>
+  resetSessionId: () => Promise<void>
   setConfigPatch: (patch: Partial<CoordinatorConfig>) => Promise<void>
   resetConfig: () => Promise<void>
   testConnection: () => Promise<void>
@@ -103,6 +104,10 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       api.coordinator.hotkeyStatus()
     ])
 
+    // Only auto-open settings on first use for providers that actually need a
+    // key. Claude-SDK / Ollama / custom-compat start usable without one.
+    const initialPreset = providers.find((p) => p.id === config.provider)
+    const initialNeedsKey = initialPreset?.requiresApiKey ?? true
     set({
       projectDir,
       config,
@@ -114,7 +119,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       streamingMessageId: null,
       error: null,
       testConnectionResult: null,
-      settingsOpen: config.apiKey.length === 0 // open settings on first use
+      settingsOpen: initialNeedsKey && config.apiKey.length === 0
     })
 
     // Subscribe to stream deltas for this project only.
@@ -160,20 +165,30 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
   },
 
   sendMessage: async (userText) => {
-    const { projectDir, turnActive, config } = get()
+    const { projectDir, turnActive, config, providers } = get()
     if (!projectDir) return
     if (turnActive) return
     if (!config) return
     if (!userText.trim()) return
-    if (!config.apiKey && config.provider !== 'ollama') {
+    // Only gate on apiKey for providers that actually require one. Otherwise
+    // every no-key backend (claude-sdk, ollama, openai-compat) falsely blocks.
+    const preset = providers.find((p) => p.id === config.provider)
+    const needsKey = preset?.requiresApiKey ?? true
+    if (needsKey && !config.apiKey.trim()) {
       set({ error: 'Set an API key in settings before sending messages.' })
       return
     }
     set({ turnActive: true, error: null })
     try {
       // Optimistically append the user message; main persists authoritatively.
+      // A UUID (not Date.now) avoids key collisions when the user fires two
+      // messages in the same millisecond and the refreshHistory() dedupe
+      // below would otherwise mis-reconcile them.
+      const pendingId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? `pending-${crypto.randomUUID()}`
+        : `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const userMsg: CoordinatorMessage = {
-        id: `pending-${Date.now()}`,
+        id: pendingId,
         role: 'user',
         content: userText,
         timestamp: Date.now()
@@ -201,6 +216,16 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!projectDir) return
     await dockApi().coordinator.clearHistory(projectDir)
     set({ messages: [], streamingMessageId: null, turnActive: false })
+  },
+
+  resetSessionId: async () => {
+    const { projectDir } = get()
+    if (!projectDir) return
+    try {
+      await dockApi().coordinator.resetSessionId(projectDir)
+    } catch (err) {
+      set({ error: (err as Error).message })
+    }
   },
 
   setConfigPatch: async (patch) => {

@@ -13,6 +13,25 @@ import { createOpenAICompatProvider } from './openai-compat'
 import { createAnthropicProvider } from './anthropic'
 import { createGeminiProvider } from './gemini'
 import { createOllamaProvider } from './ollama'
+import { createClaudeSdkProvider } from './claude-sdk'
+import {
+  getLatestSessionId,
+  setLatestSessionId
+} from '../coordinator-chat-store'
+import { getMcpEntryName } from '../../../../shared/env-profile'
+
+/**
+ * Per-call context the SDK backend needs — not derivable from `ProviderConfig`
+ * alone. The orchestrator supplies this; the test-connection IPC path can
+ * skip it (SDK `testConnection()` ignores MCP/session state).
+ */
+export interface ProviderDeps {
+  projectDir: string
+  dockDataDir: string
+  mcpScriptPath: string
+  /** Mirrors `config.maxToolStepsPerTurn` — becomes SDK `maxTurns`. */
+  maxToolSteps: number
+}
 
 export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProviderPreset> = {
   groq: {
@@ -74,6 +93,13 @@ export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProvider
     label: 'OpenAI-compatible (custom)',
     defaultModel: '',
     requiresApiKey: false
+  },
+  'claude-sdk': {
+    id: 'claude-sdk',
+    label: 'Claude Code subscription',
+    // The SDK picks the model; this string is display-only in the UI.
+    defaultModel: 'claude-opus-4-7',
+    requiresApiKey: false
   }
 }
 
@@ -87,7 +113,8 @@ export function getPreset(id: CoordinatorProviderId): CoordinatorProviderPreset 
 
 export function createProvider(
   id: CoordinatorProviderId,
-  config: ProviderConfig
+  config: ProviderConfig,
+  deps?: ProviderDeps
 ): LLMProvider {
   switch (id) {
     case 'groq':
@@ -102,6 +129,20 @@ export function createProvider(
       return createGeminiProvider(config)
     case 'ollama':
       return createOllamaProvider(config)
+    case 'claude-sdk': {
+      if (!deps) {
+        throw new Error('claude-sdk provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps)')
+      }
+      return createClaudeSdkProvider({
+        projectDir: deps.projectDir,
+        dockDataDir: deps.dockDataDir,
+        mcpScriptPath: deps.mcpScriptPath,
+        mcpServerKey: getMcpEntryName(),
+        maxToolSteps: deps.maxToolSteps,
+        getLatestSessionId,
+        setLatestSessionId
+      })
+    }
     default: {
       const _exhaustive: never = id
       throw new Error(`Unknown provider id: ${_exhaustive}`)

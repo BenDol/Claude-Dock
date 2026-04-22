@@ -15,6 +15,8 @@ import type {
 import type { ChatDelta, Message } from '../llm/provider'
 import { createProvider } from '../llm/registry'
 import { buildSystemPrompt } from '../llm/system-prompt'
+import { getMcpEntryName } from '../../../../shared/env-profile'
+import { getDataDir, getMcpServerSourcePath } from '../../../linked-mode'
 import { COORDINATOR_TOOLS, dispatchTool } from './tools'
 import { appendMessage, getHistory, upsertMessage } from '../coordinator-chat-store'
 import { getServices } from '../services'
@@ -80,16 +82,34 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
   }
   appendMessage(projectDir, userMsg, config.historyMaxMessages)
 
-  const provider = createProvider(config.provider, {
-    apiKey: config.apiKey,
-    baseUrl: config.baseUrl || undefined,
-    defaultModel: config.model
-  })
+  const provider = createProvider(
+    config.provider,
+    {
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl || undefined,
+      defaultModel: config.model
+    },
+    {
+      projectDir,
+      dockDataDir: getDataDir(),
+      mcpScriptPath: getMcpServerSourcePath(),
+      maxToolSteps: config.maxToolStepsPerTurn
+    }
+  )
+
+  svc.log(
+    '[coordinator] runTurn',
+    `project=${projectDir}`,
+    `provider=${provider.id}`,
+    `passthrough=${provider.passthrough}`
+  )
 
   const systemPrompt = buildSystemPrompt({
     enforceWorktreeInPrompt: config.enforceWorktreeInPrompt,
     projectDir,
-    maxToolSteps: config.maxToolStepsPerTurn
+    maxToolSteps: config.maxToolStepsPerTurn,
+    backend: provider.passthrough ? 'sdk' : 'llm',
+    mcpServerKey: provider.passthrough ? getMcpEntryName() : undefined
   })
 
   let step = 0
@@ -199,6 +219,18 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
     }
 
     if (stopReason === 'end_turn' || toolCalls.length === 0) {
+      broadcast({
+        projectDir,
+        messageId: assistantId,
+        payload: { type: 'done', stopReason: 'end_turn' }
+      })
+      return
+    }
+
+    // Passthrough providers (e.g. Claude SDK) run tools internally via MCP
+    // — the tool_call ChatDeltas are display-only, we must not dispatch
+    // them locally or we'd double-run the work. Close the turn instead.
+    if (provider.passthrough) {
       broadcast({
         projectDir,
         messageId: assistantId,

@@ -70,6 +70,14 @@ export interface TestConnectionResult {
 export interface LLMProvider {
   /** Stable id — matches `CoordinatorProviderId`. */
   readonly id: string
+  /**
+   * When true, the orchestrator does NOT locally dispatch tool_call deltas.
+   * The provider runs tools internally (e.g. via MCP) and the orchestrator
+   * only streams deltas through to the renderer. Default is false (legacy
+   * LLM-provider behaviour: orchestrator dispatches, feeds tool_result back
+   * into the next chat() call).
+   */
+  readonly passthrough?: boolean
   chat(req: ChatRequest, signal: AbortSignal): AsyncIterable<ChatDelta>
   /** Lightweight reachability + auth check. Should not stream tokens. */
   testConnection(): Promise<TestConnectionResult>

@@ -20,7 +20,8 @@ import {
 } from './coordinator-settings-store'
 import {
   getHistory,
-  clearHistory
+  clearHistory,
+  clearLatestSessionId
 } from './coordinator-chat-store'
 import { getServices } from './services'
 import {
@@ -31,6 +32,7 @@ import { CoordinatorWindowManager } from './coordinator-window'
 import { CoordinatorHotkeyService } from './coordinator-hotkey'
 import { listProviderPresets, createProvider } from './llm/registry'
 import { runTurn } from './orchestrator/orchestrator'
+import { getDataDir, getMcpServerSourcePath } from '../../linked-mode'
 import type {
   CoordinatorConfig,
   CoordinatorMessage,
@@ -134,11 +136,22 @@ export function registerCoordinatorIpc(): void {
   ipcMain.handle(IPC.COORDINATOR_TEST_PROVIDER, async () => {
     const cfg = getCoordinatorConfig()
     try {
-      const provider = createProvider(cfg.provider, {
-        apiKey: cfg.apiKey,
-        baseUrl: cfg.baseUrl || undefined,
-        defaultModel: cfg.model
-      })
+      const provider = createProvider(
+        cfg.provider,
+        {
+          apiKey: cfg.apiKey,
+          baseUrl: cfg.baseUrl || undefined,
+          defaultModel: cfg.model
+        },
+        {
+          // SDK testConnection doesn't touch MCP/session state, but the
+          // factory still captures these in closure — pass sane defaults.
+          projectDir: process.cwd(),
+          dockDataDir: getDataDir(),
+          mcpScriptPath: getMcpServerSourcePath(),
+          maxToolSteps: cfg.maxToolStepsPerTurn
+        }
+      )
       return await provider.testConnection()
     } catch (err) {
       return { ok: false, error: (err as Error).message }
@@ -156,6 +169,12 @@ export function registerCoordinatorIpc(): void {
   ipcMain.handle(IPC.COORDINATOR_CLEAR_HISTORY, async (_e, projectDir: unknown) => {
     const dir = assertProjectDir(projectDir)
     clearHistory(dir)
+  })
+
+  ipcMain.handle(IPC.COORDINATOR_RESET_SESSION_ID, async (_e, projectDir: unknown) => {
+    const dir = assertProjectDir(projectDir)
+    clearLatestSessionId(dir)
+    svc().log('[coordinator] reset SDK session id', dir)
   })
 
   ipcMain.handle(
@@ -224,6 +243,7 @@ export function disposeCoordinatorIpc(): void {
     IPC.COORDINATOR_TEST_PROVIDER,
     IPC.COORDINATOR_GET_HISTORY,
     IPC.COORDINATOR_CLEAR_HISTORY,
+    IPC.COORDINATOR_RESET_SESSION_ID,
     IPC.COORDINATOR_SEND_MESSAGE,
     IPC.COORDINATOR_CANCEL,
     IPC.COORDINATOR_LIST_TERMINALS,
