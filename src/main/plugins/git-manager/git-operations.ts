@@ -1928,6 +1928,30 @@ interface FileDiffChunk {
 }
 
 /**
+ * Compact structural summary of a file's diff. Captures just enough to let a
+ * small LLM write a useful one-liner without feeding it the raw diff body.
+ * Extraction is regex-based and best-effort: unrecognised languages produce
+ * empty symbol lists and fall back to the hunk header + line counts.
+ */
+interface DiffHints {
+  linesAdded: number
+  linesRemoved: number
+  /** Symbol declarations appearing on `+` lines (functions, classes, etc.). */
+  symbolsAdded: string[]
+  /** Symbol declarations appearing on `-` lines. */
+  symbolsRemoved: string[]
+  /** Import/require paths newly added (e.g. "react", "./foo"). */
+  importsAdded: string[]
+  /** Import/require paths removed. */
+  importsRemoved: string[]
+  /**
+   * Hunk-header context strings (the part after the second `@@`). Gives the
+   * enclosing function/class name for many languages via git's xfuncname.
+   */
+  hunkContexts: string[]
+}
+
+/**
  * Parse `git diff --cached --name-status -z` output (NUL-terminated) into
  * structured entries. For R/C entries the format is:
  *   <status>\0<old-path>\0<new-path>\0
@@ -2001,14 +2025,157 @@ function extractFileDiffs(diff: string): FileDiffChunk[] {
 
 /**
  * Compute a diff character budget for the local LLM based on its current
- * context size (tokens). Heuristic: ~4 chars/token, reserve ~30% of ctx for
- * the system prompt + instructions + response. Cap at 24000 to avoid huge
- * single-shot prompts that small models can't reason over anyway.
+ * context size (tokens). Heuristic: ~4 chars/token, reserve most of ctx for
+ * the system prompt + instructions + response. Cap at 6000 — even with a
+ * bigger context, feeding a small model a huge raw diff wastes CPU without
+ * improving output. The structural-hint path handles large diffs instead.
  */
 function computeDiffBudget(ctxTokens: number): number {
   const approxChars = ctxTokens * 4
   const budget = Math.floor(approxChars * 0.65)
-  return Math.max(2000, Math.min(24000, budget))
+  return Math.max(2000, Math.min(6000, budget))
+}
+
+// Regexes for per-file hint extraction. Kept broad (not language-specific)
+// because the git-manager handles mixed-language repos. False positives are
+// cheap; we only use these hints as prompt context, not as source of truth.
+const DECL_ADD_RE = new RegExp(
+  [
+    '\\bfunction\\s+([A-Za-z_$][\\w$]*)',
+    '\\bclass\\s+([A-Za-z_$][\\w$]*)',
+    '\\binterface\\s+([A-Za-z_$][\\w$]*)',
+    '\\btype\\s+([A-Za-z_$][\\w$]*)\\s*=',
+    '\\benum\\s+([A-Za-z_$][\\w$]*)',
+    '\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)',
+    '\\bdef\\s+([A-Za-z_$][\\w$]*)',
+    '\\bpublic\\s+(?:static\\s+)?(?:async\\s+)?[\\w<>\\[\\]]+\\s+([A-Za-z_$][\\w$]*)\\s*\\(',
+    '\\bprivate\\s+(?:static\\s+)?(?:async\\s+)?[\\w<>\\[\\]]+\\s+([A-Za-z_$][\\w$]*)\\s*\\('
+  ].join('|')
+)
+const IMPORT_RE = /(?:import\s+[^'"]*from\s+|require\s*\(\s*|import\s*\(\s*)['"]([^'"]+)['"]/
+const HUNK_RE = /^@@\s+-\S+\s+\+\S+\s+@@\s*(.*)$/
+
+/**
+ * Extract a compact, structural summary of a file diff suitable for prompting
+ * a small LLM. Avoids feeding the whole diff body — which on large commits
+ * overwhelms the tiny context window and spikes CPU on every token.
+ */
+function extractDiffHints(chunk: FileDiffChunk): DiffHints {
+  const hints: DiffHints = {
+    linesAdded: 0,
+    linesRemoved: 0,
+    symbolsAdded: [],
+    symbolsRemoved: [],
+    importsAdded: [],
+    importsRemoved: [],
+    hunkContexts: []
+  }
+  const seenAdded = new Set<string>()
+  const seenRemoved = new Set<string>()
+  const seenImpAdded = new Set<string>()
+  const seenImpRemoved = new Set<string>()
+  const seenHunks = new Set<string>()
+
+  const lines = chunk.body.split('\n')
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      const m = line.match(HUNK_RE)
+      const ctx = m?.[1]?.trim()
+      if (ctx && !seenHunks.has(ctx)) {
+        seenHunks.add(ctx)
+        hints.hunkContexts.push(ctx)
+      }
+      continue
+    }
+    // Skip file headers so we don't mis-read them as additions
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) continue
+
+    const isAdd = line.startsWith('+')
+    const isRemove = line.startsWith('-')
+    if (!isAdd && !isRemove) continue
+
+    const content = line.slice(1)
+    if (isAdd) hints.linesAdded++
+    else hints.linesRemoved++
+
+    const imp = content.match(IMPORT_RE)
+    if (imp && imp[1]) {
+      const importPath = imp[1]
+      if (isAdd && !seenImpAdded.has(importPath)) {
+        seenImpAdded.add(importPath)
+        hints.importsAdded.push(importPath)
+      } else if (isRemove && !seenImpRemoved.has(importPath)) {
+        seenImpRemoved.add(importPath)
+        hints.importsRemoved.push(importPath)
+      }
+      continue
+    }
+
+    const decl = content.match(DECL_ADD_RE)
+    if (decl) {
+      // The matched capture group is whichever alternative fired.
+      const name = decl.slice(1).find((g) => typeof g === 'string' && g.length > 0)
+      if (name) {
+        if (isAdd && !seenAdded.has(name)) {
+          seenAdded.add(name)
+          hints.symbolsAdded.push(name)
+        } else if (isRemove && !seenRemoved.has(name)) {
+          seenRemoved.add(name)
+          hints.symbolsRemoved.push(name)
+        }
+      }
+    }
+  }
+
+  // Cap list sizes so one huge file can't flood the prompt.
+  function cap<T>(arr: T[], n: number): T[] {
+    return arr.length > n ? arr.slice(0, n) : arr
+  }
+  hints.symbolsAdded = cap(hints.symbolsAdded, 12)
+  hints.symbolsRemoved = cap(hints.symbolsRemoved, 12)
+  hints.importsAdded = cap(hints.importsAdded, 8)
+  hints.importsRemoved = cap(hints.importsRemoved, 8)
+  hints.hunkContexts = cap(hints.hunkContexts, 6)
+  return hints
+}
+
+/**
+ * Render DiffHints as a short, bullet-style block for the LLM prompt. Empty
+ * sections are omitted so trivial changes produce trivial prompts.
+ */
+function formatHintsBlock(hints: DiffHints): string {
+  const parts: string[] = []
+  parts.push(`Changes: +${hints.linesAdded} / -${hints.linesRemoved} lines`)
+  if (hints.symbolsAdded.length > 0) parts.push(`Added symbols: ${hints.symbolsAdded.join(', ')}`)
+  if (hints.symbolsRemoved.length > 0) parts.push(`Removed symbols: ${hints.symbolsRemoved.join(', ')}`)
+  if (hints.importsAdded.length > 0) parts.push(`Added imports: ${hints.importsAdded.join(', ')}`)
+  if (hints.importsRemoved.length > 0) parts.push(`Removed imports: ${hints.importsRemoved.join(', ')}`)
+  if (hints.hunkContexts.length > 0) parts.push(`Touched contexts: ${hints.hunkContexts.join(' | ')}`)
+  return parts.join('\n')
+}
+
+// Lines that indicate the model didn't actually understand the diff —
+// generic hedging/filler with no concrete signal. These are dropped from the
+// final commit message instead of being included as noise.
+const HEDGE_LINE_RE = /^(?:\s*)(?:various\s+)?(?:minor\s+|small\s+|some\s+|a\s+few\s+)?(?:changes?|updates?|modifications?|adjustments?|tweaks?|improvements?|fixes?|refactor(?:ing)?|cleanup|miscellaneous|misc\.?|other)(?:\s+(?:were\s+)?made)?\s*\.?\s*$/i
+const UNSURE_PHRASE_RE = /\b(?:not\s+sure|unclear|unknown|cannot\s+determine|can't\s+tell|hard\s+to\s+say|i\s+(?:don'?t|cannot|can'?t)\s+(?:know|tell|determine))\b/i
+
+/**
+ * Returns true if a single line looks like a confident, informative summary
+ * and is worth keeping in the commit message. Rejects pure hedging filler
+ * ("minor changes", "various updates") and uncertainty phrases ("not sure
+ * what changed"). Lines that survive still need the usual cleanup.
+ */
+function isConfidentSummary(line: string): boolean {
+  const trimmed = line.trim()
+  if (trimmed.length < 10) return false
+  if (HEDGE_LINE_RE.test(trimmed)) return false
+  if (UNSURE_PHRASE_RE.test(trimmed)) return false
+  // Must contain at least one alphanumeric character beyond trivial fillers —
+  // require at least two "word-ish" tokens so "ok." / "done" are dropped.
+  const tokens = trimmed.split(/\s+/).filter((t) => /[A-Za-z0-9]/.test(t))
+  if (tokens.length < 3) return false
+  return true
 }
 
 /**
@@ -2092,26 +2259,73 @@ function buildLocalCommitPrompt(stat: string, diff: string, fileInfos: StagedFil
   ].join('\n')
 }
 
+/** Maximum diff-snippet length included alongside hints in the per-file
+ * prompt. Kept small on purpose: the hints already carry the signal — the
+ * snippet is just there so the model can describe concrete changes in prose.
+ */
+const PER_FILE_SNIPPET_CAP = 400
+
 /**
  * Multi-pass phase 1 prompt: summarize ONE file's diff in one short line.
- * The output of this is fed to buildCombineSummariesPrompt below.
+ * Feeds the LLM a compact hint block (+/- counts, added/removed symbols,
+ * imports, hunk contexts) plus a tiny diff snippet — NOT the full body —
+ * so CPU cost stays bounded even on huge files. The output is fed to
+ * buildCombineSummariesPrompt.
+ *
+ * Callers should drop the result via `isConfidentSummary` if the model
+ * produces pure hedging output instead of a concrete description.
  */
-function buildPerFileSummaryPrompt(info: StagedFileInfo, body: string): string {
+function buildPerFileSummaryPrompt(
+  info: StagedFileInfo,
+  hints: DiffHints,
+  snippet: string
+): string {
   const label = statusLabel(info.status)
   const renameLine = info.origPath && info.origPath !== info.path
     ? `Renamed from: ${info.origPath}\n`
     : ''
-  return [
+  const blocks: string[] = [
     `Summarize this single staged file change in ONE short line (max 120 chars).`,
-    'Describe what changed and why (if derivable from the diff). Do not use conventional-commit prefixes like "feat:" or "fix:" — just plain prose. No quotes, no code fences, no preamble.',
+    'Use the structural hints to describe what actually changed (function names, imports, etc.). If the hints are empty or ambiguous, reply with the single word: UNSURE. Do not guess. No conventional-commit prefixes. No quotes, no code fences, no preamble.',
     '',
     `File: ${info.path}`,
     `Change type: ${label}`,
-    renameLine + `Diff:`,
-    body,
-    '',
-    'One-line summary:'
-  ].join('\n')
+    renameLine + `Hints:`,
+    formatHintsBlock(hints)
+  ]
+  if (snippet) {
+    blocks.push('', 'Snippet (first change):', snippet)
+  }
+  blocks.push('', 'One-line summary:')
+  return blocks.join('\n')
+}
+
+/**
+ * Pull the first added/removed line region from a diff body and cap it at
+ * PER_FILE_SNIPPET_CAP characters. Keeps the per-file prompt short while
+ * still giving the model one concrete chunk of diff to anchor on.
+ */
+function buildShortDiffSnippet(body: string): string {
+  if (!body) return ''
+  const lines = body.split('\n')
+  let start = lines.findIndex((l) => l.startsWith('@@'))
+  if (start < 0) {
+    // No hunk header — skip any leading git diff header lines so the snippet
+    // shows actual content rather than `diff --git` / `index` / `---` / `+++`.
+    start = 0
+    while (
+      start < lines.length &&
+      (lines[start].startsWith('diff --git') ||
+        lines[start].startsWith('index ') ||
+        lines[start].startsWith('--- ') ||
+        lines[start].startsWith('+++ '))
+    ) {
+      start++
+    }
+  }
+  const tail = lines.slice(start).join('\n')
+  if (tail.length <= PER_FILE_SNIPPET_CAP) return tail
+  return tail.slice(0, PER_FILE_SNIPPET_CAP) + '\n... (truncated)'
 }
 
 /**
@@ -2140,15 +2354,30 @@ function buildCombineSummariesPrompt(stat: string, summaries: Array<{ info: Stag
   ].join('\n')
 }
 
+// Thresholds that decide which pipeline to run. Kept small on purpose —
+// small local models (Qwen2.5-0.5B, Phi-3-mini) cannot reason over large
+// raw diffs, and forcing them to try spikes CPU without improving output.
+const SMALL_COMMIT_FILE_LIMIT = 4
+// Pinned to computeDiffBudget()'s upper bound — if that cap moves, update this
+// too so single-shot mode never hits buildPerFileBudgetedDiff truncation.
+const SMALL_COMMIT_DIFF_LIMIT = 6000
+// Above this, skip raw-diff bodies entirely and drive the per-file pass
+// from DiffHints alone. Chosen to cap worst-case prompt chars per file.
+const HINTS_ONLY_TOTAL_DIFF = 256 * 1024
+const HINTS_ONLY_FILE_COUNT = 50
+
 /**
- * Local-LLM commit message generation with per-file budgeting and optional
- * multi-pass for large commits. The cloud providers continue to use the
- * simpler buildCommitPrompt() path.
+ * Local-LLM commit message generation, tuned to avoid feeding a small model
+ * huge raw diffs. The cloud providers continue to use the simpler
+ * buildCommitPrompt() path.
  *
- *   - Small commits (≤6 files AND diff ≤ 1.5× budget): single-shot with
- *     per-file budgeted diff and an explicit file checklist.
- *   - Large commits: phase 1 summarizes each file individually; phase 2
- *     combines the summaries into one commit message.
+ *   - Small commits (≤SMALL_COMMIT_FILE_LIMIT files AND diff ≤ SMALL_COMMIT_DIFF_LIMIT):
+ *     single-shot with a per-file budgeted diff and a file checklist.
+ *   - Large commits: phase 1 summarizes each file individually using a
+ *     compact hint block plus a tiny diff snippet. Low-confidence / UNSURE
+ *     summaries are dropped. Phase 2 combines the kept summaries.
+ *   - Extreme commits (> HINTS_ONLY_TOTAL_DIFF chars or > HINTS_ONLY_FILE_COUNT files):
+ *     phase 1 runs on hints only — no diff snippet at all.
  */
 async function generateViaLocalLlm(stat: string, diff: string, fileInfos: StagedFileInfo[]): Promise<string> {
   const { LocalLlmManager } = await import('../../local-llm')
@@ -2164,10 +2393,11 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
 
   const totalDiffLen = diff.length
   const fileCount = fileInfos.length || chunks.length
-  const needsMultiPass = fileCount > 6 || totalDiffLen > Math.floor(budget * 1.5)
+  const needsMultiPass = fileCount > SMALL_COMMIT_FILE_LIMIT || totalDiffLen > SMALL_COMMIT_DIFF_LIMIT
+  const hintsOnly = totalDiffLen > HINTS_ONLY_TOTAL_DIFF || fileCount > HINTS_ONLY_FILE_COUNT
 
   getServices().log(
-    `[git-manager] local-llm: ctx=${ctxTokens} budget=${budget} files=${fileCount} diffLen=${totalDiffLen} multiPass=${needsMultiPass}`
+    `[git-manager] local-llm: ctx=${ctxTokens} budget=${budget} files=${fileCount} diffLen=${totalDiffLen} multiPass=${needsMultiPass} hintsOnly=${hintsOnly}`
   )
 
   if (!needsMultiPass) {
@@ -2179,25 +2409,23 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
     return msg
   }
 
-  // --- Multi-pass ---
-  // Phase 1: per-file summaries. Budget each file individually so its prompt
-  // fits comfortably (~half the diff budget for the diff, model handles the
-  // rest). Run sequentially to avoid overwhelming the single-worker llama
-  // server — parallel requests would interleave KV cache state.
-  const perFileDiffBudget = Math.max(1500, Math.floor(budget / 2))
+  // --- Multi-pass (hint-driven) ---
+  // Phase 1: per-file summaries driven by DiffHints (+ optional tiny snippet).
+  // Running sequentially avoids interleaving KV cache state on the single-worker
+  // llama server. Each prompt is ~<1KB — orders of magnitude cheaper than
+  // feeding the full per-file diff.
   const summaries: Array<{ info: StagedFileInfo; text: string }> = []
   const chunkByPath = new Map<string, FileDiffChunk>()
   for (const c of chunks) chunkByPath.set(c.path, c)
 
   for (const info of fileInfos) {
     const chunk = chunkByPath.get(info.path)
-    const body = chunk
-      ? (chunk.body.length > perFileDiffBudget
-          ? chunk.body.slice(0, perFileDiffBudget) + '\n... (truncated)'
-          : chunk.body)
-      : `(no diff available — status: ${statusLabel(info.status)})`
+    const hints: DiffHints = chunk
+      ? extractDiffHints(chunk)
+      : { linesAdded: 0, linesRemoved: 0, symbolsAdded: [], symbolsRemoved: [], importsAdded: [], importsRemoved: [], hunkContexts: [] }
+    const snippet = chunk && !hintsOnly ? buildShortDiffSnippet(chunk.body) : ''
     try {
-      const raw = await llm.generate(buildPerFileSummaryPrompt(info, body), { maxTokens: 96 })
+      const raw = await llm.generate(buildPerFileSummaryPrompt(info, hints, snippet), { maxTokens: 96 })
       const line = (raw || '')
         .split('\n')
         .map((l) => l.trim())
@@ -2208,15 +2436,30 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
         .replace(/^[-*]\s+/, '')
         .replace(/^```[^\n]*$/g, '')
         .trim()
-      if (cleaned) summaries.push({ info, text: cleaned })
+      // Drop the UNSURE sentinel and any low-confidence output — the combine
+      // step is better off not hearing about files the model couldn't read.
+      if (/^unsure\b/i.test(cleaned)) continue
+      if (cleaned && isConfidentSummary(cleaned)) {
+        summaries.push({ info, text: cleaned })
+      }
     } catch (err) {
       getServices().log(`[git-manager] per-file summary failed for ${info.path}: ${err instanceof Error ? err.message : String(err)}`)
       // Skip this file; combine pass will still mention the others.
     }
   }
 
+  // Synthesize status-only fallback lines for files the model dropped
+  // (UNSURE, low-confidence, binary, or threw). Without this, renames and
+  // opaque files silently disappear from the commit message instead of
+  // showing up as "added x" / "deleted y".
+  const covered = new Set(summaries.map((s) => s.info.path))
+  for (const info of fileInfos) {
+    if (covered.has(info.path)) continue
+    summaries.push({ info, text: `${statusLabel(info.status)} ${info.path}` })
+  }
+
   if (summaries.length === 0) {
-    throw new Error('Local LLM produced no per-file summaries')
+    throw new Error('Local LLM produced no confident per-file summaries')
   }
 
   // Phase 2: combine. No raw diff — just the synthesized lines.
@@ -2224,7 +2467,34 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
   const combined = await llm.generate(combinePrompt, { maxTokens: 500 })
   const msg = cleanCommitMessage(combined)
   if (!msg) throw new Error('Empty response from local LLM (combine pass)')
-  return msg
+  // Post-filter bullet lines in the combined output — the combine model can
+  // still emit hedging bullets even when per-file summaries were concrete.
+  return filterLowConfidenceBullets(msg)
+}
+
+/**
+ * Drop any bullet line in the final combined commit message that looks like
+ * hedging/filler. The summary line is preserved as-is — it's already been
+ * validated by cleanCommitMessage (conventional-commit prefix required).
+ */
+function filterLowConfidenceBullets(msg: string): string {
+  const lines = msg.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/)
+    if (bulletMatch) {
+      const content = bulletMatch[1]
+      if (!isConfidentSummary(content)) continue
+    }
+    out.push(line)
+  }
+  // Collapse trailing/duplicate blank lines that may result from bullet drops
+  const collapsed = out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n+$/, '')
+  return collapsed
 }
 
 async function generateViaClaude(stat: string, diff: string): Promise<string> {
@@ -4118,4 +4388,16 @@ async function searchWorking(cwd: string, query: string, maxResults: number, gen
 
   const truncated = results.length > maxResults
   return { results: results.slice(0, maxResults), truncated }
+}
+
+// Internal helpers exposed for unit tests only. Not part of the public API —
+// callers outside the git-manager plugin should not use these.
+export const __testInternals = {
+  extractDiffHints,
+  formatHintsBlock,
+  isConfidentSummary,
+  buildShortDiffSnippet,
+  buildPerFileSummaryPrompt,
+  filterLowConfidenceBullets,
+  computeDiffBudget
 }
