@@ -2386,6 +2386,40 @@ const HINTS_ONLY_TOTAL_DIFF = 256 * 1024
 const HINTS_ONLY_FILE_COUNT = 50
 
 /**
+ * Run `llm.generate` and validate the result via cleanCommitMessage, retrying
+ * on empty output. Local LLMs are non-deterministic — empty/invalid responses
+ * often succeed on the next attempt. Bounded to avoid runaway loops.
+ * Returns the cleaned message, or the raw output from the final attempt if
+ * none produced a valid message (so the caller can log diagnostics).
+ */
+async function llmGenerateCommitMessageWithRetry(
+  llm: { generate: (prompt: string, opts?: { maxTokens?: number }) => Promise<string> },
+  prompt: string,
+  opts: { maxTokens: number },
+  label: string,
+  attempts = 3
+): Promise<{ msg: string; lastRaw: string; attempts: number }> {
+  let lastRaw = ''
+  for (let i = 1; i <= attempts; i++) {
+    const raw = await llm.generate(prompt, opts)
+    lastRaw = raw
+    const msg = cleanCommitMessage(raw)
+    if (msg) {
+      if (i > 1) {
+        getServices().log(`[git-manager] local-llm ${label} succeeded on attempt ${i}/${attempts}`)
+      }
+      return { msg, lastRaw, attempts: i }
+    }
+    if (i < attempts) {
+      getServices().log(
+        `[git-manager] local-llm ${label} attempt ${i}/${attempts} produced empty output; retrying. raw=${JSON.stringify((raw || '').slice(0, 200))}`
+      )
+    }
+  }
+  return { msg: '', lastRaw, attempts }
+}
+
+/**
  * Local-LLM commit message generation, tuned to avoid feeding a small model
  * huge raw diffs. The cloud providers continue to use the simpler
  * buildCommitPrompt() path.
@@ -2429,13 +2463,14 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
   if (!needsMultiPass) {
     const budgeted = buildPerFileBudgetedDiff(chunks, budget)
     const prompt = buildLocalCommitPrompt(stat, budgeted || diff, fileInfos)
-    const raw = await llm.generate(prompt, { maxTokens: 400 })
-    const msg = cleanCommitMessage(raw)
+    const { msg, lastRaw, attempts } = await llmGenerateCommitMessageWithRetry(
+      llm, prompt, { maxTokens: 400 }, 'single-shot'
+    )
     if (!msg) {
       getServices().log(
-        `[git-manager] local-llm single-shot rejected (empty after cleanCommitMessage). raw=${JSON.stringify((raw || '').slice(0, 500))}`
+        `[git-manager] local-llm single-shot rejected after ${attempts} attempts (empty after cleanCommitMessage). raw=${JSON.stringify((lastRaw || '').slice(0, 500))}`
       )
-      throw new Error('Empty response from local LLM')
+      throw new Error(`Empty response from local LLM after ${attempts} attempts`)
     }
     return msg
   }
@@ -2495,14 +2530,15 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
 
   // Phase 2: combine. No raw diff — just the synthesized lines.
   const combinePrompt = buildCombineSummariesPrompt(stat, summaries)
-  const combined = await llm.generate(combinePrompt, { maxTokens: 500 })
-  const msg = cleanCommitMessage(combined)
+  const { msg, lastRaw, attempts } = await llmGenerateCommitMessageWithRetry(
+    llm, combinePrompt, { maxTokens: 500 }, 'combine pass'
+  )
   if (!msg) {
     const summaryPreview = summaries.slice(0, 8).map((s) => `${s.info.path}: ${s.text}`).join(' | ')
     getServices().log(
-      `[git-manager] local-llm combine pass rejected (empty after cleanCommitMessage). raw=${JSON.stringify((combined || '').slice(0, 500))} summaries=${JSON.stringify(summaryPreview.slice(0, 400))}`
+      `[git-manager] local-llm combine pass rejected after ${attempts} attempts (empty after cleanCommitMessage). raw=${JSON.stringify((lastRaw || '').slice(0, 500))} summaries=${JSON.stringify(summaryPreview.slice(0, 400))}`
     )
-    throw new Error('Empty response from local LLM (combine pass)')
+    throw new Error(`Empty response from local LLM (combine pass) after ${attempts} attempts`)
   }
   // Post-filter bullet lines in the combined output — the combine model can
   // still emit hedging bullets even when per-file summaries were concrete.
