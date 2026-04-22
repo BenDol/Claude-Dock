@@ -1879,6 +1879,13 @@ function cleanCommitMessage(raw: string): string {
   // This lets callers retry instead of committing with nonsense text.
   if (!CONV_COMMIT_RE.test(cleanedSummary.trim())) return ''
 
+  // Reject summaries that quote hint-block labels instead of describing the
+  // change. E.g. "feat: foo.tsx: +8 / -1 lines, touched contexts: const" —
+  // the conventional-commit prefix passes the check above, but the rest is
+  // just the model parroting the prompt.
+  const summaryBody = cleanedSummary.trim().replace(CONV_COMMIT_RE, '').trim()
+  if (HINT_ECHO_RE.test(summaryBody)) return ''
+
   // Reject output that leaked phrases from the prompt's worked example — that
   // means the model copied instead of describing the actual diff.
   const combined = [cleanedSummary, ...uniqueBullets].join('\n')
@@ -2140,17 +2147,21 @@ function extractDiffHints(chunk: FileDiffChunk): DiffHints {
 }
 
 /**
- * Render DiffHints as a short, bullet-style block for the LLM prompt. Empty
- * sections are omitted so trivial changes produce trivial prompts.
+ * Render DiffHints as a machine-readable key=value block for the LLM prompt.
+ *
+ * We deliberately avoid prose-like labels ("Changes: +8 / -1 lines", "Touched
+ * contexts: const") because small models (0.5B-class) tend to copy those back
+ * verbatim as the summary — one observed failure produced
+ * `feat: CoordinatorPanel.tsx: +8 / -1 lines, touched contexts: const`.
+ * The bracketed block below reads as metadata, not sentence fragments.
  */
 function formatHintsBlock(hints: DiffHints): string {
-  const parts: string[] = []
-  parts.push(`Changes: +${hints.linesAdded} / -${hints.linesRemoved} lines`)
-  if (hints.symbolsAdded.length > 0) parts.push(`Added symbols: ${hints.symbolsAdded.join(', ')}`)
-  if (hints.symbolsRemoved.length > 0) parts.push(`Removed symbols: ${hints.symbolsRemoved.join(', ')}`)
-  if (hints.importsAdded.length > 0) parts.push(`Added imports: ${hints.importsAdded.join(', ')}`)
-  if (hints.importsRemoved.length > 0) parts.push(`Removed imports: ${hints.importsRemoved.join(', ')}`)
-  if (hints.hunkContexts.length > 0) parts.push(`Touched contexts: ${hints.hunkContexts.join(' | ')}`)
+  const parts: string[] = ['[diff-stats]', `lines=+${hints.linesAdded}/-${hints.linesRemoved}`]
+  if (hints.symbolsAdded.length > 0) parts.push(`syms_added=${hints.symbolsAdded.join(', ')}`)
+  if (hints.symbolsRemoved.length > 0) parts.push(`syms_removed=${hints.symbolsRemoved.join(', ')}`)
+  if (hints.importsAdded.length > 0) parts.push(`imports_added=${hints.importsAdded.join(', ')}`)
+  if (hints.importsRemoved.length > 0) parts.push(`imports_removed=${hints.importsRemoved.join(', ')}`)
+  if (hints.hunkContexts.length > 0) parts.push(`ctx=${hints.hunkContexts.join(' | ')}`)
   return parts.join('\n')
 }
 
@@ -2159,18 +2170,26 @@ function formatHintsBlock(hints: DiffHints): string {
 // final commit message instead of being included as noise.
 const HEDGE_LINE_RE = /^(?:\s*)(?:various\s+)?(?:minor\s+|small\s+|some\s+|a\s+few\s+)?(?:changes?|updates?|modifications?|adjustments?|tweaks?|improvements?|fixes?|refactor(?:ing)?|cleanup|miscellaneous|misc\.?|other)(?:\s+(?:were\s+)?made)?\s*\.?\s*$/i
 const UNSURE_PHRASE_RE = /\b(?:not\s+sure|unclear|unknown|cannot\s+determine|can't\s+tell|hard\s+to\s+say|i\s+(?:don'?t|cannot|can'?t)\s+(?:know|tell|determine))\b/i
+// Fragments lifted verbatim from the hint block — both the historical prose
+// format ("touched contexts:", "+8 / -1 lines") and the current key=value
+// format ("lines=+8/-1", "syms_added=..."). If any of these show up in a
+// one-line summary, the model is parroting the prompt rather than describing
+// the change. The combine pass is better off with a status-only fallback line.
+const HINT_ECHO_RE = /(?:\blines\s*=\s*[+\-]\d+\s*\/\s*-?\d+\b)|(?:\+\d+\s*\/\s*-\d+\s+lines?\b)|\b(?:syms_(?:added|removed)|imports_(?:added|removed)|diff-stats)\s*=|\b(?:touched\s+contexts?|added\s+symbols?|removed\s+symbols?|added\s+imports?|removed\s+imports?)\s*[:=]/i
 
 /**
  * Returns true if a single line looks like a confident, informative summary
  * and is worth keeping in the commit message. Rejects pure hedging filler
- * ("minor changes", "various updates") and uncertainty phrases ("not sure
- * what changed"). Lines that survive still need the usual cleanup.
+ * ("minor changes", "various updates"), uncertainty phrases ("not sure what
+ * changed"), and lines that only echo the hint block back ("lines=+8/-1,
+ * ctx=const"). Lines that survive still need the usual cleanup.
  */
 function isConfidentSummary(line: string): boolean {
   const trimmed = line.trim()
   if (trimmed.length < 10) return false
   if (HEDGE_LINE_RE.test(trimmed)) return false
   if (UNSURE_PHRASE_RE.test(trimmed)) return false
+  if (HINT_ECHO_RE.test(trimmed)) return false
   // Must contain at least one alphanumeric character beyond trivial fillers —
   // require at least two "word-ish" tokens so "ok." / "done" are dropped.
   const tokens = trimmed.split(/\s+/).filter((t) => /[A-Za-z0-9]/.test(t))
@@ -2286,11 +2305,11 @@ function buildPerFileSummaryPrompt(
     : ''
   const blocks: string[] = [
     `Summarize this single staged file change in ONE short line (max 120 chars).`,
-    'Use the structural hints to describe what actually changed (function names, imports, etc.). If the hints are empty or ambiguous, reply with the single word: UNSURE. Do not guess. No conventional-commit prefixes. No quotes, no code fences, no preamble.',
+    'Use the structural hints to describe what actually changed — interpret the added/removed symbols and imports in your own words. Do NOT copy the hint labels ("lines", "syms_added", "syms_removed", "imports_added", "imports_removed", "ctx", "diff-stats") into your answer. Do NOT quote line counts like "+N/-N" as the summary. If the hints are empty or ambiguous, reply with the single word: UNSURE. Do not guess. No conventional-commit prefixes. No quotes, no code fences, no preamble.',
     '',
     `File: ${info.path}`,
     `Change type: ${label}`,
-    renameLine + `Hints:`,
+    renameLine + `Hints (metadata — describe what these changes do, do not echo the labels):`,
     formatHintsBlock(hints)
   ]
   if (snippet) {
@@ -2380,8 +2399,15 @@ const HINTS_ONLY_FILE_COUNT = 50
  *     phase 1 runs on hints only — no diff snippet at all.
  */
 async function generateViaLocalLlm(stat: string, diff: string, fileInfos: StagedFileInfo[]): Promise<string> {
-  const { LocalLlmManager } = await import('../../local-llm')
-  const llm = LocalLlmManager.getInstance()
+  const localLlm = await import('../../local-llm')
+  // Plugin archives bundle their own muted copy of `./logger` — route
+  // local-llm logs through the injected services logger so they actually
+  // reach the dock log file in packaged builds.
+  if (typeof localLlm.setLocalLlmLoggers === 'function') {
+    const s = getServices()
+    localLlm.setLocalLlmLoggers(s.log, s.logError)
+  }
+  const llm = localLlm.LocalLlmManager.getInstance()
   const ctxTokens = llm.getContextSize()
   const budget = computeDiffBudget(ctxTokens)
 
@@ -2405,7 +2431,12 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
     const prompt = buildLocalCommitPrompt(stat, budgeted || diff, fileInfos)
     const raw = await llm.generate(prompt, { maxTokens: 400 })
     const msg = cleanCommitMessage(raw)
-    if (!msg) throw new Error('Empty response from local LLM')
+    if (!msg) {
+      getServices().log(
+        `[git-manager] local-llm single-shot rejected (empty after cleanCommitMessage). raw=${JSON.stringify((raw || '').slice(0, 500))}`
+      )
+      throw new Error('Empty response from local LLM')
+    }
     return msg
   }
 
@@ -2466,7 +2497,13 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
   const combinePrompt = buildCombineSummariesPrompt(stat, summaries)
   const combined = await llm.generate(combinePrompt, { maxTokens: 500 })
   const msg = cleanCommitMessage(combined)
-  if (!msg) throw new Error('Empty response from local LLM (combine pass)')
+  if (!msg) {
+    const summaryPreview = summaries.slice(0, 8).map((s) => `${s.info.path}: ${s.text}`).join(' | ')
+    getServices().log(
+      `[git-manager] local-llm combine pass rejected (empty after cleanCommitMessage). raw=${JSON.stringify((combined || '').slice(0, 500))} summaries=${JSON.stringify(summaryPreview.slice(0, 400))}`
+    )
+    throw new Error('Empty response from local LLM (combine pass)')
+  }
   // Post-filter bullet lines in the combined output — the combine model can
   // still emit hedging bullets even when per-file summaries were concrete.
   return filterLowConfidenceBullets(msg)
@@ -4399,5 +4436,6 @@ export const __testInternals = {
   buildShortDiffSnippet,
   buildPerFileSummaryPrompt,
   filterLowConfidenceBullets,
-  computeDiffBudget
+  computeDiffBudget,
+  cleanCommitMessage
 }

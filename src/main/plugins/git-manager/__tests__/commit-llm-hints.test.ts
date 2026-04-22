@@ -17,7 +17,8 @@ const {
   buildShortDiffSnippet,
   buildPerFileSummaryPrompt,
   filterLowConfidenceBullets,
-  computeDiffBudget
+  computeDiffBudget,
+  cleanCommitMessage
 } = __testInternals
 
 function makeChunk(path: string, body: string) {
@@ -158,11 +159,30 @@ describe('formatHintsBlock', () => {
       hunkContexts: []
     }
     const block = formatHintsBlock(hints)
-    expect(block).toContain('Changes: +3 / -1 lines')
-    expect(block).toContain('Added symbols: doThing')
-    expect(block).toContain('Added imports: react')
-    expect(block).not.toContain('Removed symbols:')
-    expect(block).not.toContain('Touched contexts:')
+    expect(block).toContain('[diff-stats]')
+    expect(block).toContain('lines=+3/-1')
+    expect(block).toContain('syms_added=doThing')
+    expect(block).toContain('imports_added=react')
+    expect(block).not.toContain('syms_removed=')
+    expect(block).not.toContain('ctx=')
+  })
+
+  it('uses key=value format (no prose labels) to discourage model echo', () => {
+    const hints = {
+      linesAdded: 8,
+      linesRemoved: 1,
+      symbolsAdded: [],
+      symbolsRemoved: [],
+      importsAdded: [],
+      importsRemoved: [],
+      hunkContexts: ['const']
+    }
+    const block = formatHintsBlock(hints)
+    // Old prose-style labels must not appear — those were the ones small
+    // models parroted verbatim ("+8 / -1 lines, touched contexts: const").
+    expect(block).not.toMatch(/Changes:\s*\+/)
+    expect(block).not.toMatch(/Touched contexts:/i)
+    expect(block).not.toMatch(/Added symbols:/i)
   })
 })
 
@@ -188,6 +208,22 @@ describe('isConfidentSummary', () => {
   it('accepts concrete descriptions', () => {
     expect(isConfidentSummary('add doThing() helper and wire into updateFoo')).toBe(true)
     expect(isConfidentSummary('remove obsolete oldParser class from lexer module')).toBe(true)
+  })
+
+  it('rejects lines that echo the current key=value hint block', () => {
+    // Small model copied the hint labels verbatim into the "summary".
+    expect(isConfidentSummary('lines=+8/-1 ctx=const')).toBe(false)
+    expect(isConfidentSummary('syms_added=foo, bar')).toBe(false)
+    expect(isConfidentSummary('imports_added=react imports_removed=legacy')).toBe(false)
+  })
+
+  it('rejects lines that echo the legacy prose-style hint labels', () => {
+    // Defensive: past hint-block format had phrases like
+    // "+8 / -1 lines, touched contexts: const" — if a model ever regenerates
+    // those labels, still drop the line.
+    expect(isConfidentSummary('CoordinatorPanel.tsx: +8 / -1 lines, touched contexts: const')).toBe(false)
+    expect(isConfidentSummary('foo.ts: Added symbols: bar, baz')).toBe(false)
+    expect(isConfidentSummary('foo.ts: Touched contexts: function outerFn()')).toBe(false)
   })
 })
 
@@ -223,10 +259,25 @@ describe('buildPerFileSummaryPrompt', () => {
       hunkContexts: []
     }
     const prompt = buildPerFileSummaryPrompt(info, hints, '')
-    expect(prompt).toContain('Hints:')
-    expect(prompt).toContain('Added symbols: bar')
+    expect(prompt).toContain('[diff-stats]')
+    expect(prompt).toContain('syms_added=bar')
     expect(prompt).toContain('UNSURE')
     expect(prompt).not.toContain('Snippet')
+  })
+
+  it('forbids copying hint labels in the prompt instructions', () => {
+    const hints = {
+      linesAdded: 1,
+      linesRemoved: 0,
+      symbolsAdded: [],
+      symbolsRemoved: [],
+      importsAdded: [],
+      importsRemoved: [],
+      hunkContexts: []
+    }
+    const prompt = buildPerFileSummaryPrompt(info, hints, '')
+    // Explicit anti-echo instruction so the model doesn't parrot label names.
+    expect(prompt).toMatch(/do\s*not\s+copy\s+the\s+hint\s+labels/i)
   })
 
   it('includes snippet section only when one is provided', () => {
@@ -277,6 +328,31 @@ describe('filterLowConfidenceBullets', () => {
     const filtered = filterLowConfidenceBullets(msg)
     // No runs of more than two consecutive newlines
     expect(/\n{3,}/.test(filtered)).toBe(false)
+  })
+})
+
+describe('cleanCommitMessage', () => {
+  it('rejects the observed hint-echo failure case from prod', () => {
+    // User reported this output: the model produced a conventional-commit
+    // prefix but the body was a verbatim echo of the old hint block labels.
+    // cleanCommitMessage must refuse it so the caller retries / errors loudly
+    // instead of committing with nonsense.
+    const bad = 'feat: cOORDINATOR_PANEL.tsx: +8 / -1 lines, touched contexts: const'
+    expect(cleanCommitMessage(bad)).toBe('')
+  })
+
+  it('rejects summaries that quote the new key=value hint labels', () => {
+    expect(cleanCommitMessage('feat: lines=+3/-1 syms_added=foo')).toBe('')
+    expect(cleanCommitMessage('fix: imports_added=react')).toBe('')
+  })
+
+  it('accepts a well-formed summary with a description', () => {
+    const ok = 'feat: add doThing helper and wire into updateFoo'
+    expect(cleanCommitMessage(ok)).toBe('feat: add doThing helper and wire into updateFoo')
+  })
+
+  it('still rejects messages without a conventional-commit prefix', () => {
+    expect(cleanCommitMessage('did some stuff')).toBe('')
   })
 })
 

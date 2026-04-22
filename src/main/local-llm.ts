@@ -19,8 +19,33 @@ import * as path from 'path'
 import * as net from 'net'
 import * as os from 'os'
 import { app, BrowserWindow } from 'electron'
-import { log, logError } from './logger'
+import { log as defaultLog, logError as defaultLogError } from './logger'
 import { IPC } from '../shared/ipc-channels'
+
+// Plugins are esbuild-bundled as standalone CommonJS archives, which means
+// each plugin archive ships its own copy of `./logger` with its own
+// `debugEnabled=false` state that never gets turned on (initLogger only runs
+// in the main bundle). When the git-manager plugin dynamically imports
+// `../../local-llm`, the bundled local-llm in the plugin uses the plugin's
+// muted logger — so its debug lines never reach the dock log file.
+//
+// Callers can route local-llm logs through the real main-process logger by
+// calling setLocalLlmLoggers() with a logger injected via their service layer
+// (e.g. getServices().log in the git-manager plugin). Defaults still point at
+// the in-module logger so this stays zero-config for main-process callers.
+let logFn: (...args: unknown[]) => void = defaultLog
+let logErrorFn: (...args: unknown[]) => void = defaultLogError
+
+export function setLocalLlmLoggers(
+  logger?: ((...args: unknown[]) => void) | null,
+  errorLogger?: ((...args: unknown[]) => void) | null
+): void {
+  if (typeof logger === 'function') logFn = logger
+  if (typeof errorLogger === 'function') logErrorFn = errorLogger
+}
+
+const log: (...args: unknown[]) => void = (...args) => logFn(...args)
+const logError: (...args: unknown[]) => void = (...args) => logErrorFn(...args)
 
 // -- Constants --
 
