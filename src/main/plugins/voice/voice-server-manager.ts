@@ -33,6 +33,7 @@ import {
   removeMcpEntry,
   VOICE_MCP_KEY
 } from './voice-mcp-register'
+import { verifyBundledPythonIntegrity, repairHintForSource } from './bundled-services'
 import { IPC } from '../../../shared/ipc-channels'
 import type {
   VoiceRuntimeStatus,
@@ -346,6 +347,24 @@ export class VoiceServerManager extends EventEmitter {
     }
 
     const daemonScript = path.join(svc().paths.pythonDir, 'hotkey_daemon.py')
+    if (!fs.existsSync(daemonScript)) {
+      // Matches the dictation-daemon missing-script path: tell the user which
+      // file is missing, where it was looked for, and how to repair (reinstall
+      // / rebuild / clear override) based on the resolved source.
+      const integrity = verifyBundledPythonIntegrity()
+      const msg =
+        `hotkey_daemon.py missing at ${daemonScript}. ` +
+        `python source=${integrity.source}, missing=[${integrity.missing.join(', ')}]. ` +
+        repairHintForSource(integrity.source)
+      svc().logError(`[voice-manager] ${msg}`)
+      this.updateStatus({
+        daemonState: 'crashed',
+        installState: 'missing',
+        lastError: msg,
+        step: 'Hotkey daemon script missing'
+      })
+      return
+    }
     const configPath = this.configPath()
     const dataDir = svc().getVoiceDataDir()
     const pidFile = path.join(dataDir, 'hotkey.pid')

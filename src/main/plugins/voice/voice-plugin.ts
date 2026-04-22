@@ -6,6 +6,7 @@ import { VoiceServerManager } from './voice-server-manager'
 import { getServices } from './services'
 import { DockManager } from '../../dock-manager'
 import { PluginManager } from '../plugin-manager'
+import { verifyBundledPythonIntegrity, repairHintForSource } from './bundled-services'
 
 export { setServices } from './services'
 
@@ -21,6 +22,23 @@ export class VoicePlugin implements DockPlugin {
   readonly lazyLoad = true
 
   register(bus: PluginEventBus): void {
+    // Surface install/packaging drift at startup so users see the problem in
+    // logs once, rather than only when they press the Speak button. The voice
+    // IPC handlers and server manager still defend at their call sites —
+    // this is an early-warning signal, not a precondition.
+    const integrity = verifyBundledPythonIntegrity()
+    if (integrity.missing.length > 0) {
+      getServices().logError(
+        `[voice] bundled python integrity check FAILED — source=${integrity.source}, ` +
+        `dir=${integrity.pythonDir}, missing=${integrity.missing.join(', ')}. ` +
+        repairHintForSource(integrity.source)
+      )
+    } else {
+      getServices().log(
+        `[voice] bundled python integrity OK — source=${integrity.source}, dir=${integrity.pythonDir}`
+      )
+    }
+
     registerVoiceIpc()
 
     // Ref-counted daemon: first enable spawns, last disable stops.

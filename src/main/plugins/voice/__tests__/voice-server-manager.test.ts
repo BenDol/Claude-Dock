@@ -69,6 +69,9 @@ vi.mock('fs', async () => {
     existsSync: vi.fn((p: string) => {
       if (p.endsWith('requirements.txt')) return true
       if (p === '/mock/venv/py') return runtimeState.exists
+      // startDaemon guards against a missing bundled hotkey_daemon.py before
+      // spawning. Tests model a healthy install, so this must resolve true.
+      if (p.endsWith('hotkey_daemon.py')) return true
       return false
     })
   }
