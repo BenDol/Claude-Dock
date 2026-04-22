@@ -241,8 +241,18 @@ def _run_daemon():
 
     # ---- hotkey toggle / hold ---- #
 
+    # `busy` flips True for the whole stop -> transcribe -> paste cycle. A
+    # shutdown request (stdin "shutdown\n" from the Dock) must wait for this
+    # cycle to drain so the user's speech actually reaches the focused app.
+    # `stopping` is the shutdown signal; reading it breaks long-running
+    # background loops (keyword watch).
     state = {"recording": False, "busy": False}
     lock = threading.Lock()
+    stopping = threading.Event()
+    # Reference to the most recently spawned transcribe+paste thread, so the
+    # main loop can join it on shutdown instead of letting Python reap it
+    # mid-work (daemon=True threads are silently killed at interpreter exit).
+    transcribe_thread_ref: dict = {"thread": None}
 
     def _start_recording():
         """Start recording. Caller must hold lock and ensure not busy/already recording."""
@@ -279,11 +289,13 @@ def _run_daemon():
             state["busy"] = False
             return
 
-        threading.Thread(
+        t = threading.Thread(
             target=_transcribe_and_paste,
             args=(audio_path,),
             daemon=True,
-        ).start()
+        )
+        transcribe_thread_ref["thread"] = t
+        t.start()
 
     def on_hotkey():
         """Toggle mode: press to start, press again to stop."""
@@ -320,7 +332,7 @@ def _run_daemon():
         _log("Keyword watch started")
         # Wait a bit before first check to accumulate audio
         time.sleep(2.0)
-        while state["recording"] and not state["busy"]:
+        while state["recording"] and not state["busy"] and not stopping.is_set():
             tail_path = recorder.get_tail_wav(seconds=3.0)
             if tail_path:
                 try:
@@ -549,6 +561,30 @@ def _run_daemon():
 
     _log(f"Hotkey [{binding}] active ({mode} mode, scope={scope}) — waiting for input")
 
+    # Cooperative shutdown via stdin. The Dock writes "shutdown\n" when it
+    # wants to stop the daemon (config change, workspace disable, etc.) so we
+    # can drain the in-flight transcribe/paste before exiting — Windows
+    # TerminateProcess (what Node's child.kill delivers there) is uncatchable,
+    # so signal-handler drain isn't an option.
+    def _stdin_shutdown_reader():
+        try:
+            for raw in sys.stdin:
+                cmd = raw.strip().lower()
+                if not cmd:
+                    continue
+                if cmd == "shutdown":
+                    _log("Shutdown requested — stopping hotkey, draining transcription")
+                    stopping.set()
+                    try:
+                        listener.stop()
+                    except Exception as exc:
+                        _log(f"Listener stop failed: {exc}")
+                    return
+        except Exception as exc:
+            _log(f"Stdin reader error: {exc}")
+
+    threading.Thread(target=_stdin_shutdown_reader, daemon=True).start()
+
     try:
         listener.join()
     except KeyboardInterrupt:
@@ -558,6 +594,18 @@ def _run_daemon():
             listener.stop()
         except Exception:
             pass
+
+    # Drain: let any active transcribe+paste finish so the user's words
+    # actually reach the focused app. Bound the wait so a wedged transcriber
+    # (CUDA hang, large-v3 on a cold model) can't hold shutdown indefinitely.
+    t = transcribe_thread_ref["thread"]
+    if t is not None and t.is_alive():
+        _log("Waiting for in-flight transcription to finish (up to 30s)…")
+        t.join(timeout=30.0)
+        if t.is_alive():
+            _log("Transcription still running after drain timeout — exiting anyway")
+        else:
+            _log("Transcription finished cleanly")
 
     _log("Daemon exiting")
 

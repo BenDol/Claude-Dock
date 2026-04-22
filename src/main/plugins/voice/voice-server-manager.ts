@@ -362,8 +362,11 @@ export class VoiceServerManager extends EventEmitter {
         [daemonScript, '--config', configPath, '--pid-file', pidFile, '--log-file', logFile],
         {
           windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+          // stdin piped so stopDaemon() can request a graceful drain via
+          // "shutdown\n" — Windows Node.kill('SIGTERM') is TerminateProcess
+          // and would abort any in-flight transcription+paste.
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }
         }
       )
     } catch (err) {
@@ -430,14 +433,42 @@ export class VoiceServerManager extends EventEmitter {
 
     this.stopInFlight = (async () => {
       try {
+        if (graceful) {
+          // Drain path: ask the daemon to stop the hotkey listener and let
+          // any in-flight transcribe+paste cycle finish. Bounded by
+          // DRAIN_TIMEOUT_MS so a wedged transcriber (e.g. CUDA hang, cold
+          // large-v3 model) still tears down eventually.
+          const DRAIN_TIMEOUT_MS = 30_000
+          let drainRequestSent = false
+          try {
+            if (child.stdin && !child.stdin.destroyed) {
+              child.stdin.write('shutdown\n')
+              child.stdin.end()
+              drainRequestSent = true
+            }
+          } catch (err) {
+            svc().log(`[voice-manager] stdin shutdown write failed: ${String(err)}`)
+          }
+
+          if (drainRequestSent) {
+            const drainedCleanly = await new Promise<boolean>((resolve) => {
+              if (!child.pid) return resolve(true)
+              const t = setTimeout(() => resolve(false), DRAIN_TIMEOUT_MS)
+              child.once('exit', () => { clearTimeout(t); resolve(true) })
+            })
+            if (drainedCleanly) return
+            svc().log('[voice-manager] drain timed out — escalating to signal')
+          }
+        }
+
+        // Escalation path (non-graceful stop, or graceful drain timed out /
+        // unavailable). SIGTERM first, then SIGKILL after a short grace.
         try {
-          if (graceful) child.kill('SIGTERM')
-          else child.kill('SIGKILL')
+          child.kill(graceful ? 'SIGTERM' : 'SIGKILL')
         } catch (err) {
           svc().logError('[voice-manager] kill failed', err)
         }
 
-        // Wait up to 3 s for clean exit, then escalate.
         await new Promise<void>((resolve) => {
           if (!child.pid) return resolve()
           const t = setTimeout(() => {

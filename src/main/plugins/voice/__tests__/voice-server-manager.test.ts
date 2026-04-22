@@ -79,8 +79,24 @@ const fakeChildren: FakeChild[] = []
 class FakeChild extends EventEmitter {
   pid = 12345
   killed = false
+  drainedViaStdin = false
   stdout = new EventEmitter()
   stderr = new EventEmitter()
+  // stopDaemon's graceful path writes "shutdown\n" here; simulate a prompt
+  // clean exit so tests don't wait out the real 30s drain timeout.
+  stdin = {
+    destroyed: false,
+    write: (chunk: string) => {
+      if (chunk.includes('shutdown')) this.drainedViaStdin = true
+      return true
+    },
+    end: () => {
+      if (this.drainedViaStdin) {
+        setTimeout(() => this.emit('exit', 0, null), 5)
+      }
+      this.stdin.destroyed = true
+    }
+  }
   kill(sig?: string) {
     this.killed = true
     // simulate async exit
@@ -213,7 +229,11 @@ describe('voice-server-manager', () => {
     await new Promise((r) => setTimeout(r, 550))
     mgr.onProjectDisabled('/proj/a')
     await new Promise((r) => setTimeout(r, 50))
-    expect(fakeChildren[0].killed).toBe(true)
+    // Graceful stop drains via stdin first (so any in-flight transcription
+    // finishes); the kill signal only escalates if the drain times out.
+    expect(fakeChildren[0].drainedViaStdin).toBe(true)
+    expect(mgr.getDaemonState()).toBe('stopped')
+    expect(fakeChildren[0].killed).toBe(false)
   })
 
   it('does not restart daemon when no workspaces are enabled', async () => {
