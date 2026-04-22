@@ -56,6 +56,9 @@ interface CoordinatorState {
   _refreshCounter: number
 
   init: (projectDir: string) => Promise<void>
+  /** Lightweight init for the standalone settings window — loads config/providers/hotkey
+   * status only. No project subscriptions, no terminal polling, no stream listener. */
+  initForSettings: () => Promise<void>
   dispose: () => void
   sendMessage: (userText: string) => Promise<void>
   cancel: () => Promise<void>
@@ -114,7 +117,10 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       streamingMessageId: null,
       error: null,
       testConnectionResult: null,
-      settingsOpen: config.apiKey.length === 0 // open settings on first use
+      // Settings now live in a dedicated BrowserWindow — the panel never renders
+      // the in-place overlay, so this always starts closed. The panel's setup
+      // placeholder opens the window via dockApi.coordinator.openSettings().
+      settingsOpen: false
     })
 
     // Subscribe to stream deltas for this project only.
@@ -145,6 +151,30 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       _focusInputUnsub: focusInputUnsub,
       _terminalsTimer: terminalsTimer
     })
+  },
+
+  initForSettings: async () => {
+    const api = dockApi()
+    try {
+      const [config, providers, hotkeyStatus] = await Promise.all([
+        api.coordinator.getConfig(),
+        api.coordinator.listProviders(),
+        api.coordinator.hotkeyStatus()
+      ])
+      set({
+        config,
+        providers,
+        hotkeyStatus,
+        testConnectionResult: null,
+        error: null,
+        settingsOpen: true
+      })
+    } catch (err) {
+      set({ error: (err as Error).message })
+      // Always rethrow unexpected failures — the settings window surfaces this
+      // as an error state rather than silently rendering an empty form.
+      throw err
+    }
   },
 
   dispose: () => {
