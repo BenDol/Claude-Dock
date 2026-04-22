@@ -13,6 +13,29 @@ const DESCRIPTION_MIN = 10
 const DESCRIPTION_MAX = 5000
 const STEPS_MAX = 2000
 
+// Per-modal zoom — remembered across opens. Starts from whatever zoom the
+// main dock document currently has (typically 1) so that if the user has
+// globally scaled the dock, the modal matches on first view. CSS `zoom` on
+// the modal root compounds with any ancestor zoom, so this is a *relative*
+// scale on top of the main-window zoom.
+const BUG_REPORT_ZOOM_KEY = 'bug-report-zoom'
+const MIN_BUG_REPORT_ZOOM = 0.6
+const MAX_BUG_REPORT_ZOOM = 2.2
+const BUG_REPORT_ZOOM_STEP = 0.1
+function readInitialBugReportZoom(): number {
+  try {
+    const saved = localStorage.getItem(BUG_REPORT_ZOOM_KEY)
+    if (saved) {
+      const n = parseFloat(saved)
+      if (!isNaN(n) && n >= MIN_BUG_REPORT_ZOOM && n <= MAX_BUG_REPORT_ZOOM) return n
+    }
+  } catch { /* ignore */ }
+  // Fall back to the main dock's current document zoom so a user who has
+  // scaled the dock globally gets a matching starting point.
+  const docZoom = parseFloat(document.documentElement.style.zoom) || 1
+  return Math.min(MAX_BUG_REPORT_ZOOM, Math.max(MIN_BUG_REPORT_ZOOM, docZoom))
+}
+
 const CATEGORIES: { value: BugReportCategory; label: string; hint: string }[] = [
   { value: 'bug', label: 'Bug', hint: 'Something is broken or not working as expected' },
   { value: 'crash', label: 'Crash / freeze', hint: 'The app crashed, froze, or became unresponsive' },
@@ -22,7 +45,45 @@ const CATEGORIES: { value: BugReportCategory; label: string; hint: string }[] = 
 
 export default function BugReportModal({ onClose }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
+  const [zoom, setZoom] = useState<number>(() => readInitialBugReportZoom())
+
+  const applyZoom = useCallback((z: number) => {
+    const clamped = Math.round(Math.min(MAX_BUG_REPORT_ZOOM, Math.max(MIN_BUG_REPORT_ZOOM, z)) * 100) / 100
+    setZoom(clamped)
+    try { localStorage.setItem(BUG_REPORT_ZOOM_KEY, String(clamped)) } catch { /* ignore */ }
+  }, [])
+
+  // Ctrl+Wheel and Ctrl +/-/0 zoom while the modal is open. Capture-phase so
+  // we intercept before any global zoom handler; scoped to events inside the
+  // modal root so the rest of the dock is unaffected.
+  useEffect(() => {
+    const root = modalRef.current
+    if (!root) return
+
+    const onWheel = (e: WheelEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (!root.contains(e.target as Node)) return
+      e.preventDefault()
+      e.stopPropagation()
+      applyZoom(zoom + (e.deltaY < 0 ? BUG_REPORT_ZOOM_STEP : -BUG_REPORT_ZOOM_STEP))
+    }
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopPropagation(); applyZoom(zoom + BUG_REPORT_ZOOM_STEP) }
+      else if (e.key === '-') { e.preventDefault(); e.stopPropagation(); applyZoom(zoom - BUG_REPORT_ZOOM_STEP) }
+      else if (e.key === '0') { e.preventDefault(); e.stopPropagation(); applyZoom(1) }
+    }
+
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
+      window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
+    }
+  }, [zoom, applyZoom])
 
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState<BugReportCategory>('bug')
@@ -119,8 +180,14 @@ export default function BugReportModal({ onClose }: Props) {
   }, [submitted])
 
   return (
-    <div className="modal-overlay" ref={backdropRef} onClick={handleBackdropClick}>
-      <div className="modal bug-report-modal" role="dialog" aria-labelledby="bug-report-title">
+    <div className="modal-overlay bug-report-overlay" ref={backdropRef} onClick={handleBackdropClick}>
+      <div
+        className="modal bug-report-modal"
+        role="dialog"
+        aria-labelledby="bug-report-title"
+        ref={modalRef}
+        style={{ zoom }}
+      >
         <div className="modal-header">
           <h2 id="bug-report-title">Report a Bug</h2>
           <button
