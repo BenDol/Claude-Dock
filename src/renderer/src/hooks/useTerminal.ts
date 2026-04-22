@@ -11,6 +11,73 @@ import { getEffectiveTerminalColors } from '../lib/theme'
 import { InputUndoManager } from '../lib/input-undo'
 import { detectInputBoxRows, renderPinnedRows } from '../lib/pinned-footer'
 import { detectWorktreePath } from '../lib/worktree-utils'
+import { routeOpenFile } from '../lib/route-open-file'
+
+const WORKSPACE_PLUGIN_ID = 'workspace'
+
+/**
+ * Check whether the workspace plugin is enabled for a project. Callers use this
+ * to decide whether to open a file in the in-app editor or fall back to the
+ * OS file opener. Resolves to `false` on IPC error so the fallback path runs.
+ */
+async function isWorkspaceEnabled(projectDir: string): Promise<boolean> {
+  try {
+    const states = await getDockApi().plugins.getStates(projectDir)
+    return !!states[WORKSPACE_PLUGIN_ID]?.enabled
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Open a terminal file-link target. When the workspace plugin is enabled and
+ * the path resolves inside the project, opens the file in the workspace editor
+ * (routing to the detached editor window if one is active). Otherwise — and on
+ * any read failure (e.g. path outside project, file too large, binary) — falls
+ * back to the OS file opener.
+ */
+async function openTerminalFileLink(
+  projectDir: string,
+  resolvedAbsPath: string,
+  line?: number,
+  column?: number
+): Promise<void> {
+  const api = getDockApi()
+  const enabled = projectDir ? await isWorkspaceEnabled(projectDir) : false
+
+  if (enabled && projectDir) {
+    const normAbs = resolvedAbsPath.replace(/\\/g, '/')
+    const normProject = projectDir.replace(/\\/g, '/').replace(/\/+$/, '')
+    let relativePath: string | null = null
+    if (normAbs === normProject) {
+      relativePath = null // project dir itself — not a file
+    } else if (normAbs.startsWith(normProject + '/')) {
+      relativePath = normAbs.slice(normProject.length + 1)
+    }
+
+    if (relativePath && !relativePath.includes('..')) {
+      try {
+        const result = await api.workspace.readFile(projectDir, relativePath)
+        if (result.content != null) {
+          await routeOpenFile({
+            projectDir,
+            relativePath,
+            content: result.content,
+            line,
+            column
+          })
+          return
+        }
+        // Fall through to native opener on read failure (too large, binary, etc.)
+        console.warn('[terminal] workspace.readFile failed, falling back to native opener:', result.error)
+      } catch (err) {
+        console.warn('[terminal] workspace.readFile threw, falling back to native opener:', err)
+      }
+    }
+  }
+
+  api.app.openInExplorer(resolvedAbsPath)
+}
 
 /** Resolve a relative path against a base directory, handling `..` and `.` segments. */
 function resolveRelativePath(base: string, relative: string): string {
@@ -147,6 +214,8 @@ interface FileLink {
   startIndex: number
   length: number
   filePath: string
+  line?: number
+  column?: number
 }
 
 function registerFilePathLinks(term: Terminal): void {
@@ -196,6 +265,8 @@ function registerFilePathLinks(term: Terminal): void {
       while ((m = FILE_LINE_RE.exec(text)) !== null) {
         const filePath = m[1]
         if (!looksLikeFilePath(filePath)) continue
+        const line = m[2] ? parseInt(m[2], 10) : undefined
+        const column = m[3] ? parseInt(m[3], 10) : undefined
         // Don't duplicate if already matched by a tool invocation
         const pathStart = text.indexOf(filePath, m.index)
         if (pathStart < 0) continue
@@ -203,7 +274,7 @@ function registerFilePathLinks(term: Terminal): void {
           pathStart >= l.startIndex && pathStart < l.startIndex + l.length
         )
         if (alreadyLinked) continue
-        links.push({ startIndex: pathStart, length: filePath.length, filePath })
+        links.push({ startIndex: pathStart, length: filePath.length, filePath, line, column })
       }
 
       if (links.length === 0) { callback(undefined); return }
@@ -221,7 +292,7 @@ function registerFilePathLinks(term: Terminal): void {
           const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
             ? l.filePath
             : projectDir + '/' + l.filePath
-          getDockApi().app.openInExplorer(resolved)
+          openTerminalFileLink(projectDir, resolved, l.line, l.column)
         }
       })))
     }
