@@ -10,22 +10,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { getEffectiveTerminalColors } from '../lib/theme'
 import { InputUndoManager } from '../lib/input-undo'
 import { detectInputBoxRows, renderPinnedRows } from '../lib/pinned-footer'
-
-/**
- * If `cwd` is inside a `.claude/worktrees/<id>` directory, return the worktree
- * root path (everything up to and including the `<id>` segment). Otherwise
- * return null. Used to auto-register a terminal as a worktree terminal when
- * the store hasn't been explicitly populated (e.g. after an app restart).
- */
-function detectWorktreePath(cwd: string): string | null {
-  if (!cwd) return null
-  const normalized = cwd.replace(/\\/g, '/')
-  const match = normalized.match(/^(.*\/\.claude\/worktrees\/[^/]+)(?:\/|$)/)
-  if (!match) return null
-  // Return with the original separator style preserved for Windows paths.
-  const usesBackslash = cwd.includes('\\')
-  return usesBackslash ? match[1].replace(/\//g, '\\') : match[1]
-}
+import { detectWorktreePath } from '../lib/worktree-utils'
 
 /** Resolve a relative path against a base directory, handling `..` and `.` segments. */
 function resolveRelativePath(base: string, relative: string): string {
