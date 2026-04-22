@@ -14,6 +14,12 @@ import type { PluginInfo, ProjectPluginStates, PluginToolbarAction } from '../..
 import type { PluginManifest } from '../../shared/plugin-manifest'
 import type { DockWindow } from '../dock-window'
 import { log, logError } from '../logger'
+// Circular-looking but safe: dock-manager.ts imports PluginManager, and
+// we import DockManager here. Neither module references the other at
+// module top-level — both only touch the imported symbol from inside
+// instance methods — so the partial-module-init hazard of CJS cycles
+// doesn't apply.
+import { DockManager } from '../dock-manager'
 
 export class PluginManager {
   private static instance: PluginManager
@@ -163,6 +169,23 @@ export class PluginManager {
    * Hot-reload a plugin: dispose the old instance (which must remove its own
    * IPC handlers), remove its event bus subscriptions, then register the new
    * instance in its place.
+   *
+   * After the new plugin is registered, we re-emit `project:postOpen` for
+   * every currently-open project where this plugin is enabled, filtered to
+   * just this plugin. That resyncs the new instance with per-project state
+   * its predecessor was tracking.
+   *
+   * Why the plugin can't do this itself: built-in plugin bundles are
+   * produced by esbuild with only electron + node builtins marked as
+   * external. Any app module the plugin imports transitively (DockManager,
+   * PluginManager, …) gets *bundled* into the plugin's standalone index.js
+   * as an isolated class. When the hot-reloaded bundle runs, calls like
+   * `DockManager.getInstance()` return a fresh bundle-local singleton with
+   * an empty docks map — nothing like the real app's state. The plugin
+   * scope cannot safely discover "which projects currently have me
+   * enabled?" on its own, so the main-app-scoped plugin-manager has to
+   * drive the resync via the shared event bus that the plugin *does*
+   * receive via `register(bus)`.
    */
   reload(pluginId: string, newPlugin: DockPlugin): boolean {
     const index = this.plugins.findIndex((p) => p.id === pluginId)
@@ -187,6 +210,29 @@ export class PluginManager {
     // 3. Replace the plugin in the list and register the new one
     this.plugins[index] = newPlugin
     newPlugin.register(this.bus)
+
+    // 4. Resync the new instance with current per-project state.
+    try {
+      const enabledDocks = DockManager.getInstance()
+        .getAllDocks()
+        .filter((d) => this.isEnabled(d.projectDir, pluginId))
+      if (enabledDocks.length > 0) {
+        log(
+          `[plugin-manager] resyncing ${pluginId} across ${enabledDocks.length} ` +
+          `open project(s) via project:postOpen`
+        )
+        for (const dock of enabledDocks) {
+          this.bus.emitPost(
+            'project:postOpen',
+            { projectDir: dock.projectDir, dock },
+            (id) => id === pluginId
+          )
+        }
+      }
+    } catch (err) {
+      logError(`[plugin-manager] post-reload resync failed for ${pluginId}:`, err)
+    }
+
     log(`[plugin-manager] hot-reload complete for ${pluginId}`)
     return true
   }

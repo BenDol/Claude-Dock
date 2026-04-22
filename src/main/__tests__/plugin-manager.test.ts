@@ -55,6 +55,17 @@ vi.mock('../plugins/plugin-store', () => ({
   markProjectConfigured: (...args: any[]) => mockMarkProjectConfigured(...args)
 }))
 
+// Mock DockManager — plugin-manager.reload() lazy-requires this to drive
+// the post-reload resync. The list of open docks is tunable per-test.
+const mockDocks: Array<{ projectDir: string }> = []
+vi.mock('../dock-manager', () => ({
+  DockManager: {
+    getInstance: () => ({
+      getAllDocks: () => mockDocks.slice()
+    })
+  }
+}))
+
 import { PluginManager } from '../plugins/plugin-manager'
 import type { DockPlugin } from '../plugins/plugin'
 import type { PluginEventBus } from '../plugins/plugin-events'
@@ -324,6 +335,98 @@ describe('PluginManager', () => {
 
       const actions = manager.getToolbarActionsFromManifests()
       expect(actions[0].order).toBe(100)
+    })
+  })
+
+  describe('reload', () => {
+    beforeEach(() => {
+      mockDocks.length = 0
+    })
+
+    it('disposes the old plugin and registers the new one in place', () => {
+      const dispose1 = vi.fn()
+      const register1 = vi.fn()
+      const register2 = vi.fn()
+      const p1 = createMockPlugin({ id: 'p', register: register1, dispose: dispose1 })
+      const p2 = createMockPlugin({ id: 'p', register: register2 })
+      manager.register(p1)
+
+      manager.reload('p', p2)
+      expect(dispose1).toHaveBeenCalledOnce()
+      expect(register2).toHaveBeenCalledOnce()
+    })
+
+    it('re-emits project:postOpen for every open dock where the plugin is enabled', () => {
+      const postOpenHandler = vi.fn()
+      mockDocks.push(
+        { projectDir: '/proj/a' },
+        { projectDir: '/proj/b' },
+        { projectDir: '/proj/c' }
+      )
+      // plugin is enabled for a + c, disabled for b
+      mockGetPluginState.mockImplementation((dir: string) => {
+        if (dir === '/proj/a' || dir === '/proj/c') return { enabled: true, settings: {} }
+        if (dir === '/proj/b') return { enabled: false, settings: {} }
+        return undefined
+      })
+
+      const newPlugin = createMockPlugin({
+        id: 'p',
+        defaultEnabled: false,
+        register: (bus: PluginEventBus) => {
+          bus.on('project:postOpen', 'p', postOpenHandler)
+        }
+      })
+      manager.register(createMockPlugin({ id: 'p', defaultEnabled: false }))
+      manager.reload('p', newPlugin)
+
+      expect(postOpenHandler).toHaveBeenCalledTimes(2)
+      const fired = postOpenHandler.mock.calls.map((c) => c[0].projectDir).sort()
+      expect(fired).toEqual(['/proj/a', '/proj/c'])
+    })
+
+    it('does not re-emit project:postOpen for unrelated plugins', () => {
+      const myHandler = vi.fn()
+      const otherHandler = vi.fn()
+      mockDocks.push({ projectDir: '/proj/a' })
+      mockGetPluginState.mockReturnValue({ enabled: true, settings: {} })
+
+      const other = createMockPlugin({
+        id: 'other',
+        defaultEnabled: true,
+        register: (bus: PluginEventBus) => {
+          bus.on('project:postOpen', 'other', otherHandler)
+        }
+      })
+      manager.register(other)
+
+      const newMine = createMockPlugin({
+        id: 'mine',
+        defaultEnabled: true,
+        register: (bus: PluginEventBus) => {
+          bus.on('project:postOpen', 'mine', myHandler)
+        }
+      })
+      manager.register(createMockPlugin({ id: 'mine', defaultEnabled: true }))
+      manager.reload('mine', newMine)
+
+      expect(myHandler).toHaveBeenCalledTimes(1)
+      expect(otherHandler).not.toHaveBeenCalled()
+    })
+
+    it('is a no-op when no docks are open', () => {
+      const postOpenHandler = vi.fn()
+      // mockDocks is empty
+      const newPlugin = createMockPlugin({
+        id: 'p',
+        defaultEnabled: true,
+        register: (bus: PluginEventBus) => {
+          bus.on('project:postOpen', 'p', postOpenHandler)
+        }
+      })
+      manager.register(createMockPlugin({ id: 'p', defaultEnabled: true }))
+      manager.reload('p', newPlugin)
+      expect(postOpenHandler).not.toHaveBeenCalled()
     })
   })
 

@@ -4,8 +4,6 @@ import { registerVoiceIpc, disposeVoiceIpc } from './voice-ipc'
 import { VoiceWindowManager } from './voice-window'
 import { VoiceServerManager } from './voice-server-manager'
 import { getServices } from './services'
-import { DockManager } from '../../dock-manager'
-import { PluginManager } from '../plugin-manager'
 import { verifyBundledPythonIntegrity, repairHintForSource } from './bundled-services'
 
 export { setServices } from './services'
@@ -115,41 +113,19 @@ export class VoicePlugin implements DockPlugin {
       VoiceServerManager.getInstance().onProjectClosed(projectDir)
     })
 
-    // Hot-reload recovery. Built plugins are bundled into a single index.js
-    // — when the plugin-updater cache-busts and re-requires that bundle, the
-    // VoiceServerManager class is freshly evaluated with a zeroed `static
-    // instance`, so its `enabled` set is empty and `refCount` is 0 even when
-    // the user had voice active for several open projects. Rebuild the
-    // enabled set from DockManager + PluginManager — both live in the main
-    // app, not the plugin bundle, so they survive the cache-bust. On a fresh
-    // app start the dock map is empty and this loop is a no-op; the normal
-    // plugin:enabled / project:postOpen events drive spawn instead.
-    const enabledProjects = DockManager.getInstance()
-      .getAllDocks()
-      .map((d) => d.projectDir)
-      .filter((dir) => PluginManager.getInstance().isEnabled(dir, this.id))
-
-    if (enabledProjects.length > 0) {
-      getServices().log(
-        `[voice] hot-reload detected — re-enabling voice for ${enabledProjects.length} project(s) to pick up updated code`
-      )
-      void (async () => {
-        try {
-          // Give Windows a moment to release the global hotkey handle that
-          // the old daemon held before we respawn and re-register it
-          // (matches applySettings()). The old dispose() already initiated
-          // the kill fire-and-forget.
-          await new Promise((r) => setTimeout(r, 200))
-          for (const dir of enabledProjects) {
-            // First call flips refCount 0→1 and spawns the daemon; subsequent
-            // calls just add to the enabled set. onProjectEnabled is idempotent.
-            await VoiceServerManager.getInstance().onProjectEnabled(dir)
-          }
-        } catch (err) {
-          getServices().logError('[voice] daemon restart after hot-reload failed', err)
-        }
-      })()
-    }
+    // Hot-reload resync is driven by plugin-manager.ts after register() —
+    // it re-emits `project:postOpen` for every dock with this plugin
+    // enabled. That flows through our existing `project:postOpen`
+    // subscription above (line 102) into `onProjectEnabled`, which
+    // respawns the daemon on the first call.
+    //
+    // Historical context: a previous version tried to drive the resync
+    // from here via `DockManager.getInstance()` + `PluginManager.getInstance()`.
+    // That doesn't work for built-in plugins — esbuild bundles those
+    // singletons as isolated classes inside the plugin's standalone
+    // index.js, so the hot-reloaded bundle sees its own empty
+    // docks/plugins state, not the app's. The resync has to run in
+    // main-app scope, which is what plugin-manager now does.
 
     getServices().log('[voice] plugin registered')
   }
