@@ -544,8 +544,15 @@ export function registerIpcHandlers(): void {
     app.exit(0)
   })
 
-  ipcMain.handle(IPC.APP_OPEN_IN_EXPLORER, (_event, dir: string) => {
-    shell.openPath(dir)
+  // Returns shell.openPath's error string (empty on success) so callers can
+  // implement fallbacks — e.g. an extensionless terminal link that fails to
+  // resolve as a file can retry with the parent directory.
+  ipcMain.handle(IPC.APP_OPEN_IN_EXPLORER, async (_event, dir: string) => {
+    try {
+      return await shell.openPath(dir)
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err)
+    }
   })
 
   ipcMain.handle(IPC.UPDATER_CHECK, async (_event, profile: string) => {

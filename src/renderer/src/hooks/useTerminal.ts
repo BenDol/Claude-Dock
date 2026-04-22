@@ -34,7 +34,11 @@ async function isWorkspaceEnabled(projectDir: string): Promise<boolean> {
  * the path resolves inside the project, opens the file in the workspace editor
  * (routing to the detached editor window if one is active). Otherwise — and on
  * any read failure (e.g. path outside project, file too large, binary) — falls
- * back to the OS file opener.
+ * back to the OS file opener (which handles both files and directories).
+ *
+ * Extensionless paths that fail to open (e.g. the path points to something
+ * that no longer exists, or was never a file) retry against the parent
+ * directory so the user still lands somewhere useful in their file manager.
  */
 async function openTerminalFileLink(
   projectDir: string,
@@ -68,7 +72,9 @@ async function openTerminalFileLink(
           })
           return
         }
-        // Fall through to native opener on read failure (too large, binary, etc.)
+        // Fall through to native opener on read failure (too large, binary,
+        // directory, etc.) — shell.openPath handles directories natively on
+        // every OS we support (Windows Explorer, macOS Finder, Linux xdg-open).
         console.warn('[terminal] workspace.readFile failed, falling back to native opener:', result.error)
       } catch (err) {
         console.warn('[terminal] workspace.readFile threw, falling back to native opener:', err)
@@ -76,7 +82,31 @@ async function openTerminalFileLink(
     }
   }
 
-  api.app.openInExplorer(resolvedAbsPath)
+  // Native opener. shell.openPath returns '' on success or an error message on
+  // failure (e.g. path doesn't exist). We need the return value here to drive
+  // the extensionless-path → parent-dir fallback below.
+  const firstError = await api.app.openInExplorer(resolvedAbsPath)
+  if (!firstError) return
+
+  // Only retry parent-dir for extensionless paths: a missing `.ext` file is
+  // almost always genuinely missing, but a missing extensionless "path/to/x"
+  // could be a directory the user wants to browse into.
+  const trimmed = resolvedAbsPath.replace(/[/\\]+$/, '')
+  const hasExtension = /\.[a-zA-Z0-9]{1,8}$/.test(trimmed)
+  if (hasExtension) {
+    console.warn('[terminal] openInExplorer failed:', firstError)
+    return
+  }
+
+  const parent = trimmed.replace(/[/\\][^/\\]+$/, '')
+  if (!parent || parent === trimmed) {
+    console.warn('[terminal] openInExplorer failed and no parent dir to retry:', firstError)
+    return
+  }
+  const parentError = await api.app.openInExplorer(parent)
+  if (parentError) {
+    console.warn('[terminal] openInExplorer parent fallback failed:', parentError)
+  }
 }
 
 /** Resolve a relative path against a base directory, handling `..` and `.` segments. */
@@ -220,6 +250,29 @@ function looksLikeFilePath(s: string): boolean {
   return true
 }
 
+/**
+ * Stricter filter applied to paths scraped from prose by FILE_PATH_RE (not to
+ * paths extracted from tool invocations, which are more trustworthy).
+ *
+ * Rejects single-slash tokens without a file extension because those are
+ * almost always English phrases like "empty/invalid", "and/or", "read/write"
+ * rather than real paths. Drive letters, `./` and `../` prefixes, and Unix
+ * absolute paths carry enough signal on their own to bypass the check.
+ */
+function isStrictFilePath(s: string): boolean {
+  // Strong path markers — no extra heuristics needed.
+  if (/^[a-zA-Z]:[\\/]/.test(s)) return true       // C:\ or C:/
+  if (/^\.{1,2}[\\/]/.test(s)) return true         // ./ or ../
+  if (/^[/\\]/.test(s)) return true                // Unix absolute / UNC start
+
+  // Multi-segment relative path: require either a file extension or 2+
+  // separators so pairs like "empty/invalid" don't get linked.
+  const hasExtension = /\.[a-zA-Z0-9]{1,8}$/.test(s)
+  if (hasExtension) return true
+  const sepCount = (s.match(/[/\\]/g) || []).length
+  return sepCount >= 2
+}
+
 // Regex matching URLs — same as the default from @xterm/addon-web-links
 const URL_RE = /https?:\/\/[^\s"'<>[\]{}|\\^`]+/g
 
@@ -341,6 +394,9 @@ function registerFilePathLinks(term: Terminal): void {
 
         filePath = trimTrailingPunct(filePath)
         if (!looksLikeFilePath(filePath)) continue
+        // Regex-scraped matches pass an extra prose filter — tool-arg paths
+        // skip this since they're already disambiguated by the Tool(…) wrapper.
+        if (!isStrictFilePath(filePath)) continue
 
         // Don't duplicate if already matched by a tool invocation (above).
         const alreadyLinked = links.some((l) =>
