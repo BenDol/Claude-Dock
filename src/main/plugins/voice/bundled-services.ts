@@ -93,6 +93,36 @@ function checkIntegrity(dir: string): { missing: string[]; present: string[] } {
 }
 
 /**
+ * Recursively copy `src` → `dest` using only fs primitives that Electron's
+ * asar shim transparently redirects (`statSync`, `readdirSync`,
+ * `copyFileSync`). `fs.cpSync` with `recursive: true` internally opens the
+ * source directory via `opendir`, which the shim does *not* cover — so a
+ * src path that lives inside app.asar throws `ENOENT: opendir`. This
+ * helper is that workaround.
+ *
+ * `filter` is applied per-path (directory OR file); returning false skips
+ * that entry and, for directories, the entire subtree.
+ */
+function _copyDirRecursive(
+  src: string,
+  dest: string,
+  filter?: (p: string) => boolean
+): void {
+  if (filter && !filter(src)) return
+  const stat = fs.statSync(src)
+  if (stat.isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true })
+    for (const entry of fs.readdirSync(src)) {
+      _copyDirRecursive(path.join(src, entry), path.join(dest, entry), filter)
+    }
+  } else if (stat.isFile()) {
+    fs.copyFileSync(src, dest)
+  }
+  // Silently skip other kinds (symlinks, etc.) — not expected inside the
+  // voice-python tree and not worth the complexity of handling them here.
+}
+
+/**
  * Copy the asar-bundled Python tree into a writable userData directory so
  * we have a guaranteed-fresh source to feed to the daemons when the
  * `extraResources` copy is stale (the classic "NSIS couldn't replace a
@@ -139,14 +169,17 @@ function ensureFallbackExtracted(): string | null {
     // while __pycache__ holds its parent dir briefly busy after daemon exit.
     fs.rmSync(fallback, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     fs.mkdirSync(path.dirname(fallback), { recursive: true })
-    fs.cpSync(src, fallback, {
-      recursive: true,
-      filter: (p) => {
-        const name = path.basename(p)
-        if (name === '__pycache__') return false
-        if (name.endsWith('.pyc')) return false
-        return true
-      }
+    // NOTE: can't use `fs.cpSync(src, ..., { recursive: true })` here — it
+    // calls `opendir` internally which isn't covered by Electron's asar
+    // shim, so a `src` that lives inside app.asar fails with
+    // `ENOENT: opendir`. The manual recurse below uses only the shimmed
+    // primitives (`readdirSync`, `statSync`, `copyFileSync`) which DO
+    // transparently read from asar.
+    _copyDirRecursive(src, fallback, (p) => {
+      const name = path.basename(p)
+      if (name === '__pycache__') return false
+      if (name.endsWith('.pyc')) return false
+      return true
     })
     const verify = checkIntegrity(fallback)
     if (verify.missing.length > 0) {
