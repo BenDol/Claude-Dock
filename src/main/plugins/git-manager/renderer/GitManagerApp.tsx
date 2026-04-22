@@ -4333,12 +4333,16 @@ const CommitBranchesSection: React.FC<{
   if (data === null) {
     return <div className="gm-detail-branches gm-detail-branches-loading">Loading branches…</div>
   }
-  // Remote-tracking refs (origin/*) are hidden from this view — only show the
-  // local branch tag for each ref the commit is reachable from.
-  if (data.local.length === 0) return null
+  // Prefer local branch tags; fall back to remote-tracking refs (origin/*)
+  // only when no local branch points at the commit, so commits that exist
+  // only on a remote still surface somewhere. When at least one local ref
+  // exists, remote chips are hidden to keep the strip uncluttered.
+  if (data.local.length === 0 && data.remote.length === 0) return null
 
   type Chip = { name: string; kind: 'local' | 'remote'; isHead: boolean }
-  const chips: Chip[] = data.local.map<Chip>((n) => ({ name: n, kind: 'local', isHead: n === data.head }))
+  const chips: Chip[] = data.local.length > 0
+    ? data.local.map<Chip>((n) => ({ name: n, kind: 'local', isHead: n === data.head }))
+    : data.remote.map<Chip>((n) => ({ name: n, kind: 'remote', isHead: false }))
   const visible = expanded ? chips : chips.slice(0, COLLAPSED_LIMIT)
   const hidden = chips.length - visible.length
 
