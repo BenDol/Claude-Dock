@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Provide globals that are normally injected by Vite define
 ;(globalThis as any).__BUILD_SHA__ = 'test-build-sha'
-;(globalThis as any).__PLUGIN_BUILD_SHAS__ = { 'git-sync': 'local-git-sync-sha', 'git-manager': 'local-git-manager-sha' }
+;(globalThis as any).__PLUGIN_BUILD_SHAS__ = { 'voice': 'local-voice-sha', 'git-manager': 'local-git-manager-sha' }
 
 // --- Hoisted mocks ---
 
@@ -154,8 +154,8 @@ describe('PluginUpdateService', () => {
 
   describe('checkBuiltinPlugins', () => {
     const builtinPlugin = {
-      id: 'git-sync',
-      name: 'Git Sync',
+      id: 'voice',
+      name: 'Voice',
       description: 'desc',
       defaultEnabled: false,
       version: '1.0.0',
@@ -168,11 +168,11 @@ describe('PluginUpdateService', () => {
       buildSha: 'remote-sha',
       buildDate: '2026-03-16',
       plugins: {
-        'git-sync': {
+        'voice': {
           version: '2.0.0',
           buildSha: 'remote-plugin-sha',
           hash: 'abc123',
-          archivePath: 'git-sync/',
+          archivePath: 'voice/',
           changelog: 'New features'
         }
       }
@@ -186,7 +186,7 @@ describe('PluginUpdateService', () => {
       mockFetchJSON.mockResolvedValue(remoteManifest)
       const updates = await service.checkForUpdates('latest')
       expect(updates).toHaveLength(1)
-      expect(updates[0].pluginId).toBe('git-sync')
+      expect(updates[0].pluginId).toBe('voice')
       expect(updates[0].currentVersion).toBe('1.0.0')
       expect(updates[0].newVersion).toBe('2.0.0')
       expect(updates[0].source).toBe('builtin')
@@ -199,10 +199,10 @@ describe('PluginUpdateService', () => {
       const sameVersionManifest = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             version: '1.0.0',
-            buildSha: 'local-git-sync-sha' // matches __PLUGIN_BUILD_SHAS__['git-sync']
+            buildSha: 'local-voice-sha' // matches __PLUGIN_BUILD_SHAS__['voice']
           }
         }
       }
@@ -215,13 +215,13 @@ describe('PluginUpdateService', () => {
       // An override exists — the user previously installed a plugin update,
       // and now there's a newer hotfix for the same version
       mockGetOverrides.mockReturnValue({
-        'git-sync': { version: '1.0.0', buildSha: 'old-override-sha', hash: 'old-hash', installedAt: Date.now() }
+        'voice': { version: '1.0.0', buildSha: 'old-override-sha', hash: 'old-hash', installedAt: Date.now() }
       })
       const hotfixManifest = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             version: '1.0.0',
             buildSha: 'different-sha-than-local'
           }
@@ -241,8 +241,8 @@ describe('PluginUpdateService', () => {
       const staleManifest = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             version: '1.0.0',
             buildSha: 'stale-sha-from-older-release'
           }
@@ -254,7 +254,7 @@ describe('PluginUpdateService', () => {
     })
 
     it('skips dismissed versions', async () => {
-      mockGetDismissedVersions.mockReturnValue({ 'git-sync': '2.0.0' })
+      mockGetDismissedVersions.mockReturnValue({ 'voice': '2.0.0' })
       mockFetchJSON.mockResolvedValue(remoteManifest)
       const updates = await service.checkForUpdates('latest')
       expect(updates).toHaveLength(0)
@@ -264,8 +264,8 @@ describe('PluginUpdateService', () => {
       const manifestWithMinApp = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             minAppVersion: '99.0.0'
           }
         }
@@ -279,8 +279,8 @@ describe('PluginUpdateService', () => {
       const manifestWithMinApp = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             minAppVersion: '0.9.0'
           }
         }
@@ -297,9 +297,9 @@ describe('PluginUpdateService', () => {
       ])
       mockFetchJSON.mockResolvedValue(remoteManifest)
       const updates = await service.checkForUpdates('latest')
-      // Only git-sync should be detected, not external-plugin
+      // Only voice should be detected, not external-plugin
       expect(updates).toHaveLength(1)
-      expect(updates[0].pluginId).toBe('git-sync')
+      expect(updates[0].pluginId).toBe('voice')
     })
 
     it('handles manifest fetch failure gracefully', async () => {
@@ -313,18 +313,18 @@ describe('PluginUpdateService', () => {
         builtinPlugin,
         { ...builtinPlugin, id: 'git-manager', name: 'Git Manager' }
       ])
-      mockFetchJSON.mockResolvedValue(remoteManifest) // only has git-sync
+      mockFetchJSON.mockResolvedValue(remoteManifest) // only has voice
       const updates = await service.checkForUpdates('latest')
       expect(updates).toHaveLength(1)
-      expect(updates[0].pluginId).toBe('git-sync')
+      expect(updates[0].pluginId).toBe('voice')
     })
 
     it('sets requiresAppUpdate flag from manifest', async () => {
       const manifestWithAppUpdate = {
         ...remoteManifest,
         plugins: {
-          'git-sync': {
-            ...remoteManifest.plugins['git-sync'],
+          'voice': {
+            ...remoteManifest.plugins['voice'],
             requiresAppUpdate: true
           }
         }
@@ -518,35 +518,35 @@ describe('PluginUpdateService', () => {
 
     it('returns updates after check', async () => {
       mockGetPluginInfoList.mockReturnValue([
-        { id: 'git-sync', name: 'Git Sync', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
+        { id: 'voice', name: 'Voice', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
       ])
       mockFetchJSON.mockResolvedValue({
         schemaVersion: 1, buildSha: 'x', buildDate: '2026-01-01',
-        plugins: { 'git-sync': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'git-sync/' } }
+        plugins: { 'voice': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'voice/' } }
       })
 
       await service.checkForUpdates('latest')
       const updates = service.getAvailableUpdates()
       expect(updates).toHaveLength(1)
-      expect(updates[0].pluginId).toBe('git-sync')
+      expect(updates[0].pluginId).toBe('voice')
     })
   })
 
   describe('dismissUpdate', () => {
     it('removes update from available and persists dismissal', async () => {
       mockGetPluginInfoList.mockReturnValue([
-        { id: 'git-sync', name: 'Git Sync', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
+        { id: 'voice', name: 'Voice', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
       ])
       mockFetchJSON.mockResolvedValue({
         schemaVersion: 1, buildSha: 'x', buildDate: '2026-01-01',
-        plugins: { 'git-sync': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'git-sync/' } }
+        plugins: { 'voice': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'voice/' } }
       })
 
       await service.checkForUpdates('latest')
       expect(service.getAvailableUpdates()).toHaveLength(1)
 
-      service.dismissUpdate('git-sync', '2.0.0')
-      expect(mockDismissVersion).toHaveBeenCalledWith('git-sync', '2.0.0')
+      service.dismissUpdate('voice', '2.0.0')
+      expect(mockDismissVersion).toHaveBeenCalledWith('voice', '2.0.0')
       expect(service.getAvailableUpdates()).toHaveLength(0)
     })
   })
@@ -554,11 +554,11 @@ describe('PluginUpdateService', () => {
   describe('installAll', () => {
     it('skips entries that require app update', async () => {
       mockGetPluginInfoList.mockReturnValue([
-        { id: 'git-sync', name: 'Git Sync', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
+        { id: 'voice', name: 'Voice', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
       ])
       mockFetchJSON.mockResolvedValue({
         schemaVersion: 1, buildSha: 'x', buildDate: '2026-01-01',
-        plugins: { 'git-sync': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'git-sync/', requiresAppUpdate: true } }
+        plugins: { 'voice': { version: '2.0.0', buildSha: 'new', hash: 'abc', archivePath: 'voice/', requiresAppUpdate: true } }
       })
 
       await service.checkForUpdates('latest')
@@ -578,13 +578,13 @@ describe('PluginUpdateService', () => {
   describe('version comparison', () => {
     it('detects multiple plugin updates in single check', async () => {
       mockGetPluginInfoList.mockReturnValue([
-        { id: 'git-sync', name: 'Git Sync', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' },
+        { id: 'voice', name: 'Voice', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' },
         { id: 'git-manager', name: 'Git Manager', description: '', defaultEnabled: false, version: '1.0.0', source: 'builtin' }
       ])
       mockFetchJSON.mockResolvedValue({
         schemaVersion: 1, buildSha: 'x', buildDate: '2026-01-01',
         plugins: {
-          'git-sync': { version: '2.0.0', buildSha: 'new1', hash: 'abc', archivePath: 'git-sync/' },
+          'voice': { version: '2.0.0', buildSha: 'new1', hash: 'abc', archivePath: 'voice/' },
           'git-manager': { version: '1.5.0', buildSha: 'new2', hash: 'def', archivePath: 'git-manager/' }
         }
       })
@@ -592,16 +592,16 @@ describe('PluginUpdateService', () => {
       const updates = await service.checkForUpdates('latest')
       expect(updates).toHaveLength(2)
       const ids = updates.map(u => u.pluginId).sort()
-      expect(ids).toEqual(['git-manager', 'git-sync'])
+      expect(ids).toEqual(['git-manager', 'voice'])
     })
 
     it('ignores older remote versions', async () => {
       mockGetPluginInfoList.mockReturnValue([
-        { id: 'git-sync', name: 'Git Sync', description: '', defaultEnabled: false, version: '3.0.0', source: 'builtin' }
+        { id: 'voice', name: 'Voice', description: '', defaultEnabled: false, version: '3.0.0', source: 'builtin' }
       ])
       mockFetchJSON.mockResolvedValue({
         schemaVersion: 1, buildSha: 'x', buildDate: '2026-01-01',
-        plugins: { 'git-sync': { version: '2.0.0', buildSha: 'old', hash: 'abc', archivePath: 'git-sync/' } }
+        plugins: { 'voice': { version: '2.0.0', buildSha: 'old', hash: 'abc', archivePath: 'voice/' } }
       })
 
       const updates = await service.checkForUpdates('latest')

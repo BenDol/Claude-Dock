@@ -62,7 +62,7 @@ export class DockManager {
       this.docks.delete(id)
     })
 
-    // Run pre-open plugins (e.g., git-sync) before loading the renderer.
+    // Run pre-open plugins before loading the renderer.
     // This allows plugins to show dialogs and do work before terminals appear.
     try {
       await pluginManager.emitProjectPreOpen(dir, dock)

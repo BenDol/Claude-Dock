@@ -71,22 +71,22 @@ describe('plugin-update-store', () => {
     })
 
     it('dismisses a version for a plugin', () => {
-      dismissVersion('git-sync', '2.0.0')
-      expect(mockStore.set).toHaveBeenCalledWith('dismissedVersions', { 'git-sync': '2.0.0' })
+      dismissVersion('voice', '2.0.0')
+      expect(mockStore.set).toHaveBeenCalledWith('dismissedVersions', { 'voice': '2.0.0' })
     })
 
     it('overwrites previous dismissal for same plugin', () => {
-      mockStoreData.dismissedVersions = { 'git-sync': '1.5.0' }
-      dismissVersion('git-sync', '2.0.0')
-      expect(mockStore.set).toHaveBeenCalledWith('dismissedVersions', { 'git-sync': '2.0.0' })
+      mockStoreData.dismissedVersions = { 'voice': '1.5.0' }
+      dismissVersion('voice', '2.0.0')
+      expect(mockStore.set).toHaveBeenCalledWith('dismissedVersions', { 'voice': '2.0.0' })
     })
 
     it('preserves other plugins when dismissing', () => {
       mockStoreData.dismissedVersions = { 'git-manager': '1.0.0' }
-      dismissVersion('git-sync', '2.0.0')
+      dismissVersion('voice', '2.0.0')
       expect(mockStore.set).toHaveBeenCalledWith('dismissedVersions', {
         'git-manager': '1.0.0',
-        'git-sync': '2.0.0'
+        'voice': '2.0.0'
       })
     })
   })
@@ -112,16 +112,16 @@ describe('plugin-update-store', () => {
 
     it('sets an override entry', () => {
       const entry = { version: '2.0.0', buildSha: 'abc123', hash: 'def456', installedAt: Date.now() }
-      setOverride('git-sync', entry)
-      expect(mockStore.set).toHaveBeenCalledWith('overrides', { 'git-sync': entry })
+      setOverride('voice', entry)
+      expect(mockStore.set).toHaveBeenCalledWith('overrides', { 'voice': entry })
     })
 
     it('removes an override entry', () => {
       mockStoreData.overrides = {
-        'git-sync': { version: '2.0.0', buildSha: 'a', hash: 'b', installedAt: 0 },
+        'voice': { version: '2.0.0', buildSha: 'a', hash: 'b', installedAt: 0 },
         'git-manager': { version: '1.5.0', buildSha: 'c', hash: 'd', installedAt: 0 }
       }
-      removeOverride('git-sync')
+      removeOverride('voice')
       expect(mockStore.set).toHaveBeenCalledWith('overrides', {
         'git-manager': { version: '1.5.0', buildSha: 'c', hash: 'd', installedAt: 0 }
       })
@@ -132,10 +132,10 @@ describe('plugin-update-store', () => {
         'git-manager': { version: '1.0.0', buildSha: 'x', hash: 'y', installedAt: 0 }
       }
       const entry = { version: '2.0.0', buildSha: 'a', hash: 'b', installedAt: Date.now() }
-      setOverride('git-sync', entry)
+      setOverride('voice', entry)
       expect(mockStore.set).toHaveBeenCalledWith('overrides', {
         'git-manager': { version: '1.0.0', buildSha: 'x', hash: 'y', installedAt: 0 },
-        'git-sync': entry
+        'voice': entry
       })
     })
   })

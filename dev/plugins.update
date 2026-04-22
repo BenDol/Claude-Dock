@@ -3,14 +3,6 @@
   "buildSha": "020f05badaca7f26e6431c50d56203d2c721bf7f",
   "buildDate": "2026-03-16",
   "plugins": {
-    "git-sync": {
-      "version": "1.0.0",
-      "buildSha": "4b07b5ed80ccc050dc771ff59e6e10ce1cc6e7e0",
-      "hash": "0394f1ba0537100a2c06205e6964b9d10e7d516a20e03eb913917534f881f11c",
-      "archivePath": "git-sync/",
-      "changelog": "",
-      "requiresAppUpdate": false
-    },
     "git-manager": {
       "version": "1.0.0",
       "buildSha": "fake-test-sha-for-update",
