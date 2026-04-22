@@ -59,14 +59,26 @@ export function resolveClaudeBinaryPath(): string | undefined {
 
   for (const pkg of pkgNames) {
     const binRel = `${pkg}/claude${exeSuffix}`
+    // Layout A (hoisted): top-level `node_modules/<pkg>/claude.exe`. This is
+    //   what modern npm produces when optionalDependencies can be hoisted.
+    // Layout B (nested): `node_modules/@anthropic-ai/claude-agent-sdk/node_modules/<pkg>/claude.exe`.
+    //   electron-builder's `install-app-deps` runs npm in production mode
+    //   which often installs platform-specific optional-deps NESTED inside
+    //   the parent package. Must check both.
+    const relLayouts = [
+      path.join('node_modules', pkg, `claude${exeSuffix}`),
+      path.join('node_modules', '@anthropic-ai', 'claude-agent-sdk', 'node_modules', pkg, `claude${exeSuffix}`)
+    ]
     const candidates: string[] = []
 
-    // 1) Packaged build: asarUnpack extracts the platform package to
-    //    `resources/app.asar.unpacked/node_modules/<pkg>/`. This MUST come
-    //    before any require.resolve result, because Electron may return a
-    //    virtual `app.asar/...` path that child_process.spawn can't execute.
+    // 1) Packaged build: asarUnpack extracts the platform package under
+    //    `resources/app.asar.unpacked/`. This MUST come before any
+    //    require.resolve result, because Electron may return a virtual
+    //    `app.asar/...` path that child_process.spawn can't execute.
     if (app.isPackaged && process.resourcesPath) {
-      candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', pkg, `claude${exeSuffix}`))
+      for (const rel of relLayouts) {
+        candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', rel))
+      }
     }
 
     // 2) Normal Node resolution — works in `electron-vite dev`.
@@ -80,9 +92,12 @@ export function resolveClaudeBinaryPath(): string | undefined {
       if (unpacked !== resolved) candidates.push(resolved)
     } catch { /* not resolvable from here */ }
 
-    // 3) Dev fallback — app source tree.
+    // 3) Dev fallback — app source tree, both layouts.
     try {
-      candidates.push(path.join(app.getAppPath(), 'node_modules', pkg, `claude${exeSuffix}`))
+      const appPath = app.getAppPath()
+      for (const rel of relLayouts) {
+        candidates.push(path.join(appPath, rel))
+      }
     } catch { /* app not ready — ignore */ }
 
     for (const candidate of candidates) {

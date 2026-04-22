@@ -305,4 +305,18 @@ describe('resolveClaudeBinaryPath', () => {
     const winPath = resolveClaudeBinaryPath()
     expect(winPath?.endsWith('claude.exe')).toBe(true)
   })
+
+  it('finds the nested layout when npm installs the platform pkg inside claude-agent-sdk', () => {
+    // electron-builder's `install-app-deps` often produces this layout:
+    //   node_modules/@anthropic-ai/claude-agent-sdk/
+    //     node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    Object.defineProperty(process, 'arch', { value: 'x64' })
+    const nested = path.join(
+      process.cwd(), 'node_modules', '@anthropic-ai', 'claude-agent-sdk',
+      'node_modules', '@anthropic-ai', 'claude-agent-sdk-win32-x64', 'claude.exe'
+    )
+    existsSync.mockImplementation((p) => p === nested)
+    expect(resolveClaudeBinaryPath()).toBe(nested)
+  })
 })
