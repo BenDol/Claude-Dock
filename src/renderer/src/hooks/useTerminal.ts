@@ -115,14 +115,55 @@ const FILE_PATH_TOOLS = new Set([
   'NotebookEdit', 'Glob'
 ])
 
-// Tools whose argument may contain quoted file paths (e.g. Bash, Grep)
+// Tools whose argument may contain quoted or unquoted file paths (e.g. Bash, Grep)
 const COMMAND_TOOLS = new Set(['Bash', 'Grep'])
 
 // Match PascalCase tool invocations: ToolName(...)
 const TOOL_RE = /\b([A-Z][a-zA-Z]*)\(([^)]+)\)/g
 
-// Match standalone file:line references: path/to/file.ext:123
-const FILE_LINE_RE = /(?:^|[\s│┃┆┇┊┋╎╏])([a-zA-Z0-9_.][a-zA-Z0-9_./\\-]*\.[a-zA-Z]{1,10}):(\d+)(?::(\d+))?/g
+// Characters that legitimately precede a file path in terminal output.
+// Broad ranges so tree markers (└ ├ ─), arrows (→ ↦), block/geometric bullets
+// (• ▪), and common bracket/quote/punctuation separators all act as valid
+// boundaries. `@` is allowed for scoped-package-style paths.
+//
+//   \s                   — whitespace
+//   ─–▟        — box drawing + block elements
+//   ←–⇿        — arrows
+//   ■–◿        — geometric shapes (bullets, diamonds)
+//   () [] {} ' " ` < > , ; @
+const PATH_PREFIX_CLASS =
+  "[\\s\\u2500-\\u259F\\u2190-\\u21FF\\u25A0-\\u25FF()\\[\\]{}'\"`<>,;@]"
+
+// Standalone file path matcher. Requires at least one path separator (/ or \)
+// so we don't over-match decimals, version strings, or bare identifiers.
+// `:line(:col)` suffix is optional so paths printed without coordinates (e.g.
+// ripgrep summary rows: "└ src/foo.ts") still get caught. `looksLikeFilePath`
+// filters noise after capture.
+//
+// Path alternatives (ordered most-to-least specific):
+//   1. Windows drive absolute:   C:\foo\bar.txt  or  C:/foo/bar.txt
+//   2. Dot-relative:               ./x  or  ../x
+//   3. Unix absolute:              /usr/local/bin/node
+//   4. Multi-segment relative:     src/foo.ts, packages/ui/bar.js
+const FILE_PATH_RE = new RegExp(
+  "(?:^|" + PATH_PREFIX_CLASS + ")(" +
+    "[a-zA-Z]:[\\\\/][^\\s<>|?*\"`:]+|" +
+    "\\.{1,2}[\\\\/][^\\s<>|?*\"`:]+|" +
+    "/[a-zA-Z0-9_.][^\\s<>|?*\"`:]*|" +
+    "[a-zA-Z0-9_.][a-zA-Z0-9_.-]*[\\\\/][a-zA-Z0-9_./\\\\-]+" +
+  ")(?::(\\d+)(?::(\\d+))?)?",
+  "g"
+)
+
+// Trim trailing punctuation the regex over-captures (e.g. sentence-final `.`
+// or a closing `)` from prose like "see src/foo.ts." or "(see src/foo.ts)").
+// Runs after the regex so the match range stays tight around the real path.
+function trimTrailingPunct(s: string): string {
+  while (s.length > 1 && /[.,;!?)}\]]$/.test(s)) {
+    s = s.slice(0, -1)
+  }
+  return s
+}
 
 // Extract a clean file path from a tool argument
 function extractFilePath(toolName: string, rawArg: string): string | null {
@@ -136,13 +177,20 @@ function extractFilePath(toolName: string, rawArg: string): string | null {
   }
 
   if (COMMAND_TOOLS.has(toolName)) {
-    // Extract quoted paths from commands like: ls "C:\path" or cat 'file.txt'
+    // Quoted first (preserve paths with spaces).
     const quoted = arg.match(/["']([^"']+)["']/g)
     if (quoted) {
       for (const q of quoted) {
         const inner = q.slice(1, -1)
         if (looksLikeFilePath(inner)) return inner
       }
+    }
+    // Fallback: any whitespace-delimited token that looks like a path.
+    // Catches common cases like `Bash(cat src/foo.ts)` that were previously
+    // missed because they weren't quoted.
+    for (const tok of arg.split(/\s+/)) {
+      const trimmed = trimTrailingPunct(tok.replace(/^["']|["']$/g, ''))
+      if (looksLikeFilePath(trimmed)) return trimmed
     }
     return null
   }
@@ -160,12 +208,15 @@ function looksLikeFilePath(s: string): boolean {
   if (!/[./\\]/.test(s)) return false
   // Must not be a glob pattern with **
   if (s.includes('**')) return false
-  // Must not contain shell operators or code syntax
+  // Must not contain shell operators or code syntax. `@` is blocked to reject
+  // email-like strings (they'd otherwise pass the separator check via the `.`
+  // in the TLD); scoped paths like `@scope/foo` are captured upstream by the
+  // tool-arg resolver, not by looksLikeFilePath directly.
   if (/[<>{}|&;!?#@$%^*+~`]/.test(s)) return false
   // Must not start with a flag
   if (/^-/.test(s)) return false
   // Must not contain spaces unless it's a Windows path (C:\Program Files\...)
-  if (s.includes(' ') && !/^[a-zA-Z]:\\/.test(s)) return false
+  if (s.includes(' ') && !/^[a-zA-Z]:[\\/]/.test(s)) return false
   return true
 }
 
@@ -263,20 +314,40 @@ function registerFilePathLinks(term: Terminal): void {
         links.push({ startIndex: start, length: filePath.length, filePath })
       }
 
-      // 2. Standalone file:line references (e.g. src/foo.ts:42:10)
-      FILE_LINE_RE.lastIndex = 0
-      while ((m = FILE_LINE_RE.exec(text)) !== null) {
-        const filePath = m[1]
-        if (!looksLikeFilePath(filePath)) continue
+      // 2. Standalone paths (with or without :line:col), including tree/list
+      //    rows like "└ src/foo.ts" that were previously missed.
+      //    Pre-compute URL ranges so we don't double-link paths embedded in
+      //    URLs (e.g. https://example.com/foo/bar.html).
+      URL_RE.lastIndex = 0
+      const urlRanges: Array<{ start: number; end: number }> = []
+      let u: RegExpExecArray | null
+      while ((u = URL_RE.exec(text)) !== null) {
+        urlRanges.push({ start: u.index, end: u.index + u[0].length })
+      }
+
+      FILE_PATH_RE.lastIndex = 0
+      while ((m = FILE_PATH_RE.exec(text)) !== null) {
+        let filePath = m[1]
         const line = m[2] ? parseInt(m[2], 10) : undefined
         const column = m[3] ? parseInt(m[3], 10) : undefined
-        // Don't duplicate if already matched by a tool invocation
+
+        // Find where the captured path actually begins within the full match
+        // (the 0th position may be the consumed prefix char).
         const pathStart = text.indexOf(filePath, m.index)
         if (pathStart < 0) continue
+
+        // Skip paths that sit inside a URL match (handled by web-links).
+        if (urlRanges.some((r) => pathStart >= r.start && pathStart < r.end)) continue
+
+        filePath = trimTrailingPunct(filePath)
+        if (!looksLikeFilePath(filePath)) continue
+
+        // Don't duplicate if already matched by a tool invocation (above).
         const alreadyLinked = links.some((l) =>
           pathStart >= l.startIndex && pathStart < l.startIndex + l.length
         )
         if (alreadyLinked) continue
+
         links.push({ startIndex: pathStart, length: filePath.length, filePath, line, column })
       }
 
