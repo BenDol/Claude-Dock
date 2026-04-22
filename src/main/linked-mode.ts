@@ -504,6 +504,12 @@ export function migrateIfNeeded(): void {
  * Pre-v5 the data dir was `%userData%` itself; v5 nests it under `dock-link/`.
  * Move existing dock-* state files so an upgraded UAT install doesn't lose
  * message history, shell state, or dock-config on first run.
+ *
+ * A separate bug between v5 and the data-dir fix meant the dock kept writing
+ * these files at the legacy parent path long after the MCP moved to reading
+ * from `dock-link/`. That left live data at the parent and 17-byte stale
+ * placeholders inside `dock-link/`. The migration below picks the newer of the
+ * two when both exist, so the fix doesn't silently drop accumulated state.
  */
 function migrateDataDirIfNeeded(): void {
   if (ENV_PROFILE !== 'uat') return // only UAT could have legacy state at the parent
@@ -517,6 +523,7 @@ function migrateDataDirIfNeeded(): void {
     'dock-shell-commands.json',
     'dock-shell-output.json',
     'dock-pending-events.json',
+    'dock-terminal-commands.json',
     'mcp-version'
   ]
   let moved = 0
@@ -525,12 +532,26 @@ function migrateDataDirIfNeeded(): void {
     const dest = path.join(newDir, name)
     try {
       if (!fs.existsSync(src)) continue
-      if (fs.existsSync(dest)) {
-        // New file already exists — leave legacy in place rather than clobber.
-        continue
-      }
       fs.mkdirSync(newDir, { recursive: true })
-      fs.renameSync(src, dest)
+      if (fs.existsSync(dest)) {
+        // Both exist: pre-fix dock kept writing at the parent while the MCP
+        // read from dock-link/. Promote the newer copy so we don't throw away
+        // accumulated activity/output state on upgrade.
+        const srcMtime = fs.statSync(src).mtimeMs
+        const destMtime = fs.statSync(dest).mtimeMs
+        if (srcMtime <= destMtime) {
+          // Dock-link version is already newer or equal — remove the orphaned
+          // parent copy so future writes (now going to dock-link/) don't get
+          // confused by a shadow file at the old location.
+          try { fs.unlinkSync(src) } catch { /* best-effort */ }
+          continue
+        }
+        // Parent is newer — overwrite dock-link/.
+        fs.copyFileSync(src, dest)
+        try { fs.unlinkSync(src) } catch { /* best-effort */ }
+      } else {
+        fs.renameSync(src, dest)
+      }
       moved++
     } catch (err) {
       logError(`linked-mode: failed to migrate ${name} into dock-link/`, err)

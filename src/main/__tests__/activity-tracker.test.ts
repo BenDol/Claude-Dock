@@ -8,6 +8,10 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.mock('../linked-mode', () => ({
+  getDataDir: () => '/mock/userData/claude-dock/dock-link'
+}))
+
 vi.mock('../logger', () => ({
   log: vi.fn(),
   logError: vi.fn()

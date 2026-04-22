@@ -14,6 +14,7 @@ import { IdleNotifier } from './idle-notifier'
 import { log, logError } from './logger'
 import { CrashReporter } from './crash-reporter'
 import { getTitleSuffix } from '../shared/env-profile'
+import { getDataDir } from './linked-mode'
 
 declare const __DEV__: boolean
 
@@ -245,7 +246,7 @@ export class DockWindow {
    */
   private startShellCommandWatcher(): void {
     const cmdFile = path.join(
-      app.getPath('userData'),
+      getDataDir(),
       'dock-shell-commands.json'
     )
     const normProjectDir = this.projectDir.replace(/\\/g, '/').toLowerCase()
@@ -339,7 +340,7 @@ export class DockWindow {
    */
   private startTerminalCommandWatcher(): void {
     const cmdFile = path.join(
-      app.getPath('userData'),
+      getDataDir(),
       'dock-terminal-commands.json'
     )
     const normProjectDir = this.projectDir.replace(/\\/g, '/').toLowerCase()
@@ -501,7 +502,7 @@ export class DockWindow {
     this.shellEventScanOffsets.delete(shellId)
     this.shellTotalLineCount.delete(shellId)
     try {
-      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+      const outputFile = path.join(getDataDir(), 'dock-shell-output.json')
       let existing: Record<string, any> = {}
       try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { return }
 
@@ -540,11 +541,11 @@ export class DockWindow {
     this.shellEventScanOffsets.delete(shellId)
     this.shellTotalLineCount.delete(shellId)
 
-    const userData = app.getPath('userData')
+    const dataDir = getDataDir()
 
     // 3. Remove shell entry from dock-shell-output.json and delete its log file
     try {
-      const outputFile = path.join(userData, 'dock-shell-output.json')
+      const outputFile = path.join(dataDir, 'dock-shell-output.json')
       let existing: Record<string, any> = {}
       try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { /* new file */ }
 
@@ -573,7 +574,7 @@ export class DockWindow {
 
     // 4. Remove pending events for this shell
     try {
-      const pendingFile = path.join(userData, 'dock-pending-events.json')
+      const pendingFile = path.join(dataDir, 'dock-pending-events.json')
       let pending: any[] = []
       try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8')) } catch { /* new file */ }
       if (Array.isArray(pending)) {
@@ -596,7 +597,7 @@ export class DockWindow {
     if (hashKeys.length === 0) return
     const keySet = new Set(hashKeys)
     try {
-      const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
+      const pendingFile = path.join(getDataDir(), 'dock-pending-events.json')
       let pending: any[] = []
       try { pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8')) } catch { return }
       if (!Array.isArray(pending)) return
@@ -623,7 +624,7 @@ export class DockWindow {
     this.shellOutputBuffers.clear()
     if (shellIds.size === 0) return
     try {
-      const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+      const outputFile = path.join(getDataDir(), 'dock-shell-output.json')
       let existing: Record<string, any> = {}
       try { existing = JSON.parse(fs.readFileSync(outputFile, 'utf-8')) } catch { return }
 
@@ -692,7 +693,7 @@ export class DockWindow {
   }
 
   private async saveShellOutputAsync(snapshot: Map<string, string>): Promise<void> {
-    const outputFile = path.join(app.getPath('userData'), 'dock-shell-output.json')
+    const outputFile = path.join(getDataDir(), 'dock-shell-output.json')
     let existing: Record<string, any> = {}
     try { existing = JSON.parse(await fsp.readFile(outputFile, 'utf-8')) } catch { /* new file */ }
 
@@ -725,7 +726,7 @@ export class DockWindow {
       // Write individual log file per shell for direct file reading by Claude
       const shellIndex = shellId.split(':').pop() || '0'
       const logFileName = `dock-shell-${sessionId.slice(0, 8)}-${shellIndex}.log`
-      const logFilePath = path.join(app.getPath('userData'), logFileName)
+      const logFilePath = path.join(getDataDir(), logFileName)
       writePromises.push(
         fsp.writeFile(logFilePath, recentLines.join('\n') + '\n').catch(() => { /* ignore write errors */ })
       )
@@ -807,7 +808,7 @@ export class DockWindow {
 
     // Deduplicate: drop events whose type+hash match an existing pending or new event
     const seen = new Set<string>()
-    const pendingFile = path.join(app.getPath('userData'), 'dock-pending-events.json')
+    const pendingFile = path.join(getDataDir(), 'dock-pending-events.json')
     let pending: any[] = []
     try {
       pending = JSON.parse(await fsp.readFile(pendingFile, 'utf-8'))
