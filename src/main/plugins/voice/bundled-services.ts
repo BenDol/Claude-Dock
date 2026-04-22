@@ -15,15 +15,33 @@ import { NotificationManager } from '../../notification-manager'
 import type { VoiceServices, VoiceNotificationPayload } from './services'
 
 /**
- * Python scripts that the TS side spawns as subprocesses. Missing any of
- * these is a packaging/install drift bug, not a user config issue — the TS
- * bundle and the on-disk python/ directory were built at different commits.
+ * Files we expect to find in the resolved python/ tree. Missing any of these
+ * is a packaging/install drift bug, not a user config issue — the TS bundle
+ * and the on-disk python/ directory were built at different commits.
+ *
+ * The list intentionally includes recent-feature files under src/ (not just
+ * top-level scripts). A stale bundle frequently still has the top-level
+ * scripts but is missing newer modules those scripts import — e.g. an old
+ * install that predates the pynput refactor has `hotkey_daemon.py` but no
+ * `src/hotkey_parser.py`, and the venv requirements drove a pynput install
+ * that the old daemon can't use (it still `import keyboard`), producing a
+ * restart loop with "'keyboard' package not installed — exiting". Adding
+ * these structural markers lets the integrity check flag the drift before
+ * we spawn a daemon that is guaranteed to crash.
  */
 export const EXPECTED_PYTHON_SCRIPTS = [
   'server.py',
   'hotkey_daemon.py',
   'dictation_daemon.py',
-  'requirements.txt'
+  'requirements.txt',
+  // Introduced with the pynput cross-platform hotkey refactor. Absence means
+  // hotkey_daemon.py on disk still imports `keyboard` while the venv was
+  // provisioned against the newer pynput-based requirements.txt.
+  'src/hotkey_parser.py',
+  // Introduced with the CUDA auto-install feature. Absence means the GPU
+  // verify probe's `from src.cuda_setup import setup_cuda_dll_paths` fails
+  // with ModuleNotFoundError right after a successful pip install.
+  'src/cuda_setup.py'
 ] as const
 
 export interface PythonIntegrityReport {

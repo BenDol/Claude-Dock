@@ -33,6 +33,34 @@ export class VoicePlugin implements DockPlugin {
         `dir=${integrity.pythonDir}, missing=${integrity.missing.join(', ')}. ` +
         repairHintForSource(integrity.source)
       )
+      // Drift of a `packaged` tree means the on-disk python/ shipped with the
+      // installed .exe is older than the app.asar that's running — a partial
+      // auto-update or a voice plugin bump that the app binary hasn't caught
+      // up with. The plugin-updater normally fixes this by installing an
+      // override, but its periodic check runs every 30 minutes; until then
+      // the daemon would crash-loop. Kick off an immediate check so the user
+      // doesn't have to wait. Load lazily so this file stays decoupled from
+      // the plugin-updater wiring for tests.
+      if (integrity.source === 'packaged') {
+        void (async () => {
+          try {
+            const { PluginUpdateService } = await import('../plugin-updater')
+            const svc = PluginUpdateService.getInstance()
+            const updates = await svc.checkForUpdates()
+            const voiceUpdate = updates.find((u) => u.pluginId === 'voice')
+            if (voiceUpdate && voiceUpdate.status === 'available' && !voiceUpdate.requiresAppUpdate) {
+              getServices().log('[voice] integrity drift — auto-installing available voice update')
+              await svc.installUpdate('voice')
+            } else {
+              getServices().log(
+                `[voice] integrity drift — no installable voice update found (${voiceUpdate?.status ?? 'not-listed'})`
+              )
+            }
+          } catch (err) {
+            getServices().logError('[voice] auto-recover from integrity drift failed', err)
+          }
+        })()
+      }
     } else {
       getServices().log(
         `[voice] bundled python integrity OK — source=${integrity.source}, dir=${integrity.pythonDir}`

@@ -84,6 +84,35 @@ vi.mock('../voice-mcp-register', () => ({
   VOICE_MCP_KEY: 'voice-input'
 }))
 
+// Bundled-services wraps app.getPath() and fs layout under userData — mock it
+// here so tests don't need a real Electron app wired up. Tests model a healthy
+// install by returning an empty `missing` list. Individual tests can override
+// by re-mocking if they want to exercise the drift pre-flight.
+vi.mock('../bundled-services', () => ({
+  verifyBundledPythonIntegrity: vi.fn(() => ({
+    pythonDir: '/mock/python',
+    source: 'packaged',
+    missing: [],
+    present: [
+      'server.py',
+      'hotkey_daemon.py',
+      'dictation_daemon.py',
+      'requirements.txt',
+      'src/hotkey_parser.py',
+      'src/cuda_setup.py'
+    ]
+  })),
+  repairHintForSource: (_s: string) => '<mock repair hint>',
+  EXPECTED_PYTHON_SCRIPTS: [
+    'server.py',
+    'hotkey_daemon.py',
+    'dictation_daemon.py',
+    'requirements.txt',
+    'src/hotkey_parser.py',
+    'src/cuda_setup.py'
+  ]
+}))
+
 // fs — stub mkdir, writeFileSync, existsSync so materializeConfig doesn't explode
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs')
@@ -238,6 +267,30 @@ describe('voice-server-manager', () => {
     await new Promise((r) => setTimeout(r, 550))
     expect(fakeChildren.length).toBe(1)
     expect(mgr.getDaemonState()).toBe('running')
+  })
+
+  it('refuses to spawn daemon when bundled python tree is stale', async () => {
+    // Simulate the partial-auto-update scenario: top-level daemon script is
+    // present (so fs.existsSync passes) but a src/ file newer TS depends on is
+    // missing. The pre-flight integrity check must catch this and set status
+    // to crashed with a clear error, not spawn a daemon that will crash-loop.
+    const { verifyBundledPythonIntegrity } = await import('../bundled-services')
+    vi.mocked(verifyBundledPythonIntegrity).mockReturnValueOnce({
+      pythonDir: '/mock/python',
+      source: 'packaged',
+      missing: ['src/hotkey_parser.py'],
+      present: ['server.py', 'hotkey_daemon.py', 'dictation_daemon.py', 'requirements.txt', 'src/cuda_setup.py']
+    })
+    runtimeState.exists = true
+    const mgr = VoiceServerManager.getInstance()
+    await mgr.onProjectEnabled('/proj/a')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fakeChildren.length).toBe(0)
+    const s = mgr.getStatus()
+    expect(s.daemonState).toBe('crashed')
+    expect(s.installState).toBe('missing')
+    expect(s.lastError).toContain('src/hotkey_parser.py')
+    expect(s.step).toBe('Voice runtime out of date')
   })
 
   it('does not spawn a second daemon when another workspace enables', async () => {

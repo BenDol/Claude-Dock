@@ -469,22 +469,29 @@ export class VoiceServerManager extends EventEmitter {
       return
     }
 
+    // Verify the full python/ tree matches what the TS side expects before we
+    // spawn. Historically we only checked hotkey_daemon.py existence here —
+    // that caught "install partially wiped" scenarios but missed the more
+    // common "bundle is stale relative to the TS bundle" drift (e.g. partial
+    // auto-update left an old hotkey_daemon.py in place while the venv was
+    // provisioned against the newer pynput requirements). Spawning in that
+    // state produced an infinite restart loop with "'keyboard' package not
+    // installed — exiting" until the periodic plugin-updater check finally
+    // fetched the override (~30 min later). Fail fast instead.
+    const integrity = verifyBundledPythonIntegrity()
     const daemonScript = path.join(svc().paths.pythonDir, 'hotkey_daemon.py')
-    if (!fs.existsSync(daemonScript)) {
-      // Matches the dictation-daemon missing-script path: tell the user which
-      // file is missing, where it was looked for, and how to repair (reinstall
-      // / rebuild / clear override) based on the resolved source.
-      const integrity = verifyBundledPythonIntegrity()
-      const msg =
-        `hotkey_daemon.py missing at ${daemonScript}. ` +
-        `python source=${integrity.source}, missing=[${integrity.missing.join(', ')}]. ` +
-        repairHintForSource(integrity.source)
+    if (integrity.missing.length > 0) {
+      const daemonMissing = integrity.missing.includes('hotkey_daemon.py')
+      const headline = daemonMissing
+        ? `hotkey_daemon.py missing at ${daemonScript}.`
+        : `Voice runtime bundle is stale — missing [${integrity.missing.join(', ')}] in ${integrity.pythonDir}.`
+      const msg = `${headline} python source=${integrity.source}. ${repairHintForSource(integrity.source)}`
       svc().logError(`[voice-manager] ${msg}`)
       this.updateStatus({
         daemonState: 'crashed',
         installState: 'missing',
         lastError: msg,
-        step: 'Hotkey daemon script missing'
+        step: daemonMissing ? 'Hotkey daemon script missing' : 'Voice runtime out of date'
       })
       return
     }
