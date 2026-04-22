@@ -6,6 +6,8 @@ interface PluginPanelProps {
   projectDir: string
   /** Compact single-column list layout for narrow containers (e.g. first-time plugin setup). */
   compact?: boolean
+  /** If set, auto-opens the detail view for this plugin on mount (deep link). */
+  initialPluginId?: string
 }
 
 function formatUpdateDate(ts: number): string {
@@ -315,13 +317,18 @@ const PluginDetailView: React.FC<PluginDetailViewProps> = ({
   )
 }
 
-const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir, compact = false }) => {
+const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir, compact = false, initialPluginId }) => {
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [states, setStates] = useState<ProjectPluginStates>({})
   const [overrides, setOverrides] = useState<Record<string, { version: string; hash: string; installedAt: number }>>({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialPluginId ?? null)
+
+  // If the caller supplies a deep-link target, honor it whenever it changes.
+  useEffect(() => {
+    if (initialPluginId) setSelectedId(initialPluginId)
+  }, [initialPluginId])
 
   const refresh = useCallback(async () => {
     const api = getDockApi()
@@ -359,6 +366,7 @@ const PluginPanel: React.FC<PluginPanelProps> = ({ projectDir, compact = false }
         settings: { ...prev[pluginId]?.settings, [key]: value }
       }
     }))
+    window.dispatchEvent(new CustomEvent('plugin-state-changed'))
   }
 
   const resetTrust = async (pluginId: string) => {

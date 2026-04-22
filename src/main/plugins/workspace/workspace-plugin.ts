@@ -1,5 +1,6 @@
 import type { DockPlugin } from '../plugin'
 import type { PluginEventBus } from '../plugin-events'
+import type { PluginSettingDef } from '../../../shared/plugin-types'
 import { registerWorkspaceIpc, disposeWorkspaceIpc } from './workspace-ipc'
 import { EditorWindowManager } from './editor-window-manager'
 import { getEditorWindowState } from './editor-window-store'
@@ -16,6 +17,15 @@ export class WorkspacePlugin implements DockPlugin {
     try { return require('electron').app.getVersion() } catch { return '0.0.0' }
   }
   readonly lazyLoad = true
+  readonly settingsSchema: PluginSettingDef[] = [
+    {
+      key: 'autoSelectOpenFile',
+      label: 'Auto-select open file',
+      description: 'Highlight and reveal the active editor file in the workspace tree when you switch tabs or open a file.',
+      type: 'boolean',
+      defaultValue: true
+    }
+  ]
 
   register(bus: PluginEventBus): void {
     try { registerWorkspaceIpc() } catch (err) {

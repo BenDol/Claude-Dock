@@ -123,6 +123,7 @@ const WorkspaceTreeNode: React.FC<{
     <>
       <div
         className={`ws-tree-item${isSelected ? ' ws-tree-item-selected' : ''}`}
+        data-ws-path={entry.path}
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={(e) => entry.isDirectory ? onToggleExpand(entry.path) : onSelect(entry.path, e)}
         onDoubleClick={() => onDoubleClick(entry)}
@@ -673,6 +674,132 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
     window.addEventListener('workspace:collapse-all', onCollapse)
     return () => window.removeEventListener('workspace:collapse-all', onCollapse)
   }, [collapseAll])
+
+  // --- Auto-select open file ---
+  // Plugin setting (defaults to true). Refreshes when plugin state changes
+  // (settings edits broadcast a 'plugin-state-changed' window event).
+  const [autoSelectOpenFile, setAutoSelectOpenFile] = useState(true)
+  useEffect(() => {
+    if (!projectDir) return
+    let cancelled = false
+    const fetchSetting = () => {
+      api.plugins.getSetting(projectDir, 'workspace', 'autoSelectOpenFile')
+        .then((v) => { if (!cancelled) setAutoSelectOpenFile(v !== false) })
+        .catch(() => { /* default stays true */ })
+    }
+    fetchSetting()
+    window.addEventListener('plugin-state-changed', fetchSetting)
+    return () => { cancelled = true; window.removeEventListener('plugin-state-changed', fetchSetting) }
+  }, [projectDir])
+
+  // Subscribe to the active editor tab (same projectDir only)
+  const activeTabRelPath = useEditorStore((s) => {
+    const t = s.tabs.find((t) => t.id === s.activeTabId)
+    return t && t.projectDir === projectDir ? t.relativePath : null
+  })
+
+  // Ref to the latest tree so the reveal can read it without the effect
+  // re-firing (and re-scrolling) on every file-system refresh.
+  const treeRef = useRef(tree)
+  useEffect(() => { treeRef.current = tree }, [tree])
+
+  // Tracks the last path whose reveal successfully located its DOM node.
+  // Prevents re-asserting the selection on every tree refresh (which would
+  // overwrite any file the user manually clicked in the tree).
+  const lastRevealedRef = useRef<string | null>(null)
+
+  // Reset the reveal tracker when the project changes so a fresh reveal
+  // runs for the new project even if the active path coincidentally matches.
+  useEffect(() => { lastRevealedRef.current = null }, [projectDir])
+
+  // React to editor tab activation — expand parents, select, scroll into view.
+  // Also depends on `tree`: when the initial tree load completes (or a fresh
+  // scan arrives), retry the reveal so it succeeds even if `activeTabRelPath`
+  // was already set before the tree had entries to match against.
+  useEffect(() => {
+    if (!autoSelectOpenFile || !activeTabRelPath) return
+    if (lastRevealedRef.current === activeTabRelPath) return
+    let cancelled = false
+    const filePath = activeTabRelPath
+
+    ;(async () => {
+      const segments = filePath.split('/')
+      const parents: string[] = []
+      for (let i = 1; i < segments.length; i++) parents.push(segments.slice(0, i).join('/'))
+
+      const findEntry = (items: FileEntry[], target: string): FileEntry | null => {
+        for (const item of items) {
+          if (item.path === target) return item
+          if (item.children) { const found = findEntry(item.children, target); if (found) return found }
+        }
+        return null
+      }
+
+      // Load any parent directories whose children aren't in the tree yet.
+      // We include parents that aren't findable at all (their own parent
+      // hasn't been loaded) — the batched setTree below grafts them in via
+      // the path map in one pass, so a deep unloaded chain resolves with a
+      // single render rather than one cascade per depth level.
+      const dirsToLoad: string[] = []
+      for (const p of parents) {
+        const entry = findEntry(treeRef.current, p)
+        if (!entry || !entry.children) dirsToLoad.push(p)
+      }
+      if (dirsToLoad.length > 0) {
+        const loaded = await Promise.all(
+          dirsToLoad.map((dir) =>
+            api.workspace.readDir(projectDir, dir, hideIgnoredRef.current)
+              .then((children) => ({ dir, children }))
+              .catch(() => null)
+          )
+        )
+        if (cancelled) return
+        const valid = loaded.filter((r): r is { dir: string; children: FileEntry[] } => r !== null)
+        if (valid.length > 0) {
+          setTree((prev) => {
+            const byDir = new Map(valid.map((r) => [r.dir, r.children]))
+            const update = (items: FileEntry[]): FileEntry[] =>
+              items.map((item) => {
+                // Prefer freshly loaded children; otherwise reuse existing.
+                const nextChildren = byDir.has(item.path) ? byDir.get(item.path)! : item.children
+                if (!nextChildren) return item
+                return { ...item, children: update(nextChildren) }
+              })
+            return update(prev)
+          })
+        }
+      }
+
+      if (cancelled) return
+
+      // Expand every parent so the file row actually renders.
+      setExpandedPaths((prev) => {
+        let changed = false
+        const next = new Set(prev)
+        for (const p of parents) if (!next.has(p)) { next.add(p); changed = true }
+        return changed ? next : prev
+      })
+
+      // Select the file and remember it as the last-clicked row for keyboard nav.
+      setSelectedPaths(new Set([filePath]))
+      setLastClickedPath(filePath)
+
+      // Scroll the row into view after the DOM updates. Two rAFs so the
+      // element created by the setExpandedPaths render is present.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (cancelled) return
+          const el = panelRootRef.current?.querySelector(`[data-ws-path="${CSS.escape(filePath)}"]`)
+          if (el) {
+            (el as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+            lastRevealedRef.current = filePath
+          }
+        })
+      })
+    })()
+
+    return () => { cancelled = true }
+  }, [activeTabRelPath, autoSelectOpenFile, projectDir, tree])
 
   // Ctrl+F in workspace panel opens search, Ctrl+Shift+F from anywhere opens it too
   useEffect(() => {

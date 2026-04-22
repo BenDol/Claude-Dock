@@ -522,6 +522,8 @@ interface SettingsModalProps {
   onClose: () => void
   initialTab?: SettingsTab
   initialSection?: string
+  /** If set (combined with initialTab='plugins'), opens the plugin detail view for this plugin. */
+  initialPluginId?: string
 }
 
 type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior' | 'server'
@@ -981,7 +983,7 @@ function loadSettingsZoom(projectDir: string | null): number {
   }
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, initialSection }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, initialSection, initialPluginId }) => {
   // Back-compat: older callers (and saved prefs) may still pass
   // section: 'mcp' to land on the Dock MCP controls. Route them to the new
   // top-level 'server' tab so the deep-link keeps working.
@@ -1692,7 +1694,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
             )}
             {tab === 'plugins' && projectDir && (
               <div className="plugin-hub-wrap">
-                <PluginPanel projectDir={projectDir} />
+                <PluginPanel projectDir={projectDir} initialPluginId={initialPluginId} />
                 <div className="plugin-hub-footer">
                   <label className="plugin-hub-inline-toggle">
                     <input

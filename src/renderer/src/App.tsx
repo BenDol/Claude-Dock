@@ -709,7 +709,19 @@ function DockApp() {
   const loadSettings = useSettingsStore((s) => s.load)
   const autoSpawn = useSettingsStore((s) => s.settings.behavior.autoSpawnFirstTerminal)
 
-  const [showSettings, setShowSettings] = useState<{ tab?: string; section?: string } | false>(false)
+  const [showSettings, setShowSettings] = useState<{ tab?: string; section?: string; pluginId?: string } | false>(false)
+
+  // Listen for plugin settings open event — dispatched from plugin headers
+  // (e.g. the workspace plugin's settings cog) to jump straight to the
+  // plugin's detail view in the settings modal.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { pluginId?: string } | undefined
+      setShowSettings({ tab: 'plugins', pluginId: detail?.pluginId })
+    }
+    window.addEventListener('plugin-settings-open', handler)
+    return () => window.removeEventListener('plugin-settings-open', handler)
+  }, [])
   const [showBugReport, setShowBugReport] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const [initialTerminalCount, setInitialTerminalCount] = useState(1)
@@ -1210,7 +1222,7 @@ function DockApp() {
           <DockGrid />
         </DockPanelLayout>
       )}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} initialTab={(showSettings as any).tab} initialSection={(showSettings as any).section} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} initialTab={(showSettings as any).tab} initialSection={(showSettings as any).section} initialPluginId={(showSettings as any).pluginId} />}
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} />}
       {pendingTask && (
         <TerminalPicker
