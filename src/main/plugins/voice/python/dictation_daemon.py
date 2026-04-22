@@ -58,6 +58,14 @@ def main() -> int:
         _emit({"fatal": f"import failed: {exc}"})
         return 1
 
+    # Log the resolved recording config before instantiating the recorder so
+    # "daemon sees input_device=null" is obvious in the Dock log even when
+    # VoiceRecorder's later logs are clipped.
+    _log(
+        f"recording config: input_device={cfg['recording'].get('input_device')!r} "
+        f"sample_rate={cfg['recording'].get('sample_rate')} "
+        f"channels={cfg['recording'].get('channels')}"
+    )
     try:
         rec = VoiceRecorder(
             sample_rate=cfg["recording"]["sample_rate"],
