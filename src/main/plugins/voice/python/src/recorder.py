@@ -145,7 +145,16 @@ class VoiceRecorder:
         on_levels=None,
         device=None,
     ):
+        # `sample_rate` is the *target* rate — whisper expects 16 kHz internally.
+        # Some devices (notably WASAPI-shared-mode mics with a 48 kHz mix
+        # format, e.g. gaming headsets) refuse to open at 16 kHz with
+        # `PaErrorCode -9997 "Invalid sample rate"`. When that happens,
+        # `start()` falls back to the device's native rate and records at
+        # `capture_sample_rate` instead. The WAV is then written at capture
+        # rate; faster-whisper resamples via its internal `av`/FFmpeg
+        # pipeline, and the OpenAI API accepts any rate.
         self.sample_rate = sample_rate
+        self.capture_sample_rate = sample_rate
         self.channels = channels
         self.speech_threshold = speech_threshold
         self.on_levels = on_levels  # callback(levels: list[float])
@@ -179,11 +188,12 @@ class VoiceRecorder:
     def start(self):
         """Begin recording (call ``stop()`` later to finish).
 
-        Pre-validates device + format via :func:`sounddevice.check_input_settings`
-        so a mismatched config (common on Windows when the user picks an MME
-        variant of a device that only supports 44.1/48 kHz) surfaces as a
-        clear ``PortAudioError`` instead of silently opening a stream that
-        captures nothing.
+        Pre-validates device + format via :func:`sounddevice.check_input_settings`.
+        If the device rejects the target 16 kHz rate (common with WASAPI-
+        shared-mode mics pinned to a 48 kHz mix format), we fall back to the
+        device's native `default_samplerate` and record there — the WAV
+        gets saved at the capture rate, and faster-whisper / OpenAI resample
+        internally.
         """
         if self._device_resolution_error:
             # Bubble the resolution failure here rather than silently using
@@ -193,27 +203,14 @@ class VoiceRecorder:
             )
         self._frames = []
         self._is_recording = True
+        self.capture_sample_rate = self._negotiate_capture_rate()
         _log(
-            f"start requested: samplerate={self.sample_rate} channels={self.channels} "
-            f"dtype=int16 {_describe_device(self.device)}"
+            f"start requested: target_samplerate={self.sample_rate} "
+            f"capture_samplerate={self.capture_sample_rate} "
+            f"channels={self.channels} dtype=int16 {_describe_device(self.device)}"
         )
-        try:
-            sd.check_input_settings(
-                device=self.device,
-                channels=self.channels,
-                samplerate=self.sample_rate,
-                dtype="int16",
-            )
-        except Exception as exc:
-            _log(f"check_input_settings failed: {exc}")
-            # Re-raise with a message that names the device so the UI error
-            # tells the user *which* selection is incompatible.
-            raise sd.PortAudioError(
-                f"Device rejected format (samplerate={self.sample_rate}, "
-                f"channels={self.channels}, int16): {exc}"
-            ) from exc
         self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
+            samplerate=self.capture_sample_rate,
             channels=self.channels,
             dtype="int16",
             callback=self._toggle_cb,
@@ -236,6 +233,67 @@ class VoiceRecorder:
             )
         except Exception as exc:
             _log(f"could not read stream device info: {exc}")
+
+    def _negotiate_capture_rate(self) -> int:
+        """Return the highest-priority sample rate the selected device accepts.
+
+        Tries the target rate first (usually 16 kHz). If the device refuses
+        it — WASAPI shared-mode devices with a native 48 kHz mix format
+        raise ``PaErrorCode -9997 "Invalid sample rate"`` — probes the
+        device's ``default_samplerate``, then a few common fallbacks
+        (48000, 44100). Raises a descriptive ``PortAudioError`` if every
+        candidate is rejected so the UI gets a clear message.
+        """
+        candidates: list[int] = []
+        # Target first so devices that natively support 16 kHz (most MME
+        # variants) stay cheap — no resampling pass inside whisper/ffmpeg.
+        candidates.append(self.sample_rate)
+
+        # Probe the device's own reported default — this is what WASAPI
+        # shared mode will actually accept. Treat the query as best-effort;
+        # a failed lookup shouldn't prevent us from trying other candidates.
+        try:
+            info = sd.query_devices(self.device, kind="input")
+            native = info.get("default_samplerate")
+            if native:
+                native_i = int(round(float(native)))
+                if native_i and native_i not in candidates:
+                    candidates.append(native_i)
+        except Exception as exc:
+            _log(f"_negotiate_capture_rate: query_devices failed: {exc}")
+
+        # Common fallbacks for consumer audio hardware. Cheap to probe and
+        # covers devices whose `default_samplerate` comes back as 0 / None.
+        for r in (48000, 44100):
+            if r not in candidates:
+                candidates.append(r)
+
+        last_error: Exception | None = None
+        for rate in candidates:
+            try:
+                sd.check_input_settings(
+                    device=self.device,
+                    channels=self.channels,
+                    samplerate=rate,
+                    dtype="int16",
+                )
+            except Exception as exc:
+                _log(f"_negotiate_capture_rate: rate={rate} rejected: {exc}")
+                last_error = exc
+                continue
+            if rate != self.sample_rate:
+                _log(
+                    f"_negotiate_capture_rate: target {self.sample_rate} Hz "
+                    f"rejected by device — falling back to {rate} Hz (will "
+                    "resample in whisper/ffmpeg)"
+                )
+            return rate
+
+        raise sd.PortAudioError(
+            f"Device rejected every sample rate we tried "
+            f"(tried={candidates}, last_error={last_error}). "
+            "Pick a different microphone in Voice settings."
+        )
 
     def _toggle_cb(self, indata, frame_count, time_info, status):
         if self._is_recording:
@@ -333,8 +391,13 @@ class VoiceRecorder:
         if log_fn:
             log_fn("Listening... speak now")
 
+        # Same WASAPI-shared-mode guard as `start()`: negotiate a rate the
+        # device will actually accept, otherwise the stream's __enter__
+        # raises PortAudioError and the caller never sees a usable recording.
+        self.capture_sample_rate = self._negotiate_capture_rate()
+
         with sd.InputStream(
-            samplerate=self.sample_rate,
+            samplerate=self.capture_sample_rate,
             channels=self.channels,
             dtype="int16",
             callback=callback,
@@ -371,13 +434,18 @@ class VoiceRecorder:
         if rms < self.speech_threshold:
             return [0.0] * self.NUM_BANDS
 
-        # FFT magnitude spectrum (positive frequencies only)
+        # FFT magnitude spectrum (positive frequencies only). Use the
+        # capture rate, not the target rate — if the device forced us up
+        # to 48 kHz the freq axis is 3x what this function would compute
+        # from `self.sample_rate`, which would put all the speech energy
+        # into the wrong visualizer bands.
+        rate = self.capture_sample_rate or self.sample_rate
         fft = np.abs(np.fft.rfft(audio))
-        freqs = np.fft.rfftfreq(n, d=1.0 / self.sample_rate)
+        freqs = np.fft.rfftfreq(n, d=1.0 / rate)
 
         # Split into bands (logarithmic spacing for natural feel)
         band_edges = np.logspace(
-            np.log10(80), np.log10(min(7500, self.sample_rate / 2)),
+            np.log10(80), np.log10(min(7500, rate / 2)),
             self.NUM_BANDS + 1,
         )
 
@@ -403,7 +471,10 @@ class VoiceRecorder:
         with wave.open(path, "wb") as wf:
             wf.setnchannels(self.channels)
             wf.setsampwidth(2)
-            wf.setframerate(self.sample_rate)
+            # Record at whatever the device opened (may differ from target
+            # 16 kHz for WASAPI-shared devices). Transcriber backends resample
+            # internally — faster-whisper via av/FFmpeg, OpenAI API server-side.
+            wf.setframerate(self.capture_sample_rate)
             wf.writeframes(audio_data.tobytes())
         return path
 
