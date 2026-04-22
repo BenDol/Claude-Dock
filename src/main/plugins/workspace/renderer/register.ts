@@ -33,8 +33,8 @@ registerToolbarAction({
   icon: React.createElement(FilesIcon),
   onClick: () => {
     const store = usePanelStore.getState()
-    if (store.activePanelId === 'workspace' && store.visible) {
-      store.setVisible(false)
+    if (store.isPanelVisible('workspace')) {
+      store.hidePanel('workspace')
     } else {
       store.setActivePanel('workspace')
     }

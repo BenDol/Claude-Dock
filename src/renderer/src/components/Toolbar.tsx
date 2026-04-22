@@ -222,14 +222,21 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
   }, [projectDir])
 
   // Merge dockable panel visibility into the open-windows set so toolbar
-  // buttons for panel-based plugins get the blue highlight border
-  const panelActive = usePanelStore((s) => s.visible ? s.activePanelId : null)
+  // buttons for panel-based plugins get the blue highlight border. With
+  // per-edge slots, multiple panels can be visible at once.
+  const visiblePanelIds = usePanelStore((s) => {
+    const ids: string[] = []
+    for (const slot of [s.slots.left, s.slots.right, s.slots.top, s.slots.bottom]) {
+      if (slot.visible && slot.activePanelId) ids.push(slot.activePanelId)
+    }
+    return ids.join('|')
+  })
   const effectiveOpenWindows = useMemo(() => {
-    if (!panelActive) return openPluginWindows
+    if (!visiblePanelIds) return openPluginWindows
     const merged = new Set(openPluginWindows)
-    merged.add(panelActive)
+    for (const id of visiblePanelIds.split('|')) merged.add(id)
     return merged
-  }, [openPluginWindows, panelActive])
+  }, [openPluginWindows, visiblePanelIds])
 
   // Load runtime plugin toolbar actions on mount, sanitizing SVG icons
   useEffect(() => {
