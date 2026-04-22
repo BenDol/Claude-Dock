@@ -103,6 +103,7 @@ export const IPC = {
   GIT_MGR_GET_STATUS: 'gitMgr:getStatus',
   GIT_MGR_GET_DIFF: 'gitMgr:getDiff',
   GIT_MGR_GET_COMMIT_DETAIL: 'gitMgr:getCommitDetail',
+  GIT_MGR_GET_BRANCHES_FOR_COMMIT: 'gitMgr:getBranchesForCommit',
   GIT_MGR_STAGE: 'gitMgr:stage',
   GIT_MGR_UNSTAGE: 'gitMgr:unstage',
   GIT_MGR_COMMIT: 'gitMgr:commit',

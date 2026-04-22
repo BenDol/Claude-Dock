@@ -455,6 +455,10 @@ export function registerGitManagerIpc(): void {
     return gitOps.getTags(projectDir)
   })
 
+  ipcMain.handle(IPC.GIT_MGR_GET_BRANCHES_FOR_COMMIT, async (_event, projectDir: string, hash: string) => {
+    return gitOps.getBranchesForCommit(projectDir, hash)
+  })
+
   ipcMain.handle(IPC.GIT_MGR_DELETE_TAG, async (_event, projectDir: string, name: string) => {
     try {
       await gitOps.deleteTag(projectDir, name)
