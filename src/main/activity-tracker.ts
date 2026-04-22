@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { app } from 'electron'
 import { log, logError } from './logger'
+import { getDataDir } from './linked-mode'
 
 // Strip ANSI escape codes and terminal control sequences from PTY output
 function stripAnsi(str: string): string {
@@ -59,7 +59,11 @@ export class ActivityTracker {
 
   private constructor() {
     try {
-      this.dataDir = path.join(app.getPath('userData').replace(/claude-dock$/, ''), 'claude-dock')
+      // Must live at getDataDir() (userData/dock-link/) so the MCP server —
+      // which the coordinator launches with DOCK_DATA_DIR=getDataDir() — can
+      // read this file. Pre-fix this wrote to the userData parent, leaving the
+      // MCP reading a stale file and unable to resolve any session.
+      this.dataDir = getDataDir()
       fs.mkdirSync(this.dataDir, { recursive: true })
       log(`ActivityTracker: data dir ${this.dataDir}`)
     } catch (err) {
