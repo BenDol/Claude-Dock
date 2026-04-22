@@ -525,6 +525,11 @@ export interface DockApi {
     onStatusChanged: (cb: (s: VoiceRuntimeStatus) => void) => () => void
     listDevices: () => Promise<VoiceListDevicesResult>
     testRecord: (seconds: number) => Promise<{ text?: string; error?: string }>
+    dictate: {
+      start: () => Promise<{ ok?: true; error?: string }>
+      stop: () => Promise<{ text?: string; error?: string }>
+      cancel: () => Promise<{ ok: true }>
+    }
     setup: {
       detect: () => Promise<{ path: string; version: string } | null>
       install: () => Promise<{ success: boolean; error?: string }>
@@ -1110,6 +1115,11 @@ const dockApi: DockApi = {
     },
     listDevices: () => ipcRenderer.invoke(IPC.VOICE_LIST_DEVICES),
     testRecord: (seconds) => ipcRenderer.invoke(IPC.VOICE_TEST_RECORD, seconds),
+    dictate: {
+      start: () => ipcRenderer.invoke(IPC.VOICE_DICTATE_START),
+      stop: () => ipcRenderer.invoke(IPC.VOICE_DICTATE_STOP),
+      cancel: () => ipcRenderer.invoke(IPC.VOICE_DICTATE_CANCEL)
+    },
     setup: {
       detect: () => ipcRenderer.invoke(IPC.VOICE_SETUP_DETECT),
       install: () => ipcRenderer.invoke(IPC.VOICE_SETUP_INSTALL),

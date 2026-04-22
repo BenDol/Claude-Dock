@@ -288,6 +288,16 @@
 .coord-send-btn:hover:not(:disabled) { filter: brightness(1.1); }
 .coord-send-btn:disabled { opacity: 0.5; cursor: default; }
 .coord-send-btn.cancel { background: #f7768e; color: #1a1b26; }
+.coord-send-btn.speak { background: #9ece6a; color: #1a1b26; }
+.coord-send-btn.recording {
+  background: #f7768e;
+  color: #1a1b26;
+  animation: coord-rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes coord-rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(247, 118, 142, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(247, 118, 142, 0); }
+}
 
 .coord-error-bar {
   background: rgba(247, 118, 142, 0.12);

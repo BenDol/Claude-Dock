@@ -88,6 +88,7 @@ interface CoordinatorState {
   refreshTerminals: () => Promise<void>
   refreshHistory: () => Promise<void>
   setSettingsOpen: (open: boolean) => void
+  setError: (message: string | null) => void
   dismissError: () => void
   requestFocusInput: () => number
 }
@@ -313,6 +314,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
   },
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setError: (message) => set({ error: message }),
   dismissError: () => set({ error: null }),
   requestFocusInput: () => focusInputTicks.n
 }))
