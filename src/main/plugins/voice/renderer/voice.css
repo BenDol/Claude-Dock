@@ -1,11 +1,14 @@
 /* Voice plugin window styling. Uses CSS variables from global.css so it
    picks up light/dark theme automatically via applyThemeToDocument. */
 
-/* Pin the document to the viewport. The titlebar / status header / tab bar
-   live in the flex column at fixed height (flex-shrink: 0) and `.voice-content`
-   owns all scrolling. This keeps the header visible when the user scrolls the
-   tab body or zooms past 1.0 — scrolling happens inside `.voice-content`
-   instead of pushing the titlebar off-screen. */
+/* Pin the document to the viewport. The titlebar, status header, and tab
+   bar live in the flex column at fixed height (flex-shrink: 0) and
+   `.voice-content` owns all scrolling. This keeps them visible when the
+   user scrolls the tab body or zooms past 1.0 — scrolling happens inside
+   `.voice-content` instead of pushing the chrome off-screen.
+   The status header and tab bar scale with `--voice-zoom`; the titlebar
+   stays at natural size so the setup overlay's fixed `top: 38px` offset
+   lines up with it. */
 html, body, #root {
   height: 100vh;
   overflow: hidden;
@@ -86,6 +89,7 @@ html, body, #root {
   border-bottom: 1px solid var(--border-color, #2a2a33);
   background: var(--bg-primary, #0f0f14);
   flex-shrink: 0;
+  zoom: var(--voice-zoom, 1);
 }
 
 .voice-status-chip {
@@ -119,6 +123,7 @@ html, body, #root {
   padding: 0 12px;
   background: var(--bg-primary, #0f0f14);
   flex-shrink: 0;
+  zoom: var(--voice-zoom, 1);
 }
 .voice-tab {
   padding: 10px 14px;

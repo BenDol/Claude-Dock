@@ -3,11 +3,14 @@
  *
  * `zoom` is a non-standard CSS property but is stable in Chromium/Electron.
  * We expose it as a CSS custom property (`--voice-zoom`) on the document
- * root and apply it only to the scrollable body (`.voice-content`) and the
- * setup overlay — NOT to the whole document. Scoping it this way means:
- *   - chrome (titlebar / status header / tab bar) stays at natural size
- *     so `position: fixed` offsets like the setup card's `top: 38px` still
- *     line up with the unzoomed titlebar;
+ * root and apply it to the status header, tab bar, scrollable body inner
+ * (`.voice-content-inner`), and the setup overlay — NOT to the titlebar
+ * or the whole document. Scoping it this way means:
+ *   - the titlebar stays at natural size so `position: fixed` offsets like
+ *     the setup card's `top: 38px` still line up with it, and the drag
+ *     region / window controls keep their intended hit area;
+ *   - the status header and tab bar scale with zoom, matching user
+ *     expectation that the whole plugin UI responds to zoom commands;
  *   - the scrollable region's children scale up with zoom while the region
  *     itself keeps its flex-computed size, so `overflow: auto` correctly
  *     triggers a scrollbar when zoomed content exceeds the viewport.
