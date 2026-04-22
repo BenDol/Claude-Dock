@@ -207,6 +207,14 @@ def _run_daemon():
     overlay.start()
 
     rec_cfg = config.get("recording", {})
+    # Log the recording section verbatim so the user can spot "I picked
+    # device 13 but the daemon sees input_device=null" without needing to
+    # inspect config.json themselves.
+    _log(
+        f"Recording config loaded: input_device={rec_cfg.get('input_device')!r} "
+        f"sample_rate={rec_cfg.get('sample_rate', 16000)} "
+        f"channels={rec_cfg.get('channels', 1)}"
+    )
     recorder = VoiceRecorder(
         sample_rate=rec_cfg.get("sample_rate", 16000),
         channels=rec_cfg.get("channels", 1),

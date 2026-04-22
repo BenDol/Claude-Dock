@@ -541,7 +541,14 @@ export class VoiceServerManager extends EventEmitter {
     const tmp = p + '.tmp'
     fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8')
     fs.renameSync(tmp, p)
-    svc().log(`[voice-manager] wrote config -> ${p}`)
+    // Log the fields a user is most likely to blame for "my mic isn't
+    // working" so we can tell at a glance whether the renderer's setting
+    // actually made it to disk.
+    svc().log(
+      `[voice-manager] wrote config -> ${p} ` +
+      `(input_device=${JSON.stringify(cfg.recording.input_device)} ` +
+      `sample_rate=${cfg.recording.sample_rate} channels=${cfg.recording.channels})`
+    )
   }
 
   /* -------------- status plumbing -------------- */

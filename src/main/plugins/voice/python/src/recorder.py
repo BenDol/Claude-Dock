@@ -44,6 +44,90 @@ def _describe_device(device) -> str:
     )
 
 
+def _resolve_device(device):
+    """Normalize the user's configured device into something sounddevice accepts.
+
+    Returns a tuple ``(resolved, description)`` where ``resolved`` is either
+    ``None`` (system default), an int index, or a string to pass through for
+    substring matching. ``description`` is a human-readable diagnostic.
+
+    Rules:
+      * ``None`` / ``""`` / ``"null"`` / ``"default"``  -> system default.
+      * Numeric strings ("13", "  13 ") -> int (avoids accidental substring
+        matching against a similarly-named device).
+      * Other strings (device-name substrings) -> kept as-is. If we find
+        zero or multiple matching input devices we raise, rather than silently
+        letting sounddevice pick one — a bug disguised as "always uses
+        system default" when a saved substring accidentally matches several
+        devices (the first match wins, which can be the default mic).
+    """
+    if device is None:
+        return None, "system default (device=None)"
+    if isinstance(device, bool):
+        # Defensive: bool is a subclass of int in Python, don't let it slip
+        # through as an index (True -> index 1, almost certainly wrong).
+        return None, f"system default (ignoring bool device={device!r})"
+    if isinstance(device, str):
+        stripped = device.strip()
+        if stripped == "" or stripped.lower() in ("null", "none", "default"):
+            return None, f"system default (empty/sentinel string {device!r})"
+        # Numeric-looking strings come from careless JSON or old configs;
+        # coerce so substring matching doesn't kick in for what the user
+        # clearly meant as an index.
+        try:
+            return int(stripped), f"coerced string {device!r} to int index"
+        except ValueError:
+            pass
+        # Real substring. Validate match count to avoid "first match wins" foot-gun.
+        needle = stripped.lower()
+        matches = []
+        try:
+            for i, d in enumerate(sd.query_devices()):
+                if int(d.get("max_input_channels", 0)) <= 0:
+                    continue
+                if needle in str(d.get("name", "")).lower():
+                    matches.append((i, d.get("name", "")))
+        except Exception as exc:
+            return stripped, (
+                f"substring {device!r} (could not pre-validate: {exc})"
+            )
+        if not matches:
+            raise ValueError(
+                f"Input device substring {device!r} matched no input devices. "
+                "Clear the selection in Voice settings or pick a different mic."
+            )
+        if len(matches) > 1:
+            names = ", ".join(f"#{i} {n!r}" for i, n in matches)
+            raise ValueError(
+                f"Input device substring {device!r} is ambiguous — matched {len(matches)} devices: "
+                f"{names}. Pick a specific device from the list in Voice settings."
+            )
+        idx, name = matches[0]
+        return idx, f"resolved substring {device!r} -> index {idx} ({name!r})"
+    # Int (or numpy int, etc.) — pass through.
+    try:
+        return int(device), f"int index {int(device)}"
+    except Exception:
+        return device, f"unknown type {type(device).__name__}: {device!r}"
+
+
+def describe_system_default_input() -> str:
+    """One-line summary of sounddevice's current default input device.
+
+    Logged at daemon startup so the user can compare the device they *expect*
+    to be used against what sounddevice thinks the default is — helpful when
+    diagnosing "it always uses the system default" complaints.
+    """
+    try:
+        default = sd.default.device
+        default_in = default[0] if isinstance(default, (list, tuple)) else default
+    except Exception as exc:
+        return f"(sd.default.device read failed: {exc})"
+    if default_in is None:
+        return "(no system default input configured)"
+    return f"sd.default.device.input={default_in!r} -> {_describe_device(default_in)}"
+
+
 class VoiceRecorder:
     """Records microphone audio in two modes:
 
@@ -65,10 +149,27 @@ class VoiceRecorder:
         self.channels = channels
         self.speech_threshold = speech_threshold
         self.on_levels = on_levels  # callback(levels: list[float])
-        # sounddevice accepts None (system default), an int index, or a
-        # substring match against the device name. Dock passes the user's
-        # choice straight through — empty strings mean "system default".
-        self.device = device if device not in ("", None) else None
+        # Normalize the user's configured device via `_resolve_device` —
+        # coerces numeric strings to indices, validates substring matches,
+        # and surfaces the resolution details so "always uses system
+        # default" bugs are immediately visible in the log.
+        self._raw_device = device
+        try:
+            self.device, reason = _resolve_device(device)
+        except Exception as exc:
+            # Surface the failure loudly in the log AND as a stored error
+            # so start() re-raises (don't silently drop back to default).
+            _log(f"device resolution failed (raw={device!r}): {exc}")
+            self.device = None
+            self._device_resolution_error = str(exc)
+            reason = f"UNRESOLVED (will fail on start): {exc}"
+        else:
+            self._device_resolution_error = None
+        _log(
+            f"init: raw_device={device!r} -> resolved={self.device!r} "
+            f"({reason}); {_describe_device(self.device)}; "
+            f"default: {describe_system_default_input()}"
+        )
         self._frames: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self._is_recording = False
@@ -84,6 +185,12 @@ class VoiceRecorder:
         clear ``PortAudioError`` instead of silently opening a stream that
         captures nothing.
         """
+        if self._device_resolution_error:
+            # Bubble the resolution failure here rather than silently using
+            # the system default — matches the user's selection intent.
+            raise sd.PortAudioError(
+                f"Cannot start recording: {self._device_resolution_error}"
+            )
         self._frames = []
         self._is_recording = True
         _log(
@@ -114,6 +221,21 @@ class VoiceRecorder:
             device=self.device,
         )
         self._stream.start()
+        # After the stream is live, cross-check what PortAudio actually opened
+        # against what the user asked for. On Windows the device index +
+        # host-API are the source of truth; logging the resolved stream's
+        # device lets us see if the kernel substituted something (rare but
+        # does happen with exclusive-mode WDM-KS devices).
+        try:
+            opened_device = getattr(self._stream, "device", None)
+            _log(
+                f"stream started: requested_device={self.device!r} "
+                f"opened_device={opened_device!r} "
+                f"samplerate={getattr(self._stream, 'samplerate', '?')} "
+                f"channels={getattr(self._stream, 'channels', '?')}"
+            )
+        except Exception as exc:
+            _log(f"could not read stream device info: {exc}")
 
     def _toggle_cb(self, indata, frame_count, time_info, status):
         if self._is_recording:

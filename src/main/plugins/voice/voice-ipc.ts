@@ -107,6 +107,17 @@ function ensureDictationDaemon(): DictationDaemon {
   const script = dictationScript()
   const cfgB64 = Buffer.from(hash, 'utf8').toString('base64')
 
+  // Log the resolved input_device on every spawn so we can see whether the
+  // Coordinator Speak button and the hotkey daemon agree on what device to
+  // use. A mismatch between the TS side and the Python side has been the
+  // smoking gun for "mic selection is ignored" reports.
+  svc().log(
+    `[voice-ipc] spawning dictation daemon ` +
+    `input_device=${JSON.stringify(cfg.recording.input_device)} ` +
+    `sample_rate=${cfg.recording.sample_rate} ` +
+    `channels=${cfg.recording.channels}`
+  )
+
   const child = spawn(py, [script, cfgB64], { windowsHide: true })
 
   let readyResolve!: () => void
