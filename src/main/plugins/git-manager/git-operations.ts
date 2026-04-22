@@ -2570,32 +2570,268 @@ function filterLowConfidenceBullets(msg: string): string {
   return collapsed
 }
 
-async function generateViaClaude(stat: string, diff: string): Promise<string> {
-  const { spawn } = require('child_process') as typeof import('child_process')
-  const prompt = buildCommitPrompt(stat, diff)
+// ─── Claude Code CLI commit message pipeline ──────────────────────
+// Runs `claude -p` (print mode) against the user's logged-in subscription.
+// Two paths:
+//   - Single-shot for commits up to CLAUDE_SINGLE_SHOT_DIFF_LIMIT bytes and
+//     CLAUDE_SINGLE_SHOT_FILE_LIMIT files: one process, full diff in prompt.
+//   - Two-pass for anything bigger: phase 1 runs `claude -p` per file with a
+//     budgeted per-file diff (pool of CLAUDE_PER_FILE_POOL); phase 2 combines
+//     the summaries into the final conventional-commit message.
+// All calls accept an AbortSignal so the renderer can cancel mid-flight.
 
-  const stdout = await new Promise<string>((resolve, reject) => {
-    const proc = spawn('claude', ['-p', '--model', 'haiku', '--max-turns', '1', '--output-format', 'text'], {
-      timeout: 15000,
+const CLAUDE_SINGLE_SHOT_DIFF_LIMIT = 400 * 1024
+const CLAUDE_SINGLE_SHOT_FILE_LIMIT = 50
+const CLAUDE_PER_FILE_DIFF_CAP = 64 * 1024
+const CLAUDE_PER_FILE_POOL = 4
+const CLAUDE_CALL_TIMEOUT_MS = 60_000
+const CLAUDE_JOB_TIMEOUT_MS = 5 * 60_000
+
+export type CommitMsgProgress =
+  | { phase: 'single' }
+  | { phase: 'per-file'; done: number; total: number }
+  | { phase: 'combine' }
+
+export interface GenerateCommitMessageOptions {
+  jobId?: string
+  signal?: AbortSignal
+  onProgress?: (p: CommitMsgProgress) => void
+}
+
+/** Build the Claude single-shot commit prompt. Unlike buildCommitPrompt (which
+ *  is tuned for the tiny local LLM and caps the diff at 4000 chars), this
+ *  passes up to ~400 KB of diff — well inside Claude's ~200K-token window. */
+function buildClaudeCommitPrompt(stat: string, diff: string): string {
+  return [
+    COMMIT_MSG_PROMPT,
+    '',
+    '---',
+    '',
+    'Staged changes (file stats):',
+    stat.trim(),
+    '',
+    'Diff:',
+    diff,
+    '',
+    'Write the commit message for the staged changes above. Reference the actual file names, functions, and symbols that appear in the diff — do not invent any topic that is not present in the diff. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
+  ].join('\n')
+}
+
+/** Spawn `claude -p` once, pipe the prompt on stdin, return stdout.
+ *  Model === 'default' omits the --model flag so `claude -p` uses the user's
+ *  configured default. AbortSignal cleanly SIGTERMs (then SIGKILLs) the child. */
+function spawnClaudeOnce(prompt: string, model: string, signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Commit message generation was cancelled'))
+      return
+    }
+    const args = ['-p', '--max-turns', '1', '--output-format', 'text']
+    if (model && model !== 'default') {
+      args.splice(1, 0, '--model', model)
+    }
+    const proc: ChildProcess = spawn('claude', args, {
+      timeout: CLAUDE_CALL_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32'
     })
+    // BE-5: cap stdout/stderr at OUTPUT_BUFFER_CAP so a misbehaving `claude`
+    // can't OOM the main process. Commit messages are always << 1 MB.
+    const OUTPUT_BUFFER_CAP = 1024 * 1024
     let out = ''
     let err = ''
-    proc.stdout.on('data', (chunk: Buffer) => { out += chunk })
-    proc.stderr.on('data', (chunk: Buffer) => { err += chunk })
-    proc.on('error', (e: Error) => reject(e))
-    proc.on('close', (code: number) => {
-      if (code !== 0) reject(new Error(err || `claude exited with code ${code}`))
-      else resolve(out)
+    let outOverflowed = false
+    let killed = false
+    const appendCapped = (existing: string, chunk: Buffer, flag: { o: boolean }): string => {
+      if (existing.length >= OUTPUT_BUFFER_CAP) { flag.o = true; return existing }
+      const room = OUTPUT_BUFFER_CAP - existing.length
+      const s = chunk.toString('utf8')
+      if (s.length <= room) return existing + s
+      flag.o = true
+      return existing + s.slice(0, room)
+    }
+    const outFlag = { o: false }
+    const errFlag = { o: false }
+    // BE-1: on Windows, spawning with shell:true wraps claude in cmd.exe.
+    // proc.kill('SIGTERM') only kills cmd.exe; the grandchild claude.exe
+    // survives until its pipes close. Use `taskkill /F /T` to tree-kill.
+    const killTree = (): void => {
+      try {
+        if (process.platform === 'win32' && proc.pid) {
+          spawn('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { shell: false, stdio: 'ignore' })
+            .on('error', () => { /* best effort */ })
+        } else {
+          proc.kill('SIGTERM')
+        }
+      } catch { /* already gone */ }
+      setTimeout(() => {
+        try { proc.kill('SIGKILL') } catch { /* already gone */ }
+      }, 2000)
+    }
+    const onAbort = (): void => {
+      killed = true
+      killTree()
+    }
+    if (signal) signal.addEventListener('abort', onAbort, { once: true })
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      out = appendCapped(out, chunk, outFlag)
+      if (outFlag.o && !outOverflowed) {
+        outOverflowed = true
+        getServices().log(`[git-manager] claude-cli stdout exceeded ${OUTPUT_BUFFER_CAP} bytes — truncating`)
+        killTree()
+      }
     })
-    proc.stdin.write(prompt)
-    proc.stdin.end()
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      err = appendCapped(err, chunk, errFlag)
+    })
+    proc.on('error', (e: Error) => {
+      signal?.removeEventListener('abort', onAbort)
+      reject(e)
+    })
+    proc.on('close', (code: number | null) => {
+      signal?.removeEventListener('abort', onAbort)
+      if (killed || signal?.aborted) {
+        reject(new Error('Commit message generation was cancelled'))
+        return
+      }
+      if (code !== 0) {
+        reject(new Error((err.trim() || `claude exited with code ${code ?? 'null'}`).slice(0, 4000)))
+      } else {
+        resolve(out)
+      }
+    })
+    try {
+      proc.stdin?.write(prompt)
+      proc.stdin?.end()
+    } catch (e) {
+      signal?.removeEventListener('abort', onAbort)
+      reject(e instanceof Error ? e : new Error(String(e)))
+    }
   })
+}
 
-  const msg = cleanCommitMessage(stdout)
-  if (!msg) throw new Error('Empty response from Claude CLI')
-  return msg
+async function generateViaClaudeCli(
+  stat: string,
+  diff: string,
+  fileInfos: StagedFileInfo[],
+  opts: { model: string; signal?: AbortSignal; onProgress?: (p: CommitMsgProgress) => void }
+): Promise<string> {
+  const { model, signal, onProgress } = opts
+  const fileCount = fileInfos.length
+  const diffLen = diff.length
+  const needsMultiPass =
+    diffLen > CLAUDE_SINGLE_SHOT_DIFF_LIMIT ||
+    fileCount > CLAUDE_SINGLE_SHOT_FILE_LIMIT
+
+  getServices().log(
+    `[git-manager] claude-cli: model=${model} files=${fileCount} diffLen=${diffLen} multiPass=${needsMultiPass}`
+  )
+
+  // ── Single-shot ──────────────────────────────────────────────────
+  if (!needsMultiPass) {
+    onProgress?.({ phase: 'single' })
+    const prompt = buildClaudeCommitPrompt(stat, diff)
+    const t0 = Date.now()
+    const raw = await spawnClaudeOnce(prompt, model, signal)
+    getServices().log(
+      `[git-manager] claude-cli phase=single bytes=${prompt.length} ms=${Date.now() - t0}`
+    )
+    const msg = cleanCommitMessage(raw)
+    if (!msg) throw new Error('Empty response from Claude CLI (single-shot)')
+    return filterLowConfidenceBullets(msg)
+  }
+
+  // ── Two-pass: per-file summaries + combine ───────────────────────
+  const chunks = extractFileDiffs(diff)
+  const chunkByPath = new Map<string, FileDiffChunk>()
+  for (const c of chunks) chunkByPath.set(c.path, c)
+
+  const summaries: Array<{ info: StagedFileInfo; text: string }> = []
+  let done = 0
+  const total = fileInfos.length
+  onProgress?.({ phase: 'per-file', done, total })
+
+  // Run per-file summaries in a bounded pool to avoid swarming the user's
+  // subscription with 50+ parallel Claude processes.
+  let cursor = 0
+  const workers: Promise<void>[] = []
+  for (let w = 0; w < Math.min(CLAUDE_PER_FILE_POOL, total); w++) {
+    workers.push((async () => {
+      while (cursor < total) {
+        if (signal?.aborted) return
+        const idx = cursor++
+        const info = fileInfos[idx]
+        const chunk = chunkByPath.get(info.path)
+        const hints: DiffHints = chunk
+          ? extractDiffHints(chunk)
+          : { linesAdded: 0, linesRemoved: 0, symbolsAdded: [], symbolsRemoved: [], importsAdded: [], importsRemoved: [], hunkContexts: [] }
+        // Per-file snippet — bigger than the local LLM path since Claude can
+        // handle it. Cap per file to CLAUDE_PER_FILE_DIFF_CAP.
+        let snippet = ''
+        if (chunk) {
+          const body = chunk.body
+          snippet = body.length > CLAUDE_PER_FILE_DIFF_CAP
+            ? body.slice(0, CLAUDE_PER_FILE_DIFF_CAP) + '\n... (truncated)'
+            : body
+        }
+        const prompt = buildPerFileSummaryPrompt(info, hints, snippet)
+        const tFile = Date.now()
+        try {
+          const raw = await spawnClaudeOnce(prompt, model, signal)
+          const line = (raw || '')
+            .split('\n')
+            .map((l) => l.trim())
+            .find((l) => l.length > 0) ?? ''
+          const cleaned = line
+            .replace(/^["'`]|["'`]$/g, '')
+            .replace(/^[-*]\s+/, '')
+            .replace(/^```[^\n]*$/g, '')
+            .trim()
+          getServices().log(
+            `[git-manager] claude-cli phase=per-file file=${info.path} bytes=${prompt.length} ms=${Date.now() - tFile}`
+          )
+          if (/^unsure\b/i.test(cleaned)) {
+            // fall through — will be synthesised below
+          } else if (cleaned && isConfidentSummary(cleaned)) {
+            summaries.push({ info, text: cleaned })
+          }
+        } catch (err) {
+          if (signal?.aborted) return
+          getServices().log(
+            `[git-manager] claude-cli per-file failed for ${info.path}: ${err instanceof Error ? err.message : String(err)}`
+          )
+          // Swallow; the covered-set fallback below will synthesise a line.
+        } finally {
+          done++
+          onProgress?.({ phase: 'per-file', done, total })
+        }
+      }
+    })())
+  }
+  await Promise.all(workers)
+  if (signal?.aborted) throw new Error('Commit message generation was cancelled')
+
+  // Synthesize status-only fallback lines for files Claude dropped.
+  const covered = new Set(summaries.map((s) => s.info.path))
+  for (const info of fileInfos) {
+    if (covered.has(info.path)) continue
+    summaries.push({ info, text: `${statusLabel(info.status)} ${info.path}` })
+  }
+  if (summaries.length === 0) {
+    throw new Error('Claude CLI produced no confident per-file summaries')
+  }
+
+  // Phase 2: combine.
+  onProgress?.({ phase: 'combine' })
+  const combinePrompt = buildCombineSummariesPrompt(stat, summaries)
+  const tCombine = Date.now()
+  const raw = await spawnClaudeOnce(combinePrompt, model, signal)
+  getServices().log(
+    `[git-manager] claude-cli phase=combine bytes=${combinePrompt.length} ms=${Date.now() - tCombine}`
+  )
+  const msg = cleanCommitMessage(raw)
+  if (!msg) throw new Error('Empty response from Claude CLI (combine pass)')
+  return filterLowConfidenceBullets(msg)
 }
 
 async function generateViaAnthropicAPI(stat: string, diff: string): Promise<string> {
@@ -2658,12 +2894,73 @@ function getDataFileExcludes(_cwd: string): string[] {
   return exts.map((ext) => `:(exclude)*.${ext}`)
 }
 
-export async function generateCommitMessage(cwd: string): Promise<string> {
+type CommitMsgBackend = 'local-llm' | 'claude-cli' | 'anthropic-api'
+
+/** Walk up to 5 levels from cwd looking for the nearest configured setting.
+ *  Submodule roots often inherit plugin settings from the parent project.
+ *  Each key is resolved independently — e.g. backend may live in the parent
+ *  while model is overridden in the submodule. */
+function lookupCommitMsgSettings(cwd: string): {
+  backend: CommitMsgBackend
+  claudeModel: string
+  settingsDir: string
+} {
+  const findSetting = (key: string): { value: unknown; dir: string } => {
+    let dir = cwd
+    for (let i = 0; i < 5; i++) {
+      const val = getServices().getPluginSetting(dir, 'git-manager', key)
+      if (val !== undefined) return { value: val, dir }
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    return { value: undefined, dir: cwd }
+  }
+  const backendR = findSetting('commitMsgBackend')
+  const modelR = findSetting('commitMsgClaudeModel')
+  const legacyR = findSetting('enableClaude')
+
+  let backend: CommitMsgBackend = 'local-llm'
+  let settingsDir = cwd
+  if (backendR.value === 'claude-cli' || backendR.value === 'anthropic-api' || backendR.value === 'local-llm') {
+    backend = backendR.value
+    settingsDir = backendR.dir
+  } else if (legacyR.value === true) {
+    // One-way migration from the old boolean: treat opt-in as claude-cli.
+    backend = 'claude-cli'
+    settingsDir = legacyR.dir
+  }
+  const claudeModel = typeof modelR.value === 'string' && modelR.value ? modelR.value : 'haiku'
+  return { backend, claudeModel, settingsDir }
+}
+
+// Registry of in-flight commit-message generation jobs keyed by jobId so the
+// renderer can cancel by id. Generators add their controller before doing any
+// real work and remove it in finally.
+const activeCommitMsgJobs = new Map<string, AbortController>()
+
+/** Cancel an in-flight generateCommitMessage job by id. No-op if unknown. */
+export function cancelCommitMessage(jobId: string): boolean {
+  const c = activeCommitMsgJobs.get(jobId)
+  if (!c) return false
+  try {
+    c.abort()
+    getServices().log(`[git-manager] cancelled commit msg job id=${jobId}`)
+  } catch (e) {
+    getServices().logError(`[git-manager] failed to abort commit msg job id=${jobId}:`, e)
+  }
+  activeCommitMsgJobs.delete(jobId)
+  return true
+}
+
+export async function generateCommitMessage(
+  cwd: string,
+  opts: GenerateCommitMessageOptions = {}
+): Promise<string> {
   // Get staged file list, stat, name-status, and diff.
-  // Cap diff fetch at 128 KB — the local LLM now does per-file budgeting and
-  // multi-pass summarization for large commits, so fetching more context pays
-  // off. The cloud path still truncates to 4000 chars inside buildCommitPrompt.
-  const MAX_DIFF_BYTES = 128 * 1024
+  // Cap diff fetch at 128 KB for local-llm; bump to 512 KB so the Claude path
+  // can actually see the whole commit on the single-shot branch.
+  const MAX_DIFF_BYTES = 512 * 1024
   const [namesResult, statResult, nameStatusResult, diffResult] = await Promise.all([
     gitExec(cwd, ['diff', '--cached', '--name-only'], 5000),
     gitExec(cwd, ['diff', '--cached', '--stat', '--no-color'], 10000),
@@ -2694,54 +2991,75 @@ export async function generateCommitMessage(cwd: string): Promise<string> {
 
   const fileInfos = parseNameStatus(nameStatusResult.stdout)
 
-  getServices().log(`[git-manager] generating commit message: stat=${stat.length} chars, diff=${diff.length} chars, files=${fileInfos.length}, dataFiles=${dataFiles.length}`)
+  const { backend, claudeModel, settingsDir } = lookupCommitMsgSettings(cwd)
+  getServices().log(
+    `[git-manager] generating commit message: backend=${backend} model=${claudeModel} settingsDir=${settingsDir} stat=${stat.length} chars, diff=${diff.length} chars, files=${fileInfos.length}, dataFiles=${dataFiles.length}`
+  )
   const t0 = Date.now()
 
-  // Race available providers — local LLM is always primary
-  const providers: Promise<string>[] = []
-
-  providers.push(generateViaLocalLlm(stat, diff, fileInfos).then((r) => {
-    getServices().log(`[git-manager] Local LLM responded in ${Date.now() - t0}ms`)
-    return r
-  }))
-
-  // Claude is optional (off by default).
-  // When inside a submodule, settings may be stored under the parent project,
-  // so walk up the directory tree to find the nearest configured value.
-  let claudeEnabled = false
-  let settingsDir = cwd
-  for (let i = 0; i < 5; i++) {
-    const val = getServices().getPluginSetting(settingsDir, 'git-manager', 'enableClaude')
-    if (val !== undefined) { claudeEnabled = !!val; break }
-    const parent = path.dirname(settingsDir)
-    if (parent === settingsDir) break
-    settingsDir = parent
+  // Register an AbortController for this job so the renderer can cancel via
+  // cancelCommitMessage(jobId). If the caller already supplied a signal, chain
+  // it through so either source triggers cancellation.
+  const controller = new AbortController()
+  if (opts.signal) {
+    if (opts.signal.aborted) controller.abort()
+    else opts.signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
-  getServices().log(`[git-manager] commit msg providers: cwd=${cwd} settingsDir=${settingsDir} claudeEnabled=${claudeEnabled}`)
-  if (claudeEnabled) {
-    providers.push(generateViaClaude(stat, diff).then((r) => {
-      getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
-      return r
-    }))
-    if (process.env.ANTHROPIC_API_KEY) {
-      providers.push(generateViaAnthropicAPI(stat, diff).then((r) => {
-        getServices().log(`[git-manager] Anthropic API responded in ${Date.now() - t0}ms`)
-        return r
-      }))
+  // Whole-job timeout (Claude two-pass can legitimately take a minute, but not
+  // five). Local LLM path ignores this since it doesn't accept a signal.
+  const jobTimeout = setTimeout(() => controller.abort(), CLAUDE_JOB_TIMEOUT_MS)
+  // BE-3: refuse duplicate jobIds so a second caller can't stomp on an
+  // in-flight controller and break cancellation for the first job.
+  if (opts.jobId) {
+    if (activeCommitMsgJobs.has(opts.jobId)) {
+      clearTimeout(jobTimeout)
+      throw new Error(`Commit message job ${opts.jobId} is already running`)
     }
+    activeCommitMsgJobs.set(opts.jobId, controller)
   }
 
-  // Promise.any resolves with the first successful result
   try {
-    return await Promise.any(providers)
-  } catch (agg) {
-    const errors = agg instanceof AggregateError ? agg.errors : [agg]
-    const reasons = errors.map((e: unknown) => e instanceof Error ? e.message : String(e))
-    for (const r of reasons) getServices().log(`[git-manager] provider failed: ${r}`)
-    throw new Error(
-      'Could not generate commit message: ' + reasons[0] +
-      (claudeEnabled ? '' : ' You can also enable Claude in Git Manager settings.')
-    )
+    let msg: string
+    switch (backend) {
+      case 'claude-cli':
+        msg = await generateViaClaudeCli(stat, diff, fileInfos, {
+          model: claudeModel,
+          signal: controller.signal,
+          onProgress: opts.onProgress
+        })
+        getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
+        break
+      case 'anthropic-api':
+        // BE-12: fail loudly rather than silently fall back. The user
+        // explicitly picked this backend — hiding the misconfig is worse than
+        // surfacing it in the UI toast.
+        if (!process.env.ANTHROPIC_API_KEY) {
+          throw new Error('ANTHROPIC_API_KEY is not set — set the env var or switch backend to Local LLM or Claude Code in Git Manager settings.')
+        }
+        msg = await generateViaAnthropicAPI(stat, diff)
+        getServices().log(`[git-manager] ${backend} responded in ${Date.now() - t0}ms`)
+        break
+      case 'local-llm':
+      default:
+        msg = await generateViaLocalLlm(stat, diff, fileInfos)
+        getServices().log(`[git-manager] Local LLM responded in ${Date.now() - t0}ms`)
+        break
+    }
+    return msg
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    getServices().log(`[git-manager] commit msg backend=${backend} failed: ${reason}`)
+    if (controller.signal.aborted) {
+      throw new Error('Commit message generation was cancelled')
+    }
+    const hint =
+      backend === 'claude-cli' ? ' Check that `claude` is installed and logged in.' :
+      backend === 'anthropic-api' ? ' Check that ANTHROPIC_API_KEY is valid.' :
+      ' You can switch to Claude Code in Git Manager settings.'
+    throw new Error(`Could not generate commit message (${backend}): ${reason}${hint}`)
+  } finally {
+    clearTimeout(jobTimeout)
+    if (opts.jobId) activeCommitMsgJobs.delete(opts.jobId)
   }
 }
 
@@ -4473,5 +4791,9 @@ export const __testInternals = {
   buildPerFileSummaryPrompt,
   filterLowConfidenceBullets,
   computeDiffBudget,
-  cleanCommitMessage
+  cleanCommitMessage,
+  buildClaudeCommitPrompt,
+  lookupCommitMsgSettings,
+  CLAUDE_SINGLE_SHOT_DIFF_LIMIT,
+  CLAUDE_SINGLE_SHOT_FILE_LIMIT
 }

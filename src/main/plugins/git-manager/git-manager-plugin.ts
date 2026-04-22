@@ -28,11 +28,29 @@ export class GitManagerPlugin implements DockPlugin {
       defaultValue: true
     },
     {
-      key: 'enableClaude',
-      label: 'Use Claude for commit messages',
-      description: 'Also use Claude (CLI or API) alongside the local LLM for commit message generation. Races both and uses whichever responds first.',
-      type: 'boolean',
-      defaultValue: false
+      key: 'commitMsgBackend',
+      label: 'Commit message backend',
+      description: 'Which engine generates commit messages. Claude Code uses your logged-in `claude` CLI subscription and handles large diffs far better than the local LLM.',
+      type: 'select',
+      options: [
+        { value: 'local-llm',     label: 'Local LLM (fast, small)' },
+        { value: 'claude-cli',    label: 'Claude Code (your subscription)' },
+        { value: 'anthropic-api', label: 'Anthropic API (requires ANTHROPIC_API_KEY)' }
+      ],
+      defaultValue: 'local-llm'
+    },
+    {
+      key: 'commitMsgClaudeModel',
+      label: 'Claude model',
+      description: '--model flag passed to `claude -p`. Only used when backend is Claude Code.',
+      type: 'select',
+      options: [
+        { value: 'haiku',   label: 'Haiku — fast, cheap' },
+        { value: 'sonnet',  label: 'Sonnet — balanced' },
+        { value: 'opus',    label: 'Opus — highest quality' },
+        { value: 'default', label: 'Subscription default' }
+      ],
+      defaultValue: 'haiku'
     },
     {
       key: 'autoFetchAll',

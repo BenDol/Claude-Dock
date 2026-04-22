@@ -5675,8 +5675,10 @@ const WorkingChanges: React.FC<{
   const [genError, setGenError] = useState<string | null>(null)
   const [autoGen, setAutoGen] = useState(false)
   const [llmDownloadProgress, setLlmDownloadProgress] = useState<number | null>(null)
+  const [genProgress, setGenProgress] = useState<string | null>(null)
   const userEditedMsgRef = useRef(false)
   const autoGenRef = useRef(0)
+  const activeJobIdRef = useRef<string | null>(null)
   const [fileCtx, setFileCtx] = useState<{ x: number; y: number; file: GitFileStatusEntry; section: 'staged' | 'unstaged' } | null>(null)
   const [gitignoreModal, setGitignoreModal] = useState<{ pattern: string; hasTracked: boolean } | null>(null)
   const [stageLoopWarning, setStageLoopWarning] = useState<string[] | null>(null)
@@ -5704,6 +5706,22 @@ const WorkingChanges: React.FC<{
   useEffect(() => {
     onBusyChange?.(!!committing || generating)
   }, [committing, generating, onBusyChange])
+
+  // Commit-msg generation progress — driven by the backend when the claude-cli
+  // path is in its per-file summarisation phase.
+  useEffect(() => {
+    const off = getDockApi().gitManager.onCommitMsgProgress?.((p) => {
+      if (p.jobId !== activeJobIdRef.current) return
+      if (p.phase === 'per-file' && p.total != null) {
+        setGenProgress(`Summarising ${p.done ?? 0}/${p.total} files via Claude…`)
+      } else if (p.phase === 'combine') {
+        setGenProgress('Combining summaries into commit message…')
+      } else {
+        setGenProgress(null)
+      }
+    })
+    return off
+  }, [])
 
   // Sync localStatus when parentStatus changes (from full refresh)
   useEffect(() => { setLocalStatus(null) }, [parentStatus])
@@ -5903,15 +5921,20 @@ const WorkingChanges: React.FC<{
   const triggerAutoGenerate = async () => {
     const gen = ++autoGenRef.current
     const capturedProjectDir = projectDir
+    const jobId = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+      ? crypto.randomUUID()
+      : `job-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    activeJobIdRef.current = jobId
     userEditedMsgRef.current = false
     setCommitMsg('')
     setGenerating(true)
     setGenError(null)
+    setGenProgress(null)
     try {
-      let result = await api.gitManager.generateCommitMsg(capturedProjectDir)
+      let result = await api.gitManager.generateCommitMsg(capturedProjectDir, jobId)
       // Retry once on failure
       if (!result.success) {
-        result = await api.gitManager.generateCommitMsg(capturedProjectDir)
+        result = await api.gitManager.generateCommitMsg(capturedProjectDir, jobId)
       }
       // Discard if superseded, project navigated away, or user started typing
       if (gen !== autoGenRef.current || capturedProjectDir !== currentProjectDirRef.current || userEditedMsgRef.current) return
@@ -5958,7 +5981,7 @@ const WorkingChanges: React.FC<{
     } catch (err) {
       // Retry once on exception
       try {
-        const retry = await api.gitManager.generateCommitMsg(capturedProjectDir)
+        const retry = await api.gitManager.generateCommitMsg(capturedProjectDir, jobId)
         if (gen !== autoGenRef.current || capturedProjectDir !== currentProjectDirRef.current || userEditedMsgRef.current) return
         if (retry.success && retry.message) {
           setCommitMsg(retry.message)
@@ -5973,14 +5996,22 @@ const WorkingChanges: React.FC<{
       setPendingAction(null)
     } finally {
       setGenerating(false)
+      setGenProgress(null)
+      if (activeJobIdRef.current === jobId) activeJobIdRef.current = null
     }
   }
 
   const cancelGenerate = () => {
+    const jobId = activeJobIdRef.current
+    if (jobId) {
+      api.gitManager.cancelCommitMsg?.(jobId).catch(() => { /* best effort */ })
+    }
+    activeJobIdRef.current = null
     ++autoGenRef.current // invalidate in-flight result
     pendingActionRef.current = null
     setPendingAction(null)
     setGenerating(false)
+    setGenProgress(null)
     // Treat cancel as user intent to type manually — prevent auto-re-triggering
     userEditedMsgRef.current = true
   }
@@ -6448,8 +6479,8 @@ const WorkingChanges: React.FC<{
                 <span className="gm-toolbar-spinner" />
                 <span>{llmDownloadProgress != null
                   ? `Downloading local LLM model... ${llmDownloadProgress}%`
-                  : 'Generating commit message from your staged changes...'}</span>
-                {llmDownloadProgress == null && (
+                  : (genProgress ?? 'Generating commit message from your staged changes...')}</span>
+                {llmDownloadProgress == null && !genProgress && (
                   <span className="gm-commit-generating-tip">Pro Tip: You can commit & push now, it'll queue until generation finishes.</span>
                 )}
               </div>
@@ -10861,10 +10892,31 @@ const EditRemoteModal: React.FC<{
 
 // --- Settings dropdown ---
 
-const PLUGIN_SETTINGS: { key: string; label: string; type: 'boolean' | 'number' | 'multiselect'; default?: unknown; options?: { value: string; label: string }[] }[] = [
+type SettingEntry = {
+  key: string
+  label: string
+  type: 'boolean' | 'number' | 'multiselect' | 'select'
+  default?: unknown
+  options?: { value: string; label: string }[]
+  /** When set, the row is only shown if values[dependsOn.key] === dependsOn.value */
+  dependsOn?: { key: string; value: unknown }
+}
+
+const PLUGIN_SETTINGS: SettingEntry[] = [
   { key: 'escToHide', label: 'Press Esc to hide window', type: 'boolean', default: true },
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
-  { key: 'enableClaude', label: 'Use Claude for commit messages (cloud)', type: 'boolean', default: false },
+  { key: 'commitMsgBackend', label: 'Commit message backend', type: 'select', default: 'local-llm', options: [
+    { value: 'local-llm',     label: 'Local LLM (fast, small)' },
+    { value: 'claude-cli',    label: 'Claude Code (your subscription)' },
+    { value: 'anthropic-api', label: 'Anthropic API (ANTHROPIC_API_KEY)' }
+  ]},
+  { key: 'commitMsgClaudeModel', label: 'Claude model', type: 'select', default: 'haiku',
+    dependsOn: { key: 'commitMsgBackend', value: 'claude-cli' }, options: [
+    { value: 'haiku',   label: 'Haiku — fast, cheap' },
+    { value: 'sonnet',  label: 'Sonnet — balanced' },
+    { value: 'opus',    label: 'Opus — highest quality' },
+    { value: 'default', label: 'Subscription default' }
+  ]},
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },
   { key: 'changesRefreshSeconds', label: 'Working changes auto-refresh (seconds, 0 to disable)', type: 'number', default: 5 },
@@ -10920,6 +10972,12 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = React.memo(({ project
     await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, next)
   }
 
+  const setSelect = async (key: string, val: string) => {
+    setValues((prev) => ({ ...prev, [key]: val }))
+    await getDockApi().plugins.setSetting(projectDir, 'git-manager', key, val)
+    window.dispatchEvent(new CustomEvent('gm-setting-changed', { detail: { key, value: val } }))
+  }
+
   return (
     <div className="gm-settings-dropdown" ref={ref}>
       <button className="gm-toolbar-btn" onClick={() => setOpen(!open)} title="Settings">
@@ -10930,36 +10988,60 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = React.memo(({ project
         <div className="gm-dropdown-backdrop" onMouseDown={() => setOpen(false)} />
         <div className="gm-settings-menu" onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
           <div className="gm-settings-title">Git Manager Settings</div>
-          {PLUGIN_SETTINGS.map((s) => (
-            s.type === 'boolean' ? (
-              <label key={s.key} className="gm-settings-item">
-                <input
-                  type="checkbox"
-                  checked={!!values[s.key]}
-                  onChange={() => toggle(s.key)}
-                />
-                <span>{s.label}</span>
-              </label>
-            ) : s.type === 'multiselect' ? (
-              <div key={s.key} className="gm-settings-item gm-settings-item-multiselect">
-                <span className="gm-settings-multiselect-label">{s.label}</span>
-                <div className="gm-settings-multiselect-options">
-                  {(s.options ?? []).map((opt) => {
-                    const selected = ((values[s.key] as string[] | undefined) ?? (s.default as string[]) ?? []).includes(opt.value)
-                    return (
-                      <label key={opt.value} className={`gm-settings-multiselect-chip${selected ? ' gm-settings-multiselect-chip-on' : ''}`}>
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleMultiselect(s.key, opt.value)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
-                    )
-                  })}
+          {PLUGIN_SETTINGS.map((s) => {
+            if (s.dependsOn && values[s.dependsOn.key] !== s.dependsOn.value) return null
+            if (s.type === 'boolean') {
+              return (
+                <label key={s.key} className="gm-settings-item">
+                  <input
+                    type="checkbox"
+                    checked={!!values[s.key]}
+                    onChange={() => toggle(s.key)}
+                  />
+                  <span>{s.label}</span>
+                </label>
+              )
+            }
+            if (s.type === 'multiselect') {
+              return (
+                <div key={s.key} className="gm-settings-item gm-settings-item-multiselect">
+                  <span className="gm-settings-multiselect-label">{s.label}</span>
+                  <div className="gm-settings-multiselect-options">
+                    {(s.options ?? []).map((opt) => {
+                      const selected = ((values[s.key] as string[] | undefined) ?? (s.default as string[]) ?? []).includes(opt.value)
+                      return (
+                        <label key={opt.value} className={`gm-settings-multiselect-chip${selected ? ' gm-settings-multiselect-chip-on' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleMultiselect(s.key, opt.value)}
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : (
+              )
+            }
+            if (s.type === 'select') {
+              const cur = (values[s.key] as string | undefined) ?? (s.default as string)
+              return (
+                <label key={s.key} className="gm-settings-item gm-settings-item-select">
+                  <span>{s.label}</span>
+                  <select
+                    className="gm-settings-select-input"
+                    value={cur ?? ''}
+                    onChange={(e) => setSelect(s.key, e.target.value)}
+                  >
+                    {(s.options ?? []).map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )
+            }
+            return (
               <label key={s.key} className="gm-settings-item gm-settings-item-number">
                 <span>{s.label}</span>
                 <input
@@ -10971,7 +11053,7 @@ const SettingsDropdown: React.FC<{ projectDir: string }> = React.memo(({ project
                 />
               </label>
             )
-          ))}
+          })}
         </div>
         </>
       )}

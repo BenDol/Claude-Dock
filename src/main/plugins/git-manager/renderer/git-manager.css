@@ -3776,6 +3776,28 @@ div.gm-ftree-search-current {
   border-color: var(--accent-color);
 }
 
+/* Select setting */
+.gm-settings-item-select {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.gm-settings-select-input {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.gm-settings-select-input:focus {
+  border-color: var(--accent-color);
+}
+
 /* Multiselect setting */
 .gm-settings-item-multiselect {
   display: flex;

@@ -126,6 +126,9 @@ export const IPC = {
   GIT_MGR_GET_SUBMODULE_LIST: 'gitMgr:getSubmoduleList',
   GIT_MGR_REFRESH_SUBMODULE: 'gitMgr:refreshSubmodule',
   GIT_MGR_GENERATE_COMMIT_MSG: 'gitMgr:generateCommitMsg',
+  GIT_MGR_CANCEL_COMMIT_MSG: 'gitMgr:cancelCommitMsg',
+  /** main -> renderer event: { jobId, phase: 'single'|'per-file'|'combine', done?, total? } */
+  GIT_MGR_COMMIT_MSG_PROGRESS: 'gitMgr:commitMsgProgress',
   GIT_MGR_RESET: 'gitMgr:reset',
   GIT_MGR_REVERT: 'gitMgr:revert',
   GIT_MGR_CHERRY_PICK: 'gitMgr:cherryPick',

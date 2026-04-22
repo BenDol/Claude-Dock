@@ -401,14 +401,31 @@ export function registerGitManagerIpc(): void {
     return gitOps.refreshSingleSubmodule(projectDir, subPath)
   })
 
-  ipcMain.handle(IPC.GIT_MGR_GENERATE_COMMIT_MSG, async (_event, projectDir: string) => {
+  ipcMain.handle(IPC.GIT_MGR_GENERATE_COMMIT_MSG, async (event, projectDir: string, jobId?: string) => {
+    // Forward phase-by-phase progress back to the originating webContents so the
+    // commit dialog can show "Summarising n/N files via Claude…" while we wait.
+    const sender = event.sender
+    const onProgress = jobId
+      ? (p: gitOps.CommitMsgProgress): void => {
+          try {
+            if (!sender.isDestroyed()) {
+              sender.send(IPC.GIT_MGR_COMMIT_MSG_PROGRESS, { jobId, ...p })
+            }
+          } catch { /* renderer gone */ }
+        }
+      : undefined
     try {
-      const message = await gitOps.generateCommitMessage(projectDir)
+      const message = await gitOps.generateCommitMessage(projectDir, { jobId, onProgress })
       return { success: true, message }
     } catch (err) {
       getServices().logError('[git-manager] generate commit message failed:', err)
       return { success: false, error: err instanceof Error ? err.message : 'Generation failed' }
     }
+  })
+
+  ipcMain.handle(IPC.GIT_MGR_CANCEL_COMMIT_MSG, async (_event, jobId: string) => {
+    const cancelled = gitOps.cancelCommitMessage(jobId)
+    return { success: cancelled }
   })
 
   ipcMain.handle(IPC.GIT_MGR_RESET, async (_event, projectDir: string, hash: string, mode: string) => {
