@@ -20,7 +20,10 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { getServices } from './services'
-import type { VoiceSetupProgress } from '../../../shared/voice-types'
+import type {
+  VoiceGpuCapability,
+  VoiceSetupProgress
+} from '../../../shared/voice-types'
 
 const svc = () => getServices()
 
@@ -440,12 +443,18 @@ export async function createVenv(basePython: string): Promise<void> {
 /**
  * Stream subprocess output line-by-line to a handler. Used for pip install
  * so the UI can show "installing numpy…" / "installing faster-whisper…".
+ *
+ * `timeoutMs` bounds the total run so a hung pip (slow mirror, network stall,
+ * wedged child on Windows) can't block the caller forever. On timeout the
+ * child is SIGTERMed then SIGKILLed after a short grace and the resolved code
+ * is null with `timedOut: true`.
  */
 function spawnStreaming(
   cmd: string,
   args: string[],
-  onLine: (line: string, stream: 'stdout' | 'stderr') => void
-): Promise<{ code: number | null }> {
+  onLine: (line: string, stream: 'stdout' | 'stderr') => void,
+  opts: { timeoutMs?: number } = {}
+): Promise<{ code: number | null; timedOut?: boolean }> {
   return new Promise((resolve, reject) => {
     let child: ChildProcess
     try {
@@ -468,10 +477,35 @@ function spawnStreaming(
     }
     child.stdout?.on('data', feed('stdout'))
     child.stderr?.on('data', feed('stderr'))
-    child.on('error', reject)
-    child.on('close', (code) => resolve({ code }))
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    let killHandle: ReturnType<typeof setTimeout> | null = null
+    let timedOut = false
+    if (opts.timeoutMs && opts.timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true
+        try { child.kill('SIGTERM') } catch { /* ignore */ }
+        killHandle = setTimeout(() => {
+          try { child.kill('SIGKILL') } catch { /* ignore */ }
+        }, 3000)
+      }, opts.timeoutMs)
+    }
+
+    child.on('error', (err) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      if (killHandle) clearTimeout(killHandle)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      if (killHandle) clearTimeout(killHandle)
+      resolve({ code, timedOut })
+    })
   })
 }
+
+/** Wall-clock cap for `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` (~600MB). */
+const GPU_INSTALL_TIMEOUT_MS = 15 * 60_000
 
 export async function installDependencies(
   requirementsPath: string,
@@ -626,5 +660,348 @@ export function diagnosticReport(): string {
   lines.push(`voiceDir: ${svc().getVoiceDataDir()}`)
   lines.push(`venvPython: ${getVenvPython()} (exists: ${fs.existsSync(getVenvPython())})`)
   return lines.join('\n')
+}
+
+/* ------------------------------------------------------------------ */
+/* GPU / CUDA runtime                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Names of the PyPI packages that ship CUDA runtime DLLs. Both are needed —
+ * ctranslate2 loads cuBLAS eagerly and cuDNN lazily on the first forward pass.
+ * `-cu12` suffix pins CUDA 12.x; faster-whisper ≥1.1 requires cuDNN 9 which
+ * only ships in the cu12 wheels.
+ */
+export const GPU_PIP_PACKAGES = ['nvidia-cublas-cu12', 'nvidia-cudnn-cu12'] as const
+
+/** Minimum driver version supporting CUDA 12. Below this, the wheels can't load even with DLLs present. */
+const MIN_NVIDIA_DRIVER = 525
+
+/**
+ * Architectures NVIDIA publishes cu12 wheels for. `nvidia-cublas-cu12` /
+ * `nvidia-cudnn-cu12` are only available as `win_amd64` and
+ * `manylinux_2_17_x86_64` — no ARM, no 32-bit. ARM-NVIDIA hardware (Jetson,
+ * Grace Hopper) ships its own system-wide CUDA toolkit and is out of scope
+ * here because even Nvidia's CPython wheels can't reach it. Detect the host
+ * arch so we skip offering an install that would definitely fail.
+ */
+const GPU_SUPPORTED_ARCHES = new Set(['x64'])
+
+/** Cache detection for the lifetime of the process — nvidia-smi doesn't change mid-session. */
+let gpuCapabilityCache: VoiceGpuCapability | null = null
+
+/**
+ * Probe for an NVIDIA GPU via `nvidia-smi`. Works on Windows + Linux (x86_64)
+ * when the NVIDIA driver is installed; returns `{ hasNvidiaGpu: false }` on
+ * any other host (macOS, ARM, AMD-only, non-NVIDIA Intel, driver missing)
+ * without throwing.
+ *
+ * Cached per-process. Pass `force` to re-probe if the user has just installed
+ * a driver and wants to retry without restarting Dock.
+ */
+export async function detectGpuCapability(force = false): Promise<VoiceGpuCapability> {
+  if (!force && gpuCapabilityCache) return gpuCapabilityCache
+
+  // Quick short-circuit on macOS — Apple Silicon + Metal isn't something
+  // faster-whisper supports without extra wheels, and there's no nvidia-smi.
+  if (process.platform === 'darwin') {
+    const result: VoiceGpuCapability = {
+      hasNvidiaGpu: false,
+      gpuName: null,
+      driverVersion: null,
+      cudaVersion: null,
+      error: 'macOS is not a supported GPU platform for faster-whisper'
+    }
+    gpuCapabilityCache = result
+    return result
+  }
+
+  // Non-x64 architectures have no published cu12 wheels. Detect the host has
+  // an NVIDIA GPU (for diagnostics) but mark as unavailable so we don't offer
+  // an install that will definitely fail.
+  if (!GPU_SUPPORTED_ARCHES.has(process.arch)) {
+    const result: VoiceGpuCapability = {
+      hasNvidiaGpu: false,
+      gpuName: null,
+      driverVersion: null,
+      cudaVersion: null,
+      error:
+        `GPU acceleration requires x86_64 — this host is ${process.arch}. ` +
+        `NVIDIA does not publish cu12 wheels for ARM / 32-bit platforms.`
+    }
+    gpuCapabilityCache = result
+    svc().log(`[voice-runtime-gpu] skipping GPU detection on unsupported arch=${process.arch}`)
+    return result
+  }
+
+  try {
+    const { stdout, code } = await execFileAsync(
+      'nvidia-smi',
+      ['--query-gpu=name,driver_version', '--format=csv,noheader'],
+      { timeout: 5000 }
+    )
+    if (code !== 0) {
+      const result: VoiceGpuCapability = {
+        hasNvidiaGpu: false,
+        gpuName: null,
+        driverVersion: null,
+        cudaVersion: null,
+        error: `nvidia-smi exit ${code}`
+      }
+      gpuCapabilityCache = result
+      return result
+    }
+    const firstLine = stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || ''
+    const [rawName, rawDriver] = firstLine.split(',').map((s) => s.trim())
+    const driverVersion = rawDriver || null
+
+    // nvidia-smi prints CUDA in the header of the plain-text form; query-gpu
+    // doesn't expose it. A second call is cheap (~40ms) and surfaces it.
+    let cudaVersion: string | null = null
+    try {
+      const plain = await execFileAsync('nvidia-smi', [], { timeout: 5000 })
+      const m = plain.stdout.match(/CUDA Version:\s*([\d.]+)/)
+      if (m) cudaVersion = m[1]
+    } catch { /* non-fatal */ }
+
+    // A too-old driver can't load the cu12 wheels even after install. Flag it
+    // as unavailable so we don't offer an install that will definitely fail.
+    const major = Number(driverVersion?.split('.')[0])
+    if (Number.isFinite(major) && major > 0 && major < MIN_NVIDIA_DRIVER) {
+      const result: VoiceGpuCapability = {
+        hasNvidiaGpu: false,
+        gpuName: rawName || null,
+        driverVersion,
+        cudaVersion,
+        error: `NVIDIA driver ${driverVersion} is too old — CUDA 12 wheels require ${MIN_NVIDIA_DRIVER}+`
+      }
+      gpuCapabilityCache = result
+      svc().log(`[voice-runtime-gpu] detected old driver ${driverVersion}; rejecting`)
+      return result
+    }
+
+    const result: VoiceGpuCapability = {
+      hasNvidiaGpu: true,
+      gpuName: rawName || null,
+      driverVersion,
+      cudaVersion,
+      error: null
+    }
+    gpuCapabilityCache = result
+    svc().log(`[voice-runtime-gpu] detected ${rawName || 'NVIDIA GPU'} driver=${driverVersion} cuda=${cudaVersion}`)
+    return result
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const result: VoiceGpuCapability = {
+      hasNvidiaGpu: false,
+      gpuName: null,
+      driverVersion: null,
+      cudaVersion: null,
+      // ENOENT is the common case — nvidia-smi isn't on PATH, meaning no
+      // NVIDIA driver. Distinguish in the log but keep the message clean.
+      error: message.includes('ENOENT')
+        ? 'nvidia-smi not found — no NVIDIA driver installed'
+        : message
+    }
+    gpuCapabilityCache = result
+    return result
+  }
+}
+
+/** Drop the detection cache so the next call reprobes (e.g. after driver install). */
+export function invalidateGpuCapability(): void {
+  gpuCapabilityCache = null
+}
+
+/**
+ * Check whether the voice venv has the GPU runtime pip packages installed.
+ * Fast — just imports both modules in a subprocess with `-c "import X"`.
+ */
+export async function isGpuRuntimeInstalled(): Promise<boolean> {
+  const py = getVenvPython()
+  if (!fs.existsSync(py)) return false
+  for (const pkg of GPU_PIP_PACKAGES) {
+    // PyPI distribution name has dashes; module name has dots and underscores:
+    //   nvidia-cublas-cu12 -> nvidia.cublas
+    //   nvidia-cudnn-cu12  -> nvidia.cudnn
+    const mod = pkg.replace(/^nvidia-/, 'nvidia.').replace(/-cu12$/, '')
+    const { code } = await execFileAsync(py, ['-c', `import ${mod}`], { timeout: 15_000 })
+    if (code !== 0) return false
+  }
+  return true
+}
+
+/**
+ * Install the CUDA runtime pip packages into the voice venv. Streams progress
+ * via the callback, same protocol as `installDependencies()`. Returns a
+ * structured result — callers should log but *not* fail the overall voice
+ * setup if this fails, since CPU transcription still works.
+ */
+export async function installGpuRuntime(
+  onProgress: (p: VoiceSetupProgress) => void
+): Promise<{ ok: boolean; error?: string }> {
+  const py = getVenvPython()
+  if (!fs.existsSync(py)) {
+    return { ok: false, error: `venv python missing at ${py}` }
+  }
+  onProgress({ step: 'install-gpu', pct: 5, message: 'Installing GPU acceleration (~600MB)…' })
+  let currentPackage = ''
+  try {
+    const { code, timedOut } = await spawnStreaming(
+      py,
+      ['-m', 'pip', 'install', '--no-input', ...GPU_PIP_PACKAGES],
+      (line, stream) => {
+        svc().log(`[voice-runtime-gpu] pip[${stream}] ${line}`)
+        const m = line.match(/^(?:Collecting|Downloading|Installing collected packages:)\s+(.+)$/)
+        if (m) {
+          currentPackage = m[1].split(/\s+/)[0]
+          onProgress({
+            step: 'install-gpu',
+            pct: 50,
+            message: `Installing ${currentPackage}…`,
+            detail: line
+          })
+        } else {
+          onProgress({
+            step: 'install-gpu',
+            pct: 50,
+            message: currentPackage
+              ? `Installing ${currentPackage}…`
+              : 'Installing GPU acceleration (~600MB)…',
+            detail: line
+          })
+        }
+      },
+      { timeoutMs: GPU_INSTALL_TIMEOUT_MS }
+    )
+    if (timedOut) {
+      return {
+        ok: false,
+        error: `pip install timed out after ${GPU_INSTALL_TIMEOUT_MS / 60_000} minutes — network stall or hung process`
+      }
+    }
+    if (code !== 0) {
+      return { ok: false, error: `pip install failed (exit ${code})` }
+    }
+    onProgress({ step: 'install-gpu', pct: 100, message: 'GPU libraries installed.' })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Probe whether the venv can actually load `WhisperModel` on `device='cuda'`.
+ * This is a stronger test than `isGpuRuntimeInstalled()` — the pip packages
+ * can be present but still fail if the driver/GPU disagree with cu12 (e.g.
+ * architecture too old, cuDNN 9 vs. 8 mismatch, DLL search path issues).
+ *
+ * Runs `tiny` for speed — it's ~75MB, cached after first fetch.
+ */
+/**
+ * Sentinel pair wrapping the JSON result of the verify probe. faster-whisper /
+ * ctranslate2 emit progress and warning text to stdout on some platforms, and a
+ * naive "last line starting with {" heuristic breaks when any warning contains
+ * a brace. The sentinels make extraction unambiguous.
+ */
+const PROBE_SENTINEL_OPEN = '<<<VOICE_GPU_PROBE>>>'
+const PROBE_SENTINEL_CLOSE = '<<<VOICE_GPU_PROBE_END>>>'
+
+export async function verifyGpuRuntime(): Promise<{ ok: boolean; error?: string }> {
+  const py = getVenvPython()
+  if (!fs.existsSync(py)) return { ok: false, error: 'venv python missing' }
+
+  // `pythonDir` is the directory containing `src/cuda_setup.py`. Adding it to
+  // sys.path lets `from src.cuda_setup import ...` resolve just like
+  // server.py / hotkey_daemon.py / dictation_daemon.py do at runtime.
+  const pythonDir = svc().paths.pythonDir
+  const probe = `
+import json
+import sys
+import traceback
+
+_OPEN = ${JSON.stringify(PROBE_SENTINEL_OPEN)}
+_CLOSE = ${JSON.stringify(PROBE_SENTINEL_CLOSE)}
+
+def _emit(obj):
+    sys.stdout.write(_OPEN + json.dumps(obj, default=str) + _CLOSE + "\\n")
+    sys.stdout.flush()
+
+try:
+    import os
+    python_dir = ${JSON.stringify(pythonDir)}
+    if python_dir not in sys.path:
+        sys.path.insert(0, python_dir)
+    from src.cuda_setup import setup_cuda_dll_paths
+    setup_result = setup_cuda_dll_paths()
+    import ctranslate2
+    n = ctranslate2.get_cuda_device_count()
+    if n <= 0:
+        _emit({'ok': False, 'error': 'ctranslate2 reports 0 CUDA devices', 'setup': setup_result})
+        sys.exit(0)
+    from faster_whisper import WhisperModel
+    m = WhisperModel('tiny', device='cuda', compute_type='int8_float16')
+    del m
+    _emit({'ok': True, 'cudaDevices': n, 'setup': setup_result})
+except Exception as e:
+    _emit({
+        'ok': False,
+        'error': f'{type(e).__name__}: {e}',
+        'traceback': traceback.format_exc()
+    })
+`
+  const { code, stdout, stderr } = await execFileAsync(py, ['-c', probe], {
+    timeout: 180_000 // first tiny-model download can take 30-60s on slow links
+  })
+  if (code !== 0) {
+    return { ok: false, error: stderr || `probe exited ${code}` }
+  }
+  try {
+    const openIdx = stdout.lastIndexOf(PROBE_SENTINEL_OPEN)
+    const closeIdx = stdout.lastIndexOf(PROBE_SENTINEL_CLOSE)
+    if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
+      return {
+        ok: false,
+        error: `probe output missing sentinels (stdout head: ${stdout.slice(0, 200)})`
+      }
+    }
+    const json = stdout.slice(openIdx + PROBE_SENTINEL_OPEN.length, closeIdx)
+    const parsed = JSON.parse(json) as {
+      ok: boolean
+      error?: string
+      cudaDevices?: number
+      setup?: unknown
+    }
+    if (parsed.ok) {
+      svc().log(`[voice-runtime-gpu] verify ok — cudaDevices=${parsed.cudaDevices ?? '?'}`)
+      return { ok: true }
+    }
+    svc().log(
+      `[voice-runtime-gpu] verify failed: ${parsed.error ?? 'unknown'} ` +
+      `setup=${JSON.stringify(parsed.setup)}`
+    )
+    return { ok: false, error: parsed.error ?? 'verify probe failed' }
+  } catch (err) {
+    return {
+      ok: false,
+      error: `failed to parse probe output: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+}
+
+/**
+ * Uninstall the GPU pip packages. Used when the user explicitly opts out
+ * of GPU acceleration (frees ~600MB) or as part of a clean reinstall path.
+ */
+export async function uninstallGpuRuntime(): Promise<{ ok: boolean; error?: string }> {
+  const py = getVenvPython()
+  if (!fs.existsSync(py)) return { ok: false, error: 'venv python missing' }
+  const { code, stderr } = await execFileAsync(
+    py,
+    ['-m', 'pip', 'uninstall', '-y', ...GPU_PIP_PACKAGES],
+    { timeout: 60_000 }
+  )
+  if (code !== 0) return { ok: false, error: stderr || `pip uninstall exit ${code}` }
+  return { ok: true }
 }
 

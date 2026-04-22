@@ -41,7 +41,9 @@ import type {
   VoiceSetupProgress,
   VoiceMcpStatus,
   VoiceMcpConflictAction,
-  VoiceListDevicesResult
+  VoiceListDevicesResult,
+  VoiceGpuStatus,
+  VoiceGpuInstallState
 } from '../shared/voice-types'
 import type { PluginUpdateEntry } from '../shared/plugin-update-types'
 import type { LastSessionEntry } from '../shared/last-session-types'
@@ -542,6 +544,16 @@ export interface DockApi {
     openLogs: () => Promise<void>
     copyDiagnostics: () => Promise<string>
     openAccessibilitySettings: () => Promise<boolean>
+    gpu: {
+      /** Re-run nvidia-smi detection and return the ephemeral capability + persisted status. */
+      detect: () => Promise<VoiceGpuStatus>
+      /** Trigger an install + verify of CUDA packages. Bypasses the failure cooldown. */
+      install: () => Promise<{ ok: boolean; error?: string; state: VoiceGpuInstallState }>
+      /** Remove the CUDA packages from the venv (frees ~600MB). */
+      uninstall: () => Promise<{ ok: boolean; error?: string }>
+      /** Clear the CUDA→CPU fallback banner after the user has acknowledged it. */
+      dismissWarning: () => Promise<void>
+    }
   }
   coordinator: {
     open: (projectDir: string) => Promise<void>
@@ -1135,7 +1147,13 @@ const dockApi: DockApi = {
     restartDaemon: () => ipcRenderer.invoke(IPC.VOICE_RESTART_DAEMON),
     openLogs: () => ipcRenderer.invoke(IPC.VOICE_OPEN_LOGS),
     copyDiagnostics: () => ipcRenderer.invoke(IPC.VOICE_COPY_DIAGNOSTICS),
-    openAccessibilitySettings: () => ipcRenderer.invoke(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS)
+    openAccessibilitySettings: () => ipcRenderer.invoke(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS),
+    gpu: {
+      detect: () => ipcRenderer.invoke(IPC.VOICE_GPU_DETECT),
+      install: () => ipcRenderer.invoke(IPC.VOICE_GPU_INSTALL),
+      uninstall: () => ipcRenderer.invoke(IPC.VOICE_GPU_UNINSTALL),
+      dismissWarning: () => ipcRenderer.invoke(IPC.VOICE_GPU_DISMISS_WARNING)
+    }
   },
   coordinator: {
     open: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_OPEN, projectDir),

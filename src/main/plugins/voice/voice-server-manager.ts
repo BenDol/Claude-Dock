@@ -20,12 +20,17 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { EventEmitter } from 'events'
 import { getServices } from './services'
-import { getVoiceConfig } from './voice-settings-store'
+import { getVoiceConfig, setVoiceConfig } from './voice-settings-store'
 import {
   ensureRuntime,
   getVenvPython,
   runtimeExists,
-  uninstallRuntime
+  uninstallRuntime,
+  detectGpuCapability,
+  isGpuRuntimeInstalled,
+  installGpuRuntime,
+  verifyGpuRuntime,
+  invalidateGpuCapability
 } from './voice-python-runtime'
 import {
   ensureMcpEntry,
@@ -35,12 +40,15 @@ import {
 } from './voice-mcp-register'
 import { verifyBundledPythonIntegrity, repairHintForSource } from './bundled-services'
 import { IPC } from '../../../shared/ipc-channels'
-import type {
-  VoiceRuntimeStatus,
-  VoiceSetupProgress,
-  VoiceDaemonState,
-  VoiceInstallState,
-  VoiceHotkeySupport
+import {
+  UNKNOWN_VOICE_GPU_STATUS,
+  type VoiceRuntimeStatus,
+  type VoiceSetupProgress,
+  type VoiceDaemonState,
+  type VoiceInstallState,
+  type VoiceHotkeySupport,
+  type VoiceGpuStatus,
+  type VoiceGpuInstallState
 } from '../../../shared/voice-types'
 
 const svc = () => getServices()
@@ -48,6 +56,16 @@ const svc = () => getServices()
 const MAX_RESTARTS = 3
 const RESTART_WINDOW_MS = 60_000
 const SETUP_OVERALL_TIMEOUT_MS = 15 * 60_000
+
+/**
+ * Don't auto-retry a failed GPU install more than once per `GPU_RETRY_COOLDOWN_MS`.
+ * Keeps a broken environment from hammering pip on every launch, but a user
+ * who just fixed their driver / disk space isn't stuck waiting forever.
+ */
+const GPU_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000
+
+/** Sentinel the Python daemon prints on stderr to surface structured warnings. */
+const VOICE_WARNING_PREFIX = '__VOICE_WARNING__:'
 
 /**
  * Classify this host's ability to run the hotkey daemon. Recomputed on every
@@ -111,10 +129,14 @@ export class VoiceServerManager extends EventEmitter {
     pythonPath: null,
     mcpRegisteredPath: null,
     platform: process.platform,
-    hotkeySupport: detectHotkeySupport()
+    hotkeySupport: detectHotkeySupport(),
+    gpu: { ...UNKNOWN_VOICE_GPU_STATUS },
+    gpuWarning: null
   }
 
   private setupPromise: Promise<void> | null = null
+  /** Shared promise guarding in-flight GPU install — prevents concurrent pip calls. */
+  private gpuInstallPromise: Promise<{ ok: boolean; error?: string }> | null = null
 
   static getInstance(): VoiceServerManager {
     if (!VoiceServerManager.instance) {
@@ -147,6 +169,17 @@ export class VoiceServerManager extends EventEmitter {
         await this.ensureSetup().catch((err) => {
           svc().logError('[voice-manager] auto-setup failed on enable', err)
         })
+      } else {
+        // Runtime already installed — refresh GPU status so the banner is
+        // accurate, and kick off a retroactive GPU install if the user's
+        // currently on cuda/auto without GPU packages yet. Fire-and-forget:
+        // a slow pip install must not block daemon start for dictation use.
+        void this.refreshGpuStatus().catch((err) =>
+          svc().logError('[voice-manager] refreshGpuStatus failed', err)
+        )
+        void this.ensureGpuRuntimeIfNeeded().catch((err) =>
+          svc().logError('[voice-manager] ensureGpuRuntimeIfNeeded failed', err)
+        )
       }
       if (runtimeExists() && !this.daemon) {
         await this.startDaemon().catch((err) => {
@@ -173,6 +206,20 @@ export class VoiceServerManager extends EventEmitter {
   /** Write the current centralized config to disk and restart the daemon. */
   async applySettings(): Promise<void> {
     this.materializeConfig()
+
+    // If the user just picked cuda/auto, make sure the GPU runtime is installed
+    // before the daemon respawns. `ensureGpuRuntimeIfNeeded` is idempotent and
+    // cheap when packages are already installed + verified.
+    const device = getVoiceConfig().transcriber.faster_whisper.device
+    if ((device === 'cuda' || device === 'auto') && runtimeExists()) {
+      const gpu = await this.ensureGpuRuntimeIfNeeded()
+      if (!gpu.ok) {
+        // Not fatal — the transcriber will surface a CUDA→CPU fallback warning
+        // on first use if the user kept 'cuda'. Log so diagnostics show why.
+        svc().log(`[voice-manager] GPU ensure on settings change failed: ${gpu.error}`)
+      }
+    }
+
     if (this.daemon) {
       svc().log('[voice-manager] settings changed — restarting daemon')
       await this.stopDaemon(true)
@@ -229,6 +276,82 @@ export class VoiceServerManager extends EventEmitter {
 
       const { pythonPath, venvPython } = await ensureRuntime(requirements, report)
       svc().log(`[voice-manager] setup complete — base=${pythonPath} venv=${venvPython}`)
+
+      // GPU packages are bundled into initial setup opportunistically: if we
+      // detect an NVIDIA GPU, install them now so `device='cuda'` works
+      // out-of-the-box the first time the user switches. Failures here are
+      // non-fatal — CPU transcription remains available.
+      report({ step: 'detect-gpu', pct: 0, message: 'Checking for GPU acceleration…' })
+      const gpuCap = await detectGpuCapability(true)
+      if (gpuCap.hasNvidiaGpu) {
+        report({
+          step: 'detect-gpu',
+          pct: 100,
+          message: `Detected ${gpuCap.gpuName ?? 'NVIDIA GPU'}`,
+          detail: `driver=${gpuCap.driverVersion ?? '?'} cuda=${gpuCap.cudaVersion ?? '?'}`
+        })
+        this.updateGpuStatus({ capability: gpuCap, state: 'installing' })
+        const gpuResult = await installGpuRuntime(report)
+        if (gpuResult.ok) {
+          this.updateGpuStatus({ state: 'verifying' })
+          report({ step: 'verify-gpu', pct: 0, message: 'Verifying GPU support…' })
+          const verify = await verifyGpuRuntime()
+          if (verify.ok) {
+            const verifiedAt = new Date().toISOString()
+            this.persistGpuRuntimeState({
+              installed: true,
+              verified: true,
+              verifiedAt,
+              lastFailedAt: null,
+              lastError: null
+            })
+            this.updateGpuStatus({ state: 'ready', verifiedAt, lastError: null })
+            report({ step: 'verify-gpu', pct: 100, message: 'GPU acceleration ready.' })
+          } else {
+            const failedAt = new Date().toISOString()
+            svc().logError(`[voice-manager] GPU verify failed (non-fatal): ${verify.error}`)
+            this.persistGpuRuntimeState({
+              installed: true,
+              verified: false,
+              verifiedAt: null,
+              lastFailedAt: failedAt,
+              lastError: verify.error ?? 'verify failed'
+            })
+            this.updateGpuStatus({ state: 'error', lastError: verify.error ?? 'verify failed' })
+            report({
+              step: 'verify-gpu',
+              pct: 100,
+              message: 'GPU verify failed — using CPU',
+              detail: verify.error
+            })
+          }
+        } else {
+          const failedAt = new Date().toISOString()
+          svc().logError(`[voice-manager] GPU install failed (non-fatal): ${gpuResult.error}`)
+          this.persistGpuRuntimeState({
+            installed: false,
+            verified: false,
+            verifiedAt: null,
+            lastFailedAt: failedAt,
+            lastError: gpuResult.error ?? 'install failed'
+          })
+          this.updateGpuStatus({ state: 'error', lastError: gpuResult.error ?? 'install failed' })
+          report({
+            step: 'install-gpu',
+            pct: 100,
+            message: 'GPU install failed — using CPU',
+            detail: gpuResult.error
+          })
+        }
+      } else {
+        report({
+          step: 'detect-gpu',
+          pct: 100,
+          message: 'No NVIDIA GPU — using CPU transcription',
+          detail: gpuCap.error ?? undefined
+        })
+        this.updateGpuStatus({ capability: gpuCap, state: 'unavailable' })
+      }
 
       // Write config before MCP registration so the server sees it on first launch.
       this.materializeConfig()
@@ -403,8 +526,16 @@ export class VoiceServerManager extends EventEmitter {
       if (text) svc().log(`[voice-daemon] ${text}`)
     })
     child.stderr?.on('data', (buf) => {
-      const text = buf.toString('utf8').trim()
-      if (text) svc().log(`[voice-daemon:err] ${text}`)
+      const text = buf.toString('utf8')
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim()
+        if (!line) continue
+        svc().log(`[voice-daemon:err] ${line}`)
+        // Structured warnings (e.g. CUDA→CPU fallback) are surfaced in the UI.
+        if (line.includes(VOICE_WARNING_PREFIX)) {
+          this.handleDaemonWarningLine(line)
+        }
+      }
     })
     child.on('error', (err) => {
       svc().logError('[voice-manager] daemon error event', err)
@@ -622,5 +753,278 @@ export class VoiceServerManager extends EventEmitter {
   /** Current daemon state string (duplicates status for convenience). */
   getDaemonState(): VoiceDaemonState {
     return this.status.daemonState
+  }
+
+  /* -------------- GPU runtime -------------- */
+
+  /**
+   * Ensure the CUDA runtime is installed + verified if the current transcriber
+   * device is `cuda` or `auto` and an NVIDIA GPU is present. Safe to call
+   * repeatedly — idempotent once the venv is in the expected state.
+   *
+   * Non-blocking in the sense that install/verify failures do NOT throw —
+   * they're persisted and surfaced via gpu.state='error' so the UI can retry.
+   */
+  async ensureGpuRuntimeIfNeeded(options: {
+    /** Bypass the cooldown check (user explicitly pressed "Install GPU"). */
+    force?: boolean
+    /** Progress sink; falls back to broadcasting via VOICE_SETUP_PROGRESS. */
+    onProgress?: (p: VoiceSetupProgress) => void
+  } = {}): Promise<{ ok: boolean; state: VoiceGpuInstallState; error?: string }> {
+    const cfg = getVoiceConfig()
+    const device = cfg.transcriber.faster_whisper.device
+    // Only auto-install for cuda/auto — `cpu` means the user explicitly opted out.
+    if (device !== 'cuda' && device !== 'auto' && !options.force) {
+      return { ok: true, state: this.status.gpu.state }
+    }
+
+    // Don't hammer pip if setup isn't even done yet.
+    if (!runtimeExists()) {
+      return { ok: false, state: 'unknown', error: 'voice runtime not installed' }
+    }
+
+    // Coalesce concurrent calls — two device changes in quick succession
+    // must not kick off two pip installs.
+    if (this.gpuInstallPromise) {
+      const r = await this.gpuInstallPromise
+      return { ok: r.ok, state: this.status.gpu.state, error: r.error }
+    }
+
+    // Wrapped in an outer try/catch so any unexpected throw (disposed
+    // BrowserWindow during a send, FS transient on setVoiceConfig, etc.)
+    // becomes a structured { ok: false } instead of propagating to callers
+    // like applySettings — which would fail the IPC handler that triggered
+    // the device change and show a confusing error in the renderer.
+    const run = async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const report = (p: VoiceSetupProgress) => {
+          options.onProgress?.(p)
+          this.broadcastProgress(p)
+        }
+
+        // Detection first — respecting the cache on repeat calls.
+        let cap = this.status.gpu.capability
+        if (cap.hasNvidiaGpu === false && cap.error === null) {
+          cap = await detectGpuCapability(false)
+        } else if (options.force) {
+          invalidateGpuCapability()
+          cap = await detectGpuCapability(true)
+        }
+        if (!cap.hasNvidiaGpu) {
+          this.updateGpuStatus({ capability: cap, state: 'unavailable', lastError: cap.error })
+          return { ok: false, error: cap.error ?? 'no NVIDIA GPU detected' }
+        }
+        this.updateGpuStatus({ capability: cap })
+
+        // Already installed + verified? Skip to success.
+        const persisted = cfg.gpuRuntime
+        if (persisted.verified && persisted.verifiedAt) {
+          const reinstalled = await isGpuRuntimeInstalled()
+          if (reinstalled) {
+            this.updateGpuStatus({ state: 'ready', verifiedAt: persisted.verifiedAt, lastError: null })
+            return { ok: true }
+          }
+          svc().log('[voice-manager] gpuRuntime marked verified but packages missing — reinstalling')
+        }
+
+        // Respect cooldown unless forced. Protects against a broken venv / no-disk
+        // hammering pip on every launch + device-change round-trip.
+        if (!options.force && persisted.lastFailedAt) {
+          const last = Date.parse(persisted.lastFailedAt)
+          if (Number.isFinite(last) && Date.now() - last < GPU_RETRY_COOLDOWN_MS) {
+            const hoursLeft = ((GPU_RETRY_COOLDOWN_MS - (Date.now() - last)) / 3_600_000).toFixed(1)
+            svc().log(
+              `[voice-manager] skipping GPU auto-install — last failure ${persisted.lastFailedAt} (${hoursLeft}h cooldown remaining)`
+            )
+            this.updateGpuStatus({ state: 'error', lastError: persisted.lastError })
+            return { ok: false, error: persisted.lastError ?? 'recent failure in cooldown' }
+          }
+        }
+
+        // Install (if not present) + verify.
+        let alreadyInstalled = await isGpuRuntimeInstalled()
+        if (!alreadyInstalled) {
+          this.updateGpuStatus({ state: 'installing' })
+          const installResult = await installGpuRuntime(report)
+          if (!installResult.ok) {
+            const failedAt = new Date().toISOString()
+            this.persistGpuRuntimeState({
+              installed: false,
+              verified: false,
+              verifiedAt: null,
+              lastFailedAt: failedAt,
+              lastError: installResult.error ?? 'install failed'
+            })
+            this.updateGpuStatus({ state: 'error', lastError: installResult.error })
+            return { ok: false, error: installResult.error }
+          }
+          alreadyInstalled = true
+        }
+
+        this.updateGpuStatus({ state: 'verifying' })
+        report({ step: 'verify-gpu', pct: 0, message: 'Verifying GPU support…' })
+        const verify = await verifyGpuRuntime()
+        if (verify.ok) {
+          const verifiedAt = new Date().toISOString()
+          this.persistGpuRuntimeState({
+            installed: true,
+            verified: true,
+            verifiedAt,
+            lastFailedAt: null,
+            lastError: null
+          })
+          this.updateGpuStatus({ state: 'ready', verifiedAt, lastError: null })
+          report({ step: 'verify-gpu', pct: 100, message: 'GPU acceleration ready.' })
+          return { ok: true }
+        }
+
+        const failedAt = new Date().toISOString()
+        this.persistGpuRuntimeState({
+          installed: alreadyInstalled,
+          verified: false,
+          verifiedAt: null,
+          lastFailedAt: failedAt,
+          lastError: verify.error ?? 'verify failed'
+        })
+        this.updateGpuStatus({ state: 'error', lastError: verify.error })
+        report({
+          step: 'verify-gpu',
+          pct: 100,
+          message: 'GPU verify failed — using CPU',
+          detail: verify.error
+        })
+        return { ok: false, error: verify.error }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        svc().logError('[voice-manager] ensureGpuRuntimeIfNeeded threw unexpectedly', err)
+        this.updateGpuStatus({ state: 'error', lastError: message })
+        return { ok: false, error: message }
+      }
+    }
+
+    this.gpuInstallPromise = run()
+      .finally(() => { this.gpuInstallPromise = null })
+    const result = await this.gpuInstallPromise!
+    return { ok: result.ok, state: this.status.gpu.state, error: result.error }
+  }
+
+  /**
+   * Explicit "uninstall GPU runtime" for the UI. Uses `uninstallGpuRuntime`
+   * but only proceeds when no pip install is in flight (guarded by the shared
+   * promise) so we never uninstall packages out from under a concurrent install.
+   */
+  async uninstallGpuRuntimeExplicit(): Promise<{ ok: boolean; error?: string }> {
+    if (this.gpuInstallPromise) {
+      return { ok: false, error: 'GPU install/verify in progress — try again shortly' }
+    }
+    const { uninstallGpuRuntime } = await import('./voice-python-runtime')
+    const result = await uninstallGpuRuntime()
+    if (result.ok) {
+      this.persistGpuRuntimeState({
+        installed: false,
+        verified: false,
+        verifiedAt: null,
+        lastFailedAt: null,
+        lastError: null
+      })
+      this.updateGpuStatus({
+        state: this.status.gpu.capability.hasNvidiaGpu ? 'not-installed' : 'unavailable',
+        verifiedAt: null,
+        lastError: null
+      })
+    }
+    return result
+  }
+
+  /**
+   * Refresh the GPU status based on current capability + on-disk packages,
+   * WITHOUT triggering an install. Called on manager initialization so the UI
+   * renders the correct banner even before the user opens the voice window.
+   */
+  async refreshGpuStatus(): Promise<VoiceGpuStatus> {
+    const cap = await detectGpuCapability(false)
+    if (!cap.hasNvidiaGpu) {
+      this.updateGpuStatus({ capability: cap, state: 'unavailable', lastError: cap.error })
+      return this.status.gpu
+    }
+    const installed = runtimeExists() ? await isGpuRuntimeInstalled() : false
+    const persisted = getVoiceConfig().gpuRuntime
+    let state: VoiceGpuInstallState
+    if (!installed) state = 'not-installed'
+    else if (persisted.verified) state = 'ready'
+    else if (persisted.lastError) state = 'error'
+    else state = 'not-installed' // installed but never verified — treat as not-ready
+    this.updateGpuStatus({
+      capability: cap,
+      state,
+      verifiedAt: persisted.verifiedAt,
+      lastError: persisted.lastError
+    })
+    return this.status.gpu
+  }
+
+  /** Parse a stderr line from the Python daemon for `__VOICE_WARNING__:` sentinels. */
+  private handleDaemonWarningLine(line: string): void {
+    const idx = line.indexOf(VOICE_WARNING_PREFIX)
+    if (idx < 0) return
+    const payload = line.slice(idx + VOICE_WARNING_PREFIX.length).trim()
+    let parsed: { kind?: string; message?: string; [k: string]: unknown }
+    try {
+      parsed = JSON.parse(payload) as typeof parsed
+    } catch {
+      svc().log(`[voice-manager] malformed voice warning: ${payload.slice(0, 200)}`)
+      return
+    }
+    const message = typeof parsed.message === 'string' ? parsed.message : 'Unknown voice warning'
+    if (parsed.kind === 'cuda_fallback') {
+      svc().log(`[voice-manager] CUDA fallback reported: ${message}`)
+      this.updateStatus({ gpuWarning: message })
+      // If GPU was marked verified but failed at runtime, flip it back to
+      // error so the next device change triggers a re-verify.
+      if (this.status.gpu.state === 'ready') {
+        this.persistGpuRuntimeState({
+          verified: false,
+          lastFailedAt: new Date().toISOString(),
+          lastError: message
+        })
+        this.updateGpuStatus({ state: 'error', lastError: message })
+      }
+    } else {
+      // Unknown kind — still forward so the user can see it.
+      this.updateStatus({ gpuWarning: message })
+    }
+  }
+
+  /** Public accessor so voice-ipc can pipe daemon stderr through the parser. */
+  feedDaemonStderr(line: string): void {
+    this.handleDaemonWarningLine(line)
+  }
+
+  /** Drop the gpuWarning banner once the user has seen it. */
+  dismissGpuWarning(): void {
+    if (this.status.gpuWarning != null) {
+      this.updateStatus({ gpuWarning: null })
+    }
+  }
+
+  /* -------------- GPU internals -------------- */
+
+  private updateGpuStatus(patch: Partial<VoiceGpuStatus>): void {
+    const next: VoiceGpuStatus = { ...this.status.gpu, ...patch }
+    // If patching capability only, preserve the current install state.
+    if (patch.capability && patch.state === undefined) {
+      next.state = this.status.gpu.state
+    }
+    this.updateStatus({ gpu: next })
+  }
+
+  private persistGpuRuntimeState(patch: Partial<{
+    installed: boolean
+    verified: boolean
+    verifiedAt: string | null
+    lastFailedAt: string | null
+    lastError: string | null
+  }>): void {
+    setVoiceConfig({ gpuRuntime: patch })
   }
 }

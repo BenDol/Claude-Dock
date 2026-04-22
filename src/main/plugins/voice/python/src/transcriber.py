@@ -1,11 +1,39 @@
 """Pluggable speech-to-text backends."""
 
+import json
 import os
+import sys
 import wave
 
 import numpy as np
 
 from abc import ABC, abstractmethod
+
+# Sentinel the Dock main process watches for on the daemon's stderr so it
+# can surface structured warnings in the UI (e.g. CUDA→CPU fallback). Keep
+# in sync with voice-server-manager.ts parseWarning().
+_VOICE_WARNING_PREFIX = "__VOICE_WARNING__:"
+
+
+def _emit_warning(kind: str, message: str, **extra) -> None:
+    """Print a parseable warning line to stderr for Dock to pick up.
+
+    We avoid the `warnings` module so the message bypasses user-configured
+    filters and lands on stderr, which Dock already forwards to the app log
+    and watches for the VOICE_WARNING sentinel.
+
+    `default=str` stringifies non-serializable extras (Path objects,
+    exceptions, etc.) so a single bad value can't silently drop the entire
+    warning.
+    """
+    payload = {"kind": kind, "message": message}
+    payload.update(extra)
+    try:
+        sys.stderr.write(_VOICE_WARNING_PREFIX + json.dumps(payload, default=str) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        # Never let a logging failure interfere with transcription.
+        pass
 
 
 class Transcriber(ABC):
@@ -82,6 +110,18 @@ class FasterWhisperLocal(Transcriber):
     def _ensure_model(self):
         if self._model is not None:
             return
+        # Register nvidia-cublas-cu12 / nvidia-cudnn-cu12 DLL directories
+        # BEFORE importing faster_whisper — ctranslate2's shared-library load
+        # happens at import time, and on Python 3.8+ Windows PATH is not
+        # consulted for dynamic loads. A no-op when the nvidia packages
+        # aren't installed (user is on the CPU-only path).
+        try:
+            from .cuda_setup import setup_cuda_dll_paths
+            setup_cuda_dll_paths()
+        except ImportError:
+            # cuda_setup module missing — older venv layout. Not fatal on CPU.
+            pass
+
         try:
             from faster_whisper import WhisperModel
         except ImportError:
@@ -89,10 +129,11 @@ class FasterWhisperLocal(Transcriber):
                 "faster-whisper is not installed.  Run:  pip install faster-whisper"
             )
         # `device='auto'` (and 'cuda') asks ctranslate2 to load CUDA libraries
-        # eagerly. On Windows boxes without CUDA installed this throws
-        # "Library cublas64_12.dll is not found" and the user gets no
-        # transcription at all. Fall back to CPU automatically so a missing
-        # GPU is a soft downgrade instead of a hard failure.
+        # eagerly. On boxes without CUDA installed this throws
+        # "Library cublas64_12.dll is not found" — fall back to CPU
+        # automatically so a missing GPU is a soft downgrade, but emit a
+        # structured warning so the UI can tell the user it's happening
+        # instead of pretending CUDA worked.
         try:
             self._model = WhisperModel(
                 self._model_size,
@@ -101,10 +142,39 @@ class FasterWhisperLocal(Transcriber):
             )
         except Exception as e:  # noqa: BLE001 — ctranslate2 raises generic RuntimeError
             msg = str(e)
-            if self._device != "cpu" and (
-                "cublas" in msg.lower() or "cuda" in msg.lower() or "gpu" in msg.lower()
-            ):
+            requested_device = self._device
+            requested_compute = self._compute_type
+            # Broad substring match covers the common ctranslate2 / CUDA failure
+            # modes: library-not-found for cuBLAS / cuDNN, "CUDA driver" / NVML
+            # errors when the driver is absent or mismatched, and "no GPU
+            # available" when ctranslate2 can't see any device.
+            msg_lower = msg.lower()
+            is_cuda_failure = (
+                requested_device != "cpu"
+                and (
+                    "cublas" in msg_lower
+                    or "cuda" in msg_lower
+                    or "cudnn" in msg_lower
+                    or "gpu" in msg_lower
+                    or "driver" in msg_lower
+                    or "nvml" in msg_lower
+                )
+            )
+            if is_cuda_failure:
                 # CPU-only fallback — int8 is the safe compute_type for CPU.
+                _emit_warning(
+                    "cuda_fallback",
+                    (
+                        f"CUDA unavailable ({msg.strip() or type(e).__name__}). "
+                        "Falling back to CPU transcription — install GPU "
+                        "acceleration from the Transcriber settings to use "
+                        "'cuda'."
+                    ),
+                    requested_device=requested_device,
+                    requested_compute_type=requested_compute,
+                    fallback_device="cpu",
+                    fallback_compute_type="int8",
+                )
                 self._device = "cpu"
                 self._compute_type = "int8"
                 self._model = WhisperModel(

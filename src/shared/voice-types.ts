@@ -61,6 +61,33 @@ export interface VoiceHotkeyConfig {
   scope_process_patterns: string[]
 }
 
+/**
+ * Persisted state of the optional CUDA / GPU acceleration packages
+ * (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) installed into the voice venv.
+ *
+ * Kept in VoiceConfig so we don't re-run the ~5-10s verify probe on every
+ * launch. `installed` means the pip packages are present; `verified` means
+ * we actually got a WhisperModel to load on `device='cuda'`.
+ */
+export interface VoiceGpuRuntimeState {
+  installed: boolean
+  verified: boolean
+  /** ISO timestamp of the last successful verify, null if never verified. */
+  verifiedAt: string | null
+  /** ISO timestamp of the last failed install or verify — throttles auto-retry. */
+  lastFailedAt: string | null
+  /** Error from the most recent failure, retained for UI display. */
+  lastError: string | null
+}
+
+export const DEFAULT_VOICE_GPU_RUNTIME_STATE: VoiceGpuRuntimeState = {
+  installed: false,
+  verified: false,
+  verifiedAt: null,
+  lastFailedAt: null,
+  lastError: null
+}
+
 export interface VoiceConfig {
   transcriber: VoiceTranscriberConfig
   recording: VoiceRecordingConfig
@@ -69,6 +96,8 @@ export interface VoiceConfig {
   setupVersion: number
   /** Set to true once initial Python install + MCP registration has completed at least once. */
   setupComplete: boolean
+  /** GPU acceleration install/verify state. Managed by VoiceServerManager, not the user. */
+  gpuRuntime: VoiceGpuRuntimeState
 }
 
 /** Default Voice settings. Scope defaults to Claude-focused; user can switch to global. */
@@ -125,7 +154,8 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     ]
   },
   setupVersion: 0,
-  setupComplete: false
+  setupComplete: false,
+  gpuRuntime: DEFAULT_VOICE_GPU_RUNTIME_STATE
 }
 
 /** Runtime / daemon status. Broadcast to the UI via VOICE_STATUS_CHANGED. */
@@ -141,6 +171,54 @@ export type VoiceInstallState = 'unknown' | 'missing' | 'installing' | 'installe
  *   - `unsupported`      : exotic platform we haven't tested
  */
 export type VoiceHotkeySupport = 'supported' | 'needs-permission' | 'wayland' | 'unsupported'
+
+/**
+ * Ephemeral GPU hardware detection result (not persisted — probed once per
+ * session via `nvidia-smi`). `hasNvidiaGpu: false` hides the `cuda` option
+ * from the UI and prevents auto-install.
+ */
+export interface VoiceGpuCapability {
+  hasNvidiaGpu: boolean
+  gpuName: string | null
+  driverVersion: string | null
+  cudaVersion: string | null
+  /** Populated when detection fails or the host has no NVIDIA GPU — shown in diagnostics. */
+  error: string | null
+}
+
+export const UNKNOWN_VOICE_GPU_CAPABILITY: VoiceGpuCapability = {
+  hasNvidiaGpu: false,
+  gpuName: null,
+  driverVersion: null,
+  cudaVersion: null,
+  error: null
+}
+
+/** Lifecycle state of the CUDA / GPU runtime install. */
+export type VoiceGpuInstallState =
+  | 'unknown'         // not yet checked this session
+  | 'unavailable'     // no NVIDIA GPU on this host
+  | 'not-installed'   // GPU present but pip packages missing
+  | 'installing'      // pip install in flight
+  | 'verifying'       // pip done, probing ctranslate2.get_cuda_device_count
+  | 'ready'           // installed + verified — safe to use device='cuda'
+  | 'error'           // install or verify failed — see lastError
+
+export interface VoiceGpuStatus {
+  capability: VoiceGpuCapability
+  state: VoiceGpuInstallState
+  /** ISO timestamp of last successful verify. Mirrors VoiceGpuRuntimeState.verifiedAt. */
+  verifiedAt: string | null
+  /** Most recent failure, if any. */
+  lastError: string | null
+}
+
+export const UNKNOWN_VOICE_GPU_STATUS: VoiceGpuStatus = {
+  capability: UNKNOWN_VOICE_GPU_CAPABILITY,
+  state: 'unknown',
+  verifiedAt: null,
+  lastError: null
+}
 
 export interface VoiceRuntimeStatus {
   daemonState: VoiceDaemonState
@@ -168,10 +246,26 @@ export interface VoiceRuntimeStatus {
    * banner and the "Enabled" checkbox gating. See `VoiceHotkeySupport`.
    */
   hotkeySupport: VoiceHotkeySupport
+  /**
+   * GPU acceleration status (NVIDIA CUDA via nvidia-cublas-cu12 + nvidia-cudnn-cu12).
+   * Drives the Transcriber tab GPU banner and gates the `cuda` device option.
+   */
+  gpu: VoiceGpuStatus
+  /**
+   * Set when the Python daemon reports that a CUDA→CPU fallback occurred
+   * (i.e. user requested cuda/auto but ctranslate2 couldn't load). Cleared on
+   * the next successful device selection or explicit dismiss.
+   */
+  gpuWarning: string | null
 }
 
 export interface VoiceSetupProgress {
-  /** 'detect' | 'download-python' | 'create-venv' | 'install-deps' | 'verify' | 'register-mcp' | 'done' | 'error' */
+  /**
+   * Coarse step identifier. Known values:
+   *   'detect' | 'download-python' | 'create-venv' | 'install-deps' | 'verify'
+   *   | 'detect-gpu' | 'install-gpu' | 'verify-gpu'
+   *   | 'register-mcp' | 'done' | 'error'
+   */
   step: string
   pct: number                  // 0–100
   message: string

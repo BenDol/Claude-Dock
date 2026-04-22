@@ -32,13 +32,26 @@ vi.mock('../services', () => ({
 }))
 
 // Settings store — keep it simple
-const cfg = {
+const cfg: any = {
   hotkey: { enabled: true },
-  transcriber: {},
-  recording: {}
+  transcriber: { faster_whisper: { device: 'cpu' } },
+  recording: {},
+  gpuRuntime: {
+    installed: false,
+    verified: false,
+    verifiedAt: null,
+    lastFailedAt: null,
+    lastError: null
+  }
 }
 vi.mock('../voice-settings-store', () => ({
-  getVoiceConfig: () => cfg
+  getVoiceConfig: () => cfg,
+  setVoiceConfig: (patch: any) => {
+    // Shallow patch for the fields tests care about; gpuRuntime is a nested merge.
+    if (patch.gpuRuntime) cfg.gpuRuntime = { ...cfg.gpuRuntime, ...patch.gpuRuntime }
+    if (patch.transcriber) cfg.transcriber = { ...cfg.transcriber, ...patch.transcriber }
+    return cfg
+  }
 }))
 
 // Runtime — runtimeExists returns false initially so no daemon is spawned during enable
@@ -47,7 +60,20 @@ vi.mock('../voice-python-runtime', () => ({
   ensureRuntime: vi.fn().mockResolvedValue({ pythonPath: '/mock/py', venvPython: '/mock/venv/py' }),
   getVenvPython: () => '/mock/venv/py',
   runtimeExists: () => runtimeState.exists,
-  uninstallRuntime: vi.fn().mockResolvedValue(undefined)
+  uninstallRuntime: vi.fn().mockResolvedValue(undefined),
+  // GPU runtime helpers — default to "no NVIDIA GPU" so the setup flow short-circuits cleanly
+  detectGpuCapability: vi.fn().mockResolvedValue({
+    hasNvidiaGpu: false,
+    gpuName: null,
+    driverVersion: null,
+    cudaVersion: null,
+    error: 'nvidia-smi not found — no NVIDIA driver installed'
+  }),
+  isGpuRuntimeInstalled: vi.fn().mockResolvedValue(false),
+  installGpuRuntime: vi.fn().mockResolvedValue({ ok: true }),
+  verifyGpuRuntime: vi.fn().mockResolvedValue({ ok: true }),
+  invalidateGpuCapability: vi.fn(),
+  uninstallGpuRuntime: vi.fn().mockResolvedValue({ ok: true })
 }))
 
 // MCP register — no-op mocks
