@@ -304,7 +304,9 @@ export interface DockApi {
     getSubmoduleList: (projectDir: string) => Promise<GitSubmoduleInfo[]>
     onSubmoduleListRefreshed: (callback: (projectDir: string, list: GitSubmoduleInfo[]) => void) => () => void
     refreshSubmodule: (projectDir: string, subPath: string) => Promise<Partial<GitSubmoduleInfo> | null>
-    generateCommitMsg: (projectDir: string) => Promise<{ success: boolean; message?: string; error?: string }>
+    generateCommitMsg: (projectDir: string, jobId?: string) => Promise<{ success: boolean; message?: string; error?: string }>
+    cancelCommitMsg: (jobId: string) => Promise<{ success: boolean }>
+    onCommitMsgProgress: (callback: (p: { jobId: string; phase: 'single' | 'per-file' | 'combine'; done?: number; total?: number }) => void) => () => void
     reset: (projectDir: string, hash: string, mode: string) => Promise<{ success: boolean; error?: string }>
     revert: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
     cherryPick: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
@@ -845,7 +847,13 @@ const dockApi: DockApi = {
       return () => ipcRenderer.removeListener('gitManager:submoduleListRefreshed', handler)
     },
     refreshSubmodule: (projectDir, subPath) => ipcRenderer.invoke(IPC.GIT_MGR_REFRESH_SUBMODULE, projectDir, subPath),
-    generateCommitMsg: (projectDir) => ipcRenderer.invoke(IPC.GIT_MGR_GENERATE_COMMIT_MSG, projectDir),
+    generateCommitMsg: (projectDir, jobId) => ipcRenderer.invoke(IPC.GIT_MGR_GENERATE_COMMIT_MSG, projectDir, jobId),
+    cancelCommitMsg: (jobId) => ipcRenderer.invoke(IPC.GIT_MGR_CANCEL_COMMIT_MSG, jobId),
+    onCommitMsgProgress: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, p: { jobId: string; phase: 'single' | 'per-file' | 'combine'; done?: number; total?: number }) => callback(p)
+      ipcRenderer.on(IPC.GIT_MGR_COMMIT_MSG_PROGRESS, handler)
+      return () => ipcRenderer.removeListener(IPC.GIT_MGR_COMMIT_MSG_PROGRESS, handler)
+    },
     reset: (projectDir, hash, mode) => ipcRenderer.invoke(IPC.GIT_MGR_RESET, projectDir, hash, mode),
     revert: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_REVERT, projectDir, hash),
     cherryPick: (projectDir, hash) => ipcRenderer.invoke(IPC.GIT_MGR_CHERRY_PICK, projectDir, hash),

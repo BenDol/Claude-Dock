@@ -24,9 +24,11 @@ export interface PluginSettingDef {
   label: string
   /** Help text shown as a tooltip on hover */
   description?: string
-  type: 'boolean' | 'string' | 'number'
+  type: 'boolean' | 'string' | 'number' | 'select'
   /** Placeholder text for string/number inputs */
   placeholder?: string
+  /** Choices for type: 'select' */
+  options?: { value: string; label: string }[]
   defaultValue: unknown
 }
 
