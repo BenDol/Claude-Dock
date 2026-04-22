@@ -201,6 +201,15 @@ export interface VoiceInputDevice {
   defaultSampleRate: number
   /** True when this is the system default input device. */
   isDefault: boolean
+  /**
+   * Host-API preference rank (lower = better). On Windows: WASAPI=0,
+   * DirectSound=2, MME=3, WDM-KS=4. 0 elsewhere (non-Windows has one API).
+   * Used by the device picker to sort recommended entries first so the user
+   * doesn't accidentally pick a legacy/exclusive variant that silently fails.
+   */
+  apiRank?: number
+  /** True when this is the recommended host-API variant of the device. */
+  recommended?: boolean
 }
 
 export interface VoiceListDevicesResult {

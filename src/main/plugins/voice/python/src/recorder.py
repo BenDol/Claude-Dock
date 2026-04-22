@@ -1,6 +1,7 @@
 """Audio recording with manual toggle and auto-stop modes."""
 
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -10,6 +11,37 @@ import numpy as np
 import sounddevice as sd
 
 from src.audio_feedback import beep as _beep
+
+
+def _log(msg: str) -> None:
+    """Diagnostic logging to stderr (captured by Dock's voice-ipc)."""
+    sys.stderr.write(f"[voice-recorder] {msg}\n")
+    sys.stderr.flush()
+
+
+def _describe_device(device) -> str:
+    """Build a human-readable line for the selected device.
+
+    sounddevice's device list on Windows contains 4+ entries per physical
+    microphone (MME, DirectSound, WASAPI, WDM-KS). Logging the resolved
+    entry helps diagnose when users pick a non-WASAPI variant that silently
+    produces no audio at our preferred 16 kHz / int16 format.
+    """
+    try:
+        info = sd.query_devices(device, kind="input")
+    except Exception as exc:
+        return f"device={device!r} (query failed: {exc})"
+    host_name = ""
+    try:
+        host_name = sd.query_hostapis(info.get("hostapi")).get("name", "")
+    except Exception:
+        pass
+    return (
+        f"device={device!r} -> name={info.get('name', '?')!r} "
+        f"hostApi={host_name!r} "
+        f"maxIn={info.get('max_input_channels', '?')} "
+        f"defaultSampleRate={info.get('default_samplerate', '?')}"
+    )
 
 
 class VoiceRecorder:
@@ -44,9 +76,35 @@ class VoiceRecorder:
     # ---- manual toggle ------------------------------------------------ #
 
     def start(self):
-        """Begin recording (call ``stop()`` later to finish)."""
+        """Begin recording (call ``stop()`` later to finish).
+
+        Pre-validates device + format via :func:`sounddevice.check_input_settings`
+        so a mismatched config (common on Windows when the user picks an MME
+        variant of a device that only supports 44.1/48 kHz) surfaces as a
+        clear ``PortAudioError`` instead of silently opening a stream that
+        captures nothing.
+        """
         self._frames = []
         self._is_recording = True
+        _log(
+            f"start requested: samplerate={self.sample_rate} channels={self.channels} "
+            f"dtype=int16 {_describe_device(self.device)}"
+        )
+        try:
+            sd.check_input_settings(
+                device=self.device,
+                channels=self.channels,
+                samplerate=self.sample_rate,
+                dtype="int16",
+            )
+        except Exception as exc:
+            _log(f"check_input_settings failed: {exc}")
+            # Re-raise with a message that names the device so the UI error
+            # tells the user *which* selection is incompatible.
+            raise sd.PortAudioError(
+                f"Device rejected format (samplerate={self.sample_rate}, "
+                f"channels={self.channels}, int16): {exc}"
+            ) from exc
         self._stream = sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
@@ -64,7 +122,14 @@ class VoiceRecorder:
                 self.on_levels(self._compute_bands(indata))
 
     def stop(self) -> str | None:
-        """Stop a toggle-mode recording.  Returns WAV path or None."""
+        """Stop a toggle-mode recording.  Returns WAV path or None.
+
+        Returns ``None`` if the stream produced zero frames *or* produced
+        only silence (peak amplitude == 0). A silent capture almost always
+        means the selected device isn't actually feeding audio into the
+        stream — a known failure mode on Windows when the wrong hostAPI
+        variant of a mic is picked.
+        """
         self._is_recording = False
         if self._stream:
             self._stream.stop()
@@ -72,10 +137,20 @@ class VoiceRecorder:
             self._stream = None
 
         if not self._frames:
+            _log("stop: no frames captured")
             return None
 
         audio = np.concatenate(self._frames)
         self._frames = []
+        peak = int(np.max(np.abs(audio))) if audio.size else 0
+        _log(f"stop: captured {audio.shape[0]} samples, peak={peak}")
+        if peak == 0:
+            _log(
+                "stop: peak amplitude is zero — selected device produced "
+                "no audio; check that the correct microphone (preferably "
+                "the WASAPI variant on Windows) is selected"
+            )
+            return None
         return self._save_wav(audio)
 
     def get_tail_wav(self, seconds: float = 3.0) -> str | None:

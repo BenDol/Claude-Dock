@@ -575,6 +575,23 @@ function RecordingTab({
   const selectedNotInList = cfg.recording.input_device != null
     && !devices.some((d) => String(d.index) === selectedValue)
 
+  // Sort recommended host-API variants to the top so a user on Windows
+  // naturally picks the WASAPI version of their mic — picking MME or WDM-KS
+  // can silently capture no audio at 16 kHz / int16.
+  const sortedDevices = [...devices].sort((a, b) => {
+    const rankA = a.apiRank ?? 99
+    const rankB = b.apiRank ?? 99
+    if (rankA !== rankB) return rankA - rankB
+    return a.name.localeCompare(b.name)
+  })
+
+  // Warn the user if they've pinned a non-recommended variant, since that's
+  // the single most common "my mic doesn't work" misconfiguration on Windows.
+  const selectedDevice = devices.find((d) => String(d.index) === selectedValue)
+  const selectedIsDiscouraged = selectedDevice
+    && selectedDevice.apiRank != null
+    && selectedDevice.apiRank > 0
+
   return (
     <>
       <div className="voice-section">
@@ -588,9 +605,12 @@ function RecordingTab({
               style={{ flex: '1 1 200px', minWidth: 0 }}
             >
               <option value="">System default</option>
-              {devices.map((d) => (
+              {sortedDevices.map((d) => (
                 <option key={d.index} value={d.index}>
-                  {d.isDefault ? '★ ' : ''}{d.name}{d.hostApi ? ` (${d.hostApi})` : ''}
+                  {d.isDefault ? '★ ' : ''}
+                  {d.recommended ? '✓ ' : ''}
+                  {d.name}
+                  {d.hostApi ? ` (${d.hostApi})` : ''}
                 </option>
               ))}
               {selectedNotInList && (
@@ -615,8 +635,17 @@ function RecordingTab({
           <span />
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             "System default" follows the OS default microphone. Pick a specific device to pin it across reboots.
+            On Windows, prefer ✓ (WASAPI) variants — other host APIs may silently capture no audio at 16 kHz.
           </span>
         </div>
+        {selectedIsDiscouraged && (
+          <div className="voice-field">
+            <span />
+            <span style={{ fontSize: 11, color: '#f7768e' }}>
+              Selected device uses {selectedDevice?.hostApi}. If recording produces no audio, switch to the ✓ (WASAPI) variant of the same microphone.
+            </span>
+          </div>
+        )}
         {devicesError && <div className="voice-error-card">{devicesError}</div>}
       </div>
 
