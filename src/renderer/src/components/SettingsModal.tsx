@@ -524,7 +524,7 @@ interface SettingsModalProps {
   initialSection?: string
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior'
+type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior' | 'server'
 
 const TAB_META: Record<SettingsTab, { label: string; description: string; icon: React.ReactNode }> = {
   appearance: {
@@ -590,7 +590,7 @@ const TAB_META: Record<SettingsTab, { label: string; description: string; icon: 
   },
   behavior: {
     label: 'Behavior',
-    description: 'Notifications, integrations, updates, and advanced options.',
+    description: 'Notifications, updates, and advanced options.',
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3" />
@@ -598,12 +598,24 @@ const TAB_META: Record<SettingsTab, { label: string; description: string; icon: 
       </svg>
     ),
   },
+  server: {
+    label: 'Server',
+    description: 'Dock MCP server and cross-terminal coordination.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="6" rx="1.5" />
+        <rect x="3" y="14" width="18" height="6" rx="1.5" />
+        <line x1="7" y1="7" x2="7.01" y2="7" />
+        <line x1="7" y1="17" x2="7.01" y2="17" />
+      </svg>
+    ),
+  },
 }
 
-const TAB_ORDER: SettingsTab[] = ['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior']
+const TAB_ORDER: SettingsTab[] = ['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior', 'server']
 
 type BehaviorSection =
-  | 'general' | 'notifications' | 'shell' | 'integrations'
+  | 'general' | 'notifications' | 'shell'
   | 'api' | 'privacy' | 'updates' | 'advanced'
 
 const BEHAVIOR_SECTIONS: Array<{ id: BehaviorSection; label: string; icon: React.ReactNode }> = [
@@ -630,14 +642,6 @@ const BEHAVIOR_SECTIONS: Array<{ id: BehaviorSection; label: string; icon: React
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="4,17 10,11 4,5" /><line x1="12" y1="19" x2="20" y2="19" />
-      </svg>
-    ),
-  },
-  { id: 'integrations', label: 'Integrations',
-    icon: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
-        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
       </svg>
     ),
   },
@@ -745,10 +749,10 @@ const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   { id: 'beh-shell-height', label: 'Shell panel default height', tab: 'behavior', section: 'shell', card: 'Shell Panel' },
   { id: 'beh-shell-events', label: 'Show dock event cards in terminals', tab: 'behavior', section: 'shell', card: 'Shell Panel', keywords: ['exceptions', 'errors'] },
 
-  // Behavior — Integrations
-  { id: 'beh-mcp', label: 'Dock MCP server', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server', keywords: ['linked'] },
-  { id: 'beh-linked', label: 'Linked mode', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server', keywords: ['coordinate'] },
-  { id: 'beh-linked-msg', label: 'Inter-terminal messaging', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server' },
+  // Server
+  { id: 'server-mcp', label: 'Dock MCP server', tab: 'server', card: 'Dock MCP Server', keywords: ['linked', 'integration'] },
+  { id: 'server-linked', label: 'Linked mode', tab: 'server', card: 'Dock MCP Server', keywords: ['coordinate', 'integration'] },
+  { id: 'server-linked-msg', label: 'Inter-terminal messaging', tab: 'server', card: 'Dock MCP Server', keywords: ['integration'] },
 
   // Behavior — Anthropic API
   { id: 'beh-usage-meter', label: 'Show usage meter', tab: 'behavior', section: 'api', card: 'Anthropic API', keywords: ['cost', 'spend'] },
@@ -807,12 +811,12 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   keybindings: 'Keybindings',
   plugins: 'Plugins',
   behavior: 'Behavior',
+  server: 'Server',
 }
 const BEHAVIOR_SECTION_LABELS: Record<BehaviorSection, string> = {
   general: 'General',
   notifications: 'Notifications',
   shell: 'Shell',
-  integrations: 'Integrations',
   api: 'Anthropic API',
   privacy: 'Privacy',
   updates: 'Updates',
@@ -978,10 +982,13 @@ function loadSettingsZoom(projectDir: string | null): number {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, initialSection }) => {
-  const [tab, setTab] = useState<SettingsTab>(initialTab || 'appearance')
-  const [behaviorSection, setBehaviorSection] = useState<BehaviorSection>(
-    initialSection === 'mcp' ? 'integrations' : 'general'
-  )
+  // Back-compat: older callers (and saved prefs) may still pass
+  // section: 'mcp' to land on the Dock MCP controls. Route them to the new
+  // top-level 'server' tab so the deep-link keeps working.
+  const resolvedInitialTab: SettingsTab =
+    initialSection === 'mcp' ? 'server' : (initialTab || 'appearance')
+  const [tab, setTab] = useState<SettingsTab>(resolvedInitialTab)
+  const [behaviorSection, setBehaviorSection] = useState<BehaviorSection>('general')
   const projectDirForZoom = useDockStore((s) => s.projectDir)
   const [zoom, setZoom] = useState<number>(() => loadSettingsZoom(projectDirForZoom))
   const modalRef = useRef<HTMLDivElement>(null)
@@ -1925,98 +1932,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                 </SettingsCard>
                   </div>
                 )}
-                  {behaviorSection === 'integrations' && (
-                  <div className="settings-stack">
-                    <SettingsCard title="Dock MCP Server">
-                <div className="settings-row">
-                  <span className="settings-label">
-                    Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}
-                  </span>
-                  <div className="settings-btn-group">
-                    <button
-                      className="settings-check-update-btn"
-                      disabled={mcpBusy}
-                      onClick={async () => {
-                        setMcpBusy(true)
-                        setMcpStatus('')
-                        try {
-                          if (mcpInstalled) {
-                            const r = await getDockApi().linked.uninstallMcp()
-                            if (r.success) {
-                              setMcpInstalled(false)
-                              if (settings.linked?.enabled) {
-                                updateLinked({ enabled: false })
-                                await getDockApi().linked.setEnabled(false)
-                              }
-                              setMcpStatus('Uninstalled successfully.')
-                            } else {
-                              setMcpStatus(r.error || 'Uninstall failed.')
-                            }
-                          } else {
-                            const r = await getDockApi().linked.installMcp()
-                            if (r.success) {
-                              setMcpInstalled(true)
-                              setMcpStatus('Installed. Restart dock to activate.')
-                            } else {
-                              setMcpStatus(r.error || 'Install failed.')
-                            }
-                          }
-                        } catch {
-                          setMcpStatus('Operation failed.')
-                        }
-                        setMcpBusy(false)
-                      }}
-                    >
-                      {mcpBusy ? '...' : mcpInstalled ? 'Uninstall' : 'Install'}
-                    </button>
-                    <button
-                      className="settings-check-update-btn"
-                      disabled={!mcpInstalled}
-                      onClick={() => getDockApi().dock.restart()}
-                      title="Restart dock to apply MCP changes"
-                    >
-                      Restart Dock
-                    </button>
-                  </div>
-                </div>
-                {mcpStatus && <div className="settings-update-status">{mcpStatus}</div>}
-                <label className={`checkbox-label${mcpInstalled ? '' : ' disabled'}`}>
-                  <input
-                    type="checkbox"
-                    checked={settings.linked?.enabled ?? false}
-                    disabled={!mcpInstalled}
-                    onChange={async (e) => {
-                      const enabled = e.target.checked
-                      updateLinked({ enabled })
-                      await getDockApi().linked.setEnabled(enabled)
-                    }}
-                  />
-                  Linked Mode
-                  {!mcpInstalled && <span className="settings-hint"> (install MCP first)</span>}
-                </label>
-                <div className="settings-description">
-                  When enabled, Claude sessions can see what other terminals are working on to coordinate tasks.
-                </div>
-                <label className={`checkbox-label${mcpInstalled && settings.linked?.enabled ? '' : ' disabled'}`} style={{ paddingLeft: 24 }}>
-                  <input
-                    type="checkbox"
-                    checked={settings.linked?.messagingEnabled ?? false}
-                    disabled={!mcpInstalled || !settings.linked?.enabled}
-                    onChange={async (e) => {
-                      const enabled = e.target.checked
-                      updateLinked({ messagingEnabled: enabled })
-                      await getDockApi().linked.setMessaging(enabled)
-                    }}
-                  />
-                  Inter-terminal Messaging
-                  {(!mcpInstalled || !settings.linked?.enabled) && <span className="settings-hint"> (enable Linked Mode first)</span>}
-                </label>
-                <div className="settings-description" style={{ paddingLeft: 24 }}>
-                  Allow Claude sessions to send messages to each other for coordination.
-                </div>
-                </SettingsCard>
-                  </div>
-                )}
                   {behaviorSection === 'api' && (
                   <div className="settings-stack">
                     <SettingsCard title="Anthropic API">
@@ -2316,6 +2231,98 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   </div>
                 )}
                 </div>
+              </div>
+            )}
+            {tab === 'server' && (
+              <div className="settings-stack">
+                <SettingsCard title="Dock MCP Server">
+                  <div className="settings-row">
+                    <span className="settings-label">
+                      Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}
+                    </span>
+                    <div className="settings-btn-group">
+                      <button
+                        className="settings-check-update-btn"
+                        disabled={mcpBusy}
+                        onClick={async () => {
+                          setMcpBusy(true)
+                          setMcpStatus('')
+                          try {
+                            if (mcpInstalled) {
+                              const r = await getDockApi().linked.uninstallMcp()
+                              if (r.success) {
+                                setMcpInstalled(false)
+                                if (settings.linked?.enabled) {
+                                  updateLinked({ enabled: false })
+                                  await getDockApi().linked.setEnabled(false)
+                                }
+                                setMcpStatus('Uninstalled successfully.')
+                              } else {
+                                setMcpStatus(r.error || 'Uninstall failed.')
+                              }
+                            } else {
+                              const r = await getDockApi().linked.installMcp()
+                              if (r.success) {
+                                setMcpInstalled(true)
+                                setMcpStatus('Installed. Restart dock to activate.')
+                              } else {
+                                setMcpStatus(r.error || 'Install failed.')
+                              }
+                            }
+                          } catch {
+                            setMcpStatus('Operation failed.')
+                          }
+                          setMcpBusy(false)
+                        }}
+                      >
+                        {mcpBusy ? '...' : mcpInstalled ? 'Uninstall' : 'Install'}
+                      </button>
+                      <button
+                        className="settings-check-update-btn"
+                        disabled={!mcpInstalled}
+                        onClick={() => getDockApi().dock.restart()}
+                        title="Restart dock to apply MCP changes"
+                      >
+                        Restart Dock
+                      </button>
+                    </div>
+                  </div>
+                  {mcpStatus && <div className="settings-update-status">{mcpStatus}</div>}
+                  <label className={`checkbox-label${mcpInstalled ? '' : ' disabled'}`}>
+                    <input
+                      type="checkbox"
+                      checked={settings.linked?.enabled ?? false}
+                      disabled={!mcpInstalled}
+                      onChange={async (e) => {
+                        const enabled = e.target.checked
+                        updateLinked({ enabled })
+                        await getDockApi().linked.setEnabled(enabled)
+                      }}
+                    />
+                    Linked Mode
+                    {!mcpInstalled && <span className="settings-hint"> (install MCP first)</span>}
+                  </label>
+                  <div className="settings-description">
+                    When enabled, Claude sessions can see what other terminals are working on to coordinate tasks.
+                  </div>
+                  <label className={`checkbox-label${mcpInstalled && settings.linked?.enabled ? '' : ' disabled'}`} style={{ paddingLeft: 24 }}>
+                    <input
+                      type="checkbox"
+                      checked={settings.linked?.messagingEnabled ?? false}
+                      disabled={!mcpInstalled || !settings.linked?.enabled}
+                      onChange={async (e) => {
+                        const enabled = e.target.checked
+                        updateLinked({ messagingEnabled: enabled })
+                        await getDockApi().linked.setMessaging(enabled)
+                      }}
+                    />
+                    Inter-terminal Messaging
+                    {(!mcpInstalled || !settings.linked?.enabled) && <span className="settings-hint"> (enable Linked Mode first)</span>}
+                  </label>
+                  <div className="settings-description" style={{ paddingLeft: 24 }}>
+                    Allow Claude sessions to send messages to each other for coordination.
+                  </div>
+                </SettingsCard>
               </div>
             )}
           </div>
