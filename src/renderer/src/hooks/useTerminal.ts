@@ -457,9 +457,15 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       }
       // Pending update matches incoming — keep the existing timer running.
       if (pinnedBtnPendingPxRef.current === footerPx && pinnedBtnTimerRef.current) return
-      // Restart the stability timer: button only moves once the height has
-      // held for 250ms, long enough to outlast per-frame detection jitter
-      // during active streaming.
+      // Asymmetric hysteresis: the detection algorithm over-includes context
+      // above the spinner when it misreads a completed tool call as still
+      // active, so the "longer" reading is typically the wrong one. Shrinking
+      // applies quickly (50ms, just enough to filter pure per-frame noise);
+      // growing requires sustained stability (500ms) so transient spikes into
+      // the over-including state don't lock the button into the wrong
+      // position.
+      const shrinking = footerPx < currentPx
+      const delay = shrinking ? 50 : 500
       pinnedBtnPendingPxRef.current = footerPx
       if (pinnedBtnTimerRef.current) clearTimeout(pinnedBtnTimerRef.current)
       pinnedBtnTimerRef.current = setTimeout(() => {
@@ -468,7 +474,7 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         pinnedBtnPendingPxRef.current = null
         if (target == null) return
         applyButtonBottom(target)
-      }, 250)
+      }, delay)
     }
     if (!active) {
       footer.classList.remove('visible')
