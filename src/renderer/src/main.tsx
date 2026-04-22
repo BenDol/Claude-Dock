@@ -12,9 +12,25 @@ import App from './App'
 // only knows about them via webContents 'render-process-gone', which
 // doesn't include the JS error message.
 window.onerror = (message, source, lineno, colno, error) => {
-  const text = `[renderer] uncaught error: ${message} at ${source}:${lineno}:${colno}${error?.stack ? '\n' + error.stack : ''}`
+  const stack = error?.stack || ''
+  const text = `[renderer] uncaught error: ${message} at ${source}:${lineno}:${colno}${stack ? '\n' + stack : ''}`
   try { window.dockApi?.debug?.write(text) } catch { /* IPC may be dead */ }
-  try { window.dockApi?.debug?.reportCrash('uncaughtError', String(message), error?.stack || `${source}:${lineno}:${colno}`) } catch { /* IPC may be dead */ }
+
+  // Known xterm.js v5 race: Viewport's constructor schedules a fire-and-forget
+  // `setTimeout(() => syncScrollArea())` that can fire after the terminal's
+  // RenderService has been disposed, making `_renderer.value.dimensions` throw
+  // "Cannot read properties of undefined (reading 'dimensions')". Primary
+  // mitigation is the deferred `term.dispose()` in useTerminal; this filter
+  // keeps any remaining stragglers out of the crash-report stream while still
+  // preserving the full entry in the debug log above.
+  const isXtermViewportRace =
+    typeof message === 'string' &&
+    message.includes("reading 'dimensions'") &&
+    stack.includes('syncScrollArea')
+
+  if (!isXtermViewportRace) {
+    try { window.dockApi?.debug?.reportCrash('uncaughtError', String(message), stack || `${source}:${lineno}:${colno}`) } catch { /* IPC may be dead */ }
+  }
   console.error(text)
 }
 
