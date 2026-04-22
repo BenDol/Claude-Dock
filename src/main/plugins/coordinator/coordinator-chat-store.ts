@@ -56,11 +56,20 @@ function normaliseEntry(raw: unknown): ProjectChatState {
   }
   if (typeof raw === 'object') {
     const obj = raw as Partial<ProjectChatState>
+    const messagesValid = Array.isArray(obj.messages)
+    const sessionIdValid = obj.latestSessionId === undefined || obj.latestSessionId === null || typeof obj.latestSessionId === 'string'
+    if (!messagesValid || !sessionIdValid) {
+      logError('[coordinator-chat] discarded malformed persisted entry', {
+        messagesType: typeof obj.messages,
+        sessionIdType: typeof obj.latestSessionId
+      })
+    }
     return {
-      messages: Array.isArray(obj.messages) ? obj.messages : [],
+      messages: messagesValid ? (obj.messages as CoordinatorMessage[]) : [],
       latestSessionId: typeof obj.latestSessionId === 'string' ? obj.latestSessionId : null
     }
   }
+  logError('[coordinator-chat] discarded persisted entry of unexpected type', { type: typeof raw })
   return { messages: [], latestSessionId: null }
 }
 
@@ -113,13 +122,20 @@ export function upsertMessage(
       ? state.messages.map((m, i) => (i === idx ? message : m))
       : [...state.messages, message]
   const trimmed = capMessages(next, maxMessages)
-  writeState(projectDir, { messages: trimmed, latestSessionId: state.latestSessionId })
+  const ok = writeState(projectDir, { messages: trimmed, latestSessionId: state.latestSessionId })
+  if (!ok) {
+    logError('[coordinator-chat] failed to upsert message', projectDir, message.id)
+  }
   return trimmed
 }
 
 export function clearHistory(projectDir: string): void {
   const key = projectKey(projectDir)
-  safeWriteSync(() => getStore().delete(key))
+  const ok = safeWriteSync(() => getStore().delete(key))
+  if (!ok) {
+    logError('[coordinator-chat] failed to clear history', projectDir)
+    return
+  }
   log('[coordinator-chat] cleared history', projectDir)
 }
 
@@ -129,12 +145,18 @@ export function getLatestSessionId(projectDir: string): string | null {
 
 export function setLatestSessionId(projectDir: string, id: string): void {
   const state = readState(projectDir)
-  writeState(projectDir, { messages: state.messages, latestSessionId: id })
+  const ok = writeState(projectDir, { messages: state.messages, latestSessionId: id })
+  if (!ok) {
+    logError('[coordinator-chat] failed to set latest session id', projectDir, id)
+  }
 }
 
 export function clearLatestSessionId(projectDir: string): void {
   const state = readState(projectDir)
-  writeState(projectDir, { messages: state.messages, latestSessionId: null })
+  const ok = writeState(projectDir, { messages: state.messages, latestSessionId: null })
+  if (!ok) {
+    logError('[coordinator-chat] failed to clear latest session id', projectDir)
+  }
 }
 
 export function getChatStorePath(): string {

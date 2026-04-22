@@ -33,12 +33,18 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
     (providerId: CoordinatorProviderId) => {
       const preset = providers.find((p) => p.id === providerId)
       if (!preset) return
-      // Reset model + baseUrl to the preset defaults so switching providers
-      // doesn't leave stale values that make the next request fail.
+      // Reset model + baseUrl + temperature to the preset defaults so switching
+      // providers doesn't leave stale values that make the next request fail
+      // or confuse the user when fields toggle visibility (e.g. claude-sdk
+      // hides temperature; flipping back must not keep a stale value).
       void setConfigPatch({
         provider: providerId,
         model: preset.defaultModel,
-        baseUrl: preset.baseUrl ?? ''
+        baseUrl: preset.baseUrl ?? '',
+        // Reset to the same default the hint text advertises so toggling the
+        // claude-sdk provider (which hides the field) doesn't leave the user
+        // with a stale temperature next time they pick a key-based backend.
+        temperature: 0.2
       })
     },
     [providers, setConfigPatch]
@@ -67,7 +73,7 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
   if (!config) return null
 
   return (
-    <div className="coord-settings" ref={rootRef} tabIndex={-1} role="dialog" aria-label="Coordinator settings">
+    <div className="coord-settings" ref={rootRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Coordinator settings">
       <div className="coord-settings-header">
         <h3>Coordinator Settings</h3>
         <button className="coord-header-btn" onClick={onClose} title="Close (Esc)">

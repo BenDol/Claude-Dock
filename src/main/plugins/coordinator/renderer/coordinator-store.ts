@@ -26,6 +26,8 @@ const dockApi = (): Window['dockApi'] => {
   return api
 }
 
+const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err)
+
 interface CoordinatorState {
   projectDir: string | null
   messages: CoordinatorMessage[]
@@ -196,7 +198,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       set((s) => ({ messages: [...s.messages, userMsg] }))
       await dockApi().coordinator.sendMessage(projectDir, userText)
     } catch (err) {
-      set({ turnActive: false, streamingMessageId: null, error: (err as Error).message })
+      set({ turnActive: false, streamingMessageId: null, error: errMessage(err) })
     }
   },
 
@@ -224,7 +226,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     try {
       await dockApi().coordinator.resetSessionId(projectDir)
     } catch (err) {
-      set({ error: (err as Error).message })
+      set({ error: errMessage(err) })
     }
   },
 
@@ -233,7 +235,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       const next = await dockApi().coordinator.setConfig(patch)
       set({ config: next })
     } catch (err) {
-      set({ error: (err as Error).message })
+      set({ error: errMessage(err) })
     }
   },
 
@@ -250,7 +252,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     } catch (err) {
       set({
         testingConnection: false,
-        testConnectionResult: { ok: false, error: (err as Error).message }
+        testConnectionResult: { ok: false, error: errMessage(err) }
       })
     }
   },
