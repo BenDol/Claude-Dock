@@ -20,6 +20,7 @@ import { registerToolbarAction } from '@dock-renderer/toolbar-actions'
 import { usePanelStore } from '@dock-renderer/stores/panel-store'
 import { useDockStore } from '@dock-renderer/stores/dock-store'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
+import { detectWorktreePath } from '@dock-renderer/lib/worktree-utils'
 
 registerPanel({
   id: 'coordinator',
@@ -61,7 +62,34 @@ if (api?.coordinator) {
     try {
       coordSpawnSeq++
       const id = `term-coord-${Date.now()}-${coordSpawnSeq}`
-      useDockStore.getState().addTerminal(id)
+      const cwd = req.options?.cwd
+      const title = req.options?.title
+
+      // If the requested cwd sits inside a dock-managed worktree
+      // (`.claude/worktrees/<id>`), register the terminal as a worktree
+      // terminal BEFORE addTerminal so (a) useTerminal's doSpawn reads the
+      // worktree path from the store and points the PTY at the worktree,
+      // and (b) the worktree button + actions render in the terminal
+      // header. Mirrors TerminalCard.spawnWorktreeTerminal's ordering —
+      // worktree set first, then addTerminal on the next tick so the
+      // store update commits before the new TerminalCard mounts.
+      const worktreePath = cwd ? detectWorktreePath(cwd) : null
+      if (worktreePath) {
+        useDockStore.getState().setTerminalWorktree(id, worktreePath)
+      }
+
+      const finishSpawn = (): void => {
+        const s = useDockStore.getState()
+        s.addTerminal(id)
+        if (title) s.setTerminalTitle(id, title)
+      }
+
+      if (worktreePath) {
+        setTimeout(finishSpawn, 0)
+      } else {
+        finishSpawn()
+      }
+
       api.coordinator.replySpawnTerminal(req.correlationId, id)
     } catch (err) {
       api.coordinator.replySpawnTerminal(req.correlationId, null, (err as Error).message)
