@@ -14,6 +14,8 @@ import { resolveRendererOverride } from '../plugin-renderer-utils'
 import { NotificationManager } from '../../notification-manager'
 import type { VoiceServices, VoiceNotificationPayload } from './services'
 
+declare const __BUILD_SHA__: string
+
 /**
  * Files we expect to find in the resolved python/ tree. Missing any of these
  * is a packaging/install drift bug, not a user config issue — the TS bundle
@@ -44,18 +46,140 @@ export const EXPECTED_PYTHON_SCRIPTS = [
   'src/cuda_setup.py'
 ] as const
 
+export type PythonDirSource = 'override' | 'packaged' | 'fallback' | 'dev'
+
 export interface PythonIntegrityReport {
   pythonDir: string
-  source: 'override' | 'packaged' | 'dev'
+  source: PythonDirSource
   missing: string[]
   present: string[]
+}
+
+/**
+ * Pristine copy of the Python tree that electron-vite's `copyVoicePythonPlugin`
+ * step lays into `out/main/voice-python/` on every build. Because the whole
+ * `out/` tree is packed into `app.asar`, this copy rides inside a single
+ * atomic blob — NSIS either replaces all of app.asar or none of it, so this
+ * source is guaranteed to match the running TS bundle. Used as the self-heal
+ * source when the on-disk `extraResources` copy drifts (see
+ * `ensureFallbackExtracted`).
+ */
+function asarBundledPythonDir(): string {
+  return path.join(__dirname, 'voice-python')
+}
+
+function fallbackPythonDir(): string {
+  return path.join(app.getPath('userData'), 'voice-python-fallback')
+}
+
+const FALLBACK_STAMP_FILENAME = '.asar-source.json'
+
+function currentBuildSha(): string {
+  try {
+    return typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function checkIntegrity(dir: string): { missing: string[]; present: string[] } {
+  const missing: string[] = []
+  const present: string[] = []
+  for (const name of EXPECTED_PYTHON_SCRIPTS) {
+    if (fs.existsSync(path.join(dir, name))) present.push(name)
+    else missing.push(name)
+  }
+  return { missing, present }
+}
+
+/**
+ * Copy the asar-bundled Python tree into a writable userData directory so
+ * we have a guaranteed-fresh source to feed to the daemons when the
+ * `extraResources` copy is stale (the classic "NSIS couldn't replace a
+ * locked .pyc so it silently skipped half the subdir" failure mode).
+ *
+ * Idempotent: stamped with the current app build SHA. Subsequent calls for
+ * the same build skip the copy unless the extracted dir itself has been
+ * tampered with. Returns null on unrecoverable failure so callers can fall
+ * back to surfacing the error instead of pointing at an empty directory.
+ */
+function ensureFallbackExtracted(): string | null {
+  const fallback = fallbackPythonDir()
+  const stampPath = path.join(fallback, FALLBACK_STAMP_FILENAME)
+  const sha = currentBuildSha()
+
+  if (fs.existsSync(stampPath)) {
+    try {
+      const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf-8')) as { buildSha?: string }
+      if (stamp.buildSha === sha) {
+        const check = checkIntegrity(fallback)
+        if (check.missing.length === 0) return fallback
+        log(
+          `[voice] fallback python tree stamp matched buildSha=${sha} but integrity failed ` +
+          `(missing=${check.missing.join(', ')}) — re-extracting`
+        )
+      } else {
+        log(
+          `[voice] fallback python tree built for ${stamp.buildSha ?? '?'}, current buildSha=${sha} — re-extracting`
+        )
+      }
+    } catch (err) {
+      logError('[voice] failed to read fallback stamp — re-extracting', err)
+    }
+  }
+
+  const src = asarBundledPythonDir()
+  if (!fs.existsSync(src)) {
+    logError(`[voice] asar-bundled python source missing at ${src} — cannot self-heal`)
+    return null
+  }
+
+  try {
+    // Clean slate. maxRetries handles Windows' transient ENOTEMPTY/EBUSY
+    // while __pycache__ holds its parent dir briefly busy after daemon exit.
+    fs.rmSync(fallback, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    fs.mkdirSync(path.dirname(fallback), { recursive: true })
+    fs.cpSync(src, fallback, {
+      recursive: true,
+      filter: (p) => {
+        const name = path.basename(p)
+        if (name === '__pycache__') return false
+        if (name.endsWith('.pyc')) return false
+        return true
+      }
+    })
+    const verify = checkIntegrity(fallback)
+    if (verify.missing.length > 0) {
+      logError(
+        `[voice] self-heal extraction completed but integrity still failed ` +
+        `(missing=${verify.missing.join(', ')}) — asar source may be truncated at ${src}`
+      )
+      return null
+    }
+    fs.writeFileSync(
+      stampPath,
+      JSON.stringify(
+        { buildSha: sha, extractedAt: new Date().toISOString(), source: src },
+        null,
+        2
+      )
+    )
+    log(
+      `[voice] self-healed stale python tree — extracted asar-bundled copy ` +
+      `from ${src} to ${fallback} (buildSha=${sha})`
+    )
+    return fallback
+  } catch (err) {
+    logError('[voice] self-heal extraction failed', err)
+    return null
+  }
 }
 
 function resolveBundledPythonDir(): string {
   return resolveBundledPythonDirWithSource().dir
 }
 
-function resolveBundledPythonDirWithSource(): { dir: string; source: 'override' | 'packaged' | 'dev' } {
+function resolveBundledPythonDirWithSource(): { dir: string; source: PythonDirSource } {
   // Plugin updates can deliver an updated python/ tree alongside the JS
   // bundle (see scripts/generate-plugin-archive.js `extraDirs`). When the
   // plugin-updater has installed an override for voice, prefer its python/
@@ -70,8 +194,19 @@ function resolveBundledPythonDirWithSource(): { dir: string; source: 'override' 
     'python'
   )
   if (fs.existsSync(overridePython)) {
-    return { dir: overridePython, source: 'override' }
+    const check = checkIntegrity(overridePython)
+    if (check.missing.length === 0) {
+      return { dir: overridePython, source: 'override' }
+    }
+    // A stale override means the plugin-updater wrote a python/ tree from a
+    // plugins.zip that's older than the app binary currently running. The
+    // app's own asar-bundled copy is by definition fresher — fall through.
+    log(
+      `[voice] ignoring stale override at ${overridePython} ` +
+      `(missing=${check.missing.join(', ')}) — falling through to packaged/fallback`
+    )
   }
+
   // In packaged builds the Python runtime ships via electron-builder's
   // `extraResources`, which copies src/main/plugins/voice/python/ into
   // <install>/resources/voice-python/. `asarUnpack` was attempted first but
@@ -80,8 +215,29 @@ function resolveBundledPythonDirWithSource(): { dir: string; source: 'override' 
   // `copyVoicePythonPlugin` step in electron.vite.config.ts still copies the
   // same tree to <bundle>/voice-python/ alongside __dirname.
   if (app.isPackaged) {
-    return { dir: path.join(process.resourcesPath, 'voice-python'), source: 'packaged' }
+    const packaged = path.join(process.resourcesPath, 'voice-python')
+    const check = checkIntegrity(packaged)
+    if (check.missing.length === 0) {
+      return { dir: packaged, source: 'packaged' }
+    }
+    // NSIS upgrades can silently leave `resources/voice-python/src/` stale
+    // when Python holds any .pyc file inside it busy at upgrade time — the
+    // top-level files get replaced but the locked subdirectory doesn't. The
+    // asar-bundled copy is immune (asar is replaced atomically), so lay it
+    // down on disk as a fallback and steer daemons to it.
+    log(
+      `[voice] packaged python tree is stale at ${packaged} ` +
+      `(missing=${check.missing.join(', ')}) — attempting self-heal from asar-bundled copy`
+    )
+    const healed = ensureFallbackExtracted()
+    if (healed) return { dir: healed, source: 'fallback' }
+    // Self-heal failed. Return the stale packaged path so the downstream
+    // integrity check produces its usual actionable error instead of a
+    // misleading "fallback" label pointing at a directory that doesn't
+    // contain what we claim.
+    return { dir: packaged, source: 'packaged' }
   }
+
   return { dir: path.join(__dirname, 'voice-python'), source: 'dev' }
 }
 
@@ -92,15 +248,7 @@ function resolveBundledPythonDirWithSource(): { dir: string; source: 'override' 
  */
 export function verifyBundledPythonIntegrity(): PythonIntegrityReport {
   const { dir, source } = resolveBundledPythonDirWithSource()
-  const missing: string[] = []
-  const present: string[] = []
-  for (const name of EXPECTED_PYTHON_SCRIPTS) {
-    if (fs.existsSync(path.join(dir, name))) {
-      present.push(name)
-    } else {
-      missing.push(name)
-    }
-  }
+  const { missing, present } = checkIntegrity(dir)
   return { pythonDir: dir, source, missing, present }
 }
 
@@ -114,7 +262,9 @@ export function repairHintForSource(source: PythonIntegrityReport['source']): st
     case 'override':
       return 'Plugin override is incomplete — reset voice in Settings → Plugins → Updates, or delete %APPDATA%/claude-dock/plugin-overrides/voice.'
     case 'packaged':
-      return 'Installed app is out of sync with its TS bundle — reinstall the latest Claude Dock.'
+      return 'Installed app is out of sync with its TS bundle and self-heal from app.asar also failed — reinstall the latest Claude Dock.'
+    case 'fallback':
+      return 'Self-healed copy is incomplete — delete %APPDATA%/claude-dock/voice-python-fallback and restart the app.'
     case 'dev':
       return 'Dev build is missing the script — run `npx electron-vite build` (or restart `electron-vite dev`) to refresh out/main/voice-python/.'
   }
