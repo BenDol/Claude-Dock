@@ -180,6 +180,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
 
       <InputBar
         inputRef={inputRef}
+        projectDir={projectDir}
         turnActive={turnActive}
         onSend={(text) => void sendMessage(text)}
         onCancel={() => void cancel()}
@@ -355,13 +356,62 @@ function formatToolContent(content: string): string {
 
 /* ── Input bar ──────────────────────────────────────────────────────────── */
 
+type DictationState = 'idle' | 'recording' | 'transcribing'
+
 const InputBar: React.FC<{
   inputRef: React.RefObject<HTMLTextAreaElement | null>
+  projectDir: string
   turnActive: boolean
   onSend: (text: string) => void
   onCancel: () => void
-}> = ({ inputRef, turnActive, onSend, onCancel }) => {
+}> = ({ inputRef, projectDir, turnActive, onSend, onCancel }) => {
   const [text, setText] = useState('')
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [dictation, setDictation] = useState<DictationState>('idle')
+  const dictationRef = useRef<DictationState>('idle')
+  const mountedRef = useRef(true)
+  const setError = useCoordinatorStore((s) => s.setError)
+
+  // Keep a ref in sync so cleanup effects can inspect the latest state without
+  // re-running on every transition.
+  useEffect(() => { dictationRef.current = dictation }, [dictation])
+
+  // Guard async handlers against post-unmount state updates (e.g. a slow
+  // transcription resumes after the Coordinator is closed).
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  // Subscribe to voice plugin enable/disable. Mirrors the pattern used in
+  // src/renderer/src/components/Toolbar.tsx — poll once on mount + refetch on
+  // the 'plugin-state-changed' window event the plugin manager emits.
+  useEffect(() => {
+    if (!projectDir) return
+    let cancelled = false
+    const fetchState = (): void => {
+      getDockApi().plugins.getStates(projectDir).then((states) => {
+        if (cancelled) return
+        setVoiceEnabled(states.voice?.enabled ?? false)
+      }).catch(() => { /* ignore — Speak simply stays hidden */ })
+    }
+    fetchState()
+    window.addEventListener('plugin-state-changed', fetchState)
+    return () => {
+      cancelled = true
+      window.removeEventListener('plugin-state-changed', fetchState)
+    }
+  }, [projectDir])
+
+  // Cancel any in-flight dictation on unmount or project change. Prevents a
+  // stale Python child from transcribing into a project the user has left.
+  useEffect(() => {
+    return () => {
+      if (dictationRef.current !== 'idle') {
+        getDockApi().voice.dictate.cancel().catch(() => { /* ignore */ })
+      }
+    }
+  }, [projectDir])
 
   const submit = (): void => {
     const trimmed = text.trim()
@@ -372,10 +422,81 @@ const InputBar: React.FC<{
     requestAnimationFrame(() => inputRef.current?.focus())
   }
 
+  const startDictation = async (): Promise<void> => {
+    setError(null)
+    setDictation('recording')
+    try {
+      const res = await getDockApi().voice.dictate.start()
+      if (!mountedRef.current) return
+      if (res.error) {
+        setDictation('idle')
+        if (res.error === 'Voice runtime not installed') {
+          setError('Voice runtime not installed. Opening Voice settings…')
+          getDockApi().voice.open().catch(() => { /* ignore */ })
+        } else {
+          setError(res.error)
+        }
+      }
+    } catch (err) {
+      if (!mountedRef.current) return
+      setDictation('idle')
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const stopDictation = async (): Promise<void> => {
+    setDictation('transcribing')
+    try {
+      const res = await getDockApi().voice.dictate.stop()
+      if (!mountedRef.current) return
+      setDictation('idle')
+      if (res.error) {
+        // "Dictation cancelled" comes from a kill path — silent.
+        if (res.error !== 'Dictation cancelled') setError(res.error)
+        return
+      }
+      const transcribed = (res.text ?? '').trim()
+      if (!transcribed) {
+        setError('No speech could be transcribed.')
+        return
+      }
+      onSend(transcribed)
+      setText('')
+      requestAnimationFrame(() => inputRef.current?.focus())
+    } catch (err) {
+      if (!mountedRef.current) return
+      setDictation('idle')
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const cancelDictation = (): void => {
+    getDockApi().voice.dictate.cancel().catch(() => { /* ignore */ })
+    setDictation('idle')
+  }
+
+  // Escape-to-cancel needs to work even though the textarea is disabled during
+  // recording (which blurs it and drops its keydown handler). Listen globally
+  // only while actively recording so we don't hijack Escape the rest of the time.
+  useEffect(() => {
+    if (dictation !== 'recording') return
+    const onDocKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        cancelDictation()
+      }
+    }
+    document.addEventListener('keydown', onDocKey)
+    return () => document.removeEventListener('keydown', onDocKey)
+  }, [dictation])
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (turnActive) return
+      // Enter on empty input with voice enabled doesn't start dictation —
+      // require an explicit click on Speak so a stray Enter can't trip the mic.
+      if (dictation !== 'idle') return
       submit()
     }
   }
@@ -389,33 +510,78 @@ const InputBar: React.FC<{
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [text, textareaRef])
 
+  const renderButton = (): React.ReactNode => {
+    if (turnActive) {
+      return (
+        <button className="coord-send-btn cancel" onClick={onCancel} title="Cancel">
+          Stop
+        </button>
+      )
+    }
+    if (dictation === 'transcribing') {
+      return (
+        <button className="coord-send-btn" disabled title="Transcribing…">
+          Transcribing…
+        </button>
+      )
+    }
+    if (dictation === 'recording') {
+      return (
+        <button
+          className="coord-send-btn recording"
+          onClick={() => void stopDictation()}
+          title="Stop & send (Esc to cancel)"
+        >
+          Stop
+        </button>
+      )
+    }
+    const empty = text.trim().length === 0
+    if (empty && voiceEnabled) {
+      return (
+        <button
+          className="coord-send-btn speak"
+          onClick={() => void startDictation()}
+          title="Speak (click again to stop & send)"
+        >
+          Speak
+        </button>
+      )
+    }
+    return (
+      <button
+        className="coord-send-btn"
+        onClick={submit}
+        disabled={empty}
+        title="Send (Enter)"
+      >
+        Send
+      </button>
+    )
+  }
+
+  const placeholder = turnActive
+    ? 'Working…'
+    : dictation === 'recording'
+      ? 'Listening… click Stop to send, Esc to cancel'
+      : dictation === 'transcribing'
+        ? 'Transcribing…'
+        : 'Ask the coordinator to dispatch work across your terminals'
+
   return (
     <div className="coord-input-wrap">
       <div className="coord-input-row">
         <textarea
           ref={textareaRef}
           className="coord-textarea"
-          placeholder={turnActive ? 'Working…' : 'Ask the coordinator to dispatch work across your terminals'}
+          placeholder={placeholder}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          disabled={false}
+          disabled={dictation !== 'idle'}
         />
-        {turnActive ? (
-          <button className="coord-send-btn cancel" onClick={onCancel} title="Cancel">
-            Stop
-          </button>
-        ) : (
-          <button
-            className="coord-send-btn"
-            onClick={submit}
-            disabled={text.trim().length === 0}
-            title="Send (Enter)"
-          >
-            Send
-          </button>
-        )}
+        {renderButton()}
       </div>
     </div>
   )

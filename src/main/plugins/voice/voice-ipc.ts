@@ -35,8 +35,34 @@ const win = () => VoiceWindowManager.getInstance()
 // closes the Voice window mid-recording.
 const activeTestRecords = new Set<ChildProcess>()
 
+// Persistent dictation daemon (Coordinator Speak button). Loads the
+// faster-whisper model once and reuses it across start/stop cycles — spawning
+// a fresh Python each time cost 2-20s of model-load latency.
+//
+// Protocol is line-JSON over stdin/stdout, defined in dictation_daemon.py.
+// Only one command can be in-flight at a time (enforced by inFlight guard).
+interface DictationDaemon {
+  child: ChildProcess
+  // Hash of the recording+transcriber config the daemon was started with.
+  // Mismatch triggers a respawn so e.g. switching from base -> large-v3 picks
+  // up the new model without requiring an app restart.
+  settingsHash: string
+  // Ready-line buffer: resolves once the daemon emits {"ready": true}.
+  ready: { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void }
+  // Zero or one pending request. The child only emits a response per command.
+  inFlight: { resolve: (msg: Record<string, unknown>) => void; reject: (e: Error) => void } | null
+  // Partial-line buffer — stdout may chunk mid-line.
+  stdoutTail: string
+  stderr: string
+}
+let dictationDaemon: DictationDaemon | null = null
+
 function serverScript(): string {
   return path.join(svc().paths.pythonDir, 'server.py')
+}
+
+function dictationScript(): string {
+  return path.join(svc().paths.pythonDir, 'dictation_daemon.py')
 }
 
 function killActiveTestRecords(reason: string): void {
@@ -46,6 +72,129 @@ function killActiveTestRecords(reason: string): void {
     try { child.kill('SIGKILL') } catch { /* ignore */ }
   }
   activeTestRecords.clear()
+}
+
+function hashDictationConfig(cfg: VoiceConfig): string {
+  // Only the fields the daemon actually uses. Avoids spurious respawns when
+  // unrelated settings change (e.g. hotkey config, auto-paste).
+  return JSON.stringify({ recording: cfg.recording, transcriber: cfg.transcriber })
+}
+
+function killDictationDaemon(reason: string): void {
+  const d = dictationDaemon
+  if (!d) return
+  svc().log(`[voice-ipc] killing dictation daemon (${reason})`)
+  dictationDaemon = null
+  // Reject anyone waiting — the daemon is gone.
+  const err = new Error(`Dictation daemon killed: ${reason}`)
+  if (d.inFlight) { d.inFlight.reject(err); d.inFlight = null }
+  d.ready.reject(err)
+  try { d.child.stdin?.end() } catch { /* ignore */ }
+  try { d.child.kill('SIGKILL') } catch { /* ignore */ }
+}
+
+function ensureDictationDaemon(): DictationDaemon {
+  const cfg = getVoiceConfig()
+  const hash = hashDictationConfig(cfg)
+  if (dictationDaemon && !dictationDaemon.child.killed && dictationDaemon.settingsHash === hash) {
+    return dictationDaemon
+  }
+  if (dictationDaemon) {
+    killDictationDaemon(dictationDaemon.settingsHash !== hash ? 'config changed' : 'stale daemon')
+  }
+
+  const py = getVenvPython()
+  const script = dictationScript()
+  const cfgB64 = Buffer.from(hash, 'utf8').toString('base64')
+
+  const child = spawn(py, [script, cfgB64], { windowsHide: true })
+
+  let readyResolve!: () => void
+  let readyReject!: (e: Error) => void
+  const readyPromise = new Promise<void>((res, rej) => { readyResolve = res; readyReject = rej })
+
+  const daemon: DictationDaemon = {
+    child,
+    settingsHash: hash,
+    ready: { promise: readyPromise, resolve: readyResolve, reject: readyReject },
+    inFlight: null,
+    stdoutTail: '',
+    stderr: ''
+  }
+
+  child.stdout?.on('data', (buf: Buffer) => {
+    daemon.stdoutTail += buf.toString()
+    // Consume whole lines; leave partials for the next chunk.
+    let newlineIdx: number
+    while ((newlineIdx = daemon.stdoutTail.indexOf('\n')) >= 0) {
+      const line = daemon.stdoutTail.slice(0, newlineIdx).trim()
+      daemon.stdoutTail = daemon.stdoutTail.slice(newlineIdx + 1)
+      if (!line) continue
+      let msg: Record<string, unknown>
+      try {
+        msg = JSON.parse(line) as Record<string, unknown>
+      } catch {
+        svc().log(`[voice-ipc] dictation daemon non-JSON line: ${line.slice(0, 200)}`)
+        continue
+      }
+      if (msg.fatal) {
+        const err = new Error(`Dictation daemon fatal: ${String(msg.fatal)}`)
+        daemon.ready.reject(err)
+        if (daemon.inFlight) { daemon.inFlight.reject(err); daemon.inFlight = null }
+        continue
+      }
+      if (msg.ready === true) {
+        daemon.ready.resolve()
+        continue
+      }
+      if (daemon.inFlight) {
+        const req = daemon.inFlight
+        daemon.inFlight = null
+        req.resolve(msg)
+      } else {
+        svc().log(`[voice-ipc] dictation daemon unsolicited: ${line.slice(0, 200)}`)
+      }
+    }
+  })
+  child.stderr?.on('data', (buf: Buffer) => {
+    daemon.stderr += buf.toString()
+  })
+  child.on('error', (err) => {
+    svc().logError('[voice-ipc] dictation daemon spawn error', err)
+    const e = err instanceof Error ? err : new Error(String(err))
+    daemon.ready.reject(e)
+    if (daemon.inFlight) { daemon.inFlight.reject(e); daemon.inFlight = null }
+    if (dictationDaemon === daemon) dictationDaemon = null
+  })
+  child.on('close', (code, signal) => {
+    svc().log(`[voice-ipc] dictation daemon closed (code=${code} signal=${signal})`)
+    const err = new Error(signal === 'SIGKILL' ? 'Dictation daemon killed' : `Dictation daemon exited (${code ?? 'null'})`)
+    daemon.ready.reject(err)
+    if (daemon.inFlight) { daemon.inFlight.reject(err); daemon.inFlight = null }
+    if (dictationDaemon === daemon) dictationDaemon = null
+  })
+
+  dictationDaemon = daemon
+  svc().log('[voice-ipc] dictation daemon spawned')
+  return daemon
+}
+
+async function dictationSend(cmd: 'start' | 'stop' | 'cancel'): Promise<Record<string, unknown>> {
+  const daemon = ensureDictationDaemon()
+  await daemon.ready.promise
+  if (daemon.inFlight) {
+    throw new Error('Dictation command already in progress')
+  }
+  const result = new Promise<Record<string, unknown>>((resolve, reject) => {
+    daemon.inFlight = { resolve, reject }
+  })
+  try {
+    daemon.child.stdin?.write(cmd + '\n')
+  } catch (err) {
+    if (daemon.inFlight) { daemon.inFlight = null }
+    throw err
+  }
+  return result
 }
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
@@ -71,13 +220,17 @@ export function registerVoiceIpc(): void {
       throw new Error('voice:setSettings: patch must be a plain object')
     }
     const merged = setVoiceConfig(patch as DeepPartial<VoiceConfig>)
-    // Write to disk + restart daemon if running.
+    // Write to disk + restart hotkey daemon if running.
     await mgr().applySettings()
+    // Also restart the dictation daemon so new recorder/transcriber config
+    // (sample rate, model, device, etc.) is actually picked up.
+    killDictationDaemon('settings changed')
     return merged
   })
 
   ipcMain.handle(IPC.VOICE_RESET_SETTINGS, async () => {
     const def = resetVoiceConfig()
+    killDictationDaemon('settings reset')
     await mgr().applySettings()
     return def
   })
@@ -241,6 +394,76 @@ print(json.dumps({'text': text}))
     })
   })
 
+  // Manual-stop dictation for UI callers (Coordinator Speak button). Backed by
+  // a persistent dictation_daemon.py that keeps the transcriber loaded across
+  // start/stop cycles, so the user doesn't pay model-load latency every time.
+  ipcMain.handle(IPC.VOICE_DICTATE_START, async (): Promise<{ ok?: true; error?: string }> => {
+    if (!fs.existsSync(getVenvPython())) {
+      return { error: 'Voice runtime not installed' }
+    }
+    if (!fs.existsSync(dictationScript())) {
+      return { error: 'Dictation daemon script missing' }
+    }
+    try {
+      const resp = await dictationSend('start')
+      if (typeof resp.error === 'string') return { error: resp.error }
+      if (resp.started !== true) return { error: 'Unexpected daemon response' }
+      return { ok: true }
+    } catch (err) {
+      svc().logError('[voice-ipc] dictation start failed', err)
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(IPC.VOICE_DICTATE_STOP, async (): Promise<{ text?: string; error?: string }> => {
+    if (!dictationDaemon) {
+      return { error: 'No active dictation' }
+    }
+    // Guard against a hung transcriber (faster-whisper crash, wedged CUDA,
+    // etc.) so the renderer never gets stuck in "Transcribing…".
+    const DICTATE_TRANSCRIBE_TIMEOUT_MS = 60_000
+    try {
+      const resp = await Promise.race([
+        dictationSend('stop'),
+        new Promise<Record<string, unknown>>((_, reject) =>
+          setTimeout(() => reject(new Error('Transcription timed out')), DICTATE_TRANSCRIBE_TIMEOUT_MS))
+      ])
+      if (typeof resp.error === 'string') return { error: resp.error }
+      const text = String(resp.text ?? '').trim()
+      if (!text) return { error: 'No speech could be transcribed.' }
+      return { text }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg === 'Transcription timed out') {
+        // Daemon state is corrupt — the transcriber may still be running. Kill
+        // the daemon so the next START spawns a fresh one with a clean model.
+        killDictationDaemon('transcribe timeout')
+      }
+      svc().logError('[voice-ipc] dictation stop failed', err)
+      return { error: msg }
+    }
+  })
+
+  ipcMain.handle(IPC.VOICE_DICTATE_CANCEL, async (): Promise<{ ok: true }> => {
+    // Cancel is a protocol-level command against the persistent daemon — it
+    // drops the in-progress audio without tearing the model down, so the next
+    // START is still fast.
+    if (dictationDaemon) {
+      try {
+        await Promise.race([
+          dictationSend('cancel'),
+          new Promise<Record<string, unknown>>((_, reject) =>
+            setTimeout(() => reject(new Error('cancel timed out')), 5_000))
+        ])
+      } catch (err) {
+        // If cancel can't reach the daemon, fall back to killing it entirely.
+        svc().log(`[voice-ipc] dictation cancel fallback to kill: ${String(err)}`)
+        killDictationDaemon('cancel fallback')
+      }
+    }
+    return { ok: true }
+  })
+
   ipcMain.handle(IPC.VOICE_SETUP_DETECT, async () => {
     return await detectSystemPython()
   })
@@ -348,6 +571,7 @@ print(json.dumps({'text': text}))
 
 export function disposeVoiceIpc(): void {
   killActiveTestRecords('disposeVoiceIpc')
+  killDictationDaemon('disposeVoiceIpc')
   const channels = [
     IPC.VOICE_OPEN,
     IPC.VOICE_CLOSE,
@@ -357,6 +581,9 @@ export function disposeVoiceIpc(): void {
     IPC.VOICE_GET_STATUS,
     IPC.VOICE_LIST_DEVICES,
     IPC.VOICE_TEST_RECORD,
+    IPC.VOICE_DICTATE_START,
+    IPC.VOICE_DICTATE_STOP,
+    IPC.VOICE_DICTATE_CANCEL,
     IPC.VOICE_SETUP_DETECT,
     IPC.VOICE_SETUP_INSTALL,
     IPC.VOICE_SETUP_UNINSTALL,
