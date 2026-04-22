@@ -19,9 +19,10 @@ import { describe, it, expect } from 'vitest'
 import { detectInputBoxRows } from '../pinned-footer'
 
 function makeTerm(rows: string[], termRows?: number): any {
-  // termRows defaults to the buffer length so the visible window covers every
-  // supplied row — simplest mental model for these tests.
-  const R = termRows ?? rows.length
+  // Default to a realistic 24-row viewport. The detector caps the pinned
+  // region at 50% of `term.rows`; using `rows.length` (6–7) would clamp
+  // results below the expected values and mask the detection logic.
+  const R = termRows ?? Math.max(rows.length, 24)
   return {
     rows: R,
     cols: Math.max(...rows.map((r) => r.length), 1),
@@ -101,7 +102,7 @@ describe('detectInputBoxRows — Claude Code horizontal-rule input box', () => {
     expect(rowCount).toBe(5)
   })
 
-  it('stops at spinner row above the box (does not over-include)', () => {
+  it('pins spinner row above the box (active-thinking anchor, no over-include)', () => {
     const term = makeTerm([
       '✶ Mustering… (4m 21s · ↓ 12k tokens)',
       RULE,
@@ -111,7 +112,10 @@ describe('detectInputBoxRows — Claude Code horizontal-rule input box', () => {
       '⏵⏵ hint'
     ])
     const { rowCount } = detectInputBoxRows(term)
-    expect(rowCount).toBe(5)
+    // Phase 2 anchors on the spinner to keep the active thinking status
+    // visible: 5-row box + 1 spinner row = 6. The detector must stop at the
+    // spinner and NOT walk further up into prior history.
+    expect(rowCount).toBe(6)
   })
 
   it('still works with legacy │-bar style input boxes', () => {
