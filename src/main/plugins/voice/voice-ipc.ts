@@ -24,6 +24,7 @@ import {
   resolveConflict as resolveMcpConflict
 } from './voice-mcp-register'
 import { getServices } from './services'
+import { verifyBundledPythonIntegrity, repairHintForSource } from './bundled-services'
 import type { VoiceConfig, VoiceMcpConflictAction } from '../../../shared/voice-types'
 import { getLogDir } from '../../logger'
 
@@ -63,6 +64,21 @@ function serverScript(): string {
 
 function dictationScript(): string {
   return path.join(svc().paths.pythonDir, 'dictation_daemon.py')
+}
+
+/**
+ * Build an actionable error string for callers when a required python
+ * script is absent. Includes the resolved path and a source-specific
+ * repair hint (reinstall vs rebuild vs clear override) so the user can
+ * self-diagnose without digging through logs.
+ */
+function missingScriptError(scriptName: string, scriptPath: string): string {
+  const integrity = verifyBundledPythonIntegrity()
+  return (
+    `${scriptName} missing at ${scriptPath}. ` +
+    `python source=${integrity.source}, missing=[${integrity.missing.join(', ')}]. ` +
+    repairHintForSource(integrity.source)
+  )
 }
 
 function killActiveTestRecords(reason: string): void {
@@ -105,6 +121,11 @@ function ensureDictationDaemon(): DictationDaemon {
 
   const py = getVenvPython()
   const script = dictationScript()
+  if (!fs.existsSync(script)) {
+    // Throw so the caller's ready-promise rejects with a diagnosable message
+    // instead of crashing inside spawn() with an opaque ENOENT from Python.
+    throw new Error(missingScriptError('Dictation daemon script', script))
+  }
   const cfgB64 = Buffer.from(hash, 'utf8').toString('base64')
 
   // Log the resolved input_device on every spawn so we can see whether the
@@ -462,8 +483,11 @@ print(json.dumps({'text': text}))
     if (!fs.existsSync(getVenvPython())) {
       return { error: 'Voice runtime not installed' }
     }
-    if (!fs.existsSync(dictationScript())) {
-      return { error: 'Dictation daemon script missing' }
+    const script = dictationScript()
+    if (!fs.existsSync(script)) {
+      const msg = missingScriptError('Dictation daemon script', script)
+      svc().logError(`[voice-ipc] ${msg}`)
+      return { error: msg }
     }
     try {
       const resp = await dictationSend('start')
