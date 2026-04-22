@@ -28,7 +28,20 @@ window.onerror = (message, source, lineno, colno, error) => {
     message.includes("reading 'dimensions'") &&
     stack.includes('syncScrollArea')
 
-  if (!isXtermViewportRace) {
+  // Known @xterm/addon-canvas race: the glyph-atlas cache draws via
+  // `getImageData()`, which throws `IndexSizeError` when the source region
+  // has a zero width or height. This happens transiently during reflow —
+  // e.g. grid-layout animations or shell-panel collapse briefly give the
+  // terminal container 0 cell dimensions, and the canvas renderer's
+  // IdleTaskQueue can fire mid-reflow. The atlas rebuilds on the next frame
+  // and rendering recovers, so the error is benign.
+  const isXtermCanvasAtlasRace =
+    typeof message === 'string' &&
+    message.includes("'getImageData'") &&
+    (message.includes('source height is 0') || message.includes('source width is 0')) &&
+    (stack.includes('_drawToCache') || stack.includes('getRasterizedGlyph'))
+
+  if (!isXtermViewportRace && !isXtermCanvasAtlasRace) {
     try { window.dockApi?.debug?.reportCrash('uncaughtError', String(message), stack || `${source}:${lineno}:${colno}`) } catch { /* IPC may be dead */ }
   }
   console.error(text)
