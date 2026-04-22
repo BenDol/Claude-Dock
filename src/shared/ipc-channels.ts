@@ -393,6 +393,12 @@ export const IPC = {
   COORDINATOR_TEST_PROVIDER: 'coordinator:testProvider',
   COORDINATOR_GET_HISTORY: 'coordinator:getHistory',
   COORDINATOR_CLEAR_HISTORY: 'coordinator:clearHistory',
+  /**
+   * Clears only the Claude-SDK session id for a project, leaving chat
+   * history intact. Useful when users want a fresh hidden-Claude session
+   * without losing their conversation log. No-op for non-SDK providers.
+   */
+  COORDINATOR_RESET_SESSION_ID: 'coordinator:resetSessionId',
   COORDINATOR_SEND_MESSAGE: 'coordinator:sendMessage',
   COORDINATOR_CANCEL: 'coordinator:cancel',
   COORDINATOR_LIST_TERMINALS: 'coordinator:listTerminals',

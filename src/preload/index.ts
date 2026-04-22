@@ -548,6 +548,7 @@ export interface DockApi {
     testProvider: () => Promise<CoordinatorTestConnectionResult>
     getHistory: (projectDir: string) => Promise<CoordinatorMessage[]>
     clearHistory: (projectDir: string) => Promise<void>
+    resetSessionId: (projectDir: string) => Promise<void>
     sendMessage: (projectDir: string, userText: string) => Promise<void>
     cancel: (projectDir: string) => Promise<void>
     listTerminals: (projectDir: string) => Promise<CoordinatorTerminalSummary[]>
@@ -1135,6 +1136,7 @@ const dockApi: DockApi = {
     testProvider: () => ipcRenderer.invoke(IPC.COORDINATOR_TEST_PROVIDER),
     getHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_GET_HISTORY, projectDir),
     clearHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CLEAR_HISTORY, projectDir),
+    resetSessionId: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_RESET_SESSION_ID, projectDir),
     sendMessage: (projectDir, userText) => ipcRenderer.invoke(IPC.COORDINATOR_SEND_MESSAGE, projectDir, userText),
     cancel: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CANCEL, projectDir),
     listTerminals: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_LIST_TERMINALS, projectDir),

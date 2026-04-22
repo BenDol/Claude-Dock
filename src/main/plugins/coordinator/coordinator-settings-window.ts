@@ -16,7 +16,6 @@ const STATE_KEY = 'coordinator:settings'
 export class CoordinatorSettingsWindowManager {
   private static instance: CoordinatorSettingsWindowManager
   private win: BrowserWindow | null = null
-  private forceClosing = false
 
   static getInstance(): CoordinatorSettingsWindowManager {
     if (!CoordinatorSettingsWindowManager.instance) {
@@ -96,14 +95,8 @@ export class CoordinatorSettingsWindowManager {
 
     // Destroy on close — settings window is cheap to recreate and keeping a
     // hidden one around would preserve stale form state from a previous open.
-    win.on('close', () => {
-      if (this.forceClosing) return
-      this.forceClosing = true
-    })
-
     win.on('closed', () => {
       this.win = null
-      this.forceClosing = false
       svc().log('[coordinator-settings-window] closed')
     })
 
@@ -118,7 +111,6 @@ export class CoordinatorSettingsWindowManager {
 
   close(): void {
     if (this.win && !this.win.isDestroyed()) {
-      this.forceClosing = true
       this.win.destroy()
     }
   }

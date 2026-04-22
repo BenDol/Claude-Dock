@@ -3,6 +3,16 @@
  *
  * One electron-store instance is shared across projects, keyed by a
  * normalized-path hash. Histories are capped to avoid unbounded growth.
+ *
+ * The per-project value is `{ messages, latestSessionId }`. The
+ * `latestSessionId` field is populated only by the Claude-SDK backend,
+ * which uses it to resume the hidden Claude session across user turns
+ * (the SDK forks a new session id on every resume, so we chain forward).
+ * Other backends ignore it.
+ *
+ * Legacy entries were a bare `CoordinatorMessage[]`; a read-time migration
+ * wraps them as `{ messages: [...], latestSessionId: null }` on first
+ * access and writes the new shape back.
  */
 import Store from 'electron-store'
 import * as crypto from 'crypto'
@@ -10,9 +20,16 @@ import { createSafeStore, safeRead, safeWriteSync } from '../../safe-store'
 import type { CoordinatorMessage } from '../../../shared/coordinator-types'
 import { log, logError } from '../../logger'
 
-interface ChatStoreData {
-  [projectKey: string]: CoordinatorMessage[]
+interface ProjectChatState {
+  messages: CoordinatorMessage[]
+  latestSessionId: string | null
 }
+
+interface ChatStoreData {
+  [projectKey: string]: ProjectChatState | CoordinatorMessage[]
+}
+
+const EMPTY_STATE: ProjectChatState = { messages: [], latestSessionId: null }
 
 let store: Store<ChatStoreData> | null = null
 
@@ -31,9 +48,39 @@ function projectKey(projectDir: string): string {
   return crypto.createHash('sha1').update(normalized).digest('hex').slice(0, 16)
 }
 
-export function getHistory(projectDir: string): CoordinatorMessage[] {
+function normaliseEntry(raw: unknown): ProjectChatState {
+  if (!raw) return { messages: [], latestSessionId: null }
+  // Legacy shape: a bare array of messages, no session id.
+  if (Array.isArray(raw)) {
+    return { messages: raw as CoordinatorMessage[], latestSessionId: null }
+  }
+  if (typeof raw === 'object') {
+    const obj = raw as Partial<ProjectChatState>
+    return {
+      messages: Array.isArray(obj.messages) ? obj.messages : [],
+      latestSessionId: typeof obj.latestSessionId === 'string' ? obj.latestSessionId : null
+    }
+  }
+  return { messages: [], latestSessionId: null }
+}
+
+function readState(projectDir: string): ProjectChatState {
   const key = projectKey(projectDir)
-  return safeRead(() => getStore().get(key)) || []
+  const raw = safeRead(() => getStore().get(key))
+  return normaliseEntry(raw)
+}
+
+function writeState(projectDir: string, state: ProjectChatState): boolean {
+  const key = projectKey(projectDir)
+  return safeWriteSync(() => getStore().set(key, state))
+}
+
+function capMessages(messages: CoordinatorMessage[], maxMessages: number): CoordinatorMessage[] {
+  return messages.length > maxMessages ? messages.slice(messages.length - maxMessages) : messages
+}
+
+export function getHistory(projectDir: string): CoordinatorMessage[] {
+  return readState(projectDir).messages
 }
 
 export function appendMessage(
@@ -41,15 +88,13 @@ export function appendMessage(
   message: CoordinatorMessage,
   maxMessages: number
 ): CoordinatorMessage[] {
-  const key = projectKey(projectDir)
-  const existing = getHistory(projectDir)
-  const next = [...existing, message]
-  const trimmed = next.length > maxMessages ? next.slice(next.length - maxMessages) : next
-  const ok = safeWriteSync(() => getStore().set(key, trimmed))
+  const state = readState(projectDir)
+  const next = capMessages([...state.messages, message], maxMessages)
+  const ok = writeState(projectDir, { messages: next, latestSessionId: state.latestSessionId })
   if (!ok) {
     logError('[coordinator-chat] failed to append message', projectDir, message.id)
   }
-  return trimmed
+  return next
 }
 
 /**
@@ -61,18 +106,14 @@ export function upsertMessage(
   message: CoordinatorMessage,
   maxMessages: number
 ): CoordinatorMessage[] {
-  const key = projectKey(projectDir)
-  const existing = getHistory(projectDir)
-  const idx = existing.findIndex((m) => m.id === message.id)
-  let next: CoordinatorMessage[]
-  if (idx >= 0) {
-    next = existing.slice()
-    next[idx] = message
-  } else {
-    next = [...existing, message]
-  }
-  const trimmed = next.length > maxMessages ? next.slice(next.length - maxMessages) : next
-  safeWriteSync(() => getStore().set(key, trimmed))
+  const state = readState(projectDir)
+  const idx = state.messages.findIndex((m) => m.id === message.id)
+  const next =
+    idx >= 0
+      ? state.messages.map((m, i) => (i === idx ? message : m))
+      : [...state.messages, message]
+  const trimmed = capMessages(next, maxMessages)
+  writeState(projectDir, { messages: trimmed, latestSessionId: state.latestSessionId })
   return trimmed
 }
 
@@ -82,6 +123,20 @@ export function clearHistory(projectDir: string): void {
   log('[coordinator-chat] cleared history', projectDir)
 }
 
+export function getLatestSessionId(projectDir: string): string | null {
+  return readState(projectDir).latestSessionId
+}
+
+export function setLatestSessionId(projectDir: string, id: string): void {
+  const state = readState(projectDir)
+  writeState(projectDir, { messages: state.messages, latestSessionId: id })
+}
+
+export function clearLatestSessionId(projectDir: string): void {
+  const state = readState(projectDir)
+  writeState(projectDir, { messages: state.messages, latestSessionId: null })
+}
+
 export function getChatStorePath(): string {
   return getStore().path
 }
@@ -89,3 +144,6 @@ export function getChatStorePath(): string {
 export function __resetChatStoreForTests(): void {
   store = null
 }
+
+// Keep the empty-state constant visible so tests can assert clean-slate shape.
+export { EMPTY_STATE as __EMPTY_STATE_FOR_TESTS }

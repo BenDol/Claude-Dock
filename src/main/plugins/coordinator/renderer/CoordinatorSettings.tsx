@@ -7,7 +7,7 @@
  * duplicate provider presets in the renderer.
  */
 
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { CoordinatorProviderId } from '../../../../shared/coordinator-types'
 import { useCoordinatorStore } from './coordinator-store'
 
@@ -20,11 +20,14 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
   const setConfigPatch = useCoordinatorStore((s) => s.setConfigPatch)
   const testConnection = useCoordinatorStore((s) => s.testConnection)
   const resetConfig = useCoordinatorStore((s) => s.resetConfig)
+  const resetSessionId = useCoordinatorStore((s) => s.resetSessionId)
 
   const selectedPreset = useMemo(
     () => providers.find((p) => p.id === config?.provider),
     [providers, config?.provider]
   )
+
+  const isSdkBackend = config?.provider === 'claude-sdk'
 
   const onProviderChange = useCallback(
     (providerId: CoordinatorProviderId) => {
@@ -41,13 +44,33 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
     [providers, setConfigPatch]
   )
 
+  // ESC-to-close + focus the panel on mount so the keydown handler is live
+  // even before the user interacts. Stops native `confirm()` from stealing
+  // focus permanently — on close we restore to the previously focused element.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    rootRef.current?.focus()
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      previouslyFocused?.focus?.()
+    }
+  }, [onClose])
+
   if (!config) return null
 
   return (
-    <div className="coord-settings">
+    <div className="coord-settings" ref={rootRef} tabIndex={-1} role="dialog" aria-label="Coordinator settings">
       <div className="coord-settings-header">
         <h3>Coordinator Settings</h3>
-        <button className="coord-header-btn" onClick={onClose} title="Close">
+        <button className="coord-header-btn" onClick={onClose} title="Close (Esc)">
           <CloseIcon />
         </button>
       </div>
@@ -78,6 +101,12 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
               >
                 {selectedPreset.docsUrl}
               </a>
+            </span>
+          )}
+          {isSdkBackend && (
+            <span className="hint">
+              Uses your existing Claude Code subscription via the Claude Agent SDK — no API key
+              required. The coordinator runs tools internally through the dock MCP server.
             </span>
           )}
         </div>
@@ -114,33 +143,37 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         )}
 
-        <div className="coord-field">
-          <label htmlFor="coord-model">Model</label>
-          <input
-            id="coord-model"
-            type="text"
-            value={config.model}
-            onChange={(e) => void setConfigPatch({ model: e.target.value })}
-            spellCheck={false}
-          />
-          {selectedPreset && (
-            <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
-          )}
-        </div>
+        {!isSdkBackend && (
+          <div className="coord-field">
+            <label htmlFor="coord-model">Model</label>
+            <input
+              id="coord-model"
+              type="text"
+              value={config.model}
+              onChange={(e) => void setConfigPatch({ model: e.target.value })}
+              spellCheck={false}
+            />
+            {selectedPreset && (
+              <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
+            )}
+          </div>
+        )}
 
-        <div className="coord-field">
-          <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
-          <input
-            id="coord-temp"
-            type="number"
-            min={0}
-            max={1}
-            step={0.05}
-            value={config.temperature}
-            onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
-          />
-          <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
-        </div>
+        {!isSdkBackend && (
+          <div className="coord-field">
+            <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
+            <input
+              id="coord-temp"
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={config.temperature}
+              onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
+            />
+            <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
+          </div>
+        )}
 
         <div className="coord-field-row">
           <button
@@ -204,6 +237,19 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           >
             Reset to defaults
           </button>
+          {isSdkBackend && (
+            <button
+              className="coord-test-btn"
+              onClick={() => {
+                if (confirm('Start a fresh Claude SDK session? Chat history is kept; only the hidden-session link is cleared.')) {
+                  void resetSessionId()
+                }
+              }}
+              title="Starts a new hidden Claude session on the next message. Chat history is preserved."
+            >
+              Reset SDK session
+            </button>
+          )}
         </div>
       </div>
     </div>

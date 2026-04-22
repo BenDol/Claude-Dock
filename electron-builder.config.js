@@ -53,7 +53,14 @@ module.exports = {
     // require() native modules from inside app.asar, so they must live on disk.
     // Without this, the coordinator's Shift+Shift hotkey silently falls back
     // to the globalShortcut path in packaged builds.
-    'node_modules/uiohook-napi/**'
+    'node_modules/uiohook-napi/**',
+    // @anthropic-ai/claude-agent-sdk ships the Claude Code CLI as a native
+    // executable via platform-specific optional-dependency packages
+    // (e.g. claude-agent-sdk-win32-x64/claude.exe). The SDK resolves it with
+    // require.resolve and then spawns it with child_process — which cannot
+    // launch a binary from inside app.asar. The wildcard covers whichever
+    // platform package npm actually installed on this build machine.
+    'node_modules/@anthropic-ai/claude-agent-sdk-*/**'
   ],
   win: {
     icon: 'assets/icon.png',

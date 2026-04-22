@@ -26,6 +26,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   const sendMessage = useCoordinatorStore((s) => s.sendMessage)
   const cancel = useCoordinatorStore((s) => s.cancel)
   const config = useCoordinatorStore((s) => s.config)
+  const providers = useCoordinatorStore((s) => s.providers)
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -43,18 +44,23 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     return () => dispose()
   }, [projectDir, init, dispose])
 
-  // First-run: if the coordinator has no API key yet, automatically surface the
-  // dedicated settings window so the user lands on setup instead of a useless
-  // chat pane. Fires once per mount after config has loaded.
+  // First-run: if the coordinator's selected provider needs an API key and none
+  // is set yet, automatically surface the dedicated settings window so the user
+  // lands on setup instead of a useless chat pane. Fires once per mount after
+  // config *and* providers have loaded — key-less providers (claude-sdk,
+  // ollama, openai-compat) skip this path.
   const autoOpenedRef = useRef(false)
   useEffect(() => {
     if (!config) return
+    if (providers.length === 0) return
     if (autoOpenedRef.current) return
-    if (config.apiKey.length === 0) {
+    const preset = providers.find((p) => p.id === config.provider)
+    const needsKey = preset?.requiresApiKey ?? true
+    if (needsKey && config.apiKey.length === 0) {
       autoOpenedRef.current = true
       openSettingsWindow()
     }
-  }, [config])
+  }, [config, providers])
 
   // Auto-focus on mount and on remote focus-input pings.
   useEffect(() => {
@@ -76,7 +82,9 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     )
   }
 
-  const needsSetup = config.apiKey.length === 0 && config.provider !== 'ollama'
+  const preset = providers.find((p) => p.id === config.provider)
+  const needsKey = preset?.requiresApiKey ?? true
+  const needsSetup = needsKey && config.apiKey.length === 0
 
   if (needsSetup) {
     return (
@@ -202,7 +210,7 @@ const MessageView: React.FC<{ message: CoordinatorMessage }> = ({ message }) => 
     return (
       <div className={'coord-message ' + (message.isError ? 'tool-error' : 'tool')}>
         <div className={'coord-msg-role ' + (message.isError ? 'tool-error' : 'tool')}>
-          <span>{message.toolName}{message.isError ? ' — error' : ''}</span>
+          <span>{displayToolName(message.toolName)}{message.isError ? ' — error' : ''}</span>
           <span className="coord-msg-time">{formatTime(message.timestamp)}</span>
         </div>
         <div className="coord-msg-body">{formatToolContent(message.content)}</div>
@@ -234,8 +242,8 @@ const MessageView: React.FC<{ message: CoordinatorMessage }> = ({ message }) => 
       {message.toolCalls && message.toolCalls.length > 0 && (
         <div className="coord-toolcall-pill-row">
           {message.toolCalls.map((tc) => (
-            <span key={tc.id} className="coord-toolcall-pill" title={renderArgs(tc.args)}>
-              → {tc.name}
+            <span key={tc.id} className="coord-toolcall-pill" title={`${tc.name}\n${renderArgs(tc.args)}`}>
+              → {displayToolName(tc.name)}
             </span>
           ))}
         </div>
@@ -255,6 +263,21 @@ function renderArgs(args: unknown): string {
   } catch {
     return String(args)
   }
+}
+
+/**
+ * Strip the `mcp__<serverKey>__` prefix that the SDK backend uses for its
+ * MCP-routed tool names so the transcript shows a readable label instead of
+ * `mcp__claude-dock-uat__dock_list_terminals`. The raw name is still passed
+ * to the tooltip/title for debugging.
+ */
+function displayToolName(name: string): string {
+  if (name.startsWith('mcp__')) {
+    const rest = name.slice('mcp__'.length)
+    const idx = rest.indexOf('__')
+    if (idx >= 0) return rest.slice(idx + 2)
+  }
+  return name
 }
 
 function formatToolContent(content: string): string {

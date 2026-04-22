@@ -52,7 +52,7 @@ function getClaudeMdPath(): string {
  * version). Lives inside the per-profile userData so separate profiles don't
  * share — or corrupt — each other's dock state.
  */
-function getDataDir(): string {
+export function getDataDir(): string {
   return path.join(app.getPath('userData'), 'dock-link')
 }
 
@@ -66,7 +66,7 @@ function getLegacyMcpServerPath(): string {
   return path.join(getDataDir(), 'claude-dock-mcp.js')
 }
 
-function getMcpServerSourcePath(): string {
+export function getMcpServerSourcePath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'claude-dock-mcp.cjs')
   }

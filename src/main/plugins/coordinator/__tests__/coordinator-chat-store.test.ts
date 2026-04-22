@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// Expose the most recently constructed mock store so tests can seed
+// legacy-shape entries and assert the read-time migration.
+const mockStoreRef: { current: any } = { current: null }
+
 vi.mock('electron-store', () => {
   function MockStore(this: any, opts?: any) {
     this.path = '/mock/coordinator-chat.json'
@@ -12,6 +16,7 @@ vi.mock('electron-store', () => {
     this.delete = vi.fn((key: string) => { delete this.store[key] })
     this.has = vi.fn((k: string) => k in this.store)
     this.clear = vi.fn(() => { this.store = {} })
+    mockStoreRef.current = this
   }
   return { default: MockStore }
 })
@@ -31,6 +36,9 @@ import {
   appendMessage,
   upsertMessage,
   clearHistory,
+  getLatestSessionId,
+  setLatestSessionId,
+  clearLatestSessionId,
   __resetChatStoreForTests
 } from '../coordinator-chat-store'
 import type { CoordinatorMessage } from '../../../../shared/coordinator-types'
@@ -125,5 +133,71 @@ describe('coordinator-chat-store', () => {
     clearHistory(PROJECT_A)
     expect(getHistory(PROJECT_A)).toEqual([])
     expect(getHistory(PROJECT_B).map((m) => m.id)).toEqual(['b1'])
+  })
+
+  it('latestSessionId starts null, persists, and clears independently', () => {
+    expect(getLatestSessionId(PROJECT_A)).toBeNull()
+    setLatestSessionId(PROJECT_A, 'sess-1')
+    expect(getLatestSessionId(PROJECT_A)).toBe('sess-1')
+    // Appending messages must not disturb the session id.
+    appendMessage(PROJECT_A, userMsg('u1'), 100)
+    expect(getLatestSessionId(PROJECT_A)).toBe('sess-1')
+    clearLatestSessionId(PROJECT_A)
+    expect(getLatestSessionId(PROJECT_A)).toBeNull()
+    // Messages remain after clearing session id.
+    expect(getHistory(PROJECT_A).map((m) => m.id)).toEqual(['u1'])
+  })
+
+  it('setLatestSessionId overwrites previous id (chain-forward)', () => {
+    setLatestSessionId(PROJECT_A, 'first')
+    setLatestSessionId(PROJECT_A, 'second')
+    expect(getLatestSessionId(PROJECT_A)).toBe('second')
+  })
+
+  it('session ids are per-project', () => {
+    setLatestSessionId(PROJECT_A, 'a-sess')
+    setLatestSessionId(PROJECT_B, 'b-sess')
+    expect(getLatestSessionId(PROJECT_A)).toBe('a-sess')
+    expect(getLatestSessionId(PROJECT_B)).toBe('b-sess')
+  })
+
+  it('clearHistory also drops the session id for that project', () => {
+    setLatestSessionId(PROJECT_A, 'sess-x')
+    appendMessage(PROJECT_A, userMsg('u1'), 100)
+    clearHistory(PROJECT_A)
+    expect(getLatestSessionId(PROJECT_A)).toBeNull()
+    expect(getHistory(PROJECT_A)).toEqual([])
+  })
+
+  it('migrates legacy array-shaped entries on read', () => {
+    // Force the real store instance to materialise, then inject a legacy
+    // entry (bare CoordinatorMessage[]) directly into its backing map.
+    appendMessage(PROJECT_A, userMsg('warmup'), 100)
+    clearHistory(PROJECT_A)
+
+    // Compute the project key the same way the module does — sha1 of the
+    // lowercased, forward-slash-normalized project dir, first 16 chars.
+    // We don't import the internal projectKey helper; instead we rely on
+    // the fact that writing via the internal key `project-a-legacy` and
+    // reading through PROJECT_A_LEGACY_DIR exercises the same path.
+    // For this test we use the mock store's backing map and seed a known
+    // key directly, then read via the public API using the matching dir.
+    const legacyMessages: CoordinatorMessage[] = [
+      userMsg('legacy-1', 'pre-migration'),
+      assistantMsg('legacy-2', 'also pre-migration')
+    ]
+    // Seed under PROJECT_A's key by writing through the API first, then
+    // overwriting with the legacy shape. The module re-reads per call.
+    appendMessage(PROJECT_A, userMsg('placeholder'), 100)
+    const storedKeys = Object.keys(mockStoreRef.current.store)
+    expect(storedKeys.length).toBeGreaterThan(0)
+    // The most recently written key is PROJECT_A's hash.
+    const aKey = storedKeys[storedKeys.length - 1]
+    // Overwrite with legacy shape (bare array, no wrapping object).
+    mockStoreRef.current.store[aKey] = legacyMessages
+
+    // Read back — migration wraps the array and preserves it.
+    expect(getHistory(PROJECT_A).map((m) => m.id)).toEqual(['legacy-1', 'legacy-2'])
+    expect(getLatestSessionId(PROJECT_A)).toBeNull()
   })
 })
