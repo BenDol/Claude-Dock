@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import { Settings, DEFAULT_SETTINGS } from '../shared/settings-schema'
+import { Settings, DEFAULT_SETTINGS, mergeSettingsPartial } from '../shared/settings-schema'
 import { ENV_PROFILE } from '../shared/env-profile'
 import { createSafeStore, safeRead, safeWriteSync } from './safe-store'
 
@@ -72,13 +72,9 @@ export function setSetting<K extends keyof Settings>(key: K, value: Settings[K])
 }
 
 export function setSettings(settings: Partial<Settings>): void {
-  // Batch into a single write by merging with current settings
+  // Deep-merge: callers may pass a partial section (e.g. `{ terminal: { fontSize } }`)
+  // and must not clobber sibling fields like `fontFamily` or `lineHeight`.
   const current = getSettings()
-  const merged = { ...current }
-  for (const [key, value] of Object.entries(settings)) {
-    if (value !== undefined) {
-      ;(merged as any)[key] = value
-    }
-  }
+  const merged = mergeSettingsPartial(current, settings)
   safeWriteSync(() => getStore().set(merged))
 }

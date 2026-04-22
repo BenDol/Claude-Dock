@@ -24,6 +24,29 @@ export const CONCATENATED_ARRAY_PATHS: string[] = [
 /** Origin of a setting value in the merge chain */
 export type SettingsOrigin = 'default' | 'global' | 'project' | 'local'
 
+/**
+ * Recursively merge `override` into `base`, producing a new object. Arrays and
+ * primitives in `override` replace the corresponding value in `base`; plain
+ * objects recurse so partial section updates (e.g. `{ terminal: { fontSize } }`)
+ * don't wipe sibling fields.
+ */
+export function mergeSettingsPartial<T extends Record<string, any>>(base: T, override: DeepPartial<T>): T {
+  const result: any = { ...base }
+  for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) continue
+    const b = (base as any)[key]
+    if (
+      b && typeof b === 'object' && !Array.isArray(b) &&
+      value && typeof value === 'object' && !Array.isArray(value)
+    ) {
+      result[key] = mergeSettingsPartial(b, value as any)
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
 export interface Settings {
   theme: {
     mode: 'dark' | 'light' | 'system'

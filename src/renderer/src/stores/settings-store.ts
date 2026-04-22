@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Settings, SettingsOrigin } from '../../../shared/settings-schema'
-import { DEFAULT_SETTINGS } from '../../../shared/settings-schema'
+import { DEFAULT_SETTINGS, mergeSettingsPartial } from '../../../shared/settings-schema'
 import { getDockApi } from '../lib/ipc-bridge'
 import { applyThemeToDocument } from '../lib/theme'
 
@@ -51,7 +51,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   update: async (partial) => {
     const api = getDockApi()
     await api.settings.set(partial)
-    const newSettings = { ...get().settings, ...partial }
+    // Deep-merge: a partial section update (e.g. `{ terminal: { fontSize } }`)
+    // must not blank sibling fields like `fontFamily` — xterm crashes on undefined
+    // font values (IndexSizeError / dimensions TypeError) before the SETTINGS_CHANGED
+    // broadcast arrives.
+    const newSettings = mergeSettingsPartial(get().settings, partial)
     set({ settings: newSettings })
     applyThemeToDocument(newSettings)
   },

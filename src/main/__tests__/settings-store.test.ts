@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // We don't import settings-store directly because it depends on electron-store
 // and __UPDATE_PROFILE__ define. Instead we test the pure merge function inline.
 
-import { DEFAULT_SETTINGS, BUILTIN_NOTIFICATION_SOURCES } from '../../shared/settings-schema'
+import { DEFAULT_SETTINGS, BUILTIN_NOTIFICATION_SOURCES, mergeSettingsPartial } from '../../shared/settings-schema'
 
 describe('settings-store', () => {
   beforeEach(() => {
@@ -153,6 +153,41 @@ describe('settings-store', () => {
       }
       const result = deepMergeDefaults(DEFAULT_SETTINGS, stored as any)
       expect(result.behavior.blockedNotificationSources).toEqual(['updater', 'git-manager'])
+    })
+  })
+
+  describe('mergeSettingsPartial (section-aware deep merge)', () => {
+    it('preserves sibling fields when writing a single key in a section', () => {
+      // Regression: SettingScope → "Global" calls update({ terminal: { fontSize: 16 } })
+      // which used to blank fontFamily/lineHeight/etc., crashing xterm.
+      const merged = mergeSettingsPartial(DEFAULT_SETTINGS, {
+        terminal: { fontSize: 16 }
+      })
+      expect(merged.terminal.fontSize).toBe(16)
+      expect(merged.terminal.fontFamily).toBe(DEFAULT_SETTINGS.terminal.fontFamily)
+      expect(merged.terminal.lineHeight).toBe(DEFAULT_SETTINGS.terminal.lineHeight)
+      expect(merged.terminal.cursorStyle).toBe(DEFAULT_SETTINGS.terminal.cursorStyle)
+    })
+
+    it('replaces arrays instead of concatenating them', () => {
+      const merged = mergeSettingsPartial(DEFAULT_SETTINGS, {
+        terminal: { additionalDirs: ['C:/foo'] }
+      })
+      expect(merged.terminal.additionalDirs).toEqual(['C:/foo'])
+    })
+
+    it('skips undefined overrides', () => {
+      const merged = mergeSettingsPartial(DEFAULT_SETTINGS, {
+        terminal: { fontSize: undefined as any }
+      })
+      expect(merged.terminal.fontSize).toBe(DEFAULT_SETTINGS.terminal.fontSize)
+    })
+
+    it('does not mutate the base object', () => {
+      const base = { terminal: { fontSize: 14, fontFamily: 'Consolas' } }
+      const snapshot = JSON.parse(JSON.stringify(base))
+      mergeSettingsPartial(base as any, { terminal: { fontSize: 20 } } as any)
+      expect(base).toEqual(snapshot)
     })
   })
 
