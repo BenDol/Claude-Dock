@@ -1,5 +1,5 @@
 import './workspace.css'
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 import type { PanelProps } from '@dock-renderer/panel-registry'
@@ -382,7 +382,8 @@ const WorkspacePanel: React.FC<PanelProps> = ({ projectDir }) => {
   const zoomRef = useRef(1)
 
   // Zoom: Ctrl+MouseWheel and Ctrl++/- with persistence, defaults to dock's zoom
-  useEffect(() => {
+  // useLayoutEffect runs before paint so the saved zoom applies without a flash.
+  useLayoutEffect(() => {
     const saved = localStorage.getItem(ZOOM_KEY)
     if (saved) {
       const z = parseFloat(saved)
