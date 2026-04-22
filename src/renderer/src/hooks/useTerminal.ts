@@ -827,8 +827,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
       termRef.current = term
       fitAddonRef.current = fitAddon
 
-      // Scroll detection via xterm viewport — uses refs to avoid re-renders
-      const viewport = container.querySelector('.xterm-viewport') as HTMLElement | null
+      // Scroll detection via xterm viewport — uses refs to avoid re-renders.
+      // Scope the lookup to this xterm instance's own wrapper (term.element)
+      // rather than the shared container. In React StrictMode (dev) the
+      // cleanup of the previous mount defers term.dispose() by a tick, so a
+      // remount can see the OLD xterm's DOM still parented in `container`.
+      // `container.querySelector('.xterm-viewport')` would return the older
+      // (soon-to-be-disposed) viewport, and the scroll listener we attach
+      // gets orphaned when the deferred dispose removes that DOM. Querying
+      // within `term.element` guarantees we bind to the current instance.
+      const viewport = (term.element ?? container).querySelector('.xterm-viewport') as HTMLElement | null
       if (viewport) {
         const SCROLL_THRESHOLD = 80
         viewport.addEventListener('scroll', () => {
