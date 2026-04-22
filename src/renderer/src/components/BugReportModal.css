@@ -1,5 +1,16 @@
 /* ---- Bug Report Modal ---- */
 
+/* The overlay becomes scrollable when the modal exceeds the viewport
+   (e.g. after the user zooms in past the point where max-height: 86vh
+   can no longer contain the pre-zoom layout). `safe center` prevents
+   the flex-centered modal from being pushed into negative space with
+   no way to reach its top edge. */
+.bug-report-overlay {
+  overflow: auto;
+  align-items: safe center;
+  justify-content: safe center;
+}
+
 .bug-report-modal {
   width: 560px;
   max-width: 92vw;
