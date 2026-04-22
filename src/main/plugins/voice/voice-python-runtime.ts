@@ -20,6 +20,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { getServices } from './services'
+import { getVoiceConfig } from './voice-settings-store'
 import type {
   VoiceGpuCapability,
   VoiceSetupProgress
@@ -915,6 +916,12 @@ export async function verifyGpuRuntime(): Promise<{ ok: boolean; error?: string 
   // sys.path lets `from src.cuda_setup import ...` resolve just like
   // server.py / hotkey_daemon.py / dictation_daemon.py do at runtime.
   const pythonDir = svc().paths.pythonDir
+  // Mirror the user's configured language for the inference exercise so the
+  // probe runs the same code path as their real transcriptions. An unset /
+  // empty string becomes `None` (auto-detect), matching transcriber.py's
+  // `language or None` normalization.
+  const rawLang = getVoiceConfig().transcriber.faster_whisper.language
+  const probeLanguage = rawLang && rawLang.trim() ? rawLang.trim() : null
   const probe = `
 import json
 import sys
@@ -941,6 +948,27 @@ try:
         sys.exit(0)
     from faster_whisper import WhisperModel
     m = WhisperModel('tiny', device='cuda', compute_type='int8_float16')
+    # Run a tiny silent-audio inference so we exercise the same lazy-load
+    # code path (cudnn_*, cublasLt*) that production transcription uses.
+    # Construction alone isn't enough — ctranslate2 defers some CUDA DLL
+    # loads until the first forward pass, and those loads use legacy
+    # LoadLibrary calls that can fail even when the model built cleanly.
+    # See src/cuda_setup.py for why we ctypes.CDLL-preload the nvidia DLLs.
+    probe_language = ${JSON.stringify(probeLanguage)}
+    try:
+        import numpy as np
+        silent = np.zeros(16000, dtype=np.float32)
+        segs, _ = m.transcribe(silent, language=probe_language, without_timestamps=True)
+        for _ in segs:
+            pass
+    except Exception as e:
+        _emit({
+            'ok': False,
+            'error': f'inference probe failed: {type(e).__name__}: {e}',
+            'traceback': traceback.format_exc(),
+            'setup': setup_result
+        })
+        sys.exit(0)
     del m
     _emit({'ok': True, 'cudaDevices': n, 'setup': setup_result})
 except Exception as e:

@@ -22,6 +22,7 @@ export interface VoiceFasterWhisperConfig {
 export interface VoiceOpenAIApiConfig {
   api_key: string
   model: string                // 'whisper-1' etc.
+  language: string             // '' for auto-detect, otherwise 2-letter ISO code
 }
 
 export interface VoiceTranscriberConfig {
@@ -119,7 +120,8 @@ export const DEFAULT_VOICE_CONFIG: VoiceConfig = {
     },
     openai_api: {
       api_key: '',
-      model: 'whisper-1'
+      model: 'whisper-1',
+      language: ''
     }
   },
   recording: {
