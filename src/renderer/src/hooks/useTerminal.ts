@@ -343,28 +343,45 @@ function registerFilePathLinks(term: Terminal): void {
         const filePath = extractFilePath(toolName, rawArg)
         if (!filePath) continue
 
-        // Find where the path actually starts within the full match
         const argStart = m.index + toolName.length + 1 // after "Tool("
-        const innerText = m[2]
-        const pathOffset = innerText.indexOf(filePath.charAt(0) === '"' || filePath.charAt(0) === "'"
-          ? filePath : filePath)
+        const innerText = rawArg
 
-        // For command tools, find the quoted path position
         if (COMMAND_TOOLS.has(toolName)) {
-          const quoteMatch = innerText.match(new RegExp(`["']${filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`))
+          // Prefer a quoted occurrence (handles paths with spaces); fall back
+          // to the unquoted position within the argument. Previously, an
+          // unquoted match fell through to the FILE_PATH_TOOLS branch below
+          // and anchored the link at the start of the whole argument — e.g.
+          // `Bash(git log -- src/foo.ts)` would underline starting from `git`
+          // instead of `src/foo.ts`.
+          const escaped = filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          const quoteMatch = innerText.match(new RegExp(`["']${escaped}["']`))
           if (quoteMatch && quoteMatch.index != null) {
-            const start = argStart + quoteMatch.index + 1 // skip opening quote
-            links.push({ startIndex: start, length: filePath.length, filePath })
+            links.push({
+              startIndex: argStart + quoteMatch.index + 1, // skip opening quote
+              length: filePath.length,
+              filePath
+            })
             continue
           }
+          const unquotedOffset = innerText.indexOf(filePath)
+          if (unquotedOffset < 0) continue
+          links.push({
+            startIndex: argStart + unquotedOffset,
+            length: filePath.length,
+            filePath
+          })
+          continue
         }
 
-        // For file path tools, the path is the content (possibly unquoted)
-        const stripped = rawArg.trim()
-        const quoteOffset = stripped.startsWith('"') || stripped.startsWith("'") ? 1 : 0
+        // FILE_PATH_TOOLS: the whole argument (minus leading whitespace and
+        // optional surrounding quotes) is the path.
         const leadingSpaces = rawArg.length - rawArg.trimStart().length
-        const start = argStart + leadingSpaces + quoteOffset
-        links.push({ startIndex: start, length: filePath.length, filePath })
+        const quoteOffset = rawArg[leadingSpaces] === '"' || rawArg[leadingSpaces] === "'" ? 1 : 0
+        links.push({
+          startIndex: argStart + leadingSpaces + quoteOffset,
+          length: filePath.length,
+          filePath
+        })
       }
 
       // 2. Standalone paths (with or without :line:col), including tree/list
