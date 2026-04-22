@@ -41,6 +41,18 @@ vi.mock('../coordinator-window', () => ({
   }
 }))
 
+const settingsWindowOpen = vi.fn(async () => {})
+const settingsWindowClose = vi.fn()
+vi.mock('../coordinator-settings-window', () => ({
+  CoordinatorSettingsWindowManager: {
+    getInstance: () => ({
+      open: settingsWindowOpen,
+      close: settingsWindowClose,
+      isOpen: () => false
+    })
+  }
+}))
+
 vi.mock('../bundled-services', () => ({
   registerSpawnReplyHandler: vi.fn(),
   unregisterSpawnReplyHandler: vi.fn()
@@ -163,6 +175,27 @@ describe('coordinator IPC — resetSessionId', () => {
   it('rejects non-string projectDir', async () => {
     const h = handlers.get(IPC.COORDINATOR_RESET_SESSION_ID)!
     await expect(h({}, undefined)).rejects.toThrow(/projectDir/)
+  })
+})
+
+describe('coordinator IPC — openSettings', () => {
+  it('registers an OPEN_SETTINGS handler', () => {
+    expect(handlers.has(IPC.COORDINATOR_OPEN_SETTINGS)).toBe(true)
+  })
+
+  it('opens the settings window via the manager', async () => {
+    settingsWindowOpen.mockClear()
+    const h = handlers.get(IPC.COORDINATOR_OPEN_SETTINGS)!
+    await h({})
+    expect(settingsWindowOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('rethrows manager failures so the renderer sees them', async () => {
+    settingsWindowOpen.mockImplementationOnce(async () => {
+      throw new Error('window-open-failed')
+    })
+    const h = handlers.get(IPC.COORDINATOR_OPEN_SETTINGS)!
+    await expect(h({})).rejects.toThrow(/window-open-failed/)
   })
 })
 

@@ -28,6 +28,22 @@ const dockApi = (): Window['dockApi'] => {
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err)
 
+/**
+ * Does the named provider need an API key set before it can be used?
+ *
+ * Fallback is `true` (safe — blocks send) for unknown provider ids so a
+ * typo'd registry entry can't bypass the key requirement. Key-less providers
+ * (claude-sdk, ollama, openai-compat) set `requiresApiKey: false` in the
+ * registry and return false here.
+ */
+export function providerNeedsApiKey(
+  providers: CoordinatorProviderPreset[],
+  providerId: string
+): boolean {
+  const preset = providers.find((p) => p.id === providerId)
+  return preset?.requiresApiKey ?? true
+}
+
 interface CoordinatorState {
   projectDir: string | null
   messages: CoordinatorMessage[]
@@ -58,6 +74,9 @@ interface CoordinatorState {
   _refreshCounter: number
 
   init: (projectDir: string) => Promise<void>
+  /** Lightweight init for the standalone settings window — loads config/providers/hotkey
+   * status only. No project subscriptions, no terminal polling, no stream listener. */
+  initForSettings: () => Promise<void>
   dispose: () => void
   sendMessage: (userText: string) => Promise<void>
   cancel: () => Promise<void>
@@ -106,10 +125,6 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       api.coordinator.hotkeyStatus()
     ])
 
-    // Only auto-open settings on first use for providers that actually need a
-    // key. Claude-SDK / Ollama / custom-compat start usable without one.
-    const initialPreset = providers.find((p) => p.id === config.provider)
-    const initialNeedsKey = initialPreset?.requiresApiKey ?? true
     set({
       projectDir,
       config,
@@ -121,7 +136,11 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
       streamingMessageId: null,
       error: null,
       testConnectionResult: null,
-      settingsOpen: initialNeedsKey && config.apiKey.length === 0
+      // Settings now live in a dedicated BrowserWindow — the panel never renders
+      // the in-place overlay, so this always starts closed. CoordinatorPanel
+      // auto-opens the settings window via dockApi.coordinator.openSettings()
+      // for providers that need an API key and don't have one yet.
+      settingsOpen: false
     })
 
     // Subscribe to stream deltas for this project only.
@@ -154,6 +173,30 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     })
   },
 
+  initForSettings: async () => {
+    try {
+      const api = dockApi()
+      const [config, providers, hotkeyStatus] = await Promise.all([
+        api.coordinator.getConfig(),
+        api.coordinator.listProviders(),
+        api.coordinator.hotkeyStatus()
+      ])
+      set({
+        config,
+        providers,
+        hotkeyStatus,
+        testConnectionResult: null,
+        error: null,
+        settingsOpen: true
+      })
+    } catch (err) {
+      set({ error: errMessage(err) })
+      // Always rethrow unexpected failures — the settings window surfaces this
+      // as an error state rather than silently rendering an empty form.
+      throw err
+    }
+  },
+
   dispose: () => {
     const s = get()
     s._streamUnsub?.()
@@ -174,9 +217,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!userText.trim()) return
     // Only gate on apiKey for providers that actually require one. Otherwise
     // every no-key backend (claude-sdk, ollama, openai-compat) falsely blocks.
-    const preset = providers.find((p) => p.id === config.provider)
-    const needsKey = preset?.requiresApiKey ?? true
-    if (needsKey && !config.apiKey.trim()) {
+    if (providerNeedsApiKey(providers, config.provider) && !config.apiKey.trim()) {
       set({ error: 'Set an API key in settings before sending messages.' })
       return
     }

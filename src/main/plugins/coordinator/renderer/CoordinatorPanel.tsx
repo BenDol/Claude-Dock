@@ -12,8 +12,8 @@ import type {
   CoordinatorMessage,
   CoordinatorTerminalSummary
 } from '../../../../shared/coordinator-types'
-import { useCoordinatorStore } from './coordinator-store'
-import { CoordinatorSettings } from './CoordinatorSettings'
+import { useCoordinatorStore, providerNeedsApiKey } from './coordinator-store'
+import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 
 const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   const init = useCoordinatorStore((s) => s.init)
@@ -26,11 +26,17 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   const sendMessage = useCoordinatorStore((s) => s.sendMessage)
   const cancel = useCoordinatorStore((s) => s.cancel)
   const config = useCoordinatorStore((s) => s.config)
-  const settingsOpen = useCoordinatorStore((s) => s.settingsOpen)
-  const setSettingsOpen = useCoordinatorStore((s) => s.setSettingsOpen)
+  const providers = useCoordinatorStore((s) => s.providers)
 
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const openSettingsWindow = (): void => {
+    // Dedicated settings BrowserWindow (see CoordinatorSettingsWindowManager).
+    // Replaces the old in-panel overlay that rendered full-screen due to
+    // position: absolute inside an un-positioned panel container.
+    void getDockApi().coordinator.openSettings()
+  }
 
   useEffect(() => {
     if (!projectDir) return
@@ -38,10 +44,26 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     return () => dispose()
   }, [projectDir, init, dispose])
 
+  // First-run: if the coordinator's selected provider needs an API key and none
+  // is set yet, automatically surface the dedicated settings window so the user
+  // lands on setup instead of a useless chat pane. Fires once per mount after
+  // config *and* providers have loaded — key-less providers (claude-sdk,
+  // ollama, openai-compat) skip this path.
+  const autoOpenedRef = useRef(false)
+  useEffect(() => {
+    if (!config) return
+    if (providers.length === 0) return
+    if (autoOpenedRef.current) return
+    if (providerNeedsApiKey(providers, config.provider) && config.apiKey.length === 0) {
+      autoOpenedRef.current = true
+      openSettingsWindow()
+    }
+  }, [config, providers])
+
   // Auto-focus on mount and on remote focus-input pings.
   useEffect(() => {
     inputRef.current?.focus()
-  }, [projectDir, settingsOpen])
+  }, [projectDir])
 
   // Scroll to bottom when messages change (streaming or new messages).
   useLayoutEffect(() => {
@@ -58,13 +80,24 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     )
   }
 
+  const needsSetup =
+    providerNeedsApiKey(providers, config.provider) && config.apiKey.length === 0
+
+  if (needsSetup) {
+    return (
+      <div className="coord-root">
+        <SetupPlaceholder onOpenSettings={openSettingsWindow} />
+      </div>
+    )
+  }
+
   return (
     <div className="coord-root">
-      {settingsOpen && (
-        <CoordinatorSettings onClose={() => setSettingsOpen(false)} />
-      )}
-
-      <StatusRow terminals={terminals} turnActive={turnActive} />
+      <StatusRow
+        terminals={terminals}
+        turnActive={turnActive}
+        onOpenSettings={openSettingsWindow}
+      />
 
       <div className="coord-messages" ref={scrollRef}>
         {messages.length === 0 ? (
@@ -102,7 +135,8 @@ export default CoordinatorPanel
 const StatusRow: React.FC<{
   terminals: CoordinatorTerminalSummary[]
   turnActive: boolean
-}> = ({ terminals, turnActive }) => {
+  onOpenSettings: () => void
+}> = ({ terminals, turnActive, onOpenSettings }) => {
   const idleCount = terminals.filter((t) => t.isIdle).length
   const busyCount = terminals.length - idleCount
   return (
@@ -113,9 +147,37 @@ const StatusRow: React.FC<{
       )}
       <span className="coord-status-spacer" />
       {turnActive && <span className="coord-status-pill busy">Thinking…</span>}
+      <button
+        className="coord-header-btn"
+        onClick={onOpenSettings}
+        title="Coordinator settings"
+        aria-label="Open coordinator settings"
+      >
+        <GearIcon />
+      </button>
     </div>
   )
 }
+
+const SetupPlaceholder: React.FC<{ onOpenSettings: () => void }> = ({ onOpenSettings }) => (
+  <div className="coord-empty">
+    <h3>Coordinator needs setup</h3>
+    <p>
+      The coordinator opens in its own window. Pick a provider and enter an API
+      key to get started.
+    </p>
+    <button className="coord-test-btn" onClick={onOpenSettings}>
+      Open Coordinator Settings
+    </button>
+  </div>
+)
+
+const GearIcon: React.FC = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+)
 
 /* ── Empty state ────────────────────────────────────────────────────────── */
 

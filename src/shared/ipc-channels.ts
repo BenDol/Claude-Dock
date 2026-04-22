@@ -383,6 +383,7 @@ export const IPC = {
 
   // Coordinator Plugin
   COORDINATOR_OPEN: 'coordinator:open',
+  COORDINATOR_OPEN_SETTINGS: 'coordinator:openSettings',
   COORDINATOR_FOCUS: 'coordinator:focus',
   COORDINATOR_GET_WINDOW_MODE: 'coordinator:getWindowMode',
   COORDINATOR_GET_CONFIG: 'coordinator:getConfig',

@@ -312,7 +312,55 @@
   line-height: 1;
 }
 
-/* ── Settings overlay ─────────────────────────────────────────────────── */
+/* ── Standalone settings window ───────────────────────────────────────── */
+
+/* Root wrapper for the dedicated coordinator-settings BrowserWindow. Fills
+ * the whole window and establishes the positioned ancestor that .coord-settings
+ * anchors to via inset:0 — this is what prevents the form from escaping its
+ * container the way it did when embedded in the docked panel. */
+.coord-settings-window {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.coord-settings-window-loading,
+.coord-settings-window-error {
+  align-items: center;
+  justify-content: center;
+}
+
+.coord-settings-window-error-body {
+  max-width: 520px;
+  padding: 24px;
+  text-align: center;
+}
+
+.coord-settings-window-error-body h3 {
+  margin: 0 0 12px;
+  color: #f7768e;
+  font-size: 14px;
+}
+
+.coord-settings-window-error-body pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: left;
+}
+
+/* ── Settings form (used inside .coord-settings-window) ───────────────── */
 
 .coord-settings {
   position: absolute;
@@ -330,6 +378,13 @@
   align-items: center;
   justify-content: space-between;
   background: var(--bg-secondary);
+  /* Frameless window: the title bar doubles as the OS drag region. Interactive
+   * children re-enable pointer events via .coord-settings-header .coord-header-btn. */
+  -webkit-app-region: drag;
+}
+
+.coord-settings-header .coord-header-btn {
+  -webkit-app-region: no-drag;
 }
 
 .coord-settings-header h3 {

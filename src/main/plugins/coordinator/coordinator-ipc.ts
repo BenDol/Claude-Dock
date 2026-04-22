@@ -29,6 +29,7 @@ import {
   unregisterSpawnReplyHandler
 } from './bundled-services'
 import { CoordinatorWindowManager } from './coordinator-window'
+import { CoordinatorSettingsWindowManager } from './coordinator-settings-window'
 import { CoordinatorHotkeyService } from './coordinator-hotkey'
 import { listProviderPresets, createProvider } from './llm/registry'
 import { runTurn } from './orchestrator/orchestrator'
@@ -84,6 +85,15 @@ export function registerCoordinatorIpc(): void {
       win.webContents.send(IPC.COORDINATOR_OPEN_REQUEST, dir)
     } catch (err) {
       svc().logError('[coordinator] open: failed to notify dock renderer', err)
+    }
+  })
+
+  ipcMain.handle(IPC.COORDINATOR_OPEN_SETTINGS, async () => {
+    try {
+      await CoordinatorSettingsWindowManager.getInstance().open()
+    } catch (err) {
+      svc().logError('[coordinator] openSettings failed', err)
+      throw err
     }
   })
 
@@ -232,8 +242,10 @@ export function disposeCoordinatorIpc(): void {
   activeTurns.clear()
   unregisterSpawnReplyHandler()
   CoordinatorWindowManager.getInstance().closeAll()
+  CoordinatorSettingsWindowManager.getInstance().close()
   const channels = [
     IPC.COORDINATOR_OPEN,
+    IPC.COORDINATOR_OPEN_SETTINGS,
     IPC.COORDINATOR_FOCUS,
     IPC.COORDINATOR_GET_WINDOW_MODE,
     IPC.COORDINATOR_GET_CONFIG,

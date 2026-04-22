@@ -538,6 +538,7 @@ export interface DockApi {
   }
   coordinator: {
     open: (projectDir: string) => Promise<void>
+    openSettings: () => Promise<void>
     focus: (projectDir: string) => Promise<void>
     getWindowMode: () => Promise<CoordinatorWindowMode>
     getConfig: () => Promise<CoordinatorConfig>
@@ -1125,6 +1126,7 @@ const dockApi: DockApi = {
   },
   coordinator: {
     open: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_OPEN, projectDir),
+    openSettings: () => ipcRenderer.invoke(IPC.COORDINATOR_OPEN_SETTINGS),
     focus: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_FOCUS, projectDir),
     getWindowMode: () => ipcRenderer.invoke(IPC.COORDINATOR_GET_WINDOW_MODE),
     getConfig: () => ipcRenderer.invoke(IPC.COORDINATOR_GET_CONFIG),
