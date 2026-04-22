@@ -157,7 +157,15 @@ function ensureDictationDaemon(): DictationDaemon {
     }
   })
   child.stderr?.on('data', (buf: Buffer) => {
-    daemon.stderr += buf.toString()
+    const chunk = buf.toString()
+    daemon.stderr += chunk
+    // Forward daemon stderr to the app log so the user (and us) can see
+    // device-resolution details, check_input_settings failures, and
+    // silent-capture diagnostics in real time without waiting for exit.
+    for (const line of chunk.split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed) svc().log(`[voice-daemon] ${trimmed}`)
+    }
   })
   child.on('error', (err) => {
     svc().logError('[voice-ipc] dictation daemon spawn error', err)
@@ -248,6 +256,7 @@ export function registerVoiceIpc(): void {
     // so a stray stderr/log line on stdout can't break parsing.
     const script = `
 import json
+import platform
 import sounddevice as sd
 devs = sd.query_devices()
 try:
@@ -255,6 +264,23 @@ try:
 except Exception:
     default = (None, None)
 default_in = default[0] if isinstance(default, (list, tuple)) else default
+
+is_windows = platform.system() == 'Windows'
+
+# On Windows sounddevice surfaces the same physical mic 4x (MME, DirectSound,
+# WASAPI, WDM-KS). Only WASAPI reliably supports arbitrary sample rates via
+# the Windows APO; MME is legacy + 48 kHz only; DirectSound is deprecated;
+# WDM-KS requires exclusive mode and often fails silently. Rank by API so the
+# UI can promote the sensible choice and warn against the others.
+def _api_rank(host_name):
+    if not is_windows:
+        return 0
+    h = (host_name or '').lower()
+    if 'wasapi' in h: return 0
+    if 'directsound' in h: return 2
+    if 'mme' in h: return 3
+    if 'wdm-ks' in h: return 4
+    return 5
 
 def _host_name(d):
     h = d.get('hostapi')
@@ -272,13 +298,19 @@ for i, d in enumerate(devs):
     try:
         if int(d.get('max_input_channels', 0)) <= 0:
             continue
+        host_name = _host_name(d)
+        rank = _api_rank(host_name)
         entries.append({
             'index': i,
             'name': d.get('name', f'device {i}'),
-            'hostApi': _host_name(d),
+            'hostApi': host_name,
             'maxInputChannels': int(d.get('max_input_channels', 0)),
             'defaultSampleRate': float(d.get('default_samplerate', 0.0) or 0.0),
             'isDefault': i == default_in,
+            'apiRank': rank,
+            # On Windows, WASAPI is the recommended pick. Off-Windows all
+            # entries are equally fine so we don't nag the user.
+            'recommended': (rank == 0) if is_windows else False,
         })
     except Exception:
         continue
@@ -348,11 +380,19 @@ rec = VoiceRecorder(
     speech_threshold=cfg['recording']['speech_threshold'],
     device=cfg['recording'].get('input_device'),
 )
-rec.start()
+try:
+    rec.start()
+except Exception as e:
+    print(json.dumps({'error': f'Recording failed to start: {e}'}))
+    sys.exit(0)
 import time; time.sleep(${dur})
 audio = rec.stop()
 if not audio:
-    print(json.dumps({'error': 'No audio captured'}))
+    print(json.dumps({'error': (
+        'No audio was captured. The selected microphone produced silence '
+        '— try a different device (prefer the WASAPI variant on Windows). '
+        'See voice logs for the resolved device details.'
+    )}))
     sys.exit(0)
 trans = create_transcriber(cfg['transcriber'])
 text = trans.transcribe(audio)
@@ -367,7 +407,17 @@ print(json.dumps({'text': text}))
       let out = ''
       let err = ''
       child.stdout?.on('data', (b) => (out += b.toString()))
-      child.stderr?.on('data', (b) => (err += b.toString()))
+      child.stderr?.on('data', (b) => {
+        const chunk = b.toString()
+        err += chunk
+        // Forward recorder diagnostics (device info, check_input_settings
+        // failures, silent-capture notes) to the app log so we can see why
+        // a test record returned silence.
+        for (const line of chunk.split('\n')) {
+          const trimmed = line.trim()
+          if (trimmed) svc().log(`[voice-testrec] ${trimmed}`)
+        }
+      })
       child.on('error', (spawnErr) => {
         activeTestRecords.delete(child)
         svc().logError('[voice-ipc] testRecord spawn error', spawnErr)

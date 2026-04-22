@@ -116,9 +116,18 @@ def main() -> int:
                 _emit({"cancelled": True})
                 continue
 
-            # stop: transcribe
+            # stop: transcribe. `rec.stop()` returns None for zero frames OR
+            # when the captured buffer is pure silence — the latter is a
+            # strong signal that the selected device isn't feeding audio.
             if not audio:
-                _emit({"error": "No audio was captured."})
+                _emit({
+                    "error": (
+                        "No audio was captured. The selected microphone "
+                        "produced silence — try a different device (prefer "
+                        "the WASAPI variant on Windows). See voice logs for "
+                        "the resolved device details."
+                    )
+                })
                 continue
             try:
                 text = trans.transcribe(audio)
