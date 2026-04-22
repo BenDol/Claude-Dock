@@ -25,6 +25,16 @@
  *   dock_check_messages     — Check for messages sent to this terminal (requires messaging enabled)
  *
  * Protocol: JSON-RPC 2.0 over stdio (MCP stdio transport)
+ *
+ * Env:
+ *   DOCK_DATA_DIR      — where the dock writes activity/commands/shell output.
+ *                        Defaults to %APPDATA%/claude-dock (Win) or
+ *                        ~/.config/claude-dock elsewhere.
+ *   DOCK_MCP_COMPACT=1 — return terse one-line tool descriptions from
+ *                        tools/list instead of full prose. Set by the
+ *                        Coordinator plugin so all 11 tools fit under Claude
+ *                        Code's per-server tool-loading budget. Regular user
+ *                        terminals omit this var and receive full descriptions.
  */
 
 const fs = require('fs')
@@ -386,6 +396,590 @@ function formatDockStatus(projectDir, sessionId) {
   return result
 }
 
+// ---------- Tool schemas ----------
+
+/**
+ * Full tool definitions — long-form descriptions and parameter hints. This
+ * is the default response to `tools/list`. Regular user Claude Code terminals
+ * get this set because it carries more context for the model to act correctly
+ * on edge cases (worktree fallback, shell targeting rules, etc.).
+ *
+ * Keep the ORDER of this array and `buildCompactTools()` in sync so bisecting
+ * a budget overflow produces identical name ordering in both modes.
+ */
+function buildFullTools() {
+  return [
+    {
+      name: 'dock_status',
+      description:
+        'Get a summary of what other Claude Dock terminals are currently working on. ' +
+        'Use this at the start of a task when the .linked file exists in the project root ' +
+        'to coordinate with other terminals and avoid conflicts. ' +
+        'Pass project_dir to filter results and session_id to also receive messages. ' +
+        'If your terminal is working in a git worktree, also pass current_cwd so the Dock ' +
+        'can retroactively detect the worktree and show the worktree action button.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project directory. Filters results to only show terminals from this project.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'Your session ID. When provided, unread messages for you are appended to the output.'
+          },
+          current_cwd: {
+            type: 'string',
+            description: 'Optional: your terminal\'s current working directory. If it differs from project_dir (e.g. you\'re in a git worktree), the Dock will validate it and, if it\'s a real worktree, update the UI to reflect this. Prefer the explicit dock_notify_worktree tool when you know you\'ve switched worktrees; this parameter is a safety net.'
+          }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_run_in_shell',
+      description:
+        'Run a command in YOUR Claude Dock shell panel. The shell panel is a separate terminal ' +
+        'embedded in your dock window — use it for running tests, builds, git commands, or any ' +
+        'shell operation without interrupting your current conversation. The shell panel opens ' +
+        'automatically if not already open. The command runs in the project directory. ' +
+        'You can ONLY target shells attached to your own terminal — cross-session targeting is blocked.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description: 'The shell command to execute (e.g. "npm test", "git status", "make build")'
+          },
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project directory. Used to route the command to the correct dock window.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
+          },
+          submit: {
+            type: 'boolean',
+            description: 'Whether to press Enter after typing the command. Default: true.'
+          },
+          shell: {
+            type: 'string',
+            enum: ['default', 'bash', 'cmd', 'powershell', 'pwsh'],
+            description: 'Shell type to use. Use "bash" for bash/shell scripts, "cmd" for Windows batch, "powershell"/"pwsh" for PowerShell scripts. Default: uses the user\'s configured shell.'
+          },
+          shell_id: {
+            type: 'string',
+            description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). Special values: omit/null = open a NEW shell panel; "-1" = use the first existing shell (default/reuse). Use dock_list_shells to discover available shell IDs.'
+          },
+          shell_layout: {
+            type: 'string',
+            enum: ['split', 'stack'],
+            description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "split".'
+          }
+        },
+        required: ['command', 'session_id']
+      }
+    },
+    {
+      name: 'dock_read_shell',
+      description:
+        'Read the recent output from YOUR Claude Dock shell panel. Use this after dock_run_in_shell ' +
+        'to see the command output (test results, build output, etc.). Returns the last N lines ' +
+        'of shell output for your session (default 200). ' +
+        'You can ONLY read shells attached to your own terminal.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
+          },
+          shell_id: {
+            type: 'string',
+            description: 'Specific shell panel ID to read (e.g. "shell:term-1-123:0"). If not provided, reads the first (default) shell panel.'
+          },
+          lines: {
+            type: 'number',
+            description: 'Number of lines to return from the end of the output. Default: 200. Max: 500.'
+          }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_list_shells',
+      description:
+        'List open shell panels for your session. Returns shell IDs, ' +
+        'line counts, and last update times. Use this to discover available shells before ' +
+        'reading their output with dock_read_shell. ' +
+        'Only shows shells belonging to your own session.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID. Only lists shells for your session.'
+          }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_check_shell_events',
+      description:
+        'Check for structured events emitted by scripts running in YOUR Dock shell panel. ' +
+        'Events are embedded as ##DOCK_EVENT:type:payload## markers in the shell output. ' +
+        'Use this to detect compile errors, hot swap results, server start/stop events, etc. ' +
+        'Returns only events, not the full shell output. ' +
+        'You can ONLY check events for shells attached to your own terminal.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
+          },
+          shell_id: {
+            type: 'string',
+            description: 'Target shell panel ID. If omitted, uses the default (first) shell.'
+          },
+          last_n: {
+            type: 'number',
+            description: 'Only scan the last N lines of output for events. Default: 50.'
+          }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_clear_shell',
+      description:
+        'Clear a shell panel\'s terminal output, scrollback buffer, and log file. ' +
+        'Use this before starting a new server or build to get a clean terminal. ' +
+        'The shell process keeps running — only the visible output is cleared. ' +
+        'You can ONLY clear shells attached to your own terminal.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
+          },
+          shell_id: {
+            type: 'string',
+            description: 'Target shell panel ID to clear (e.g. "shell:term-1-123:0"). Use dock_list_shells to discover IDs.'
+          },
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project directory. Used to route to the correct dock window.'
+          }
+        },
+        required: ['session_id', 'shell_id']
+      }
+    },
+    {
+      name: 'dock_list_terminals',
+      description:
+        'List the Claude terminals in a dock window. Use this to discover terminal IDs ' +
+        'before calling dock_prompt_terminal, dock_close_terminal, or dock_spawn_terminal. ' +
+        'Returns each terminal\'s ID, title, session ID, idle/alive state, and a short preview ' +
+        'of its recent output.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project whose dock should be listed.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID. When omitted the tool lists terminals for every dock visible to this MCP server.'
+          }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_spawn_terminal',
+      description:
+        'Ask the dock to open a new Claude terminal. Returns immediately — call dock_list_terminals ' +
+        'after ~500ms to discover the new terminal\'s ID. Use this before dispatching multiple ' +
+        'parallel tasks, so each task has its own idle terminal to consume.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the target project directory.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required).'
+          },
+          title: {
+            type: 'string',
+            description: 'Optional title hint for the new terminal.'
+          },
+          cwd: {
+            type: 'string',
+            description: 'Optional working directory override. Defaults to the project directory.'
+          }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_close_terminal',
+      description:
+        'Close (kill) a Claude terminal. Use dock_list_terminals first to find the correct terminal ID. ' +
+        'Only terminals in the caller\'s own project can be closed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project whose terminal should be closed.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required).'
+          },
+          terminal_id: {
+            type: 'string',
+            description: 'ID of the terminal to close (from dock_list_terminals).'
+          }
+        },
+        required: ['session_id', 'terminal_id']
+      }
+    },
+    {
+      name: 'dock_prompt_terminal',
+      description:
+        'Send a prompt to a Claude terminal. Writes the text into the terminal\'s input and, unless ' +
+        'submit=false, presses Enter. This is how a coordinating Claude instance dispatches work ' +
+        'to another terminal. Keep prompts short, concrete, and self-contained — the target ' +
+        'terminal already has full project context.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project whose terminal should receive the prompt.'
+          },
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required).'
+          },
+          terminal_id: {
+            type: 'string',
+            description: 'ID of the target terminal (from dock_list_terminals).'
+          },
+          prompt: {
+            type: 'string',
+            description: 'The text to send to the terminal.'
+          },
+          submit: {
+            type: 'boolean',
+            description: 'Whether to press Enter after the prompt. Default: true.'
+          }
+        },
+        required: ['session_id', 'terminal_id', 'prompt']
+      }
+    },
+    {
+      name: 'dock_notify_worktree',
+      description:
+        'Notify the Dock that YOUR terminal has switched into (or out of) a git worktree. ' +
+        'Call this after changing the terminal\'s working directory to a worktree (e.g. via ' +
+        '`git worktree add && cd <path>`) so the Dock shows the worktree action button and ' +
+        'routes resolve/remove operations to the correct worktree. Pass worktree_path=null to ' +
+        'clear the association when switching back to the main repo. The path is validated on ' +
+        'the Dock side — it must be an absolute path that exists on disk and has a .git marker.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'YOUR session ID (required).'
+          },
+          project_dir: {
+            type: 'string',
+            description: 'Absolute path to the project directory (the main repo). Used to route to the correct dock window.'
+          },
+          worktree_path: {
+            type: ['string', 'null'],
+            description: 'Absolute path to the worktree the terminal is now working in. Pass null/empty to clear and return to the main repo.'
+          },
+          branch: {
+            type: 'string',
+            description: 'Optional branch name associated with the worktree (informational, for logs).'
+          }
+        },
+        required: ['session_id']
+      }
+    }
+  ]
+}
+
+function buildFullMessagingTools() {
+  return [
+    {
+      name: 'dock_send_message',
+      description:
+        'Send a message to another Claude Dock terminal. Use this to coordinate work, ' +
+        'warn about file conflicts, or request information from another terminal. ' +
+        'The recipient will see the message next time they call dock_status or dock_check_messages.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          from_session_id: {
+            type: 'string',
+            description: 'Your session ID.'
+          },
+          to: {
+            type: 'string',
+            description: 'Recipient: session ID (or prefix), or terminal title.'
+          },
+          message: {
+            type: 'string',
+            description: 'The message to send.'
+          },
+          project_dir: {
+            type: 'string',
+            description: 'Optional. Project directory to scope recipient lookup.'
+          }
+        },
+        required: ['from_session_id', 'to', 'message']
+      }
+    },
+    {
+      name: 'dock_check_messages',
+      description:
+        'Check for messages sent to this terminal by other Claude Dock terminals. ' +
+        'Returns unread messages and marks them as read.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: {
+            type: 'string',
+            description: 'Your session ID to check messages for.'
+          },
+          mark_read: {
+            type: 'boolean',
+            description: 'Whether to mark retrieved messages as read. Default: true.'
+          }
+        },
+        required: ['session_id']
+      }
+    }
+  ]
+}
+
+/**
+ * Compact tool definitions — one-line descriptions, terse param hints. Emitted
+ * when the caller spawns this server with `DOCK_MCP_COMPACT=1` (currently the
+ * Coordinator plugin's Claude Code SDK subprocess). Keeping the full payload
+ * small lets Claude Code's per-server tool budget fit all 11 tools instead of
+ * deferring the last 5 — the symptom that blocked the Coordinator from seeing
+ * `dock_list_terminals`, `dock_spawn_terminal`, etc.
+ *
+ * Must cover the same tool names, `required` sets, and `enum` values as
+ * `buildFullTools()`. Only descriptions differ.
+ */
+function buildCompactTools() {
+  return [
+    {
+      name: 'dock_status',
+      description: 'Summary of Dock terminals + unread messages. Call at task start when .linked exists.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Filter by project dir.' },
+          session_id: { type: 'string', description: 'Your session id; unread messages appended when set.' },
+          current_cwd: { type: 'string', description: 'Your cwd if different from project_dir (worktree fallback).' }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_run_in_shell',
+      description: 'Run a command in your dock shell panel (separate from chat). Shell-panel-scoped to your session.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute.' },
+          project_dir: { type: 'string', description: 'Project dir (routing).' },
+          session_id: { type: 'string', description: 'Your session id.' },
+          submit: { type: 'boolean', description: 'Press Enter (default true).' },
+          shell: {
+            type: 'string',
+            enum: ['default', 'bash', 'cmd', 'powershell', 'pwsh'],
+            description: 'Shell type; default = user config.'
+          },
+          shell_id: { type: 'string', description: 'Shell id, "-1" for first, omit for new panel.' },
+          shell_layout: {
+            type: 'string',
+            enum: ['split', 'stack'],
+            description: 'New-panel layout (split=column, stack=row).'
+          }
+        },
+        required: ['command', 'session_id']
+      }
+    },
+    {
+      name: 'dock_read_shell',
+      description: 'Read recent output from your dock shell panel. Use after dock_run_in_shell.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' },
+          shell_id: { type: 'string', description: 'Shell id (default: first).' },
+          lines: { type: 'number', description: 'Tail N lines (default 200, max 500).' }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_list_shells',
+      description: 'List open shell panels for your session.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_check_shell_events',
+      description: 'Scan your shell panel output for ##DOCK_EVENT:type:payload## markers (compile errors, hot-swap, etc).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' },
+          shell_id: { type: 'string', description: 'Shell id (default: first).' },
+          last_n: { type: 'number', description: 'Scan last N lines (default 50).' }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_clear_shell',
+      description: 'Clear a shell panel\'s output, scrollback, and log file. Process keeps running.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' },
+          shell_id: { type: 'string', description: 'Shell id to clear.' },
+          project_dir: { type: 'string', description: 'Project dir (routing).' }
+        },
+        required: ['session_id', 'shell_id']
+      }
+    },
+    {
+      name: 'dock_list_terminals',
+      description: 'List Claude terminals in the dock (id, title, session, alive/idle). Call first before prompt/close/spawn.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Project dir to filter by.' },
+          session_id: { type: 'string', description: 'Your session id (optional).' }
+        },
+        required: []
+      }
+    },
+    {
+      name: 'dock_spawn_terminal',
+      description: 'Open a new Claude terminal in the project. Call dock_list_terminals ~500ms later to get its id.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Target project dir.' },
+          session_id: { type: 'string', description: 'Your session id.' },
+          title: { type: 'string', description: 'Optional title.' },
+          cwd: { type: 'string', description: 'Optional cwd override.' }
+        },
+        required: ['session_id']
+      }
+    },
+    {
+      name: 'dock_close_terminal',
+      description: 'Kill a Claude terminal by id (must be in your project).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Project dir.' },
+          session_id: { type: 'string', description: 'Your session id.' },
+          terminal_id: { type: 'string', description: 'Terminal id from dock_list_terminals.' }
+        },
+        required: ['session_id', 'terminal_id']
+      }
+    },
+    {
+      name: 'dock_prompt_terminal',
+      description: 'Write a prompt into a Claude terminal and submit it (Enter appended unless submit=false).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project_dir: { type: 'string', description: 'Project dir.' },
+          session_id: { type: 'string', description: 'Your session id.' },
+          terminal_id: { type: 'string', description: 'Target terminal id.' },
+          prompt: { type: 'string', description: 'Text to send.' },
+          submit: { type: 'boolean', description: 'Press Enter (default true).' }
+        },
+        required: ['session_id', 'terminal_id', 'prompt']
+      }
+    },
+    {
+      name: 'dock_notify_worktree',
+      description: 'Tell the Dock your terminal switched into/out of a git worktree. Pass worktree_path=null to clear.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' },
+          project_dir: { type: 'string', description: 'Main repo project dir.' },
+          worktree_path: { type: ['string', 'null'], description: 'Abs worktree path, or null to clear.' },
+          branch: { type: 'string', description: 'Optional branch name (log only).' }
+        },
+        required: ['session_id']
+      }
+    }
+  ]
+}
+
+function buildCompactMessagingTools() {
+  return [
+    {
+      name: 'dock_send_message',
+      description: 'Send a message to another Dock terminal. Shown next time they call dock_status or dock_check_messages.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          from_session_id: { type: 'string', description: 'Your session id.' },
+          to: { type: 'string', description: 'Recipient: session id/prefix or title.' },
+          message: { type: 'string', description: 'Message text.' },
+          project_dir: { type: 'string', description: 'Optional project dir for lookup.' }
+        },
+        required: ['from_session_id', 'to', 'message']
+      }
+    },
+    {
+      name: 'dock_check_messages',
+      description: 'Fetch unread messages for this terminal; marks as read.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session_id: { type: 'string', description: 'Your session id.' },
+          mark_read: { type: 'boolean', description: 'Mark as read (default true).' }
+        },
+        required: ['session_id']
+      }
+    }
+  ]
+}
+
 // ---------- MCP message handlers ----------
 
 async function handleMessage(msg) {
@@ -427,374 +1021,19 @@ async function handleMessage(msg) {
       return null
 
     case 'tools/list': {
-      const tools = [
-        {
-          name: 'dock_status',
-          description:
-            'Get a summary of what other Claude Dock terminals are currently working on. ' +
-            'Use this at the start of a task when the .linked file exists in the project root ' +
-            'to coordinate with other terminals and avoid conflicts. ' +
-            'Pass project_dir to filter results and session_id to also receive messages. ' +
-            'If your terminal is working in a git worktree, also pass current_cwd so the Dock ' +
-            'can retroactively detect the worktree and show the worktree action button.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project directory. Filters results to only show terminals from this project.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'Your session ID. When provided, unread messages for you are appended to the output.'
-              },
-              current_cwd: {
-                type: 'string',
-                description: 'Optional: your terminal\'s current working directory. If it differs from project_dir (e.g. you\'re in a git worktree), the Dock will validate it and, if it\'s a real worktree, update the UI to reflect this. Prefer the explicit dock_notify_worktree tool when you know you\'ve switched worktrees; this parameter is a safety net.'
-              }
-            },
-            required: []
-          }
-        },
-        {
-          name: 'dock_run_in_shell',
-          description:
-            'Run a command in YOUR Claude Dock shell panel. The shell panel is a separate terminal ' +
-            'embedded in your dock window — use it for running tests, builds, git commands, or any ' +
-            'shell operation without interrupting your current conversation. The shell panel opens ' +
-            'automatically if not already open. The command runs in the project directory. ' +
-            'You can ONLY target shells attached to your own terminal — cross-session targeting is blocked.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              command: {
-                type: 'string',
-                description: 'The shell command to execute (e.g. "npm test", "git status", "make build")'
-              },
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project directory. Used to route the command to the correct dock window.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
-              },
-              submit: {
-                type: 'boolean',
-                description: 'Whether to press Enter after typing the command. Default: true.'
-              },
-              shell: {
-                type: 'string',
-                enum: ['default', 'bash', 'cmd', 'powershell', 'pwsh'],
-                description: 'Shell type to use. Use "bash" for bash/shell scripts, "cmd" for Windows batch, "powershell"/"pwsh" for PowerShell scripts. Default: uses the user\'s configured shell.'
-              },
-              shell_id: {
-                type: 'string',
-                description: 'Target a specific shell panel by ID (e.g. "shell:term-1-123:0"). Special values: omit/null = open a NEW shell panel; "-1" = use the first existing shell (default/reuse). Use dock_list_shells to discover available shell IDs.'
-              },
-              shell_layout: {
-                type: 'string',
-                enum: ['split', 'stack'],
-                description: 'Layout for new shell panels (only applies when shell_id is omitted). "split" = new column to the right (horizontal), "stack" = below in same column (vertical). Default: "split".'
-              }
-            },
-            required: ['command', 'session_id']
-          }
-        },
-        {
-          name: 'dock_read_shell',
-          description:
-            'Read the recent output from YOUR Claude Dock shell panel. Use this after dock_run_in_shell ' +
-            'to see the command output (test results, build output, etc.). Returns the last N lines ' +
-            'of shell output for your session (default 200). ' +
-            'You can ONLY read shells attached to your own terminal.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
-              },
-              shell_id: {
-                type: 'string',
-                description: 'Specific shell panel ID to read (e.g. "shell:term-1-123:0"). If not provided, reads the first (default) shell panel.'
-              },
-              lines: {
-                type: 'number',
-                description: 'Number of lines to return from the end of the output. Default: 200. Max: 500.'
-              }
-            },
-            required: ['session_id']
-          }
-        },
-        {
-          name: 'dock_list_shells',
-          description:
-            'List open shell panels for your session. Returns shell IDs, ' +
-            'line counts, and last update times. Use this to discover available shells before ' +
-            'reading their output with dock_read_shell. ' +
-            'Only shows shells belonging to your own session.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID. Only lists shells for your session.'
-              }
-            },
-            required: []
-          }
-        },
-        {
-          name: 'dock_check_shell_events',
-          description:
-            'Check for structured events emitted by scripts running in YOUR Dock shell panel. ' +
-            'Events are embedded as ##DOCK_EVENT:type:payload## markers in the shell output. ' +
-            'Use this to detect compile errors, hot swap results, server start/stop events, etc. ' +
-            'Returns only events, not the full shell output. ' +
-            'You can ONLY check events for shells attached to your own terminal.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
-              },
-              shell_id: {
-                type: 'string',
-                description: 'Target shell panel ID. If omitted, uses the default (first) shell.'
-              },
-              last_n: {
-                type: 'number',
-                description: 'Only scan the last N lines of output for events. Default: 50.'
-              }
-            },
-            required: ['session_id']
-          }
-        },
-        {
-          name: 'dock_clear_shell',
-          description:
-            'Clear a shell panel\'s terminal output, scrollback buffer, and log file. ' +
-            'Use this before starting a new server or build to get a clean terminal. ' +
-            'The shell process keeps running — only the visible output is cleared. ' +
-            'You can ONLY clear shells attached to your own terminal.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required). Must be your own session — cross-session targeting is rejected.'
-              },
-              shell_id: {
-                type: 'string',
-                description: 'Target shell panel ID to clear (e.g. "shell:term-1-123:0"). Use dock_list_shells to discover IDs.'
-              },
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project directory. Used to route to the correct dock window.'
-              }
-            },
-            required: ['session_id', 'shell_id']
-          }
-        },
-        {
-          name: 'dock_list_terminals',
-          description:
-            'List the Claude terminals in a dock window. Use this to discover terminal IDs ' +
-            'before calling dock_prompt_terminal, dock_close_terminal, or dock_spawn_terminal. ' +
-            'Returns each terminal\'s ID, title, session ID, idle/alive state, and a short preview ' +
-            'of its recent output.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project whose dock should be listed.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID. When omitted the tool lists terminals for every dock visible to this MCP server.'
-              }
-            },
-            required: []
-          }
-        },
-        {
-          name: 'dock_spawn_terminal',
-          description:
-            'Ask the dock to open a new Claude terminal. Returns immediately — call dock_list_terminals ' +
-            'after ~500ms to discover the new terminal\'s ID. Use this before dispatching multiple ' +
-            'parallel tasks, so each task has its own idle terminal to consume.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the target project directory.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required).'
-              },
-              title: {
-                type: 'string',
-                description: 'Optional title hint for the new terminal.'
-              },
-              cwd: {
-                type: 'string',
-                description: 'Optional working directory override. Defaults to the project directory.'
-              }
-            },
-            required: ['session_id']
-          }
-        },
-        {
-          name: 'dock_close_terminal',
-          description:
-            'Close (kill) a Claude terminal. Use dock_list_terminals first to find the correct terminal ID. ' +
-            'Only terminals in the caller\'s own project can be closed.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project whose terminal should be closed.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required).'
-              },
-              terminal_id: {
-                type: 'string',
-                description: 'ID of the terminal to close (from dock_list_terminals).'
-              }
-            },
-            required: ['session_id', 'terminal_id']
-          }
-        },
-        {
-          name: 'dock_prompt_terminal',
-          description:
-            'Send a prompt to a Claude terminal. Writes the text into the terminal\'s input and, unless ' +
-            'submit=false, presses Enter. This is how a coordinating Claude instance dispatches work ' +
-            'to another terminal. Keep prompts short, concrete, and self-contained — the target ' +
-            'terminal already has full project context.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project whose terminal should receive the prompt.'
-              },
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required).'
-              },
-              terminal_id: {
-                type: 'string',
-                description: 'ID of the target terminal (from dock_list_terminals).'
-              },
-              prompt: {
-                type: 'string',
-                description: 'The text to send to the terminal.'
-              },
-              submit: {
-                type: 'boolean',
-                description: 'Whether to press Enter after the prompt. Default: true.'
-              }
-            },
-            required: ['session_id', 'terminal_id', 'prompt']
-          }
-        },
-        {
-          name: 'dock_notify_worktree',
-          description:
-            'Notify the Dock that YOUR terminal has switched into (or out of) a git worktree. ' +
-            'Call this after changing the terminal\'s working directory to a worktree (e.g. via ' +
-            '`git worktree add && cd <path>`) so the Dock shows the worktree action button and ' +
-            'routes resolve/remove operations to the correct worktree. Pass worktree_path=null to ' +
-            'clear the association when switching back to the main repo. The path is validated on ' +
-            'the Dock side — it must be an absolute path that exists on disk and has a .git marker.',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              session_id: {
-                type: 'string',
-                description: 'YOUR session ID (required).'
-              },
-              project_dir: {
-                type: 'string',
-                description: 'Absolute path to the project directory (the main repo). Used to route to the correct dock window.'
-              },
-              worktree_path: {
-                type: ['string', 'null'],
-                description: 'Absolute path to the worktree the terminal is now working in. Pass null/empty to clear and return to the main repo.'
-              },
-              branch: {
-                type: 'string',
-                description: 'Optional branch name associated with the worktree (informational, for logs).'
-              }
-            },
-            required: ['session_id']
-          }
-        }
-      ]
-
+      // Claude Code applies a per-server token budget to MCP tools and defers
+      // the tail of the list when descriptions overflow (see SDKMcpTool.isLoaded
+      // in @anthropic-ai/claude-agent-sdk). When the caller is the Coordinator
+      // plugin's SDK-backed subprocess, it spawns this script with
+      // DOCK_MCP_COMPACT=1 to receive one-line descriptions so ALL 11 tools
+      // fit under the budget. Regular user terminals get the full descriptions
+      // — they have lower tool pressure (fewer competing MCPs and built-ins).
+      const compact = process.env.DOCK_MCP_COMPACT === '1'
+      const tools = compact ? buildCompactTools() : buildFullTools()
       if (isMessagingEnabled()) {
-        tools.push(
-          {
-            name: 'dock_send_message',
-            description:
-              'Send a message to another Claude Dock terminal. Use this to coordinate work, ' +
-              'warn about file conflicts, or request information from another terminal. ' +
-              'The recipient will see the message next time they call dock_status or dock_check_messages.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                from_session_id: {
-                  type: 'string',
-                  description: 'Your session ID.'
-                },
-                to: {
-                  type: 'string',
-                  description: 'Recipient: session ID (or prefix), or terminal title.'
-                },
-                message: {
-                  type: 'string',
-                  description: 'The message to send.'
-                },
-                project_dir: {
-                  type: 'string',
-                  description: 'Optional. Project directory to scope recipient lookup.'
-                }
-              },
-              required: ['from_session_id', 'to', 'message']
-            }
-          },
-          {
-            name: 'dock_check_messages',
-            description:
-              'Check for messages sent to this terminal by other Claude Dock terminals. ' +
-              'Returns unread messages and marks them as read.',
-            inputSchema: {
-              type: 'object',
-              properties: {
-                session_id: {
-                  type: 'string',
-                  description: 'Your session ID to check messages for.'
-                },
-                mark_read: {
-                  type: 'boolean',
-                  description: 'Whether to mark retrieved messages as read. Default: true.'
-                }
-              },
-              required: ['session_id']
-            }
-          }
-        )
+        const msgTools = compact ? buildCompactMessagingTools() : buildFullMessagingTools()
+        tools.push(...msgTools)
       }
-
       return jsonRpcResponse(id, { tools })
     }
 

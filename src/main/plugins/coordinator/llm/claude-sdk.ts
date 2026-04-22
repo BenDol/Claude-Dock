@@ -198,7 +198,15 @@ export function createClaudeSdkProvider(deps: ClaudeSdkProviderDeps): LLMProvide
               type: 'stdio',
               command: 'node',
               args: [deps.mcpScriptPath],
-              env: { DOCK_DATA_DIR: deps.dockDataDir }
+              // DOCK_MCP_COMPACT=1 flips the MCP server into compact-description
+              // mode. Claude Code's per-server tool-loading budget (see
+              // SDKMcpTool.isLoaded in @anthropic-ai/claude-agent-sdk) would
+              // otherwise defer the back half of our 11-tool list — notably
+              // dock_list_terminals/spawn/prompt/close — leaving the
+              // Coordinator blind to its primary orchestration verbs. Compact
+              // mode keeps identical tool names and schemas but trims prose so
+              // everything fits under the budget.
+              env: { DOCK_DATA_DIR: deps.dockDataDir, DOCK_MCP_COMPACT: '1' }
             }
           },
           // Wildcard — allow every tool the coordinator MCP exposes.

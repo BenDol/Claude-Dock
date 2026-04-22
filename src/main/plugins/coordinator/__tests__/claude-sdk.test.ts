@@ -179,7 +179,9 @@ describe('claude-sdk provider', () => {
       type: 'stdio',
       command: 'node',
       args: ['C:/tmp/claude-dock-mcp.cjs'],
-      env: { DOCK_DATA_DIR: 'C:/tmp/dock-link' }
+      // DOCK_MCP_COMPACT=1 flips the MCP server into compact-description mode
+      // so all 11 tools fit under Claude Code's per-server loading budget.
+      env: { DOCK_DATA_DIR: 'C:/tmp/dock-link', DOCK_MCP_COMPACT: '1' }
     })
     expect(opts.systemPrompt).toEqual({
       type: 'preset',
