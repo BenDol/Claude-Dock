@@ -187,7 +187,8 @@ export interface DockApi {
     openDockPath: (dir: string) => Promise<void>
     focusDockPath: (dir: string) => Promise<boolean>
     openExternal: (url: string) => Promise<void>
-    openInExplorer: (dir: string) => Promise<void>
+    /** Resolves to shell.openPath's error string (empty on success). */
+    openInExplorer: (dir: string) => Promise<string>
     relaunch: () => Promise<void>
     closeAll: () => Promise<void>
     getLastSession: () => Promise<LastSessionEntry[]>
