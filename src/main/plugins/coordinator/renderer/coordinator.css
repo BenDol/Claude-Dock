@@ -88,6 +88,23 @@
   50% { opacity: 0.4; }
 }
 
+@keyframes coord-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.coord-thinking-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(240, 185, 87, 0.25);
+  border-top-color: #f0b957;
+  border-radius: 50%;
+  animation: coord-spin 0.9s linear infinite;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
 .coord-status-spacer { flex: 1; }
 
 /* ── Message list ─────────────────────────────────────────────────────── */

@@ -10,13 +10,19 @@
  * from Claude Dock's shared state file and exposes it via MCP tools.
  *
  * Tools:
- *   dock_status          — View what other terminals are working on + unread messages
- *   dock_run_in_shell    — Run a command in the dock's shell panel (opens it if closed)
- *   dock_read_shell      — Read recent output from a shell panel
- *   dock_list_shells     — List all open shell panels for a session (or all sessions)
- *   dock_notify_worktree — Notify the Dock that your terminal switched to/from a git worktree
- *   dock_send_message    — Send a message to another terminal (requires messaging enabled)
- *   dock_check_messages  — Check for messages sent to this terminal (requires messaging enabled)
+ *   dock_status             — View what other terminals are working on + unread messages
+ *   dock_run_in_shell       — Run a command in the dock's shell panel (opens it if closed)
+ *   dock_read_shell         — Read recent output from a shell panel
+ *   dock_list_shells        — List all open shell panels for a session (or all sessions)
+ *   dock_check_shell_events — Scan a shell panel for structured ##DOCK_EVENT## markers
+ *   dock_clear_shell        — Clear a shell panel's output, scrollback, and log file
+ *   dock_list_terminals     — List Claude terminals in a dock window (id, title, idle/alive)
+ *   dock_spawn_terminal     — Ask the dock to open a new Claude terminal
+ *   dock_close_terminal     — Close (kill) a Claude terminal by id
+ *   dock_prompt_terminal    — Write a prompt into a Claude terminal and submit it
+ *   dock_notify_worktree    — Notify the Dock that your terminal switched to/from a git worktree
+ *   dock_send_message       — Send a message to another terminal (requires messaging enabled)
+ *   dock_check_messages     — Check for messages sent to this terminal (requires messaging enabled)
  *
  * Protocol: JSON-RPC 2.0 over stdio (MCP stdio transport)
  */
@@ -394,7 +400,26 @@ async function handleMessage(msg) {
           experimental: { 'claude/channel': {} }
         },
         serverInfo: { name: 'claude-dock', version: '2.0.0' },
-        instructions: 'Shell events from Dock arrive as channel notifications. React to them (e.g. exception_detected, server_stopped, compile_error) by investigating and helping the user.'
+        instructions: [
+          'Claude Dock MCP exposes two families of tools:',
+          '',
+          '1. Shell-panel tools (run commands in YOUR dock shell panel):',
+          '   dock_run_in_shell, dock_read_shell, dock_list_shells,',
+          '   dock_check_shell_events, dock_clear_shell.',
+          '',
+          '2. Terminal tools (orchestrate other Claude terminals in the dock):',
+          '   dock_list_terminals — enumerate terminals with idle/alive state.',
+          '   dock_spawn_terminal — open a new Claude terminal in the project.',
+          '   dock_prompt_terminal — write a prompt into a terminal and submit it.',
+          '   dock_close_terminal — kill an idle terminal you no longer need.',
+          '',
+          'Plus: dock_status (overview), dock_notify_worktree (worktree signalling),',
+          'and the optional messaging tools (dock_send_message, dock_check_messages).',
+          '',
+          'Shell events from Dock arrive as channel notifications. React to them',
+          '(e.g. exception_detected, server_stopped, compile_error) by investigating',
+          'and helping the user.'
+        ].join('\n')
       })
 
     case 'notifications/initialized':

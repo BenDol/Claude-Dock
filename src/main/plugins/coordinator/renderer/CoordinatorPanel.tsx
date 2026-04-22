@@ -206,7 +206,14 @@ const StatusRow: React.FC<{
         <span className="coord-status-pill running-dot">{busyCount} busy</span>
       )}
       <span className="coord-status-spacer" />
-      {turnActive && <span className="coord-status-pill busy">Thinking…</span>}
+      {turnActive && (
+        <span
+          className="coord-thinking-spinner"
+          role="status"
+          aria-label="Thinking"
+          title="Thinking…"
+        />
+      )}
       <button
         className="coord-header-btn"
         onClick={onOpenSettings}

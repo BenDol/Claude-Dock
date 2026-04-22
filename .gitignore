@@ -10,3 +10,4 @@ Thumbs.db
 
 /.claude/settings.local.json
 .claude/worktrees/
+.claude/dock.local.json
