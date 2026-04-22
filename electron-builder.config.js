@@ -58,9 +58,11 @@ module.exports = {
     // executable via platform-specific optional-dependency packages
     // (e.g. claude-agent-sdk-win32-x64/claude.exe). The SDK resolves it with
     // require.resolve and then spawns it with child_process — which cannot
-    // launch a binary from inside app.asar. The wildcard covers whichever
-    // platform package npm actually installed on this build machine.
-    'node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+    // launch a binary from inside app.asar. The glob below is explicit about
+    // the <platform>-<arch> combinations we expect npm to install, so future
+    // `@anthropic-ai/claude-agent-sdk-*` siblings (docs, types, etc.) won't
+    // be unpacked accidentally.
+    'node_modules/@anthropic-ai/claude-agent-sdk-{win32,darwin,linux}-{x64,arm64}/**'
   ],
   win: {
     icon: 'assets/icon.png',

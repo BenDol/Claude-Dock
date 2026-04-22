@@ -26,6 +26,22 @@ const dockApi = (): Window['dockApi'] => {
   return api
 }
 
+/**
+ * Does the named provider need an API key set before it can be used?
+ *
+ * Fallback is `true` (safe — blocks send) for unknown provider ids so a
+ * typo'd registry entry can't bypass the key requirement. Key-less providers
+ * (claude-sdk, ollama, openai-compat) set `requiresApiKey: false` in the
+ * registry and return false here.
+ */
+export function providerNeedsApiKey(
+  providers: CoordinatorProviderPreset[],
+  providerId: string
+): boolean {
+  const preset = providers.find((p) => p.id === providerId)
+  return preset?.requiresApiKey ?? true
+}
+
 interface CoordinatorState {
   projectDir: string | null
   messages: CoordinatorMessage[]
@@ -156,8 +172,8 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
   },
 
   initForSettings: async () => {
-    const api = dockApi()
     try {
+      const api = dockApi()
       const [config, providers, hotkeyStatus] = await Promise.all([
         api.coordinator.getConfig(),
         api.coordinator.listProviders(),
@@ -199,9 +215,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!userText.trim()) return
     // Only gate on apiKey for providers that actually require one. Otherwise
     // every no-key backend (claude-sdk, ollama, openai-compat) falsely blocks.
-    const preset = providers.find((p) => p.id === config.provider)
-    const needsKey = preset?.requiresApiKey ?? true
-    if (needsKey && !config.apiKey.trim()) {
+    if (providerNeedsApiKey(providers, config.provider) && !config.apiKey.trim()) {
       set({ error: 'Set an API key in settings before sending messages.' })
       return
     }

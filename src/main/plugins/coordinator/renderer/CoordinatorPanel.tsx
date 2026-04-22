@@ -12,7 +12,7 @@ import type {
   CoordinatorMessage,
   CoordinatorTerminalSummary
 } from '../../../../shared/coordinator-types'
-import { useCoordinatorStore } from './coordinator-store'
+import { useCoordinatorStore, providerNeedsApiKey } from './coordinator-store'
 import { getDockApi } from '@dock-renderer/lib/ipc-bridge'
 
 const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
@@ -54,9 +54,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     if (!config) return
     if (providers.length === 0) return
     if (autoOpenedRef.current) return
-    const preset = providers.find((p) => p.id === config.provider)
-    const needsKey = preset?.requiresApiKey ?? true
-    if (needsKey && config.apiKey.length === 0) {
+    if (providerNeedsApiKey(providers, config.provider) && config.apiKey.length === 0) {
       autoOpenedRef.current = true
       openSettingsWindow()
     }
@@ -82,9 +80,8 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
     )
   }
 
-  const preset = providers.find((p) => p.id === config.provider)
-  const needsKey = preset?.requiresApiKey ?? true
-  const needsSetup = needsKey && config.apiKey.length === 0
+  const needsSetup =
+    providerNeedsApiKey(providers, config.provider) && config.apiKey.length === 0
 
   if (needsSetup) {
     return (
