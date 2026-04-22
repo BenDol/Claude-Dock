@@ -1990,13 +1990,17 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 10px;
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
   white-space: nowrap;
-  line-height: 1.4;
+  /* line-height: 1 tightens the text line-box so `align-items: center`
+   * centres the dot on the glyph itself rather than on a loose line-box
+   * (with line-height: 1.4 the line-box included ascender/descender
+   * padding, which pushed lowercase text below the dot's midpoint). */
+  line-height: 1;
   font-family: var(--font-mono, monospace);
   font-size: inherit;
 }
@@ -2034,6 +2038,11 @@ button.gm-detail-branch-chip {
   height: 6px;
   border-radius: 50%;
   background: currentColor;
+  flex-shrink: 0;
+  /* Nudge down ~1px so the dot's optical centre lines up with the
+   * lowercase glyph midline (monospace fonts sit slightly below the
+   * em-box centre even after tightening line-height). */
+  transform: translateY(1px);
 }
 
 .gm-detail-branches-more {
