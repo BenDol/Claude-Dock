@@ -121,7 +121,12 @@ function ensureDictationDaemon(): DictationDaemon {
 
   const py = getVenvPython()
   const script = dictationScript()
-  if (!fs.existsSync(script)) {
+  // Pre-flight the full python/ tree, not just dictation_daemon.py. A stale
+  // bundle can still have the top-level script but miss src/ modules (e.g.
+  // src/cuda_setup.py) that the daemon imports, causing an opaque crash inside
+  // Python rather than a diagnosable TS error. Refuse to spawn in that state.
+  const integrity = verifyBundledPythonIntegrity()
+  if (!fs.existsSync(script) || integrity.missing.length > 0) {
     // Throw so the caller's ready-promise rejects with a diagnosable message
     // instead of crashing inside spawn() with an opaque ENOENT from Python.
     throw new Error(missingScriptError('Dictation daemon script', script))
