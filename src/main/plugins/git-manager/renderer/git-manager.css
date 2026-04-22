@@ -1926,6 +1926,42 @@
   line-height: 1.4;
 }
 
+/* Long commit bodies get capped so the diff below stays visible. The
+ * fade-out hint cues that content is clipped; the adjacent toggle button
+ * expands it in place. */
+.gm-detail-body-collapsed {
+  max-height: calc(1.4em * 6);
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 0;
+}
+
+.gm-detail-body-collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1.8em;
+  background: linear-gradient(to bottom, transparent, var(--bg-primary, var(--bg-secondary, #1e1e1e)));
+  pointer-events: none;
+}
+
+.gm-detail-body-toggle {
+  background: none;
+  border: none;
+  color: var(--accent-color, #7aa2f7);
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+  margin-bottom: 8px;
+  align-self: flex-start;
+}
+
+.gm-detail-body-toggle:hover {
+  text-decoration: underline;
+}
+
 /* "In: main, origin/main, …" chips — which branches contain the selected commit */
 .gm-detail-branches {
   display: flex;

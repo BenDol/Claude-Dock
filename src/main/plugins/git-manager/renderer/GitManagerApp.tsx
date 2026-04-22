@@ -4333,16 +4333,24 @@ const CommitBranchesSection: React.FC<{
   if (data === null) {
     return <div className="gm-detail-branches gm-detail-branches-loading">Loading branches…</div>
   }
-  // Prefer local branch tags; fall back to remote-tracking refs (origin/*)
-  // only when no local branch points at the commit, so commits that exist
-  // only on a remote still surface somewhere. When at least one local ref
-  // exists, remote chips are hidden to keep the strip uncluttered.
+  // Show every local branch that contains the commit, plus any remote
+  // branch whose short name has no local counterpart. This surfaces
+  // branches that only exist on the remote (e.g. a feature branch that
+  // was merged via `origin/feature-x` and never pulled locally) without
+  // cluttering the strip with `origin/main` alongside `main`.
   if (data.local.length === 0 && data.remote.length === 0) return null
 
   type Chip = { name: string; kind: 'local' | 'remote'; isHead: boolean }
-  const chips: Chip[] = data.local.length > 0
-    ? data.local.map<Chip>((n) => ({ name: n, kind: 'local', isHead: n === data.head }))
-    : data.remote.map<Chip>((n) => ({ name: n, kind: 'remote', isHead: false }))
+  const localSet = new Set(data.local)
+  const remoteUnique = data.remote.filter((r) => {
+    const slash = r.indexOf('/')
+    const shortName = slash >= 0 ? r.slice(slash + 1) : r
+    return !localSet.has(shortName)
+  })
+  const chips: Chip[] = [
+    ...data.local.map<Chip>((n) => ({ name: n, kind: 'local', isHead: n === data.head })),
+    ...remoteUnique.map<Chip>((n) => ({ name: n, kind: 'remote', isHead: false }))
+  ]
   const visible = expanded ? chips : chips.slice(0, COLLAPSED_LIMIT)
   const hidden = chips.length - visible.length
 
@@ -4433,6 +4441,14 @@ const CommitDetailPanel: React.FC<{
   } | null>(null)
   const [branchesExpanded, setBranchesExpanded] = useState(false)
   const branchesTokenRef = useRef(0)
+  // Collapse long commit bodies so a 40-line message doesn't push the file
+  // list + diff off the bottom of the detail panel.
+  const [bodyExpanded, setBodyExpanded] = useState(false)
+  const bodyIsLong = useMemo(() => {
+    if (!detail.body) return false
+    const lineCount = detail.body.split('\n').length
+    return lineCount > 8 || detail.body.length > 500
+  }, [detail.body])
 
   useEffect(() => {
     const token = ++branchesTokenRef.current
@@ -4493,7 +4509,7 @@ const CommitDetailPanel: React.FC<{
   }, [api, projectDir, detail.files, selectedLines, onError, onRefresh])
 
   // Clear selection on new commit
-  useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null); setFocusedFileIdx(null) }, [detail.hash])
+  useEffect(() => { setSelectedLines(new Set()); setCtxMenu(null); setFocusedFileIdx(null); setBodyExpanded(false) }, [detail.hash])
 
   // Scroll to file and line from search navigation
   useEffect(() => {
@@ -4747,7 +4763,22 @@ const CommitDetailPanel: React.FC<{
           </div>
         </div>
         <div className="gm-detail-subject">{detail.subject}</div>
-        {detail.body && <div className="gm-detail-body">{detail.body}</div>}
+        {detail.body && (
+          <>
+            <div className={`gm-detail-body${bodyIsLong && !bodyExpanded ? ' gm-detail-body-collapsed' : ''}`}>
+              {detail.body}
+            </div>
+            {bodyIsLong && (
+              <button
+                type="button"
+                className="gm-detail-body-toggle"
+                onClick={() => setBodyExpanded((v) => !v)}
+              >
+                {bodyExpanded ? 'Show less' : 'Show more'}
+              </button>
+            )}
+          </>
+        )}
       </div>
       <CommitBranchesSection
         data={branchesForCommit}
