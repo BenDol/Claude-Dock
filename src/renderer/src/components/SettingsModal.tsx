@@ -1,4 +1,5 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useSettingsStore } from '../stores/settings-store'
 import { useDockStore } from '../stores/dock-store'
 import { getDockApi } from '../lib/ipc-bridge'
@@ -57,58 +58,217 @@ const KeybindInput: React.FC<{
   const isDefault = value === defaultValue
 
   return (
-    <label>
-      {label}
-      <div className="keybind-row">
-        <input
-          type="checkbox"
-          checked={!isDisabled}
-          onChange={toggleEnabled}
-          title={isDisabled ? 'Enable this keybind' : 'Disable this keybind'}
-        />
-        <input
-          ref={inputRef}
-          type="text"
-          readOnly
-          value={listening ? 'Press a key combo...' : displayValue || 'None'}
-          className={`keybind-input${listening ? ' listening' : ''}${isDisabled ? ' disabled-bind' : ''}`}
-          onClick={() => { if (!isDisabled) setListening(true) }}
-          onKeyDown={handleKeyDown}
-          onBlur={() => setListening(false)}
-        />
-        <button
-          className="keybind-restore"
-          title="Restore default"
-          disabled={isDefault}
-          onClick={(e) => { e.preventDefault(); onChange(defaultValue) }}
-        >
-          ↺
-        </button>
+    <div className="settings-field">
+      <div className="settings-field-row">
+        <span className="settings-field-label">
+          <label className="dock-toggle" title={isDisabled ? 'Enable this keybind' : 'Disable this keybind'}>
+            <input type="checkbox" checked={!isDisabled} onChange={toggleEnabled} />
+            <span className="dock-toggle-track" />
+          </label>
+          {label}
+        </span>
+        <span className="settings-field-control">
+          <div className="keybind-row">
+            <input
+              ref={inputRef}
+              type="text"
+              readOnly
+              value={listening ? 'Press a key combo…' : displayValue || 'None'}
+              className={`keybind-input${listening ? ' listening' : ''}${isDisabled ? ' disabled-bind' : ''}`}
+              onClick={() => { if (!isDisabled) setListening(true) }}
+              onKeyDown={handleKeyDown}
+              onBlur={() => setListening(false)}
+              disabled={isDisabled}
+            />
+            <button
+              className="keybind-restore"
+              title="Restore default"
+              disabled={isDefault}
+              onClick={(e) => { e.preventDefault(); onChange(defaultValue) }}
+              aria-label="Restore default keybind"
+            >
+              ↺
+            </button>
+          </div>
+        </span>
       </div>
-    </label>
+    </div>
   )
 }
 
-/** Collapsible section header — same visual style as settings-section-header
- *  but clickable to expand/collapse the content below it. */
+/** Reusable modern toggle pill (checkbox replacement). */
+const DockToggle: React.FC<{
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+  label?: React.ReactNode
+  ariaLabel?: string
+}> = ({ checked, onChange, disabled, label, ariaLabel }) => (
+  <label className={`dock-toggle${disabled ? ' disabled' : ''}`}>
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.checked)}
+      aria-label={ariaLabel}
+    />
+    <span className="dock-toggle-track" />
+    {label !== undefined && <span className="dock-toggle-label">{label}</span>}
+  </label>
+)
+
+/** Segmented control for small enum choices. */
+function SegmentedControl<T extends string>({
+  value, options, onChange, ariaLabel,
+}: {
+  value: T
+  options: Array<{ value: T; label: string; title?: string }>
+  onChange: (v: T) => void
+  ariaLabel?: string
+}): React.ReactElement {
+  return (
+    <div className="settings-seg" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          title={o.title}
+          className={`settings-seg-btn${value === o.value ? ' active' : ''}`}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Card container for a group of related settings. */
+const SettingsCard: React.FC<{
+  title: string
+  description?: React.ReactNode
+  icon?: React.ReactNode
+  children: React.ReactNode
+}> = ({ title, description, icon, children }) => (
+  <div className="settings-card" data-settings-card={title}>
+    <div className="settings-card-header">
+      {icon && <span className="settings-card-header-icon">{icon}</span>}
+      <div className="settings-card-header-text">
+        <h4>{title}</h4>
+        {description && <div className="settings-card-header-desc">{description}</div>}
+      </div>
+    </div>
+    <div className="settings-card-body">{children}</div>
+  </div>
+)
+
+/** A single field with label / control / optional description. Label + control on one row. */
+const SettingsField: React.FC<{
+  label: React.ReactNode
+  description?: React.ReactNode
+  children: React.ReactNode
+}> = ({ label, description, children }) => (
+  <div className="settings-field">
+    <div className="settings-field-row">
+      <span className="settings-field-label">{label}</span>
+      <span className="settings-field-control">{children}</span>
+    </div>
+    {description && <div className="settings-field-desc">{description}</div>}
+  </div>
+)
+
+/** Field variant where the control spans full width under the label (e.g. chip lists). */
+const SettingsFieldStacked: React.FC<{
+  label: React.ReactNode
+  description?: React.ReactNode
+  children: React.ReactNode
+}> = ({ label, description, children }) => (
+  <div className="settings-field">
+    <span className="settings-field-label">{label}</span>
+    {description && <div className="settings-field-desc">{description}</div>}
+    <div style={{ marginTop: 6 }}>{children}</div>
+  </div>
+)
+
+/** Accent color swatch selector. */
+const ACCENT_PRESETS = [
+  '#da7756', // Claude orange (default)
+  '#3b82f6', // Blue
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#ef4444', // Red
+  '#14b8a6', // Teal
+]
+
+const AccentPicker: React.FC<{
+  value: string
+  onChange: (color: string) => void
+}> = ({ value, onChange }) => {
+  const isCustom = !ACCENT_PRESETS.some((c) => c.toLowerCase() === value.toLowerCase())
+  return (
+    <div className="settings-accent-row">
+      {ACCENT_PRESETS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          className={`settings-accent-swatch${value.toLowerCase() === c.toLowerCase() ? ' active' : ''}`}
+          style={{ background: c }}
+          onClick={() => onChange(c)}
+          aria-label={`Accent ${c}`}
+          title={c}
+        />
+      ))}
+      <label className="settings-accent-custom">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: 28, height: 28, border: 'none', borderRadius: '50%', padding: 0, background: 'none', cursor: 'pointer' }}
+          aria-label="Custom accent color"
+        />
+        {isCustom ? 'Custom' : 'Pick custom'}
+      </label>
+    </div>
+  )
+}
+
+/** Card-style collapsible section with a full-width click target. */
 const SettingsAccordion: React.FC<{
   title: string
   defaultOpen?: boolean
   noDivider?: boolean
   children: React.ReactNode
-}> = ({ title, defaultOpen = false, noDivider, children }) => {
+}> = ({ title, defaultOpen = false, children }) => {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <>
-      {!noDivider && <div className="settings-divider" />}
-      <button className={`settings-section-toggle${open ? ' open' : ''}`} onClick={() => setOpen(!open)}>
-        <svg className="settings-section-chevron" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="2,1 6,4 2,7" />
+    <div className={`settings-accordion${open ? ' open' : ''}`}>
+      <button
+        className="settings-accordion-toggle"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        <span className="settings-accordion-title">{title}</span>
+        <svg
+          className="settings-accordion-chevron"
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="3,4.5 6,7.5 9,4.5" />
         </svg>
-        {title}
       </button>
-      {open && children}
-    </>
+      {open && <div className="settings-accordion-body">{children}</div>}
+    </div>
   )
 }
 
@@ -119,6 +279,14 @@ const SettingsAccordion: React.FC<{
  *
  * Usage: <SettingScope keyPath="terminal.fontSize" value={settings.terminal.fontSize} section="terminal" sectionKey="fontSize" />
  */
+type ScopeKind = 'global' | 'project' | 'local'
+
+const SCOPE_META: Record<ScopeKind, { label: string; file: string; description: string }> = {
+  global: { label: 'Global', file: 'user settings', description: 'Applies everywhere unless overridden.' },
+  project: { label: 'Project', file: 'dock.json', description: 'Shared across the team — committed to the repo.' },
+  local: { label: 'Local', file: 'dock.local.json', description: 'Only for this machine — not committed.' },
+}
+
 const SettingScope: React.FC<{
   keyPath: string
   value: unknown
@@ -126,80 +294,129 @@ const SettingScope: React.FC<{
   sectionKey: string
 }> = ({ keyPath, value, section, sectionKey }) => {
   const origins = useSettingsStore((s) => s.origins)
+  const update = useSettingsStore((s) => s.update)
   const updateProject = useSettingsStore((s) => s.updateProject)
   const resetProjectKey = useSettingsStore((s) => s.resetProjectKey)
   const [open, setOpen] = useState(false)
 
-  const origin = origins[keyPath] as string | undefined // 'project' | 'local' | undefined (global)
-  const isOverridden = origin === 'project' || origin === 'local'
+  const origin = (origins[keyPath] as ScopeKind | undefined) ?? 'global'
+  const meta = SCOPE_META[origin]
 
-  const saveToProject = async () => {
+  const pillRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
+
+  const selectScope = async (target: ScopeKind) => {
     setOpen(false)
-    await updateProject({ [section]: { [sectionKey]: value } } as any, 'project')
+    // Always write the current value to the chosen tier (even if origin matches target —
+    // the user may have edited the value since and expects the selection to persist it there).
+    // Also clear conflicting overrides in other tiers so the value only lives in one place.
+    if (target === 'global') {
+      // Save at the global tier — applies to every project on this env profile.
+      await update({ [section]: { [sectionKey]: value } } as any)
+      if (origin === 'project') await resetProjectKey(keyPath, 'project')
+      if (origin === 'local') await resetProjectKey(keyPath, 'local')
+      return
+    }
+    await updateProject({ [section]: { [sectionKey]: value } } as any, target)
+    if (target === 'project' && origin === 'local') await resetProjectKey(keyPath, 'local')
+    if (target === 'local' && origin === 'project') await resetProjectKey(keyPath, 'project')
   }
 
-  const saveToLocal = async () => {
-    setOpen(false)
-    await updateProject({ [section]: { [sectionKey]: value } } as any, 'local')
-  }
+  // Position the portaled menu relative to the pill
+  useEffect(() => {
+    if (!open) { setMenuPos(null); return }
+    const place = () => {
+      const r = pillRef.current?.getBoundingClientRect()
+      if (!r) return
+      setMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open])
 
-  const resetToGlobal = async () => {
-    setOpen(false)
-    if (origin === 'local') await resetProjectKey(keyPath, 'local')
-    if (origin === 'project') await resetProjectKey(keyPath, 'project')
-  }
-
-  // Close on Escape
   useEffect(() => {
     if (!open) return
-    const handler = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) }
     }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (popoverRef.current?.contains(t) || pillRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('mousedown', onDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('mousedown', onDown, true)
+    }
   }, [open])
 
-  // Close on any mousedown outside the popover
-  const popoverRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler, true)
-    return () => document.removeEventListener('mousedown', handler, true)
-  }, [open])
+  const menu = open && menuPos ? createPortal(
+    <div
+      className="scope-pill-menu"
+      ref={popoverRef}
+      role="menu"
+      style={{ position: 'fixed', top: menuPos.top, right: menuPos.right }}
+    >
+      <div className="scope-pill-menu-head">Save this setting to…</div>
+      {(['global', 'project', 'local'] as ScopeKind[]).map((kind) => {
+        const m = SCOPE_META[kind]
+        const active = origin === kind
+        return (
+          <button
+            key={kind}
+            type="button"
+            role="menuitemradio"
+            aria-checked={active}
+            className={`scope-pill-menu-item scope-${kind}${active ? ' active' : ''}`}
+            onClick={() => selectScope(kind)}
+          >
+            <span className="scope-pill-menu-dot" aria-hidden="true" />
+            <span className="scope-pill-menu-text">
+              <span className="scope-pill-menu-label">{m.label}</span>
+              <span className="scope-pill-menu-desc">{m.description}</span>
+            </span>
+            <span className="scope-pill-menu-right">
+              {active ? (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="2.5,6 5,8.5 9.5,3.5" />
+                </svg>
+              ) : (
+                <span className="scope-pill-menu-file">{m.file}</span>
+              )}
+            </span>
+          </button>
+        )
+      })}
+    </div>,
+    document.body
+  ) : null
 
   return (
-    <span className="setting-scope-wrap">
+    <span className="scope-pill-wrap">
       <button
-        className={`setting-scope-btn${isOverridden ? ' setting-scope-overridden' : ''}`}
-        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-        title={isOverridden ? `Overridden at ${origin} level — click to change` : 'Click to save at project level'}
+        ref={pillRef}
+        type="button"
+        className={`scope-pill scope-${origin}`}
+        onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen((o) => !o) }}
+        title={`Saved as ${meta.label} — ${meta.description}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        {isOverridden ? (origin === 'project' ? 'P' : 'L') : '\u2302'}
+        <span className="scope-pill-dot" aria-hidden="true" />
+        <span className="scope-pill-label">{meta.label}</span>
+        <svg className="scope-pill-chevron" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="2,3 4,5 6,3" />
+        </svg>
       </button>
-      {open && (
-        <div className="setting-scope-popover" ref={popoverRef}>
-            <button className="setting-scope-option" onClick={saveToProject}>
-              <span className="setting-scope-dot setting-scope-dot-project" />
-              Save for project
-              <span className="setting-scope-hint">dock.json</span>
-            </button>
-            <button className="setting-scope-option" onClick={saveToLocal}>
-              <span className="setting-scope-dot setting-scope-dot-local" />
-              Save locally
-              <span className="setting-scope-hint">dock.local.json</span>
-            </button>
-            {isOverridden && (
-              <button className="setting-scope-option setting-scope-reset" onClick={resetToGlobal}>
-                Reset to global
-              </button>
-            )}
-          </div>
-      )}
+      {menu}
     </span>
   )
 }
@@ -309,11 +526,517 @@ interface SettingsModalProps {
 
 type SettingsTab = 'appearance' | 'terminal' | 'grid' | 'keybindings' | 'plugins' | 'behavior'
 
+const TAB_META: Record<SettingsTab, { label: string; description: string; icon: React.ReactNode }> = {
+  appearance: {
+    label: 'Appearance',
+    description: 'Theme, colors, and header sizing.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 3a9 9 0 0 1 0 18" fill="currentColor" opacity="0.15" />
+        <circle cx="7.5" cy="10.5" r="1" fill="currentColor" />
+        <circle cx="12" cy="7.5" r="1" fill="currentColor" />
+        <circle cx="16.5" cy="10.5" r="1" fill="currentColor" />
+        <circle cx="15" cy="15.5" r="1" fill="currentColor" />
+      </svg>
+    ),
+  },
+  terminal: {
+    label: 'Terminal',
+    description: 'Font, cursor, scrollback, and default permissions.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4.5" width="18" height="15" rx="2" />
+        <polyline points="7,10 10,12.5 7,15" />
+        <line x1="12" y1="15.5" x2="16.5" y2="15.5" />
+      </svg>
+    ),
+  },
+  grid: {
+    label: 'Grid',
+    description: 'Layout mode, columns, and viewport behavior.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
+        <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
+        <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
+        <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" />
+      </svg>
+    ),
+  },
+  keybindings: {
+    label: 'Keybindings',
+    description: 'Keyboard shortcuts for focus and editing.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="6.5" width="19" height="11" rx="2" />
+        <line x1="6" y1="10" x2="6.01" y2="10" />
+        <line x1="10" y1="10" x2="10.01" y2="10" />
+        <line x1="14" y1="10" x2="14.01" y2="10" />
+        <line x1="18" y1="10" x2="18.01" y2="10" />
+        <line x1="7" y1="14" x2="17" y2="14" />
+      </svg>
+    ),
+  },
+  plugins: {
+    label: 'Plugins',
+    description: 'Enable, update, and manage plugins for this project.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 3v4M15 3v4M9 17v4M15 17v4" />
+        <rect x="5.5" y="7" width="13" height="10" rx="2" />
+      </svg>
+    ),
+  },
+  behavior: {
+    label: 'Behavior',
+    description: 'Notifications, integrations, updates, and advanced options.',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    ),
+  },
+}
+
+const TAB_ORDER: SettingsTab[] = ['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior']
+
+type BehaviorSection =
+  | 'general' | 'notifications' | 'shell' | 'integrations'
+  | 'api' | 'privacy' | 'updates' | 'advanced'
+
+const BEHAVIOR_SECTIONS: Array<{ id: BehaviorSection; label: string; icon: React.ReactNode }> = [
+  { id: 'general', label: 'General',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+        <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+        <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+        <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" />
+        <line x1="17" y1="16" x2="23" y2="16" />
+      </svg>
+    ),
+  },
+  { id: 'notifications', label: 'Notifications',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 01-3.46 0" />
+      </svg>
+    ),
+  },
+  { id: 'shell', label: 'Shell',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="4,17 10,11 4,5" /><line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    ),
+  },
+  { id: 'integrations', label: 'Integrations',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+      </svg>
+    ),
+  },
+  { id: 'api', label: 'Anthropic API',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+      </svg>
+    ),
+  },
+  { id: 'privacy', label: 'Privacy',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+    ),
+  },
+  { id: 'updates', label: 'Updates',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 12a9 9 0 11-3-6.7L21 8" /><polyline points="21,3 21,8 16,8" />
+      </svg>
+    ),
+  },
+  { id: 'advanced', label: 'Advanced',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3h.1a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8v.1a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" />
+      </svg>
+    ),
+  },
+]
+
+/* ============================================================================
+ * Settings search index
+ * Each entry is a user-searchable setting. `card` is the visible card title used
+ * to locate the element in the DOM after navigation (matched via data attribute).
+ * Keywords boost recall for common synonyms.
+ * ========================================================================== */
+
+interface SettingsSearchEntry {
+  id: string
+  label: string
+  tab: SettingsTab
+  section?: BehaviorSection
+  card?: string
+  keywords?: string[]
+}
+
+const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
+  // Appearance
+  { id: 'app-mode', label: 'Theme mode', tab: 'appearance', card: 'Theme', keywords: ['dark', 'light', 'system'] },
+  { id: 'app-accent', label: 'Accent color', tab: 'appearance', card: 'Theme', keywords: ['highlight', 'color'] },
+  { id: 'app-term-style', label: 'Terminal style', tab: 'appearance', card: 'Theme', keywords: ['claude code', 'console'] },
+  { id: 'app-header-size', label: 'Toolbar header size', tab: 'appearance', card: 'Sizing', keywords: ['density', 'small', 'medium', 'large'] },
+  { id: 'app-term-header-size', label: 'Terminal header size', tab: 'appearance', card: 'Sizing', keywords: ['density'] },
+
+  // Terminal
+  { id: 'term-font-family', label: 'Font family', tab: 'terminal', card: 'Typography', keywords: ['cascadia', 'fira', 'monospace'] },
+  { id: 'term-font-size', label: 'Font size', tab: 'terminal', card: 'Typography' },
+  { id: 'term-line-height', label: 'Line height', tab: 'terminal', card: 'Typography', keywords: ['spacing'] },
+  { id: 'term-cursor-style', label: 'Cursor style', tab: 'terminal', card: 'Cursor', keywords: ['block', 'underline', 'bar'] },
+  { id: 'term-cursor-blink', label: 'Cursor blink', tab: 'terminal', card: 'Cursor' },
+  { id: 'term-scrollback', label: 'Scrollback lines', tab: 'terminal', card: 'Scrolling', keywords: ['history', 'buffer'] },
+  { id: 'term-scroll-btn', label: 'Scroll-to-bottom button', tab: 'terminal', card: 'Scrolling', keywords: ['floating'] },
+  { id: 'term-pin-input', label: 'Pin input box', tab: 'terminal', card: 'Scrolling', keywords: ['sticky'] },
+  { id: 'term-perm-mode', label: 'Default permission mode', tab: 'terminal', card: 'Default Permissions', keywords: ['auto accept', 'bypass'] },
+  { id: 'term-allowed-tools', label: 'Allowed tools', tab: 'terminal', card: 'Default Permissions', keywords: ['bash', 'read', 'edit', 'write', 'glob', 'grep', 'preapprove'] },
+  { id: 'term-add-dirs', label: 'Additional directories', tab: 'terminal', card: 'Additional Directories', keywords: ['--add-dir', 'claude cli', 'paths'] },
+
+  // Grid
+  { id: 'grid-viewport', label: 'Viewport orientation', tab: 'grid', card: 'Layout', keywords: ['landscape', 'portrait'] },
+  { id: 'grid-max-cols', label: 'Max columns', tab: 'grid', card: 'Spacing' },
+  { id: 'grid-gap', label: 'Gap size', tab: 'grid', card: 'Spacing', keywords: ['spacing', 'padding'] },
+
+  // Keybindings
+  { id: 'key-focus-up', label: 'Focus up shortcut', tab: 'keybindings', card: 'Focus navigation', keywords: ['keybind', 'hotkey', 'shortcut'] },
+  { id: 'key-focus-down', label: 'Focus down shortcut', tab: 'keybindings', card: 'Focus navigation' },
+  { id: 'key-focus-left', label: 'Focus left shortcut', tab: 'keybindings', card: 'Focus navigation' },
+  { id: 'key-focus-right', label: 'Focus right shortcut', tab: 'keybindings', card: 'Focus navigation' },
+  { id: 'key-undo', label: 'Undo input shortcut', tab: 'keybindings', card: 'Editing' },
+  { id: 'key-redo', label: 'Redo input shortcut', tab: 'keybindings', card: 'Editing' },
+  { id: 'key-select-all', label: 'Select all shortcut', tab: 'keybindings', card: 'Editing' },
+
+  // Plugins
+  { id: 'plugins-hub', label: 'Manage plugins', tab: 'plugins', keywords: ['install', 'enable', 'disable', 'plugin'] },
+  { id: 'plugins-auto-update', label: 'Auto-update plugins', tab: 'plugins' },
+
+  // Behavior — General
+  { id: 'beh-confirm-close', label: 'Confirm close with running terminals', tab: 'behavior', section: 'general', card: 'General', keywords: ['exit', 'quit'] },
+  { id: 'beh-autospawn', label: 'Auto-spawn first terminal', tab: 'behavior', section: 'general', card: 'General', keywords: ['startup'] },
+
+  // Behavior — Notifications
+  { id: 'beh-mark-read', label: 'Mark all notifications as read', tab: 'behavior', section: 'notifications', card: 'Notifications', keywords: ['badge'] },
+  { id: 'beh-idle-notify', label: 'Notify when terminal goes idle', tab: 'behavior', section: 'notifications', card: 'Notifications', keywords: ['idle', 'alert'] },
+  { id: 'beh-idle-min-lines', label: 'Idle minimum activity lines', tab: 'behavior', section: 'notifications', card: 'Notifications' },
+  { id: 'beh-idle-delay', label: 'Idle delay', tab: 'behavior', section: 'notifications', card: 'Notifications' },
+  { id: 'beh-block-sources', label: 'Block notifications from sources', tab: 'behavior', section: 'notifications', card: 'Notifications', keywords: ['mute'] },
+
+  // Behavior — Shell
+  { id: 'beh-ctxmenu', label: 'Context menu (Open with Claude Dock)', tab: 'behavior', section: 'shell', card: 'Shell Integration', keywords: ['right-click', 'explorer', 'finder'] },
+  { id: 'beh-shell-enabled', label: 'Enable shell panel in terminals', tab: 'behavior', section: 'shell', card: 'Shell Panel' },
+  { id: 'beh-shell-preferred', label: 'Preferred shell', tab: 'behavior', section: 'shell', card: 'Shell Panel', keywords: ['bash', 'pwsh', 'powershell', 'cmd'] },
+  { id: 'beh-shell-height', label: 'Shell panel default height', tab: 'behavior', section: 'shell', card: 'Shell Panel' },
+  { id: 'beh-shell-events', label: 'Show dock event cards in terminals', tab: 'behavior', section: 'shell', card: 'Shell Panel', keywords: ['exceptions', 'errors'] },
+
+  // Behavior — Integrations
+  { id: 'beh-mcp', label: 'Dock MCP server', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server', keywords: ['linked'] },
+  { id: 'beh-linked', label: 'Linked mode', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server', keywords: ['coordinate'] },
+  { id: 'beh-linked-msg', label: 'Inter-terminal messaging', tab: 'behavior', section: 'integrations', card: 'Dock MCP Server' },
+
+  // Behavior — Anthropic API
+  { id: 'beh-usage-meter', label: 'Show usage meter', tab: 'behavior', section: 'api', card: 'Anthropic API', keywords: ['cost', 'spend'] },
+  { id: 'beh-spend-limit', label: 'Spend limit', tab: 'behavior', section: 'api', card: 'Anthropic API', keywords: ['budget', 'usd'] },
+  { id: 'beh-api-key', label: 'Anthropic API key', tab: 'behavior', section: 'api', card: 'Anthropic API', keywords: ['secret', 'token'] },
+
+  // Behavior — Privacy
+  { id: 'beh-telemetry', label: 'Anonymous usage telemetry', tab: 'behavior', section: 'privacy', card: 'Privacy', keywords: ['analytics', 'tracking'] },
+
+  // Behavior — Updates
+  { id: 'beh-update-profile', label: 'Update profile (Stable / Bleeding Edge)', tab: 'behavior', section: 'updates', card: 'Updates', keywords: ['channel'] },
+  { id: 'beh-auto-update', label: 'Automatically update app', tab: 'behavior', section: 'updates', card: 'Updates' },
+  { id: 'beh-auto-update-plugins', label: 'Automatically update plugins', tab: 'behavior', section: 'updates', card: 'Updates' },
+  { id: 'beh-check-updates', label: 'Check for updates', tab: 'behavior', section: 'updates', card: 'Updates' },
+
+  // Behavior — Advanced
+  { id: 'beh-env', label: 'Environment profile', tab: 'behavior', section: 'advanced', card: 'Advanced', keywords: ['dev', 'uat', 'prod'] },
+  { id: 'beh-devtools', label: 'Open DevTools', tab: 'behavior', section: 'advanced', card: 'Advanced', keywords: ['debug', 'inspect'] },
+  { id: 'beh-mem-limit', label: 'Memory limit', tab: 'behavior', section: 'advanced', card: 'Advanced', keywords: ['heap', 'v8'] },
+  { id: 'beh-live-plugin', label: 'Live plugin reload', tab: 'behavior', section: 'advanced', card: 'Advanced', keywords: ['watch', 'hot reload'] },
+  { id: 'beh-path', label: 'Check & fix PATH', tab: 'behavior', section: 'advanced', card: 'Advanced', keywords: ['claude cli', 'shell'] },
+]
+
+function searchSettings(query: string): SettingsSearchEntry[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const terms = q.split(/\s+/).filter(Boolean)
+  const scored: Array<{ entry: SettingsSearchEntry; score: number }> = []
+  for (const entry of SETTINGS_SEARCH_INDEX) {
+    const label = entry.label.toLowerCase()
+    const card = (entry.card || '').toLowerCase()
+    const kw = (entry.keywords || []).join(' ').toLowerCase()
+    const haystack = `${label} ${card} ${kw}`
+    // Require every term to match somewhere (AND semantics)
+    if (!terms.every((t) => haystack.includes(t))) continue
+    // Score: label startswith > label contains > card contains > keyword contains
+    let score = 0
+    for (const t of terms) {
+      if (label.startsWith(t)) score += 10
+      else if (label.includes(t)) score += 6
+      else if (card.includes(t)) score += 3
+      else if (kw.includes(t)) score += 2
+    }
+    // Shorter labels tend to be more relevant
+    score -= Math.min(5, Math.floor(label.length / 8))
+    scored.push({ entry, score })
+  }
+  scored.sort((a, b) => b.score - a.score)
+  return scored.slice(0, 12).map((s) => s.entry)
+}
+
+const TAB_LABELS: Record<SettingsTab, string> = {
+  appearance: 'Appearance',
+  terminal: 'Terminal',
+  grid: 'Grid',
+  keybindings: 'Keybindings',
+  plugins: 'Plugins',
+  behavior: 'Behavior',
+}
+const BEHAVIOR_SECTION_LABELS: Record<BehaviorSection, string> = {
+  general: 'General',
+  notifications: 'Notifications',
+  shell: 'Shell',
+  integrations: 'Integrations',
+  api: 'Anthropic API',
+  privacy: 'Privacy',
+  updates: 'Updates',
+  advanced: 'Advanced',
+}
+
+function entryBreadcrumb(e: SettingsSearchEntry): string {
+  const parts = [TAB_LABELS[e.tab]]
+  if (e.tab === 'behavior' && e.section) parts.push(BEHAVIOR_SECTION_LABELS[e.section])
+  if (e.card && e.card !== TAB_LABELS[e.tab] && e.card !== BEHAVIOR_SECTION_LABELS[e.section as BehaviorSection]) parts.push(e.card)
+  return parts.join(' › ')
+}
+
+const SettingsSearch: React.FC<{ onNavigate: (e: SettingsSearchEntry) => void }> = ({ onNavigate }) => {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+
+  const results = useMemo(() => searchSettings(query), [query])
+
+  useEffect(() => { setHighlighted(0) }, [query])
+
+  // Ctrl+F / Cmd+F focuses the search while the modal is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // Scroll the highlighted option into view within the listbox
+  useEffect(() => {
+    if (!open || !listRef.current) return
+    const el = listRef.current.querySelector<HTMLElement>(`[data-idx="${highlighted}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [highlighted, open])
+
+  const commit = (entry: SettingsSearchEntry) => {
+    onNavigate(entry)
+    setQuery('')
+    setOpen(false)
+    inputRef.current?.blur()
+  }
+
+  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      if (query) { setQuery(''); e.preventDefault() }
+      else { setOpen(false); inputRef.current?.blur() }
+      return
+    }
+    if (!open || results.length === 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlighted((h) => (h + 1) % results.length) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlighted((h) => (h - 1 + results.length) % results.length) }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(results[highlighted]) }
+    else if (e.key === 'Home') { e.preventDefault(); setHighlighted(0) }
+    else if (e.key === 'End') { e.preventDefault(); setHighlighted(results.length - 1) }
+  }
+
+  const showResults = open && query.trim().length > 0
+  const listboxId = 'settings-search-listbox'
+
+  return (
+    <div className="settings-search" role="search">
+      <span className="settings-search-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="7" cy="7" r="4.5" />
+          <line x1="10.5" y1="10.5" x2="14" y2="14" />
+        </svg>
+      </span>
+      <input
+        ref={inputRef}
+        type="text"
+        className="settings-search-input"
+        placeholder="Search settings…"
+        value={query}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={showResults}
+        aria-controls={listboxId}
+        aria-activedescendant={showResults && results[highlighted] ? `${listboxId}-${highlighted}` : undefined}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 140)}
+        onKeyDown={handleKey}
+      />
+      {query && (
+        <button
+          type="button"
+          className="settings-search-clear"
+          onClick={(e) => { e.preventDefault(); setQuery(''); inputRef.current?.focus() }}
+          aria-label="Clear search"
+          tabIndex={-1}
+        >
+          ×
+        </button>
+      )}
+      <span className="settings-search-kbd" aria-hidden="true">Ctrl F</span>
+      {showResults && (
+        <div className="settings-search-dropdown" role="presentation">
+          {results.length === 0 ? (
+            <div className="settings-search-empty">
+              No settings match <strong>&ldquo;{query}&rdquo;</strong>.
+            </div>
+          ) : (
+            <ul
+              id={listboxId}
+              ref={listRef}
+              className="settings-search-results"
+              role="listbox"
+            >
+              {results.map((r, i) => (
+                <li
+                  key={r.id}
+                  id={`${listboxId}-${i}`}
+                  data-idx={i}
+                  role="option"
+                  aria-selected={i === highlighted}
+                  className={`settings-search-item${i === highlighted ? ' highlighted' : ''}`}
+                  onMouseEnter={() => setHighlighted(i)}
+                  onMouseDown={(e) => { e.preventDefault(); commit(r) }}
+                >
+                  <span className="settings-search-item-label">{r.label}</span>
+                  <span className="settings-search-item-crumb">{entryBreadcrumb(r)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const SETTINGS_ZOOM_KEY_PREFIX = 'settings-zoom:'
+const SETTINGS_ZOOM_LEGACY_KEY = 'settings-zoom'
+const SETTINGS_ZOOM_MIN = 0.7
+const SETTINGS_ZOOM_MAX = 1.8
+const SETTINGS_ZOOM_STEP = 0.1
+
+function zoomKey(projectDir: string | null): string {
+  return SETTINGS_ZOOM_KEY_PREFIX + (projectDir || '__global__')
+}
+
+function loadSettingsZoom(projectDir: string | null): number {
+  try {
+    const key = zoomKey(projectDir)
+    // Check per-project key first; fall back to legacy single-key value for one-time migration.
+    const raw = localStorage.getItem(key) ?? localStorage.getItem(SETTINGS_ZOOM_LEGACY_KEY)
+    if (!raw) return 1
+    const z = parseFloat(raw)
+    if (isNaN(z)) return 1
+    return Math.min(SETTINGS_ZOOM_MAX, Math.max(SETTINGS_ZOOM_MIN, z))
+  } catch {
+    return 1
+  }
+}
+
 const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, initialSection }) => {
   const [tab, setTab] = useState<SettingsTab>(initialTab || 'appearance')
+  const [behaviorSection, setBehaviorSection] = useState<BehaviorSection>(
+    initialSection === 'mcp' ? 'integrations' : 'general'
+  )
+  const projectDirForZoom = useDockStore((s) => s.projectDir)
+  const [zoom, setZoom] = useState<number>(() => loadSettingsZoom(projectDirForZoom))
+  const modalRef = useRef<HTMLDivElement>(null)
+
+  // Reload persisted zoom when the project changes (e.g. opening settings in a different workspace)
+  useEffect(() => {
+    setZoom(loadSettingsZoom(projectDirForZoom))
+  }, [projectDirForZoom])
+
+  // Zoom: Ctrl+wheel, Ctrl+/-, Ctrl+0 reset. Scoped to the settings modal only.
+  // Any Ctrl+wheel while the modal is open is blocked from reaching the dock's default
+  // webFrame zoom — so changing settings zoom never affects terminals behind the modal.
+  useEffect(() => {
+    const storeZoom = (z: number) => {
+      try { localStorage.setItem(zoomKey(projectDirForZoom), String(z)) } catch { /* ignore */ }
+    }
+    const clamp = (z: number) =>
+      Math.round(Math.min(SETTINGS_ZOOM_MAX, Math.max(SETTINGS_ZOOM_MIN, z)) * 100) / 100
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      // Always block default page zoom while the settings modal is open so the dock
+      // behind never zooms, regardless of where the wheel fired.
+      e.preventDefault()
+      e.stopPropagation()
+      // Only update the settings zoom when the wheel is over the modal itself.
+      if (!modalRef.current?.contains(e.target as Node)) return
+      setZoom((z) => {
+        const next = clamp(z + (e.deltaY < 0 ? SETTINGS_ZOOM_STEP : -SETTINGS_ZOOM_STEP))
+        storeZoom(next)
+        return next
+      })
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey) return
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        setZoom((z) => { const n = clamp(z + SETTINGS_ZOOM_STEP); storeZoom(n); return n })
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        setZoom((z) => { const n = clamp(z - SETTINGS_ZOOM_STEP); storeZoom(n); return n })
+      } else if (e.key === '0') {
+        e.preventDefault()
+        setZoom(1); storeZoom(1)
+      }
+    }
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.removeEventListener('wheel', onWheel, { capture: true } as AddEventListenerOptions)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [projectDirForZoom])
   const projectDir = useDockStore((s) => s.projectDir)
   const settings = useSettingsStore((s) => s.settings)
-  const update = useSettingsStore((s) => s.update)
   const [updateCheckStatus, setUpdateCheckStatus] = useState('')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [switchingProfile, setSwitchingProfile] = useState(false)
@@ -374,30 +1097,61 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
     }
   }, [tab, anthropicHasKey])
 
-  const updateTheme = (partial: Partial<Settings['theme']>) => {
-    update({ theme: { ...settings.theme, ...partial } })
+  const origins = useSettingsStore((s) => s.origins)
+  const updateProject = useSettingsStore((s) => s.updateProject)
+
+  /**
+   * Determine the destination tier for a plain edit.
+   * - If any of the keys being written is already project-scoped, keep the write at
+   *   'project' so team-shared settings remain team-shared after edits.
+   * - Otherwise default to 'local' — edits should NOT silently leak to every project.
+   *   Use the scope pill to promote a setting to 'global' or 'project' explicitly.
+   */
+  const editTier = (section: string, partial: Record<string, unknown>): 'project' | 'local' => {
+    for (const k of Object.keys(partial)) {
+      if (origins[`${section}.${k}`] === 'project') return 'project'
+    }
+    return 'local'
   }
-  const updateTerminal = (partial: Partial<Settings['terminal']>) => {
-    update({ terminal: { ...settings.terminal, ...partial } })
+
+  /** Write an edit to the appropriate tier (project if already scoped there, else local). */
+  const writeEdit = (section: string, partial: Record<string, unknown>) => {
+    return updateProject({ [section]: partial } as any, editTier(section, partial))
   }
-  const updateGrid = (partial: Partial<Settings['grid']>) => {
-    update({ grid: { ...settings.grid, ...partial } })
-  }
-  const updateBehavior = (partial: Partial<Settings['behavior']>) => {
-    update({ behavior: { ...settings.behavior, ...partial } })
-  }
-  const updateKeybindings = (partial: Partial<Settings['keybindings']>) => {
-    update({ keybindings: { ...settings.keybindings, ...partial } })
-  }
-  const updateLinked = (partial: Partial<Settings['linked']>) => {
-    update({ linked: { ...settings.linked, ...partial } })
-  }
-  const updateAnthropic = (partial: Partial<Settings['anthropic']>) => {
-    update({ anthropic: { ...settings.anthropic, ...partial } })
-  }
-  const updateUpdater = (partial: Partial<Settings['updater']>) => {
-    update({ updater: { ...settings.updater, ...partial } })
-  }
+
+  const updateTheme = (partial: Partial<Settings['theme']>) => writeEdit('theme', partial as Record<string, unknown>)
+  const updateTerminal = (partial: Partial<Settings['terminal']>) => writeEdit('terminal', partial as Record<string, unknown>)
+  const updateGrid = (partial: Partial<Settings['grid']>) => writeEdit('grid', partial as Record<string, unknown>)
+  const updateBehavior = (partial: Partial<Settings['behavior']>) => writeEdit('behavior', partial as Record<string, unknown>)
+  const updateKeybindings = (partial: Partial<Settings['keybindings']>) => writeEdit('keybindings', partial as Record<string, unknown>)
+  const updateLinked = (partial: Partial<Settings['linked']>) => writeEdit('linked', partial as Record<string, unknown>)
+  const updateAnthropic = (partial: Partial<Settings['anthropic']>) => writeEdit('anthropic', partial as Record<string, unknown>)
+  const updateUpdater = (partial: Partial<Settings['updater']>) => writeEdit('updater', partial as Record<string, unknown>)
+
+  // Navigate from the search dropdown: switch tab (and Behavior sub-section), then locate
+  // the target card by data-settings-card and briefly highlight it so the user sees where
+  // they landed. Non-fatal if the card isn't found.
+  const handleSearchNavigate = useCallback((entry: SettingsSearchEntry) => {
+    setTab(entry.tab)
+    if (entry.tab === 'behavior' && entry.section) setBehaviorSection(entry.section)
+    // Two rAFs to ensure the new tab has mounted & laid out before we scroll/highlight.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!entry.card) return
+        const root = document.querySelector('.settings-modal')
+        const target = root?.querySelector<HTMLElement>(
+          `[data-settings-card="${CSS.escape(entry.card)}"]`
+        )
+        if (!target) return
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        target.classList.remove('settings-card-flash')
+        // Force reflow so re-adding the class restarts the animation
+        void target.offsetWidth
+        target.classList.add('settings-card-flash')
+        window.setTimeout(() => target.classList.remove('settings-card-flash'), 1400)
+      })
+    })
+  }, [])
 
   const handleCheckForUpdates = async () => {
     setCheckingUpdate(true)
@@ -502,363 +1256,473 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
     setPathChecking(false)
   }
 
+  const activeMeta = TAB_META[tab]
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+    <div className="modal-overlay settings-overlay" onClick={onClose}>
+      <div
+        className="modal settings-modal"
+        ref={modalRef}
+        style={{ zoom, ['--settings-zoom' as string]: String(zoom) } as React.CSSProperties}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header settings-modal-header">
           <h2>Settings</h2>
-          <button className="modal-close" onClick={onClose}>&times;</button>
+          <SettingsSearch onNavigate={handleSearchNavigate} />
+          <button className="modal-close" onClick={onClose} aria-label="Close settings">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <line x1="4" y1="4" x2="12" y2="12" />
+              <line x1="12" y1="4" x2="4" y2="12" />
+            </svg>
+          </button>
         </div>
-        <div
-          className="settings-tabs"
-          role="tablist"
-          onKeyDown={(e) => {
-            const tabs: SettingsTab[] = ['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior']
-            const idx = tabs.indexOf(tab)
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-              e.preventDefault()
-              setTab(tabs[(idx + 1) % tabs.length])
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-              e.preventDefault()
-              setTab(tabs[(idx - 1 + tabs.length) % tabs.length])
-            }
-          }}
-        >
-          {(['appearance', 'terminal', 'grid', 'keybindings', 'plugins', 'behavior'] as SettingsTab[]).map((t) => (
-            <button
-              key={t}
-              role="tab"
-              aria-selected={tab === t}
-              tabIndex={tab === t ? 0 : -1}
-              className={`settings-tab ${tab === t ? 'active' : ''}`}
-              onClick={() => setTab(t)}
-            >
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-        <div className="modal-body">
-          <div className="settings-content">
+        <div className="settings-shell">
+          <nav
+            className="settings-sidebar"
+            role="tablist"
+            aria-orientation="vertical"
+            onKeyDown={(e) => {
+              const idx = TAB_ORDER.indexOf(tab)
+              if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                e.preventDefault()
+                setTab(TAB_ORDER[(idx + 1) % TAB_ORDER.length])
+              } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                e.preventDefault()
+                setTab(TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length])
+              }
+            }}
+          >
+            {TAB_ORDER.map((t) => {
+              const meta = TAB_META[t]
+              const active = tab === t
+              return (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={active}
+                  tabIndex={active ? 0 : -1}
+                  className={`settings-nav-item${active ? ' active' : ''}`}
+                  onClick={() => setTab(t)}
+                >
+                  <span className="settings-nav-icon">{meta.icon}</span>
+                  <span className="settings-nav-label">{meta.label}</span>
+                </button>
+              )
+            })}
+          </nav>
+          <div className="settings-content-area">
+            <div className="settings-content-header">
+              <h3>{activeMeta.label}</h3>
+              <p>{activeMeta.description}</p>
+            </div>
+            <div className="settings-content settings-content-scroll">
             {tab === 'appearance' && (
-              <div className="settings-group">
-                <label>
-                  Theme Mode
-                  <SettingScope keyPath="theme.mode" value={settings.theme.mode} section="theme" sectionKey="mode" />
-                  <select
-                    value={settings.theme.mode}
-                    onChange={(e) => updateTheme({ mode: e.target.value as Settings['theme']['mode'] })}
+              <div className="settings-stack">
+                <SettingsCard
+                  title="Theme"
+                  description="Color mode and accent for the entire dock."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 3v18M3 12h18" />
+                    </svg>
+                  }
+                >
+                  <SettingsFieldStacked
+                    label={<>Mode<SettingScope keyPath="theme.mode" value={settings.theme.mode} section="theme" sectionKey="mode" /></>}
                   >
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                    <option value="system">System</option>
-                  </select>
-                </label>
-                <label>
-                  Terminal Style
-                  <select
-                    value={settings.theme.terminalStyle}
-                    onChange={(e) => updateTheme({ terminalStyle: e.target.value as Settings['theme']['terminalStyle'] })}
+                    <div className="settings-theme-picker">
+                      {(['dark', 'light', 'system'] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`settings-theme-tile${settings.theme.mode === m ? ' active' : ''}`}
+                          onClick={() => updateTheme({ mode: m })}
+                          aria-pressed={settings.theme.mode === m}
+                        >
+                          <div className={`settings-theme-preview ${m}`} />
+                          <div className="settings-theme-tile-name">
+                            {m === 'dark' ? 'Dark' : m === 'light' ? 'Light' : 'System'}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </SettingsFieldStacked>
+                  <SettingsFieldStacked
+                    label={<>Accent color<SettingScope keyPath="theme.accentColor" value={settings.theme.accentColor} section="theme" sectionKey="accentColor" /></>}
+                    description="Used for focus rings, active states, and highlights."
                   >
-                    <option value="default">Default</option>
-                    <option value="claude-code">Claude Code</option>
-                    <option value="standard">Standard Console</option>
-                  </select>
-                </label>
-                <label>
-                  Accent Color
-                  <input
-                    type="color"
-                    value={settings.theme.accentColor}
-                    onChange={(e) => updateTheme({ accentColor: e.target.value })}
-                  />
-                </label>
-                <div className="settings-divider" />
-                <label>
-                  Header Bar Size
-                  <select
-                    value={settings.theme.headerBarSize || 'small'}
-                    onChange={(e) => updateTheme({ headerBarSize: e.target.value as Settings['theme']['headerBarSize'] })}
-                  >
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
-                  </select>
-                </label>
-                <label>
-                  Terminal Header Size
-                  <select
-                    value={settings.theme.terminalHeaderBarSize || 'small'}
-                    onChange={(e) => updateTheme({ terminalHeaderBarSize: e.target.value as Settings['theme']['terminalHeaderBarSize'] })}
-                  >
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                    <option value="large">Large</option>
-                  </select>
-                </label>
+                    <AccentPicker
+                      value={settings.theme.accentColor}
+                      onChange={(c) => updateTheme({ accentColor: c })}
+                    />
+                  </SettingsFieldStacked>
+                  <SettingsField label={<>Terminal style<SettingScope keyPath="theme.terminalStyle" value={settings.theme.terminalStyle} section="theme" sectionKey="terminalStyle" /></>}>
+                    <select
+                      value={settings.theme.terminalStyle}
+                      onChange={(e) => updateTheme({ terminalStyle: e.target.value as Settings['theme']['terminalStyle'] })}
+                    >
+                      <option value="default">Default</option>
+                      <option value="claude-code">Claude Code</option>
+                      <option value="standard">Standard Console</option>
+                    </select>
+                  </SettingsField>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Sizing"
+                  description="Density of the toolbar and terminal headers."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 9h18M3 15h18M5 5v14M19 5v14" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Toolbar header<SettingScope keyPath="theme.headerBarSize" value={settings.theme.headerBarSize} section="theme" sectionKey="headerBarSize" /></>}>
+                    <SegmentedControl
+                      value={(settings.theme.headerBarSize || 'small') as 'small' | 'medium' | 'large'}
+                      options={[
+                        { value: 'small', label: 'Small' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'large', label: 'Large' },
+                      ]}
+                      onChange={(v) => updateTheme({ headerBarSize: v })}
+                      ariaLabel="Toolbar header size"
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Terminal header<SettingScope keyPath="theme.terminalHeaderBarSize" value={settings.theme.terminalHeaderBarSize} section="theme" sectionKey="terminalHeaderBarSize" /></>}>
+                    <SegmentedControl
+                      value={(settings.theme.terminalHeaderBarSize || 'small') as 'small' | 'medium' | 'large'}
+                      options={[
+                        { value: 'small', label: 'Small' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'large', label: 'Large' },
+                      ]}
+                      onChange={(v) => updateTheme({ terminalHeaderBarSize: v })}
+                      ariaLabel="Terminal header size"
+                    />
+                  </SettingsField>
+                </SettingsCard>
               </div>
             )}
             {tab === 'terminal' && (
-              <div className="settings-group">
-                <label>
-                  Font Family
-                  <input
-                    type="text"
-                    value={settings.terminal.fontFamily}
-                    onChange={(e) => updateTerminal({ fontFamily: e.target.value })}
-                  />
-                </label>
-                <label>
-                  Font Size
-                  <SettingScope keyPath="terminal.fontSize" value={settings.terminal.fontSize} section="terminal" sectionKey="fontSize" />
-                  <input
-                    type="number"
-                    min={8}
-                    max={32}
-                    value={settings.terminal.fontSize}
-                    onChange={(e) => updateTerminal({ fontSize: parseInt(e.target.value) || 14 })}
-                  />
-                </label>
-                <label>
-                  Line Height
-                  <input
-                    type="number"
-                    min={1}
-                    max={2}
-                    step={0.1}
-                    value={settings.terminal.lineHeight}
-                    onChange={(e) => updateTerminal({ lineHeight: parseFloat(e.target.value) || 1.2 })}
-                  />
-                </label>
-                <label>
-                  Cursor Style
-                  <select
-                    value={settings.terminal.cursorStyle}
-                    onChange={(e) =>
-                      updateTerminal({ cursorStyle: e.target.value as Settings['terminal']['cursorStyle'] })
-                    }
+              <div className="settings-stack">
+                <SettingsCard
+                  title="Typography"
+                  description="Font family, size, and line height in the terminal."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="4,7 4,4 20,4 20,7" />
+                      <line x1="9" y1="20" x2="15" y2="20" />
+                      <line x1="12" y1="4" x2="12" y2="20" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Font family<SettingScope keyPath="terminal.fontFamily" value={settings.terminal.fontFamily} section="terminal" sectionKey="fontFamily" /></>}>
+                    <input
+                      type="text"
+                      value={settings.terminal.fontFamily}
+                      onChange={(e) => updateTerminal({ fontFamily: e.target.value })}
+                      style={{ minWidth: 240 }}
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Font size<SettingScope keyPath="terminal.fontSize" value={settings.terminal.fontSize} section="terminal" sectionKey="fontSize" /></>}>
+                    <input
+                      className="settings-num"
+                      type="number"
+                      min={8}
+                      max={32}
+                      value={settings.terminal.fontSize}
+                      onChange={(e) => updateTerminal({ fontSize: parseInt(e.target.value) || 14 })}
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Line height<SettingScope keyPath="terminal.lineHeight" value={settings.terminal.lineHeight} section="terminal" sectionKey="lineHeight" /></>}>
+                    <input
+                      className="settings-num"
+                      type="number"
+                      min={1}
+                      max={2}
+                      step={0.1}
+                      value={settings.terminal.lineHeight}
+                      onChange={(e) => updateTerminal({ lineHeight: parseFloat(e.target.value) || 1.2 })}
+                    />
+                  </SettingsField>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Cursor"
+                  description="Appearance and blinking behavior of the terminal cursor."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="4" x2="12" y2="20" />
+                      <polyline points="8,4 12,4 16,4" />
+                      <polyline points="8,20 12,20 16,20" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Style<SettingScope keyPath="terminal.cursorStyle" value={settings.terminal.cursorStyle} section="terminal" sectionKey="cursorStyle" /></>}>
+                    <SegmentedControl
+                      value={settings.terminal.cursorStyle as 'block' | 'underline' | 'bar'}
+                      options={[
+                        { value: 'block', label: 'Block' },
+                        { value: 'underline', label: 'Underline' },
+                        { value: 'bar', label: 'Bar' },
+                      ]}
+                      onChange={(v) => updateTerminal({ cursorStyle: v })}
+                      ariaLabel="Cursor style"
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Blink<SettingScope keyPath="terminal.cursorBlink" value={settings.terminal.cursorBlink} section="terminal" sectionKey="cursorBlink" /></>}>
+                    <DockToggle
+                      checked={settings.terminal.cursorBlink}
+                      onChange={(v) => updateTerminal({ cursorBlink: v })}
+                      ariaLabel="Cursor blink"
+                    />
+                  </SettingsField>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Scrolling"
+                  description="Scrollback history and scroll-related affordances."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="8,7 12,3 16,7" />
+                      <polyline points="8,17 12,21 16,17" />
+                      <line x1="12" y1="3" x2="12" y2="21" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Scrollback lines<SettingScope keyPath="terminal.scrollback" value={settings.terminal.scrollback} section="terminal" sectionKey="scrollback" /></>} description="Number of previous lines kept in memory.">
+                    <input
+                      className="settings-num"
+                      type="number"
+                      min={100}
+                      max={50000}
+                      step={100}
+                      value={settings.terminal.scrollback}
+                      onChange={(e) => updateTerminal({ scrollback: parseInt(e.target.value) || 5000 })}
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Scroll-to-bottom button<SettingScope keyPath="terminal.scrollToBottom" value={settings.terminal.scrollToBottom} section="terminal" sectionKey="scrollToBottom" /></>} description="Show a floating button when not at the latest line.">
+                    <DockToggle
+                      checked={settings.terminal.scrollToBottom}
+                      onChange={(v) => updateTerminal({ scrollToBottom: v })}
+                      ariaLabel="Scroll to bottom button"
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Pin input box<SettingScope keyPath="terminal.pinInputBox" value={settings.terminal.pinInputBox} section="terminal" sectionKey="pinInputBox" /></>} description="Keep the input box visible while scrolled up through history.">
+                    <DockToggle
+                      checked={settings.terminal.pinInputBox ?? true}
+                      onChange={(v) => updateTerminal({ pinInputBox: v })}
+                      ariaLabel="Pin input box while scrolled"
+                    />
+                  </SettingsField>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Default Permissions"
+                  description="Pre-approve tools and permission mode for newly spawned terminals."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="5" y="10" width="14" height="10" rx="2" />
+                      <path d="M8 10V7a4 4 0 118 0v3" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Permission mode<SettingScope keyPath="terminal.defaultPermissionMode" value={settings.terminal.defaultPermissionMode} section="terminal" sectionKey="defaultPermissionMode" /></>}>
+                    <select
+                      value={settings.terminal.defaultPermissionMode ?? 'default'}
+                      onChange={(e) => updateTerminal({ defaultPermissionMode: e.target.value as Settings['terminal']['defaultPermissionMode'] })}
+                    >
+                      <option value="default">Ask each time</option>
+                      <option value="acceptEdits">Accept edits</option>
+                      <option value="bypassPermissions">Bypass all permissions</option>
+                    </select>
+                  </SettingsField>
+                  <SettingsFieldStacked
+                    label="Allowed tools"
+                    description="Pre-approve specific tools. Leave all unchecked to use Claude's defaults."
                   >
-                    <option value="block">Block</option>
-                    <option value="underline">Underline</option>
-                    <option value="bar">Bar</option>
-                  </select>
-                </label>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.terminal.cursorBlink}
-                    onChange={(e) => updateTerminal({ cursorBlink: e.target.checked })}
-                  />
-                  Cursor Blink
-                </label>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.terminal.scrollToBottom}
-                    onChange={(e) => updateTerminal({ scrollToBottom: e.target.checked })}
-                  />
-                  Scroll to Bottom Button
-                </label>
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.terminal.pinInputBox ?? true}
-                    onChange={(e) => updateTerminal({ pinInputBox: e.target.checked })}
-                  />
-                  Pin Input Box While Scrolled
-                </label>
-                <label>
-                  Scrollback Lines
-                  <input
-                    type="number"
-                    min={100}
-                    max={50000}
-                    step={100}
-                    value={settings.terminal.scrollback}
-                    onChange={(e) => updateTerminal({ scrollback: parseInt(e.target.value) || 5000 })}
-                  />
-                </label>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Default Permissions</div>
-                <div className="settings-description">
-                  Pre-approve tools and permission mode for new terminals so Claude doesn&apos;t ask each time. Only applies to newly spawned terminals.
-                </div>
-                <label>
-                  Permission Mode
-                  <SettingScope keyPath="terminal.defaultPermissionMode" value={settings.terminal.defaultPermissionMode} section="terminal" sectionKey="defaultPermissionMode" />
-                  <select
-                    value={settings.terminal.defaultPermissionMode ?? 'default'}
-                    onChange={(e) => updateTerminal({ defaultPermissionMode: e.target.value as Settings['terminal']['defaultPermissionMode'] })}
-                  >
-                    <option value="default">Default (ask each time)</option>
-                    <option value="acceptEdits">Accept edits</option>
-                    <option value="bypassPermissions">Bypass all permissions</option>
-                  </select>
-                </label>
-                <div className="settings-section-header" style={{ fontSize: 11, marginTop: 8 }}>Allowed Tools</div>
-                <div className="settings-description">
-                  Pre-approve specific tools. Leave all unchecked to use Claude&apos;s defaults.
-                </div>
-                <div className="tp-perms-tools">
-                  {['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep'].map((tool) => {
-                    const allowed = settings.terminal.defaultAllowedTools ?? []
-                    const isChecked = allowed.includes(tool)
-                    return (
-                      <label key={tool} className="tp-perms-tool">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...allowed, tool]
-                              : allowed.filter((t: string) => t !== tool)
-                            updateTerminal({ defaultAllowedTools: next })
-                          }}
-                        />
-                        {tool}
-                      </label>
-                    )
-                  })}
-                </div>
-                <div className="settings-divider" />
-                <div className="settings-section-header">Additional Directories</div>
-                <div className="settings-description">
-                  Directories passed as <code>--add-dir</code> to Claude CLI. Useful for referencing shared libraries, protos, or documentation outside the project.
-                  These are concatenated across all settings tiers (global + project + local).
-                </div>
-                <AdditionalDirsEditor />
+                    <div className="settings-chips">
+                      {['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep'].map((tool) => {
+                        const allowed = settings.terminal.defaultAllowedTools ?? []
+                        const isChecked = allowed.includes(tool)
+                        return (
+                          <label key={tool} className={`settings-chip${isChecked ? ' active' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...allowed, tool]
+                                  : allowed.filter((t: string) => t !== tool)
+                                updateTerminal({ defaultAllowedTools: next })
+                              }}
+                            />
+                            <svg className="settings-chip-check" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="2.5,6 5,8.5 9.5,3.5" />
+                            </svg>
+                            {tool}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </SettingsFieldStacked>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Additional Directories"
+                  description={
+                    <>Directories passed as <code>--add-dir</code> to the Claude CLI for referencing shared code or docs outside the project. Concatenated across all tiers (global + project + local).</>
+                  }
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                    </svg>
+                  }
+                >
+                  <AdditionalDirsEditor />
+                </SettingsCard>
               </div>
             )}
             {tab === 'grid' && (
-              <div className="settings-group">
-                <label>
-                  Max Columns
-                  <SettingScope keyPath="grid.maxColumns" value={settings.grid.maxColumns} section="grid" sectionKey="maxColumns" />
-                  <input
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={settings.grid.maxColumns}
-                    onChange={(e) => updateGrid({ maxColumns: parseInt(e.target.value) || 4 })}
-                  />
-                </label>
-                <label>
-                  Gap Size (px)
-                  <input
-                    type="number"
-                    min={0}
-                    max={32}
-                    value={settings.grid.gapSize}
-                    onChange={(e) => { const v = parseInt(e.target.value); updateGrid({ gapSize: isNaN(v) ? 0 : v }) }}
-                  />
-                </label>
-                <label>
-                  Default Mode
-                  <select
-                    value={settings.grid.defaultMode}
-                    onChange={(e) =>
-                      updateGrid({ defaultMode: e.target.value as Settings['grid']['defaultMode'] })
-                    }
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="freeform">Freeform</option>
-                  </select>
-                </label>
-                <label>
-                  Viewport Mode
-                  <select
-                    value={settings.grid.viewportMode ?? 'auto'}
-                    onChange={(e) =>
-                      updateGrid({ viewportMode: e.target.value as Settings['grid']['viewportMode'] })
-                    }
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="landscape">Landscape</option>
-                    <option value="portrait">Portrait</option>
-                  </select>
-                </label>
-                <div className="settings-description">
-                  Auto detects viewport orientation and switches between landscape (side-by-side) and portrait (stacked) layouts.
-                </div>
+              <div className="settings-stack">
+                <SettingsCard
+                  title="Layout"
+                  description="How terminals are arranged when the dock opens."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
+                      <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
+                      <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
+                      <rect x="13.5" y="13.5" width="7" height="7" rx="1.2" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Viewport orientation<SettingScope keyPath="grid.viewportMode" value={settings.grid.viewportMode} section="grid" sectionKey="viewportMode" /></>} description="Auto picks landscape (side-by-side) or portrait (stacked) based on the window shape.">
+                    <SegmentedControl
+                      value={(settings.grid.viewportMode ?? 'auto') as 'auto' | 'landscape' | 'portrait'}
+                      options={[
+                        { value: 'auto', label: 'Auto' },
+                        { value: 'landscape', label: 'Landscape' },
+                        { value: 'portrait', label: 'Portrait' },
+                      ]}
+                      onChange={(v) => updateGrid({ viewportMode: v })}
+                      ariaLabel="Viewport mode"
+                    />
+                  </SettingsField>
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Spacing"
+                  description="Column count and gap between terminals."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="7" height="16" rx="1.2" />
+                      <rect x="14" y="4" width="7" height="16" rx="1.2" />
+                    </svg>
+                  }
+                >
+                  <SettingsField label={<>Max columns<SettingScope keyPath="grid.maxColumns" value={settings.grid.maxColumns} section="grid" sectionKey="maxColumns" /></>}>
+                    <input
+                      className="settings-num"
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={settings.grid.maxColumns}
+                      onChange={(e) => updateGrid({ maxColumns: parseInt(e.target.value) || 4 })}
+                    />
+                  </SettingsField>
+                  <SettingsField label={<>Gap size<SettingScope keyPath="grid.gapSize" value={settings.grid.gapSize} section="grid" sectionKey="gapSize" /></>} description="Pixels between adjacent terminals.">
+                    <input
+                      className="settings-num"
+                      type="number"
+                      min={0}
+                      max={32}
+                      value={settings.grid.gapSize}
+                      onChange={(e) => { const v = parseInt(e.target.value); updateGrid({ gapSize: isNaN(v) ? 0 : v }) }}
+                    />
+                  </SettingsField>
+                </SettingsCard>
               </div>
             )}
             {tab === 'keybindings' && (
-              <div className="settings-group">
-                <KeybindInput
-                  label="Focus Up"
-                  value={settings.keybindings.focusUp}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.focusUp}
-                  onChange={(v) => updateKeybindings({ focusUp: v })}
-                />
-                <KeybindInput
-                  label="Focus Down"
-                  value={settings.keybindings.focusDown}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.focusDown}
-                  onChange={(v) => updateKeybindings({ focusDown: v })}
-                />
-                <KeybindInput
-                  label="Focus Left"
-                  value={settings.keybindings.focusLeft}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.focusLeft}
-                  onChange={(v) => updateKeybindings({ focusLeft: v })}
-                />
-                <KeybindInput
-                  label="Focus Right"
-                  value={settings.keybindings.focusRight}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.focusRight}
-                  onChange={(v) => updateKeybindings({ focusRight: v })}
-                />
-                <div className="settings-divider" />
-                <KeybindInput
-                  label="Undo Input"
-                  value={settings.keybindings.undo}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.undo}
-                  onChange={(v) => updateKeybindings({ undo: v })}
-                />
-                <KeybindInput
-                  label="Redo Input"
-                  value={settings.keybindings.redo}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.redo}
-                  onChange={(v) => updateKeybindings({ redo: v })}
-                />
-                <KeybindInput
-                  label="Select All"
-                  value={settings.keybindings.selectAll}
-                  defaultValue={DEFAULT_SETTINGS.keybindings.selectAll}
-                  onChange={(v) => updateKeybindings({ selectAll: v })}
-                />
+              <div className="settings-stack">
+                <SettingsCard
+                  title="Focus navigation"
+                  description="Move focus between terminals in the grid."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <polyline points="12,3 12,7" />
+                      <polyline points="12,17 12,21" />
+                      <polyline points="3,12 7,12" />
+                      <polyline points="17,12 21,12" />
+                    </svg>
+                  }
+                >
+                  <KeybindInput label="Focus up" value={settings.keybindings.focusUp} defaultValue={DEFAULT_SETTINGS.keybindings.focusUp} onChange={(v) => updateKeybindings({ focusUp: v })} />
+                  <KeybindInput label="Focus down" value={settings.keybindings.focusDown} defaultValue={DEFAULT_SETTINGS.keybindings.focusDown} onChange={(v) => updateKeybindings({ focusDown: v })} />
+                  <KeybindInput label="Focus left" value={settings.keybindings.focusLeft} defaultValue={DEFAULT_SETTINGS.keybindings.focusLeft} onChange={(v) => updateKeybindings({ focusLeft: v })} />
+                  <KeybindInput label="Focus right" value={settings.keybindings.focusRight} defaultValue={DEFAULT_SETTINGS.keybindings.focusRight} onChange={(v) => updateKeybindings({ focusRight: v })} />
+                </SettingsCard>
+
+                <SettingsCard
+                  title="Editing"
+                  description="Text editing shortcuts inside the terminal input."
+                  icon={
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                  }
+                >
+                  <KeybindInput label="Undo input" value={settings.keybindings.undo} defaultValue={DEFAULT_SETTINGS.keybindings.undo} onChange={(v) => updateKeybindings({ undo: v })} />
+                  <KeybindInput label="Redo input" value={settings.keybindings.redo} defaultValue={DEFAULT_SETTINGS.keybindings.redo} onChange={(v) => updateKeybindings({ redo: v })} />
+                  <KeybindInput label="Select all" value={settings.keybindings.selectAll} defaultValue={DEFAULT_SETTINGS.keybindings.selectAll} onChange={(v) => updateKeybindings({ selectAll: v })} />
+                </SettingsCard>
               </div>
             )}
             {tab === 'plugins' && projectDir && (
-              <div className="settings-group">
-                <div className="settings-description" style={{ marginBottom: 12 }}>
-                  Plugins run when this project directory opens. Enable or disable per-project.
-                </div>
+              <div className="plugin-hub-wrap">
                 <PluginPanel projectDir={projectDir} />
-                <div className="settings-divider" />
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.updater?.autoUpdatePlugins ?? false}
-                    onChange={(e) => updateUpdater({ autoUpdatePlugins: e.target.checked })}
-                  />
-                  Automatically update plugins
-                </label>
-                <div className="settings-description">
-                  When enabled, plugin updates are installed automatically on launch.
-                </div>
-                <div>
+                <div className="plugin-hub-footer">
+                  <label className="plugin-hub-inline-toggle">
+                    <input
+                      type="checkbox"
+                      checked={settings.updater?.autoUpdatePlugins ?? false}
+                      onChange={(e) => updateUpdater({ autoUpdatePlugins: e.target.checked })}
+                    />
+                    Automatically update plugins on launch
+                  </label>
                   <button
-                    className="settings-check-update-btn"
+                    className="plugin-hub-btn"
                     onClick={() => window.dispatchEvent(new CustomEvent('plugin-update-open'))}
                   >
-                    Check for Plugin Updates
+                    Check for Updates
                   </button>
                 </div>
               </div>
             )}
             {tab === 'behavior' && (
-              <div className="settings-group">
-                <SettingsAccordion title="General" defaultOpen noDivider>
+              <div className="behavior-shell">
+                <nav className="settings-subnav">
+                  {BEHAVIOR_SECTIONS.map((sec) => (
+                    <button
+                      key={sec.id}
+                      type="button"
+                      className={`settings-subnav-item${behaviorSection === sec.id ? ' active' : ''}`}
+                      onClick={() => setBehaviorSection(sec.id)}
+                    >
+                      <span className="settings-subnav-icon">{sec.icon}</span>
+                      <span className="settings-subnav-label">{sec.label}</span>
+                    </button>
+                  ))}
+                </nav>
+                <div className="behavior-content">
+                  {behaviorSection === 'general' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="General">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -888,9 +1752,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   />
                   Auto-spawn first terminal
                 </label>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Notifications">
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'notifications' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Notifications">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -959,9 +1826,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     </label>
                   )
                 })}
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Shell Integration">
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'shell' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Shell Integration">
                 <div className="settings-row">
                   <span className="settings-label">
                     Context Menu: {ctxMenuRegistered === null ? '...' : ctxMenuRegistered ? 'Registered' : 'Not Registered'}
@@ -1004,14 +1874,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   Adds &quot;Open with Claude Dock&quot; to your file manager&apos;s right-click context menu.
                 </div>
                 {ctxMenuStatus && <div className="settings-update-status">{ctxMenuStatus}</div>}
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Shell Panel">
+                </SettingsCard>
+                <SettingsCard title="Shell Panel">
                 <label>
                   <input
                     type="checkbox"
                     checked={settings.shellPanel?.enabled ?? true}
-                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, enabled: e.target.checked } } as any)}
+                    onChange={(e) => writeEdit('shellPanel', { enabled: e.target.checked })}
                   />
                   Enable embedded shell panel in terminals
                 </label>
@@ -1022,7 +1891,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   Preferred Shell
                   <select
                     value={settings.shellPanel?.preferredShell ?? 'default'}
-                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, preferredShell: e.target.value } } as any)}
+                    onChange={(e) => writeEdit('shellPanel', { preferredShell: e.target.value })}
                   >
                     <option value="default">Default (system shell)</option>
                     <option value="bash">Bash</option>
@@ -1039,7 +1908,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     max={600}
                     step={10}
                     value={settings.shellPanel?.defaultHeight ?? 200}
-                    onChange={(e) => update({ shellPanel: { ...settings.shellPanel, defaultHeight: parseInt(e.target.value) || 200 } } as any)}
+                    onChange={(e) => writeEdit('shellPanel', { defaultHeight: parseInt(e.target.value) || 200 })}
                   />
                 </label>
                 <label>
@@ -1053,26 +1922,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                 <div className="settings-description">
                   Displays event cards (exceptions, compile errors, server status, etc.) detected from shell output above each terminal.
                 </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Privacy">
-                <label className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={settings.telemetry?.enabled ?? false}
-                    onChange={(e) => {
-                      getDockApi().telemetry.setConsent(e.target.checked)
-                      update({ telemetry: { ...settings.telemetry, enabled: e.target.checked, consentGiven: true } } as any)
-                    }}
-                  />
-                  Share anonymous usage telemetry
-                </label>
-                <div className="settings-description">
-                  Sends anonymous session stats (duration, crash count, feature usage) to help improve Claude Dock. No personal data, terminal content, or file paths are ever collected.
-                </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Dock MCP Server" defaultOpen={initialSection === 'mcp'}>
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'integrations' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Dock MCP Server">
                 <div className="settings-row">
                   <span className="settings-label">
                     Status: {mcpInstalled === null ? '...' : mcpInstalled ? 'Installed' : 'Not Installed'}
@@ -1159,9 +2014,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                 <div className="settings-description" style={{ paddingLeft: 24 }}>
                   Allow Claude sessions to send messages to each other for coordination.
                 </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Anthropic API">
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'api' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Anthropic API">
                 <label className="checkbox-label">
                   <input
                     type="checkbox"
@@ -1286,9 +2144,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     Manage API keys on Anthropic Console
                   </button>
                 </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Updates">
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'privacy' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Privacy">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={settings.telemetry?.enabled ?? false}
+                    onChange={(e) => {
+                      getDockApi().telemetry.setConsent(e.target.checked)
+                      writeEdit('telemetry', { enabled: e.target.checked, consentGiven: true })
+                    }}
+                  />
+                  Share anonymous usage telemetry
+                </label>
+                <div className="settings-description">
+                  Sends anonymous session stats (duration, crash count, feature usage) to help improve Claude Dock. No personal data, terminal content, or file paths are ever collected.
+                </div>
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'updates' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Updates">
                 {ENV_PROFILE === 'uat' ? (
                   <div className="settings-description">
                     This build is on the <strong>Bleeding Edge</strong> channel — updates arrive on every commit to main. Install the Stable build to switch to versioned releases.
@@ -1364,9 +2245,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     <div className="settings-update-status">{updateCheckStatus}</div>
                   )}
                 </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Advanced">
+                </SettingsCard>
+                  </div>
+                )}
+                  {behaviorSection === 'advanced' && (
+                  <div className="settings-stack">
+                    <SettingsCard title="Advanced">
                 <label>
                   Environment
                   <input
@@ -1395,7 +2279,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     max={8192}
                     step={256}
                     value={settings.advanced.maxHeapSizeMb}
-                    onChange={(e) => update({ advanced: { ...settings.advanced, maxHeapSizeMb: parseInt(e.target.value) || 2048 } })}
+                    onChange={(e) => writeEdit('advanced', { maxHeapSizeMb: parseInt(e.target.value) || 2048 })}
                   />
                 </label>
                 <div className="settings-description">
@@ -1405,7 +2289,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                   <input
                     type="checkbox"
                     checked={settings.advanced.livePluginReload}
-                    onChange={(e) => update({ advanced: { ...settings.advanced, livePluginReload: e.target.checked } })}
+                    onChange={(e) => writeEdit('advanced', { livePluginReload: e.target.checked })}
                   />
                   Live Plugin Reload
                 </label>
@@ -1428,9 +2312,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, initialTab, init
                     <div className="settings-update-status">{pathCheckStatus}</div>
                   )}
                 </div>
-                </SettingsAccordion>
+                </SettingsCard>
+                  </div>
+                )}
+                </div>
               </div>
             )}
+          </div>
           </div>
         </div>
         <div className="modal-footer">

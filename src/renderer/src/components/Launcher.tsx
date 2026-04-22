@@ -1043,14 +1043,18 @@ const Launcher: React.FC = () => {
       </div>
 
       {pluginSetupPath && (
-        <div className="modal-overlay" onClick={() => setPluginSetupPath(null)}>
+        <div className="modal-overlay plugin-setup-overlay" onClick={() => setPluginSetupPath(null)}>
           <div className="plugin-setup-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="plugin-setup-title">Plugin Setup</h3>
-            <p className="plugin-setup-subtitle">
-              Enable plugins for <strong>{pluginSetupPath.split(/[/\\]/).pop()}</strong>
-            </p>
+            <div className="plugin-setup-header">
+              <div className="plugin-setup-header-text">
+                <h3 className="plugin-setup-title">Plugin Setup</h3>
+                <p className="plugin-setup-subtitle">
+                  Enable plugins for <strong>{pluginSetupPath.split(/[/\\]/).pop()}</strong>
+                </p>
+              </div>
+            </div>
             <div className="plugin-setup-body">
-              <PluginPanel projectDir={pluginSetupPath} />
+              <PluginPanel projectDir={pluginSetupPath} compact />
             </div>
             <div className="plugin-setup-footer">
               <button className="plugin-setup-done" onClick={finishPluginSetup}>
