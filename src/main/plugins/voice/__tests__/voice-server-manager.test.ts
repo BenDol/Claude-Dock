@@ -134,26 +134,51 @@ vi.mock('fs', async () => {
 
 // Spawn is used by startDaemon — return a fake process.
 const fakeChildren: FakeChild[] = []
+// stdin stub — needs EventEmitter semantics (.on('error', …)) because
+// spawnDaemon attaches an error listener so async EPIPE during graceful
+// drain doesn't surface as an uncaughtException. Must also expose
+// `destroyed`, `write(chunk, cb?)`, and `end()` to support the drain path.
+class FakeStdin extends EventEmitter {
+  destroyed = false
+  private child: FakeChild
+  constructor(child: FakeChild) {
+    super()
+    this.child = child
+  }
+  write(chunk: string | Buffer, cb?: (err?: Error | null) => void): boolean {
+    if (typeof chunk === 'string' && chunk.includes('shutdown')) {
+      this.child.drainedViaStdin = true
+    }
+    cb?.()
+    return true
+  }
+  end(): void {
+    if (this.child.drainedViaStdin) {
+      setTimeout(() => this.child.emit('exit', 0, null), 5)
+    }
+    this.destroyed = true
+  }
+}
 class FakeChild extends EventEmitter {
   pid = 12345
   killed = false
   drainedViaStdin = false
+  // ChildProcess exposes `null` exitCode / signalCode while alive. stopDaemon's
+  // skip-if-exited guard depends on this truthiness, so the stub must match.
+  exitCode: number | null = null
+  signalCode: NodeJS.Signals | null = null
   stdout = new EventEmitter()
   stderr = new EventEmitter()
-  // stopDaemon's graceful path writes "shutdown\n" here; simulate a prompt
-  // clean exit so tests don't wait out the real 30s drain timeout.
-  stdin = {
-    destroyed: false,
-    write: (chunk: string) => {
-      if (chunk.includes('shutdown')) this.drainedViaStdin = true
-      return true
-    },
-    end: () => {
-      if (this.drainedViaStdin) {
-        setTimeout(() => this.emit('exit', 0, null), 5)
-      }
-      this.stdin.destroyed = true
-    }
+  stdin: FakeStdin
+  constructor() {
+    super()
+    this.stdin = new FakeStdin(this)
+    // Keep exitCode/signalCode in sync when our simulated exits fire so future
+    // stopDaemon calls in the same test take the skip-if-exited path.
+    this.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      this.exitCode = code
+      this.signalCode = signal
+    })
   }
   kill(sig?: string) {
     this.killed = true
@@ -291,6 +316,32 @@ describe('voice-server-manager', () => {
     expect(s.installState).toBe('missing')
     expect(s.lastError).toContain('src/hotkey_parser.py')
     expect(s.step).toBe('Voice runtime out of date')
+  })
+
+  it('graceful stopDaemon skips stdin write when the daemon has already exited', async () => {
+    // Regression: dispose() firing right after the daemon crashed (hot-reload
+    // after a crash loop) used to write to a half-closed pipe and surface EPIPE
+    // as an uncaughtException — see the 2026-04-22 startup crash. stopDaemon
+    // must detect the dead child and fall through to the kill escalation
+    // without touching stdin.
+    const mgr = VoiceServerManager.getInstance()
+    // Skip the full enable → startDaemon lifecycle here — it schedules restart
+    // timers whose dangling setTimeouts would leak into the next test. Pin a
+    // dead FakeChild directly, then call stopDaemon and assert the skip-path.
+    const child = new FakeChild()
+    fakeChildren.push(child)
+    child.exitCode = 0
+    ;(mgr as any).daemon = child
+
+    const beforeDrained = child.drainedViaStdin
+    await mgr.stopDaemon(true)
+    // Skip-if-exited branch fires: no stdin write, no EPIPE surface.
+    expect(child.drainedViaStdin).toBe(beforeDrained)
+    // Log line confirms we took the intended path (guards against a silent
+    // regression where we still write and just log the error).
+    expect(
+      serviceLogs.some((l) => l.includes('skipping graceful drain — daemon already exited'))
+    ).toBe(true)
   })
 
   it('does not spawn a second daemon when another workspace enables', async () => {

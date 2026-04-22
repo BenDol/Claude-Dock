@@ -548,6 +548,24 @@ export class VoiceServerManager extends EventEmitter {
       svc().logError('[voice-manager] daemon error event', err)
       this.updateStatus({ lastError: err.message })
     })
+    // Stream error events (notably EPIPE when the daemon has already exited)
+    // propagate as `uncaughtException` if nothing listens. The `shutdown\n`
+    // write in stopDaemon() is the canonical trigger: if the daemon crashed
+    // before we hit the dispose path, `child.stdin.write()` completes
+    // synchronously but the pipe error fires asynchronously on stdin. Attach
+    // listeners here so the write is safely a no-op regardless of the child's
+    // liveness. The stdout/stderr listeners are defensive — stream consumers
+    // don't usually emit errors after EOF, but missing listeners have bitten
+    // us on other Windows pipe closures.
+    child.stdin?.on('error', (err) => {
+      svc().log(`[voice-manager] daemon stdin error (ignored): ${String(err)}`)
+    })
+    child.stdout?.on('error', (err) => {
+      svc().log(`[voice-manager] daemon stdout error (ignored): ${String(err)}`)
+    })
+    child.stderr?.on('error', (err) => {
+      svc().log(`[voice-manager] daemon stderr error (ignored): ${String(err)}`)
+    })
     child.on('exit', (code, signal) => {
       // Only act if this exit event pertains to the currently tracked child —
       // a late exit from a previously-replaced daemon must not clobber state
@@ -597,14 +615,30 @@ export class VoiceServerManager extends EventEmitter {
           // large-v3 model) still tears down eventually.
           const DRAIN_TIMEOUT_MS = 30_000
           let drainRequestSent = false
-          try {
-            if (child.stdin && !child.stdin.destroyed) {
-              child.stdin.write('shutdown\n')
-              child.stdin.end()
-              drainRequestSent = true
+          // Skip the write entirely if the child has already exited — otherwise
+          // Node queues a write against a dead pipe and surfaces EPIPE via the
+          // stdin `error` event (swallowed by the listener attached in
+          // spawnDaemon) but still reports back through the write callback.
+          const childAlreadyExited =
+            child.exitCode !== null || child.signalCode !== null || child.killed
+          if (!childAlreadyExited) {
+            try {
+              if (child.stdin && !child.stdin.destroyed) {
+                // Supply an explicit callback so the write's error path is
+                // handled at the call site — omitting it pushed unhandled
+                // EPIPE up to `uncaughtException` when the daemon had just
+                // exited (e.g. during a hot-reload after a crash loop).
+                child.stdin.write('shutdown\n', (err) => {
+                  if (err) svc().log(`[voice-manager] stdin shutdown write callback err: ${String(err)}`)
+                })
+                child.stdin.end()
+                drainRequestSent = true
+              }
+            } catch (err) {
+              svc().log(`[voice-manager] stdin shutdown write failed: ${String(err)}`)
             }
-          } catch (err) {
-            svc().log(`[voice-manager] stdin shutdown write failed: ${String(err)}`)
+          } else {
+            svc().log('[voice-manager] skipping graceful drain — daemon already exited')
           }
 
           if (drainRequestSent) {
