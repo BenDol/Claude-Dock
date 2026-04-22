@@ -199,7 +199,10 @@ function registerWebLinks(term: Terminal): void {
           end: { x: l.startIndex + l.url.length + 1, y: lineNumber }
         },
         text: l.url,
-        decorations: { pointerCursor: true, underline: false },
+        // underline: true renders only on hover — signals the link is clickable.
+        // Cursor stays as text unless Ctrl is held (see .ctrl-held CSS), and
+        // activate() below gates the open on Ctrl/Meta.
+        decorations: { pointerCursor: true, underline: true },
         activate(event: MouseEvent) {
           if (event.ctrlKey || event.metaKey) {
             getDockApi().app.openExternal(l.url)
@@ -286,7 +289,10 @@ function registerFilePathLinks(term: Terminal): void {
           end: { x: l.startIndex + l.length + 1, y: lineNumber }
         },
         text: l.filePath,
-        decorations: { pointerCursor: true, underline: false },
+        // underline: true renders only on hover — signals the path is clickable.
+        // Cursor stays as text unless Ctrl is held (see .ctrl-held CSS), and
+        // activate() below ignores clicks without Ctrl/Meta.
+        decorations: { pointerCursor: true, underline: true },
         activate(event: MouseEvent) {
           if (!event.ctrlKey && !event.metaKey) return
           const resolved = l.filePath.match(/^[a-zA-Z]:[\\/]|^\//)
