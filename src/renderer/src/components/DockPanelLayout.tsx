@@ -11,7 +11,7 @@
  * in the same DOM position regardless of which slots are visible — switching
  * Fragment <-> div would unmount the grid and kill all xterm instances.
  */
-import React, { useCallback, useRef, useEffect, useState, Suspense } from 'react'
+import React, { useCallback, useEffect, useState, Suspense } from 'react'
 import { usePanelStore, PANEL_POSITIONS, type PanelPosition } from '../stores/panel-store'
 import { getPanel, type PanelRegistration } from '../panel-registry'
 import { useDockStore } from '../stores/dock-store'
