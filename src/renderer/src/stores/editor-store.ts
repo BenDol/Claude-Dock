@@ -196,7 +196,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   closeTab: (id) => {
-    const { tabs, activeTabId } = get()
+    const { tabs, activeTabId, navBack, navForward } = get()
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
     const newTabs = tabs.filter((t) => t.id !== id)
@@ -207,36 +207,58 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ? (newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null)
         : null
     }
-    set({ tabs: newTabs, activeTabId: newActive })
+    set({
+      tabs: newTabs,
+      activeTabId: newActive,
+      navBack: navBack.filter((e) => e.tabId !== id),
+      navForward: navForward.filter((e) => e.tabId !== id)
+    })
   },
 
-  closeAllTabs: () => set({ tabs: [], activeTabId: null }),
+  closeAllTabs: () => set({ tabs: [], activeTabId: null, navBack: [], navForward: [] }),
 
   closeOtherTabs: (id) => {
-    const { tabs } = get()
+    const { tabs, navBack, navForward } = get()
     const keeper = tabs.find((t) => t.id === id)
     if (!keeper) return
-    set({ tabs: [keeper], activeTabId: keeper.id })
+    set({
+      tabs: [keeper],
+      activeTabId: keeper.id,
+      navBack: navBack.filter((e) => e.tabId === id),
+      navForward: navForward.filter((e) => e.tabId === id)
+    })
   },
 
   closeTabsToLeft: (id) => {
-    const { tabs, activeTabId } = get()
+    const { tabs, activeTabId, navBack, navForward } = get()
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx <= 0) return
     const newTabs = tabs.slice(idx)
+    const keepIds = new Set(newTabs.map((t) => t.id))
     // If the currently-active tab is one of the tabs being removed, switch
     // to the anchor — otherwise leave the active tab as-is.
-    const stillPresent = newTabs.some((t) => t.id === activeTabId)
-    set({ tabs: newTabs, activeTabId: stillPresent ? activeTabId : id })
+    const stillPresent = keepIds.has(activeTabId ?? '')
+    set({
+      tabs: newTabs,
+      activeTabId: stillPresent ? activeTabId : id,
+      navBack: navBack.filter((e) => keepIds.has(e.tabId)),
+      navForward: navForward.filter((e) => keepIds.has(e.tabId))
+    })
   },
 
   closeTabsToRight: (id) => {
-    const { tabs, activeTabId } = get()
+    const { tabs, activeTabId, navBack, navForward } = get()
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0 || idx >= tabs.length - 1) return
     const newTabs = tabs.slice(0, idx + 1)
-    const stillPresent = newTabs.some((t) => t.id === activeTabId)
-    set({ tabs: newTabs, activeTabId: stillPresent ? activeTabId : id })
+    const keepIds = new Set(newTabs.map((t) => t.id))
+    const stillPresent = keepIds.has(activeTabId ?? '')
+    set({
+      tabs: newTabs,
+      activeTabId: stillPresent ? activeTabId : id,
+      navBack: navBack.filter((e) => keepIds.has(e.tabId)),
+      navForward: navForward.filter((e) => keepIds.has(e.tabId))
+    })
   },
 
   setActiveTab: (id) => set({ activeTabId: id }),
@@ -264,7 +286,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   removeTab: (id) => {
-    const { tabs, activeTabId } = get()
+    const { tabs, activeTabId, navBack, navForward } = get()
     const idx = tabs.findIndex((t) => t.id === id)
     if (idx < 0) return null
     const tab = tabs[idx]
@@ -275,7 +297,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ? (newTabs[Math.min(idx, newTabs.length - 1)]?.id ?? null)
         : null
     }
-    set({ tabs: newTabs, activeTabId: newActive })
+    set({
+      tabs: newTabs,
+      activeTabId: newActive,
+      navBack: navBack.filter((e) => e.tabId !== id),
+      navForward: navForward.filter((e) => e.tabId !== id)
+    })
     return tab
   }
 }))

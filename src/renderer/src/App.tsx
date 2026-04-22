@@ -660,7 +660,11 @@ function DetachedEditorShell() {
       const names = dirty.map((t) => t.fileName).join(', ')
       if (!confirm(`Unsaved changes in: ${names}\nRedock anyway? Changes will move with the tabs but stay unsaved.`)) return
     }
-    await getDockApi().workspace.redockEditor(projectDir, JSON.stringify(tabs))
+    const res = await getDockApi().workspace.redockEditor(projectDir, JSON.stringify(tabs))
+    if (!res?.success) {
+      console.error('[DetachedEditorShell] redock failed:', res?.error)
+      alert(`Redock failed: ${res?.error || 'unknown error'}`)
+    }
   }, [projectDir])
 
   return (

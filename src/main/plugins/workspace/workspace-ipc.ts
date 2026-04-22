@@ -5,6 +5,7 @@ import { IPC } from '../../../shared/ipc-channels'
 import { readDirectory, readTreeAsync, sanitizePath, loadTreeCache, saveTreeCache } from './file-scanner'
 import { EditorWindowManager, type OpenFileRequest } from './editor-window-manager'
 import { getEditorWindowState, saveEditorWindowState } from './editor-window-store'
+import { DockManager } from '../../dock-manager'
 
 import { getServices } from './services'
 
@@ -296,9 +297,12 @@ export function registerWorkspaceIpc(): void {
 
   ipcMain.handle(IPC.WORKSPACE_REDOCK_EDITOR, (_event, projectDir: string, tabsJson: string) => {
     try {
-      const { DockManager } = require('../../dock-manager') as typeof import('../../dock-manager')
       const dock = DockManager.getInstance().findDockByDir(projectDir)
       const dockWebContents = dock?.window.webContents ?? null
+      if (!dockWebContents) {
+        getServices().logError(`[workspace] redock editor: no dock window found for ${projectDir}`)
+        return { success: false, error: 'Dock window not found for this project' }
+      }
       EditorWindowManager.getInstance().redock(projectDir, tabsJson, dockWebContents)
       return { success: true }
     } catch (err) {
