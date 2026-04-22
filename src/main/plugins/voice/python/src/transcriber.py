@@ -53,9 +53,13 @@ class Transcriber(ABC):
 
 
 class OpenAIWhisperAPI(Transcriber):
-    def __init__(self, api_key: str = "", model: str = "whisper-1"):
+    def __init__(self, api_key: str = "", model: str = "whisper-1", language: str = ""):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self._model = model
+        # Empty string means "auto-detect" — the OpenAI API expects the kwarg
+        # to be absent (or a non-empty ISO-639-1 code), not "". Normalize to
+        # None so the call site can conditionally include the kwarg.
+        self._language = language or None
 
     @property
     def name(self) -> str:
@@ -70,8 +74,13 @@ class OpenAIWhisperAPI(Transcriber):
         from openai import OpenAI
 
         client = OpenAI(api_key=self._api_key)
+        # Only include `language` when the user configured one — omitting the
+        # kwarg matches the prior behavior and lets the API auto-detect.
+        kwargs = {"model": self._model}
+        if self._language:
+            kwargs["language"] = self._language
         with open(audio_path, "rb") as f:
-            result = client.audio.transcriptions.create(model=self._model, file=f)
+            result = client.audio.transcriptions.create(file=f, **kwargs)
         return result.text
 
 
@@ -255,7 +264,11 @@ def create_transcriber(config: dict) -> Transcriber:
 
     if backend == "openai_api":
         s = config.get("openai_api", {})
-        return OpenAIWhisperAPI(api_key=s.get("api_key", ""), model=s.get("model", "whisper-1"))
+        return OpenAIWhisperAPI(
+            api_key=s.get("api_key", ""),
+            model=s.get("model", "whisper-1"),
+            language=s.get("language", ""),
+        )
 
     if backend == "faster_whisper":
         s = config.get("faster_whisper", {})

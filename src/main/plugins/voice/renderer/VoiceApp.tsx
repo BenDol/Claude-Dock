@@ -1047,6 +1047,14 @@ function TranscriberTab({ cfg, patch, status }: { cfg: VoiceConfig; patch: Patch
               onChange={(e) => patch({ transcriber: { openai_api: { model: e.target.value } } })}
             />
           </div>
+          <div className="voice-field">
+            <label>Language (2-letter code, empty = auto)</label>
+            <input
+              type="text"
+              value={cfg.transcriber.openai_api.language}
+              onChange={(e) => patch({ transcriber: { openai_api: { language: e.target.value } } })}
+            />
+          </div>
         </div>
       )}
     </>
