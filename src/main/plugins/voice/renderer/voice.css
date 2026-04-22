@@ -338,3 +338,85 @@ html, body, #root {
   outline: none;
   padding: 2px 4px;
 }
+
+/* ── GPU acceleration section ─────────────────────────────────────── */
+
+.voice-gpu-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary, #1f1f29);
+  border-radius: 4px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.voice-gpu-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted, #7a7a85);
+  flex-shrink: 0;
+}
+.voice-gpu-status.ready .voice-gpu-status-dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+.voice-gpu-status.error .voice-gpu-status-dot { background: #ef4444; }
+.voice-gpu-status.unavailable .voice-gpu-status-dot { background: #6b7280; }
+
+.voice-gpu-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #a0a0a8);
+  margin-bottom: 8px;
+}
+.voice-gpu-meta.dim { color: var(--text-muted, #7a7a85); }
+
+.voice-gpu-warning {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  background: rgba(234, 179, 8, 0.08);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-primary, #e5e5ea);
+}
+.voice-gpu-warning button { flex-shrink: 0; }
+
+.voice-gpu-error {
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #fca5a5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.voice-gpu-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.voice-gpu-spinner {
+  font-size: 11px;
+  color: var(--text-secondary, #a0a0a8);
+  font-style: italic;
+}
+
+.voice-gpu-help {
+  font-size: 11px;
+  color: var(--text-muted, #7a7a85);
+  line-height: 1.5;
+}
+.voice-gpu-help code {
+  background: var(--bg-tertiary, #1f1f29);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+}

@@ -14,7 +14,8 @@ import type {
   VoiceDaemonState,
   VoiceInstallState,
   VoiceInputDevice,
-  VoiceHotkeySupport
+  VoiceHotkeySupport,
+  VoiceGpuStatus
 } from '../../../../shared/voice-types'
 
 type Tab = 'hotkey' | 'recording' | 'transcriber' | 'setup'
@@ -351,7 +352,7 @@ export default function VoiceApp() {
               devicesError={devicesError}
             />
           )}
-          {tab === 'transcriber' && <TranscriberTab cfg={cfg} patch={patch} />}
+          {tab === 'transcriber' && <TranscriberTab cfg={cfg} patch={patch} status={status} />}
           {tab === 'setup' && <SetupTab cfg={cfg} status={status} onRunSetup={runSetup} onUninstall={() => api.voice.setup.uninstall()} />}
         </div>
       </div>
@@ -711,8 +712,184 @@ function RecordingTab({
   )
 }
 
-function TranscriberTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
+/**
+ * GPU / CUDA acceleration status panel for the Transcriber tab.
+ * Shown only when backend='faster_whisper' (OpenAI API doesn't use local GPU).
+ *
+ * Rendering matrix:
+ *   no NVIDIA GPU        → info banner, cuda disabled
+ *   GPU, not installed   → [Install GPU acceleration] button
+ *   installing/verifying → progress spinner + step text
+ *   ready                → green "GPU ready" + (Re-verify) / (Uninstall)
+ *   error                → red error + (Retry) / (Uninstall)
+ */
+function GpuAccelerationSection({
+  gpu,
+  gpuWarning,
+  busy,
+  actionError,
+  onInstall,
+  onUninstall,
+  onDismissWarning
+}: {
+  gpu: VoiceGpuStatus
+  gpuWarning: string | null
+  busy: boolean
+  actionError: string | null
+  onInstall: () => void
+  onUninstall: () => void
+  onDismissWarning: () => void
+}) {
+  const { capability, state } = gpu
+  const hasGpu = capability.hasNvidiaGpu
+  const driverLabel = capability.driverVersion ? `driver ${capability.driverVersion}` : ''
+  const cudaLabel = capability.cudaVersion ? `CUDA ${capability.cudaVersion}` : ''
+  const gpuLabel = capability.gpuName || 'NVIDIA GPU'
+  const isBusy = busy || state === 'installing' || state === 'verifying'
+
+  let statusClass = 'voice-gpu-status'
+  if (state === 'ready') statusClass += ' ready'
+  else if (state === 'error') statusClass += ' error'
+  else if (state === 'unavailable') statusClass += ' unavailable'
+
+  let statusLabel = 'Unknown'
+  if (state === 'unavailable') statusLabel = 'GPU acceleration unavailable'
+  else if (state === 'unknown') statusLabel = 'Checking GPU…'
+  else if (state === 'not-installed') statusLabel = 'GPU detected — install available'
+  else if (state === 'installing') statusLabel = 'Installing GPU packages…'
+  else if (state === 'verifying') statusLabel = 'Verifying GPU support…'
+  else if (state === 'ready') statusLabel = 'GPU acceleration ready'
+  else if (state === 'error') statusLabel = 'GPU setup failed'
+
+  return (
+    <div className="voice-section">
+      <h3>GPU acceleration</h3>
+      <div className={statusClass}>
+        <span className="voice-gpu-status-dot" aria-hidden /> {statusLabel}
+      </div>
+
+      {hasGpu && (
+        <div className="voice-gpu-meta">
+          {gpuLabel}
+          {(driverLabel || cudaLabel) && ` (${[driverLabel, cudaLabel].filter(Boolean).join(', ')})`}
+        </div>
+      )}
+
+      {!hasGpu && capability.error && (
+        <div className="voice-gpu-meta dim">{capability.error}</div>
+      )}
+
+      {gpuWarning && (
+        <div className="voice-gpu-warning">
+          <div>{gpuWarning}</div>
+          <button type="button" className="voice-btn" onClick={onDismissWarning}>Dismiss</button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="voice-gpu-error">{actionError}</div>
+      )}
+
+      {gpu.lastError && state === 'error' && (
+        <div className="voice-gpu-error">{gpu.lastError}</div>
+      )}
+
+      {hasGpu && (
+        <div className="voice-gpu-actions">
+          {state === 'not-installed' || state === 'error' ? (
+            <button
+              type="button"
+              className="voice-btn primary"
+              onClick={onInstall}
+              disabled={isBusy}
+            >
+              {state === 'error' ? 'Retry install' : 'Install GPU acceleration (~600MB)'}
+            </button>
+          ) : null}
+
+          {state === 'ready' && (
+            <>
+              <button
+                type="button"
+                className="voice-btn"
+                onClick={onInstall}
+                disabled={isBusy}
+                title="Re-run the CUDA verification probe"
+              >
+                Re-verify
+              </button>
+              <button
+                type="button"
+                className="voice-btn"
+                onClick={onUninstall}
+                disabled={isBusy}
+                title="Remove CUDA packages from the voice runtime"
+              >
+                Uninstall
+              </button>
+            </>
+          )}
+
+          {isBusy && (
+            <span
+              className="voice-gpu-spinner"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              Working…
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="voice-gpu-help">
+        GPU acceleration speeds up transcription 3–10× for medium / large-v3 models.
+        Installed automatically during voice setup when an NVIDIA GPU is detected;
+        switching Device to <code>cuda</code> or <code>auto</code> triggers an on-the-fly install if required.
+      </div>
+    </div>
+  )
+}
+
+function TranscriberTab({ cfg, patch, status }: { cfg: VoiceConfig; patch: PatchFn; status: VoiceRuntimeStatus }) {
   const isLocal = cfg.transcriber.backend === 'faster_whisper'
+  const gpu = status.gpu
+  const api = getDockApi()
+  const [gpuBusy, setGpuBusy] = useState(false)
+  const [gpuActionError, setGpuActionError] = useState<string | null>(null)
+
+  const handleInstallGpu = useCallback(async () => {
+    setGpuBusy(true)
+    setGpuActionError(null)
+    try {
+      const result = await api.voice.gpu.install()
+      if (!result.ok) setGpuActionError(result.error ?? 'Install failed')
+    } catch (err) {
+      setGpuActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGpuBusy(false)
+    }
+  }, [api])
+
+  const handleUninstallGpu = useCallback(async () => {
+    if (!confirm('Remove the GPU acceleration packages from the voice runtime (~600MB)? Transcription will fall back to CPU until reinstalled.')) return
+    setGpuBusy(true)
+    setGpuActionError(null)
+    try {
+      const result = await api.voice.gpu.uninstall()
+      if (!result.ok) setGpuActionError(result.error ?? 'Uninstall failed')
+    } catch (err) {
+      setGpuActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGpuBusy(false)
+    }
+  }, [api])
+
+  const handleDismissWarning = useCallback(() => {
+    api.voice.gpu.dismissWarning().catch(() => { /* non-fatal */ })
+  }, [api])
+
   return (
     <>
       <div className="voice-section">
@@ -728,6 +905,18 @@ function TranscriberTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
           </select>
         </div>
       </div>
+
+      {isLocal && (
+        <GpuAccelerationSection
+          gpu={gpu}
+          gpuWarning={status.gpuWarning}
+          busy={gpuBusy}
+          actionError={gpuActionError}
+          onInstall={handleInstallGpu}
+          onUninstall={handleUninstallGpu}
+          onDismissWarning={handleDismissWarning}
+        />
+      )}
 
       {isLocal ? (
         <div className="voice-section">
@@ -749,9 +938,11 @@ function TranscriberTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
               value={cfg.transcriber.faster_whisper.device}
               onChange={(e) => patch({ transcriber: { faster_whisper: { device: e.target.value as VoiceConfig['transcriber']['faster_whisper']['device'] } } })}
             >
-              <option value="auto">auto</option>
+              <option value="auto">auto{gpu.state === 'ready' ? ' (GPU)' : ' (CPU)'}</option>
               <option value="cpu">cpu</option>
-              <option value="cuda">cuda</option>
+              <option value="cuda" disabled={!gpu.capability.hasNvidiaGpu}>
+                cuda{!gpu.capability.hasNvidiaGpu ? ' — no NVIDIA GPU' : gpu.state === 'ready' ? '' : ' — install required'}
+              </option>
             </select>
           </div>
           <div className="voice-field">
@@ -760,10 +951,49 @@ function TranscriberTab({ cfg, patch }: { cfg: VoiceConfig; patch: PatchFn }) {
               value={cfg.transcriber.faster_whisper.compute_type}
               onChange={(e) => patch({ transcriber: { faster_whisper: { compute_type: e.target.value } } })}
             >
-              {['default', 'int8', 'int8_float16', 'float16', 'float32'].map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
+              {/*
+                Valid compute_types depend on device. ctranslate2 rejects
+                float16 / int8_float16 on CPU and (historically) has issues
+                with int8 on CUDA. 'default' + float32 always work. 'auto'
+                picks the best at runtime so we keep all options open.
+              */}
+              {(() => {
+                const device = cfg.transcriber.faster_whisper.device
+                const ALL = ['default', 'int8', 'int8_float16', 'float16', 'float32'] as const
+                const allowed = new Set<string>(
+                  device === 'cpu'
+                    ? ['default', 'int8', 'float32']
+                    : device === 'cuda'
+                      ? ['default', 'int8_float16', 'float16', 'float32']
+                      : ALL // auto: all valid, ctranslate2 picks
+                )
+                const current = cfg.transcriber.faster_whisper.compute_type
+                return ALL.map((m) => (
+                  <option
+                    key={m}
+                    value={m}
+                    disabled={!allowed.has(m) && m !== current}
+                  >
+                    {m}
+                    {!allowed.has(m) ? ` — not supported on ${device}` : ''}
+                  </option>
+                ))
+              })()}
             </select>
+            {(() => {
+              const device = cfg.transcriber.faster_whisper.device
+              const current = cfg.transcriber.faster_whisper.compute_type
+              const invalid =
+                (device === 'cpu' && (current === 'float16' || current === 'int8_float16')) ||
+                (device === 'cuda' && current === 'int8')
+              if (!invalid) return null
+              const suggested = device === 'cuda' ? 'int8_float16' : 'int8'
+              return (
+                <div className="hint" style={{ color: '#fca5a5' }}>
+                  "{current}" is not supported on {device}. Switch to "{suggested}" or "default".
+                </div>
+              )
+            })()}
           </div>
           <div className="voice-field">
             <label>Language (2-letter code, empty = auto)</label>

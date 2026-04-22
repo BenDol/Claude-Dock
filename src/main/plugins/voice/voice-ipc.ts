@@ -173,9 +173,15 @@ function ensureDictationDaemon(): DictationDaemon {
     // Forward daemon stderr to the app log so the user (and us) can see
     // device-resolution details, check_input_settings failures, and
     // silent-capture diagnostics in real time without waiting for exit.
+    // Structured __VOICE_WARNING__ lines (e.g. CUDA fallback) are also
+    // routed into the server manager so the UI can surface them.
     for (const line of chunk.split('\n')) {
       const trimmed = line.trim()
-      if (trimmed) svc().log(`[voice-daemon] ${trimmed}`)
+      if (!trimmed) continue
+      svc().log(`[voice-daemon] ${trimmed}`)
+      if (trimmed.includes('__VOICE_WARNING__:')) {
+        mgr().feedDaemonStderr(trimmed)
+      }
     }
   })
   child.on('error', (err) => {
@@ -580,6 +586,29 @@ print(json.dumps({'text': text}))
     }
   })
 
+  // ── GPU / CUDA acceleration ─────────────────────────────────────────────
+  // `detect` just refreshes status (no install). `install` bypasses the
+  // failure cooldown so an explicit user click always gets a fresh attempt.
+  ipcMain.handle(IPC.VOICE_GPU_DETECT, async () => {
+    return mgr().refreshGpuStatus()
+  })
+
+  ipcMain.handle(IPC.VOICE_GPU_INSTALL, async () => {
+    const result = await mgr().ensureGpuRuntimeIfNeeded({ force: true })
+    return result
+  })
+
+  ipcMain.handle(IPC.VOICE_GPU_UNINSTALL, async () => {
+    // Kill the dictation daemon so it doesn't hold the DLLs open. Daemon will
+    // respawn on next dictate command with the updated package set.
+    killDictationDaemon('gpu uninstall')
+    return mgr().uninstallGpuRuntimeExplicit()
+  })
+
+  ipcMain.handle(IPC.VOICE_GPU_DISMISS_WARNING, async () => {
+    mgr().dismissGpuWarning()
+  })
+
   ipcMain.handle(IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS, async () => {
     // macOS-only: deep-link to the Accessibility privacy pane. Other OSes
     // don't need this permission so we return early and leave the caller a
@@ -653,7 +682,11 @@ export function disposeVoiceIpc(): void {
     IPC.VOICE_RESTART_DAEMON,
     IPC.VOICE_OPEN_LOGS,
     IPC.VOICE_COPY_DIAGNOSTICS,
-    IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS
+    IPC.VOICE_OPEN_ACCESSIBILITY_SETTINGS,
+    IPC.VOICE_GPU_DETECT,
+    IPC.VOICE_GPU_INSTALL,
+    IPC.VOICE_GPU_UNINSTALL,
+    IPC.VOICE_GPU_DISMISS_WARNING
   ]
   for (const ch of channels) {
     try { ipcMain.removeHandler(ch) } catch { /* ignore */ }

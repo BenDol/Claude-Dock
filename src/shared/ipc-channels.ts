@@ -384,6 +384,11 @@ export const IPC = {
   VOICE_COPY_DIAGNOSTICS: 'voice:copyDiagnostics',
   VOICE_RESTART_DAEMON: 'voice:restartDaemon',
   VOICE_OPEN_ACCESSIBILITY_SETTINGS: 'voice:openAccessibilitySettings',
+  // GPU / CUDA acceleration install flow
+  VOICE_GPU_DETECT: 'voice:gpuDetect',
+  VOICE_GPU_INSTALL: 'voice:gpuInstall',
+  VOICE_GPU_UNINSTALL: 'voice:gpuUninstall',
+  VOICE_GPU_DISMISS_WARNING: 'voice:gpuDismissWarning',
 
   // Coordinator Plugin
   COORDINATOR_OPEN: 'coordinator:open',
