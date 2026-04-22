@@ -121,7 +121,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
   const toolbarRef = useRef<HTMLDivElement>(null)
   useToolbarNavigation(toolbarRef)
 
-  const terminalCount = useDockStore((s) => s.terminals.length)
   // Track alt/ctrl so the + button morphs into a "new worktree terminal" button
   const [worktreeMode, setWorktreeMode] = useState(false)
   useEffect(() => {
@@ -371,7 +370,6 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
     <div className="toolbar" ref={toolbarRef} role="toolbar" aria-label="Dock toolbar">
       <div className="toolbar-left">
         <WorkspaceDropdown projectDir={projectDir} />
-        <span className="toolbar-count">{terminalCount} terminal{terminalCount !== 1 ? 's' : ''}</span>
         <button
           data-toolbar-btn
           tabIndex={-1}
