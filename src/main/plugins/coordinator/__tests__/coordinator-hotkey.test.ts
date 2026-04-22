@@ -222,6 +222,45 @@ describe('CoordinatorHotkeyService — uiohook backend', () => {
     expect(getAllDocks).not.toHaveBeenCalled()
   })
 
+  it('fires on Shift+Shift even after the user typed earlier (regression)', () => {
+    // Bug: non-Shift keydown used to set an `interrupted` flag that persisted
+    // across the next Shift-keyup/keydown cycle, so typing in a terminal made
+    // the very next Shift+Shift a silent no-op.
+    service.start()
+    const { down, up } = capturedListeners()
+
+    // User types "a" in a terminal.
+    down({ keycode: UIOHOOK_A })
+    up({ keycode: UIOHOOK_A })
+    vi.advanceTimersByTime(500)
+
+    // Then the normal double-tap.
+    down({ keycode: UIOHOOK_SHIFT })
+    up({ keycode: UIOHOOK_SHIFT })
+    vi.advanceTimersByTime(100)
+    down({ keycode: UIOHOOK_SHIFT })
+
+    expect(getAllDocks).toHaveBeenCalled()
+  })
+
+  it('ignores Shift-keydown auto-repeats from a long-held first Shift', () => {
+    // OS auto-repeat fires keydown without a keyup in between. Those repeats
+    // must not be counted as a second tap.
+    service.start()
+    const { down, up } = capturedListeners()
+
+    down({ keycode: UIOHOOK_SHIFT })  // initial press
+    vi.advanceTimersByTime(50)
+    down({ keycode: UIOHOOK_SHIFT })  // auto-repeat — should be ignored
+    vi.advanceTimersByTime(50)
+    down({ keycode: UIOHOOK_SHIFT })  // auto-repeat — should be ignored
+    up({ keycode: UIOHOOK_SHIFT })
+    vi.advanceTimersByTime(100)
+    down({ keycode: UIOHOOK_SHIFT })  // genuine second tap — should fire
+
+    expect(getAllDocks).toHaveBeenCalled()
+  })
+
   it('treats left and right Shift keycodes as equivalent', () => {
     service.start()
     const { down, up } = capturedListeners()

@@ -39,8 +39,10 @@ export class CoordinatorHotkeyService {
   private keyUpListener: ((e: UiohookKeyboardEvent) => void) | null = null
   private shiftKeycodes = new Set<number>()
   private lastShiftUp = 0
-  /** Set to true on any non-Shift keydown between the armed keyup and the next Shift keydown. */
-  private interrupted = false
+  /** True while a Shift key is currently physically held. Resets on Shift keyup. */
+  private shiftHeld = false
+  /** True if a non-Shift key was pressed while Shift was held — the upcoming keyup is a chord, not a tap. */
+  private chordInProgress = false
 
   // globalShortcut fallback state
   private registeredAccelerator: string | null = null
@@ -129,7 +131,8 @@ export class CoordinatorHotkeyService {
     }
 
     this.lastShiftUp = 0
-    this.interrupted = false
+    this.shiftHeld = false
+    this.chordInProgress = false
 
     this.keyDownListener = (e) => this.onUiohookKeyDown(e)
     this.keyUpListener = (e) => this.onUiohookKeyUp(e)
@@ -172,33 +175,46 @@ export class CoordinatorHotkeyService {
 
   private onUiohookKeyDown(e: UiohookKeyboardEvent): void {
     if (this.shiftKeycodes.has(e.keycode)) {
-      // If this Shift-down lands within doubleTapMs of the last Shift-up
-      // (and no other key was pressed in between), fire.
-      if (!this.interrupted && this.lastShiftUp > 0) {
+      // Auto-repeat on a held Shift fires keydown over and over. Ignore those
+      // so a long-held Shift doesn't look like a second tap.
+      if (this.shiftHeld) return
+
+      // If this Shift-down lands within doubleTapMs of a clean Shift-up, fire.
+      if (this.lastShiftUp > 0) {
         const gap = Date.now() - this.lastShiftUp
         const cfg = getCoordinatorConfig()
         if (gap <= cfg.hotkeyDoubleTapMs) {
           this.lastShiftUp = 0
-          this.interrupted = false
+          this.shiftHeld = true
+          this.chordInProgress = false
           this.fire()
           return
         }
       }
-      // Fresh first press — wait for its keyup to arm.
+      // Fresh first press — enter held state. Reset chord flag so a chord
+      // from a prior Shift press doesn't poison this one.
+      this.shiftHeld = true
+      this.chordInProgress = false
       return
     }
-    // Any non-Shift keydown disarms the double-tap window. This prevents
-    // Shift+Letter (typing capitals) or Shift+Tab from counting as the gesture.
-    this.interrupted = true
+    // Non-Shift keydown. Two distinct concerns:
+    //   1. If Shift is currently held, remember we're in a chord — the next
+    //      Shift-up must NOT arm the double-tap.
+    //   2. Whether or not Shift is held, the user is now typing, so any
+    //      previously-armed double-tap window is stale and must be cleared.
+    //      Without this, "shift, shift-up, type-a-letter, shift, shift-up,
+    //      shift" would fire on the third press.
+    if (this.shiftHeld) this.chordInProgress = true
     this.lastShiftUp = 0
   }
 
   private onUiohookKeyUp(e: UiohookKeyboardEvent): void {
     if (!this.shiftKeycodes.has(e.keycode)) return
-    if (this.interrupted) {
-      // A non-Shift key was pressed between the Shift-down and Shift-up —
-      // this was part of a chord (e.g. Shift+A). Reset.
-      this.interrupted = false
+    this.shiftHeld = false
+    if (this.chordInProgress) {
+      // A non-Shift key was pressed while Shift was held — this was a chord
+      // (Shift+A, Shift+Tab, etc), not a tap.
+      this.chordInProgress = false
       this.lastShiftUp = 0
       return
     }
