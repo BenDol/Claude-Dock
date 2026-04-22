@@ -38,6 +38,11 @@ module.exports = {
   },
   extraResources: [
     { from: 'resources/claude-dock-mcp.cjs', to: 'claude-dock-mcp.cjs' },
+    // PostToolUse hook — copied into each linked project's .claude/ dir so
+    // Claude Code fires it after every Bash/Task tool call for worktree
+    // auto-detection. Must be on disk (not in app.asar) because Claude Code
+    // spawns it directly via `node .claude/dock-worktree-hook.cjs`.
+    { from: 'resources/dock-worktree-hook.cjs', to: 'dock-worktree-hook.cjs' },
     // Voice plugin Python scripts must live outside app.asar because Python
     // is spawned as a subprocess and cannot read from inside the archive.
     // `asarUnpack` was unreliable here (globbing under `out/**/*` silently
