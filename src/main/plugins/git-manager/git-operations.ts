@@ -2635,19 +2635,55 @@ function spawnClaudeOnce(prompt: string, model: string, signal?: AbortSignal): P
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: process.platform === 'win32'
     })
+    // BE-5: cap stdout/stderr at OUTPUT_BUFFER_CAP so a misbehaving `claude`
+    // can't OOM the main process. Commit messages are always << 1 MB.
+    const OUTPUT_BUFFER_CAP = 1024 * 1024
     let out = ''
     let err = ''
+    let outOverflowed = false
     let killed = false
-    const onAbort = (): void => {
-      killed = true
-      try { proc.kill('SIGTERM') } catch { /* already gone */ }
+    const appendCapped = (existing: string, chunk: Buffer, flag: { o: boolean }): string => {
+      if (existing.length >= OUTPUT_BUFFER_CAP) { flag.o = true; return existing }
+      const room = OUTPUT_BUFFER_CAP - existing.length
+      const s = chunk.toString('utf8')
+      if (s.length <= room) return existing + s
+      flag.o = true
+      return existing + s.slice(0, room)
+    }
+    const outFlag = { o: false }
+    const errFlag = { o: false }
+    // BE-1: on Windows, spawning with shell:true wraps claude in cmd.exe.
+    // proc.kill('SIGTERM') only kills cmd.exe; the grandchild claude.exe
+    // survives until its pipes close. Use `taskkill /F /T` to tree-kill.
+    const killTree = (): void => {
+      try {
+        if (process.platform === 'win32' && proc.pid) {
+          spawn('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { shell: false, stdio: 'ignore' })
+            .on('error', () => { /* best effort */ })
+        } else {
+          proc.kill('SIGTERM')
+        }
+      } catch { /* already gone */ }
       setTimeout(() => {
         try { proc.kill('SIGKILL') } catch { /* already gone */ }
       }, 2000)
     }
+    const onAbort = (): void => {
+      killed = true
+      killTree()
+    }
     if (signal) signal.addEventListener('abort', onAbort, { once: true })
-    proc.stdout?.on('data', (chunk: Buffer) => { out += chunk })
-    proc.stderr?.on('data', (chunk: Buffer) => { err += chunk })
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      out = appendCapped(out, chunk, outFlag)
+      if (outFlag.o && !outOverflowed) {
+        outOverflowed = true
+        getServices().log(`[git-manager] claude-cli stdout exceeded ${OUTPUT_BUFFER_CAP} bytes — truncating`)
+        killTree()
+      }
+    })
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      err = appendCapped(err, chunk, errFlag)
+    })
     proc.on('error', (e: Error) => {
       signal?.removeEventListener('abort', onAbort)
       reject(e)
@@ -2972,7 +3008,15 @@ export async function generateCommitMessage(
   // Whole-job timeout (Claude two-pass can legitimately take a minute, but not
   // five). Local LLM path ignores this since it doesn't accept a signal.
   const jobTimeout = setTimeout(() => controller.abort(), CLAUDE_JOB_TIMEOUT_MS)
-  if (opts.jobId) activeCommitMsgJobs.set(opts.jobId, controller)
+  // BE-3: refuse duplicate jobIds so a second caller can't stomp on an
+  // in-flight controller and break cancellation for the first job.
+  if (opts.jobId) {
+    if (activeCommitMsgJobs.has(opts.jobId)) {
+      clearTimeout(jobTimeout)
+      throw new Error(`Commit message job ${opts.jobId} is already running`)
+    }
+    activeCommitMsgJobs.set(opts.jobId, controller)
+  }
 
   try {
     let msg: string
@@ -2986,12 +3030,13 @@ export async function generateCommitMessage(
         getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
         break
       case 'anthropic-api':
+        // BE-12: fail loudly rather than silently fall back. The user
+        // explicitly picked this backend — hiding the misconfig is worse than
+        // surfacing it in the UI toast.
         if (!process.env.ANTHROPIC_API_KEY) {
-          getServices().log('[git-manager] anthropic-api backend selected but ANTHROPIC_API_KEY unset — falling back to local-llm')
-          msg = await generateViaLocalLlm(stat, diff, fileInfos)
-        } else {
-          msg = await generateViaAnthropicAPI(stat, diff)
+          throw new Error('ANTHROPIC_API_KEY is not set — set the env var or switch backend to Local LLM or Claude Code in Git Manager settings.')
         }
+        msg = await generateViaAnthropicAPI(stat, diff)
         getServices().log(`[git-manager] ${backend} responded in ${Date.now() - t0}ms`)
         break
       case 'local-llm':
