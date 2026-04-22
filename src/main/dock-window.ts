@@ -452,6 +452,14 @@ export class DockWindow {
                   targetTerminalId = this.ptyManager.findTerminalBySessionId(cmd.sessionId)
                 }
                 if (!targetTerminalId) {
+                  // Hook-originated commands carry a reliable session_id — if it
+                  // doesn't match any terminal in THIS dock, the hook fired from
+                  // a session this dock doesn't own. Dropping is correct; falling
+                  // back would misattribute to an unrelated terminal.
+                  if (cmd.origin === 'hook' && typeof cmd.sessionId === 'string') {
+                    log(`[terminal-command] worktree_changed (hook) session ${String(cmd.sessionId).slice(0, 8)} not in this dock — ignoring`)
+                    break
+                  }
                   targetTerminalId = this.ptyManager.findFirstAliveTerminal()
                   if (targetTerminalId) {
                     log(`[terminal-command] worktree_changed session ${String(cmd.sessionId).slice(0, 8)} not found, falling back to ${targetTerminalId}`)

@@ -11,7 +11,10 @@ import {
 
 // Bump this when CLAUDE.md block or MCP server script changes.
 // Migration will auto-update existing installs on startup.
-const MCP_VERSION = 5
+// v6: install PostToolUse hook (`dock-worktree-hook.cjs`) into the project
+// so the Dock auto-detects worktree switches from Bash/Task tool calls —
+// no more relying on Claude to remember to call dock_notify_worktree.
+const MCP_VERSION = 6
 
 const LEGACY_LINKED_FILE = '.linked'
 const LEGACY_MCP_ENTRY = 'claude-dock'
@@ -31,6 +34,12 @@ check for messages. This helps coordinate work and avoid conflicts.
 If the \`dock_send_message\` tool is available, you can send messages to other terminals
 to coordinate work (e.g., warn about file conflicts, request information, or share status).
 Use \`dock_check_messages\` with your session ID to explicitly check for new messages.
+
+**Worktree awareness:** When you \`cd\` into (or out of) a git worktree, the Dock auto-detects
+the change via a PostToolUse hook and updates the terminal's worktree actions. The hook is
+the primary mechanism — but as a backstop, if you know you've switched worktrees you can
+call \`dock_notify_worktree\` explicitly with your \`session_id\` and the absolute
+\`worktree_path\` (or \`null\` to clear). Invalid paths are silently dropped.
 
 If any tool is unavailable or errors, proceed normally — do not retry.
 ${CLAUDE_MD_END}`
@@ -61,6 +70,19 @@ function getProjectMcpScriptPath(projectDir: string): string {
   return path.join(projectDir, '.claude', 'claude-dock-mcp.cjs')
 }
 
+/** Project-local PostToolUse hook script path */
+function getProjectHookScriptPath(projectDir: string): string {
+  return path.join(projectDir, '.claude', 'dock-worktree-hook.cjs')
+}
+
+/** Project-local Claude Code settings file the hook registers into */
+function getProjectClaudeSettingsPath(projectDir: string): string {
+  // settings.local.json is user/machine-specific (not committed); hook paths
+  // and absolute DOCK_DATA_DIR values are machine-local, so this is the
+  // right bucket. settings.json would drag them into version control.
+  return path.join(projectDir, '.claude', 'settings.local.json')
+}
+
 /** Legacy absolute path (AppData) — used for migration cleanup */
 function getLegacyMcpServerPath(): string {
   return path.join(getDataDir(), 'claude-dock-mcp.js')
@@ -73,6 +95,14 @@ export function getMcpServerSourcePath(): string {
   return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.cjs')
 }
 
+/** Bundled hook source — ships alongside the MCP server via extraResources. */
+export function getHookScriptSourcePath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'dock-worktree-hook.cjs')
+  }
+  return path.join(app.getAppPath(), 'resources', 'dock-worktree-hook.cjs')
+}
+
 /**
  * When the linked project IS the dock source repo itself, its own
  * `resources/claude-dock-mcp.cjs` is the authoritative copy — typically
@@ -82,6 +112,12 @@ export function getMcpServerSourcePath(): string {
  */
 function getProjectOwnMcpSourcePath(projectDir: string): string | null {
   const candidate = path.join(projectDir, 'resources', 'claude-dock-mcp.cjs')
+  return fs.existsSync(candidate) ? candidate : null
+}
+
+/** Same self-hosting shortcut for the hook script. */
+function getProjectOwnHookSourcePath(projectDir: string): string | null {
+  const candidate = path.join(projectDir, 'resources', 'dock-worktree-hook.cjs')
   return fs.existsSync(candidate) ? candidate : null
 }
 
@@ -333,6 +369,167 @@ function setInstalledVersion(version: number): void {
   }
 }
 
+// ---------- PostToolUse hook (worktree auto-detection) ----------
+
+/**
+ * The hook command we register into `.claude/settings.local.json`. Baking
+ * DOCK_DATA_DIR in as argv[2] means the hook writes to the right profile's
+ * inbox even when uat + prod are both linked to the same project.
+ *
+ * Use `node` on PATH rather than a fully-resolved binary: Claude Code users
+ * already have node installed (the MCP server needs it), and baking an
+ * absolute node path would break sharing the same project across machines.
+ */
+function buildHookCommand(dataDir: string): string {
+  // Forward slashes work in both cmd.exe and bash; escape `"` via JSON quoting.
+  const scriptArg = `.claude/dock-worktree-hook.cjs`
+  const dataArg = dataDir.replace(/\\/g, '/')
+  return `node ${JSON.stringify(scriptArg)} ${JSON.stringify(dataArg)}`
+}
+
+/** Recognizable substring so uninstall can find our hook entries. */
+const HOOK_COMMAND_SIGNATURE = 'dock-worktree-hook.cjs'
+
+/**
+ * Merge our PostToolUse hook into the project's settings.local.json. Safe to
+ * call repeatedly — duplicate entries (same command) are skipped. Preserves
+ * all other hooks and settings.
+ */
+function installWorktreeHook(projectDir: string): void {
+  const dest = getProjectHookScriptPath(projectDir)
+  const src = getProjectOwnHookSourcePath(projectDir) ?? getHookScriptSourcePath()
+  try {
+    if (!fs.existsSync(src)) {
+      log(`linked-mode: hook source missing at ${src} — skipping hook install`)
+      return
+    }
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    fs.copyFileSync(src, dest)
+    log(`linked-mode: copied worktree hook to ${dest}`)
+  } catch (err) {
+    logError('linked-mode: failed to copy hook script', err)
+    return
+  }
+
+  const settingsPath = getProjectClaudeSettingsPath(projectDir)
+  let settings: Record<string, any> = {}
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf8')
+      settings = JSON.parse(raw) || {}
+      if (typeof settings !== 'object' || Array.isArray(settings)) settings = {}
+    }
+  } catch (err) {
+    logError(`linked-mode: failed to read ${settingsPath} (will overwrite with fresh hooks)`, err)
+    settings = {}
+  }
+
+  if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {}
+  if (!Array.isArray(settings.hooks.PostToolUse)) settings.hooks.PostToolUse = []
+
+  const desiredCommand = buildHookCommand(getDataDir())
+  const desiredMatcher = 'Bash|Task'
+
+  // Find (or create) the matcher block that owns our hook. We only manage
+  // entries whose command string contains `dock-worktree-hook.cjs`, leaving
+  // unrelated hooks alone.
+  let block = settings.hooks.PostToolUse.find(
+    (b: any) =>
+      b &&
+      b.matcher === desiredMatcher &&
+      Array.isArray(b.hooks) &&
+      b.hooks.some((h: any) => typeof h?.command === 'string' && h.command.includes(HOOK_COMMAND_SIGNATURE))
+  )
+
+  if (!block) {
+    block = { matcher: desiredMatcher, hooks: [] }
+    settings.hooks.PostToolUse.push(block)
+  }
+  if (!Array.isArray(block.hooks)) block.hooks = []
+
+  // Replace any stale version of our hook (earlier data dir, etc.) with the
+  // current command. Keeps the list exactly one entry per profile data dir.
+  block.hooks = block.hooks.filter(
+    (h: any) => !(typeof h?.command === 'string' && h.command.includes(HOOK_COMMAND_SIGNATURE) && h.command.includes(getDataDir().replace(/\\/g, '/')))
+  )
+  block.hooks.push({ type: 'command', command: desiredCommand })
+
+  try {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+    log(`linked-mode: registered PostToolUse hook in ${settingsPath}`)
+  } catch (err) {
+    logError(`linked-mode: failed to write ${settingsPath}`, err)
+  }
+}
+
+/**
+ * Remove our hook command(s) from settings.local.json and delete the script.
+ * Only affects entries whose command string contains `dock-worktree-hook.cjs`
+ * — user-authored hooks are preserved.
+ */
+function uninstallWorktreeHook(projectDir: string): void {
+  const settingsPath = getProjectClaudeSettingsPath(projectDir)
+  try {
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, 'utf8')
+      const settings = JSON.parse(raw)
+      const posts = settings?.hooks?.PostToolUse
+      if (Array.isArray(posts)) {
+        const dataDir = getDataDir().replace(/\\/g, '/')
+        let changed = false
+        for (const block of posts) {
+          if (!block || !Array.isArray(block.hooks)) continue
+          const before = block.hooks.length
+          block.hooks = block.hooks.filter(
+            (h: any) => !(
+              typeof h?.command === 'string' &&
+              h.command.includes(HOOK_COMMAND_SIGNATURE) &&
+              // Only remove the entry for THIS profile's data dir. Sibling
+              // profiles (prod when uat uninstalls) keep working.
+              h.command.includes(dataDir)
+            )
+          )
+          if (block.hooks.length !== before) changed = true
+        }
+        // Drop empty matcher blocks we own; leave user blocks intact even if empty.
+        settings.hooks.PostToolUse = posts.filter(
+          (b: any) => b && Array.isArray(b.hooks) && b.hooks.length > 0
+        )
+        // Prune empty containers.
+        if (settings.hooks.PostToolUse.length === 0) delete settings.hooks.PostToolUse
+        if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks
+        if (changed) {
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
+          log(`linked-mode: removed PostToolUse hook from ${settingsPath}`)
+        }
+      }
+    }
+  } catch (err) {
+    logError(`linked-mode: failed to clean hook from ${settingsPath}`, err)
+  }
+
+  // Delete the script itself only if no other profile still references it.
+  // Simplest heuristic: if settings.local.json no longer mentions our hook,
+  // remove the file. Other profiles re-install it on their next pass.
+  try {
+    const dest = getProjectHookScriptPath(projectDir)
+    if (fs.existsSync(dest)) {
+      let stillReferenced = false
+      try {
+        const raw = fs.readFileSync(settingsPath, 'utf8')
+        if (raw.includes(HOOK_COMMAND_SIGNATURE)) stillReferenced = true
+      } catch { /* no settings file — safe to delete */ }
+      if (!stillReferenced) {
+        fs.unlinkSync(dest)
+        log(`linked-mode: deleted hook script ${dest}`)
+      }
+    }
+  } catch (err) {
+    logError('linked-mode: failed to delete hook script', err)
+  }
+}
+
 // ---------- Public API ----------
 
 export function isMcpInstalled(projectDir: string): boolean {
@@ -387,7 +584,12 @@ export function installMcp(projectDir: string): { success: boolean; error?: stri
     // 4. Add CLAUDE.md instructions
     appendClaudeMd()
 
-    // 5. Write dock config and version
+    // 5. Install the PostToolUse worktree-detection hook. Copies the hook
+    //    script into .claude/ and registers it in settings.local.json so
+    //    cwd changes inside Claude Code auto-surface as worktree switches.
+    installWorktreeHook(projectDir)
+
+    // 6. Write dock config and version
     syncDockConfig({ messagingEnabled: false })
     setInstalledVersion(MCP_VERSION)
 
@@ -426,6 +628,11 @@ export function uninstallMcp(projectDir: string): { success: boolean; error?: st
     try { if (fs.existsSync(projectScript)) fs.unlinkSync(projectScript) } catch { /* ignore */ }
     const legacyProjectScript = path.join(projectDir, '.claude', 'claude-dock-mcp.js')
     try { if (fs.existsSync(legacyProjectScript)) fs.unlinkSync(legacyProjectScript) } catch { /* ignore */ }
+
+    // 3b. Uninstall the PostToolUse worktree hook (removes our entry from
+    //     settings.local.json and deletes the script if no profile still
+    //     references it).
+    uninstallWorktreeHook(projectDir)
 
     // 4. Delete runtime data files from AppData
     for (const file of [getLegacyMcpServerPath(), getDockConfigPath(), getVersionPath()]) {
@@ -591,6 +798,10 @@ export function migrateProjectIfNeeded(projectDir: string): void {
       fs.mkdirSync(path.dirname(dest), { recursive: true })
       fs.copyFileSync(src, dest)
     }
+
+    // Ensure the PostToolUse worktree hook is installed + up-to-date. Cheap
+    // and idempotent — safe to run every dock-open migration pass.
+    installWorktreeHook(projectDir)
 
     if (!needsRewrite) return
 
