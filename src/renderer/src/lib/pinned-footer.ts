@@ -270,18 +270,39 @@ function isUserPromptRow(s: string): boolean {
  * for the box's top border: only keep going if the current row *could* be the
  * inside of the same box.
  *
- * Accepts the vertical bar (`│` U+2502, ASCII `|`) at the start, the chevron
- * the user prompt uses (`>` / `›` / `❯`), or fully blank rows. Rejects rows
- * starting with alnum characters or with unrelated bullet glyphs.
+ * Claude Code renders the input box with horizontal rules only (no `│` left
+ * border), so wrapped continuation lines look like plain indented text:
+ *   `────────────────`   <- top rule
+ *   `> first line`       <- chevron row
+ *   `  continued text`   <- plain indented wrap (no │ bar!)
+ *   `────────────────`   <- bottom rule
+ * Rejecting rows that start with alphanumerics broke multi-line detection —
+ * the walker stopped at the continuation row and the pinned region collapsed
+ * to just the bottom rule + hint, so the input "fell off the bottom" when
+ * the user typed past one line.
+ *
+ * Accept strategy: outright-accept legacy box bars (`│`/`|`) and prompt
+ * chevrons; reject rows that clearly live ABOVE the box (tool-call bullets,
+ * Claude's `⎿` sub-bullets, spinner status lines); accept everything else.
+ * The `maxBoxHeight = 16` cap in the caller bounds how far we'll walk, so
+ * accepting "unknown" rows can't runaway-include prior history.
  */
 function isBoxInteriorRow(s: string): boolean {
   if (isBlankRow(s)) return true
   const trimmed = s.replace(/^\s+/, '')
   if (trimmed.length === 0) return true
   const c = trimmed[0]
+  // Legacy strict accepts (box styles that *do* draw side bars):
   if (c === '│' || c === '|') return true
   if (c === '>' || c === '›' || c === '❯' || c === '▸' || c === '▶') return true
-  return false
+  // Bullets / sub-bullets / continuation arrows — only appear OUTSIDE the
+  // input box, in Claude's tool-call and thinking-block layout above it.
+  if (c === '●' || c === '○' || c === '⎿' || c === '└' || c === 'L') return false
+  // Spinner rows (`· Deliberating…`, `✶ Mustering…`) also live above the box.
+  if (isSpinnerRow(s)) return false
+  // Anything else is a plausible wrapped-input continuation. The caller's
+  // border-search + maxBoxHeight cap prevent runaway inclusion.
+  return true
 }
 
 /** A row is a border if it contains a long run of ─ or a high density of them. */
