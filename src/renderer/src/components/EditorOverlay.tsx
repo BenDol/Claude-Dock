@@ -3,6 +3,7 @@
  * Lazy-loaded via React.lazy() from DockPanelLayout.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ReactDOM from 'react-dom'
 import Editor, { loader } from '@monaco-editor/react'
 import type { editor as MonacoEditor } from 'monaco-editor'
 import type * as MonacoNS from 'monaco-editor'
@@ -52,6 +53,14 @@ const FONT_SIZE_KEY = 'editor-font-size'
 const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 8
 const MAX_FONT_SIZE = 32
+// Separate from FONT_SIZE because the preview is rendered HTML (CSS zoom),
+// not Monaco text (options.fontSize). Persisted so rereads of the same file
+// restore the user's last-chosen scale.
+const MARKDOWN_ZOOM_KEY = 'editor-markdown-zoom'
+const DEFAULT_MARKDOWN_ZOOM = 1
+const MIN_MARKDOWN_ZOOM = 0.5
+const MAX_MARKDOWN_ZOOM = 3
+const MARKDOWN_ZOOM_STEP = 0.1
 /** Minimum pixels of drag movement before we consider it a real drag (prevents accidental detach on click) */
 const MIN_DRAG_DISTANCE = 20
 /** Cap workspace models to prevent Monaco listener leak (each model adds listeners to shared emitters) */
@@ -89,7 +98,7 @@ function ensureMarkedConfigured(): void {
   })
 }
 
-const MarkdownPreview: React.FC<{ content: string }> = React.memo(({ content }) => {
+const MarkdownPreview: React.FC<{ content: string; zoom: number }> = React.memo(({ content, zoom }) => {
   const html = useMemo(() => {
     try {
       ensureMarkedConfigured()
@@ -100,11 +109,91 @@ const MarkdownPreview: React.FC<{ content: string }> = React.memo(({ content }) 
   }, [content])
 
   return (
-    <div className="editor-preview-panel">
+    <div className="editor-preview-panel" style={{ zoom }}>
       <div className="editor-preview-content" dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   )
 })
+
+// ── Tab context menu ─────────────────────────────────────────────────────────
+
+interface TabContextMenuProps {
+  x: number
+  y: number
+  tabId: string
+  tabIndex: number
+  tabCount: number
+  absPath: string
+  relativePath: string
+  onClose: () => void
+  onCloseTab: (id: string) => void
+  onCloseOthers: (id: string) => void
+  onCloseToLeft: (id: string) => void
+  onCloseToRight: (id: string) => void
+  onCloseAll: () => void
+  onRevealInExplorer: (absPath: string) => void
+}
+
+const TabContextMenu: React.FC<TabContextMenuProps> = ({
+  x, y, tabId, tabIndex, tabCount, absPath, relativePath,
+  onClose, onCloseTab, onCloseOthers, onCloseToLeft, onCloseToRight, onCloseAll, onRevealInExplorer
+}) => {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const onEsc = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [onClose])
+
+  // Clamp to viewport so the menu never renders off-screen — accounts for
+  // global dock zoom the same way the workspace context menu does.
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1
+    const vw = window.innerWidth / zoom
+    const vh = window.innerHeight / zoom
+    if (parseFloat(el.style.left) + el.offsetWidth > vw) el.style.left = `${vw - el.offsetWidth - 4}px`
+    if (parseFloat(el.style.top) + el.offsetHeight > vh) el.style.top = `${vh - el.offsetHeight - 4}px`
+  }, [])
+
+  const hasOthers = tabCount > 1
+  const hasLeft = tabIndex > 0
+  const hasRight = tabIndex < tabCount - 1
+
+  const Item: React.FC<{ disabled?: boolean; onClick: () => void; children: React.ReactNode }> =
+    ({ disabled, onClick, children }) => (
+      <div
+        className={`editor-ctx-item${disabled ? ' editor-ctx-item-disabled' : ''}`}
+        onClick={() => { if (!disabled) { onClick(); onClose() } }}
+      >
+        {children}
+      </div>
+    )
+
+  return (
+    <div className="editor-ctx-menu" ref={ref} style={{ left: x, top: y }}>
+      <Item onClick={() => onCloseTab(tabId)}>Close</Item>
+      <Item disabled={!hasOthers} onClick={() => onCloseOthers(tabId)}>Close Others</Item>
+      <Item disabled={!hasLeft} onClick={() => onCloseToLeft(tabId)}>Close Tabs to the Left</Item>
+      <Item disabled={!hasRight} onClick={() => onCloseToRight(tabId)}>Close Tabs to the Right</Item>
+      <Item onClick={onCloseAll}>Close All</Item>
+      <div className="editor-ctx-separator" />
+      <Item onClick={() => { void navigator.clipboard.writeText(absPath) }}>Copy Path</Item>
+      <Item onClick={() => { void navigator.clipboard.writeText(relativePath) }}>Copy Relative Path</Item>
+      <div className="editor-ctx-separator" />
+      <Item onClick={() => onRevealInExplorer(absPath)}>Reveal in Explorer</Item>
+    </div>
+  )
+}
 
 // ── Editor ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +203,9 @@ const EditorOverlay: React.FC = () => {
   const setActiveTab = useEditorStore((s) => s.setActiveTab)
   const closeTab = useEditorStore((s) => s.closeTab)
   const closeAllTabs = useEditorStore((s) => s.closeAllTabs)
+  const closeOtherTabs = useEditorStore((s) => s.closeOtherTabs)
+  const closeTabsToLeft = useEditorStore((s) => s.closeTabsToLeft)
+  const closeTabsToRight = useEditorStore((s) => s.closeTabsToRight)
   const updateContent = useEditorStore((s) => s.updateContent)
   const markSaved = useEditorStore((s) => s.markSaved)
   const navBackCount = useEditorStore((s) => s.navBack.length)
@@ -140,6 +232,9 @@ const EditorOverlay: React.FC = () => {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  const [tabCtxMenu, setTabCtxMenu] = useState<{
+    x: number; y: number; tabId: string; tabIndex: number
+  } | null>(null)
   const [fontSize, setFontSize] = useState(() => {
     try {
       const saved = localStorage.getItem(FONT_SIZE_KEY)
@@ -149,6 +244,16 @@ const EditorOverlay: React.FC = () => {
       }
     } catch { /* ignore */ }
     return DEFAULT_FONT_SIZE
+  })
+  const [markdownZoom, setMarkdownZoom] = useState(() => {
+    try {
+      const saved = localStorage.getItem(MARKDOWN_ZOOM_KEY)
+      if (saved) {
+        const z = parseFloat(saved)
+        if (!isNaN(z) && z >= MIN_MARKDOWN_ZOOM && z <= MAX_MARKDOWN_ZOOM) return z
+      }
+    } catch { /* ignore */ }
+    return DEFAULT_MARKDOWN_ZOOM
   })
 
   const applyFontSize = useCallback((size: number) => {
@@ -160,25 +265,48 @@ const EditorOverlay: React.FC = () => {
     }
   }, [])
 
-  // Ctrl+MouseWheel and Ctrl++/- zoom for the editor
+  const applyMarkdownZoom = useCallback((zoom: number) => {
+    const clamped = Math.round(Math.max(MIN_MARKDOWN_ZOOM, Math.min(MAX_MARKDOWN_ZOOM, zoom)) * 100) / 100
+    setMarkdownZoom(clamped)
+    try { localStorage.setItem(MARKDOWN_ZOOM_KEY, String(clamped)) } catch { /* ignore */ }
+  }, [])
+
+  // Ctrl+MouseWheel and Ctrl++/- zoom for the editor. When markdown preview
+  // is the active view, route zoom to the preview's CSS scale instead of
+  // Monaco's fontSize — those are independent scales with their own
+  // persisted values.
   useEffect(() => {
     const overlayEl = document.querySelector('.editor-overlay')
     if (!overlayEl) return
+
+    // Preview mode only applies when the active tab is markdown and the
+    // user has toggled preview on.
+    const isMarkdownPreview = previewMode && activeTab?.language === 'markdown'
 
     const onWheel = (e: Event) => {
       const we = e as WheelEvent
       if (!(we.ctrlKey || we.metaKey)) return
       we.preventDefault()
       we.stopPropagation()
-      applyFontSize(fontSize + (we.deltaY < 0 ? 1 : -1))
+      if (isMarkdownPreview) {
+        applyMarkdownZoom(markdownZoom + (we.deltaY < 0 ? MARKDOWN_ZOOM_STEP : -MARKDOWN_ZOOM_STEP))
+      } else {
+        applyFontSize(fontSize + (we.deltaY < 0 ? 1 : -1))
+      }
     }
 
     const onKeyDown = (e: Event) => {
       const ke = e as KeyboardEvent
       if (!(ke.ctrlKey || ke.metaKey)) return
-      if (ke.key === '=' || ke.key === '+') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize + 1) }
-      else if (ke.key === '-') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize - 1) }
-      else if (ke.key === '0') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(DEFAULT_FONT_SIZE) }
+      if (isMarkdownPreview) {
+        if (ke.key === '=' || ke.key === '+') { ke.preventDefault(); ke.stopPropagation(); applyMarkdownZoom(markdownZoom + MARKDOWN_ZOOM_STEP) }
+        else if (ke.key === '-') { ke.preventDefault(); ke.stopPropagation(); applyMarkdownZoom(markdownZoom - MARKDOWN_ZOOM_STEP) }
+        else if (ke.key === '0') { ke.preventDefault(); ke.stopPropagation(); applyMarkdownZoom(DEFAULT_MARKDOWN_ZOOM) }
+      } else {
+        if (ke.key === '=' || ke.key === '+') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize + 1) }
+        else if (ke.key === '-') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(fontSize - 1) }
+        else if (ke.key === '0') { ke.preventDefault(); ke.stopPropagation(); applyFontSize(DEFAULT_FONT_SIZE) }
+      }
     }
 
     overlayEl.addEventListener('wheel', onWheel, { passive: false, capture: true })
@@ -187,7 +315,7 @@ const EditorOverlay: React.FC = () => {
       overlayEl.removeEventListener('wheel', onWheel, { capture: true } as any)
       overlayEl.removeEventListener('keydown', onKeyDown, { capture: true } as any)
     }
-  }, [fontSize, applyFontSize])
+  }, [fontSize, markdownZoom, previewMode, activeTab?.language, applyFontSize, applyMarkdownZoom])
 
   // Translate vertical mouse wheel to horizontal scroll on the tab list.
   // Passive: false because we preventDefault when we actually consume the scroll.
@@ -653,6 +781,11 @@ const EditorOverlay: React.FC = () => {
                   setActiveTab(tab.id)
                 }}
                 onAuxClick={(e) => { if (e.button === 1) handleCloseTab(tab.id) }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setTabCtxMenu({ x: e.clientX, y: e.clientY, tabId: tab.id, tabIndex: idx })
+                }}
                 title={tab.relativePath}
                 draggable
                 onDragStart={(e) => handleTabDragStart(e, tab.id, idx)}
@@ -689,7 +822,7 @@ const EditorOverlay: React.FC = () => {
       <div className="editor-body">
         {activeTab ? (
           previewMode && activeTab.language === 'markdown' ? (
-            <MarkdownPreview content={activeTab.content} />
+            <MarkdownPreview content={activeTab.content} zoom={markdownZoom} />
           ) : (
             <Editor
               path={activeTab.relativePath}
@@ -722,6 +855,30 @@ const EditorOverlay: React.FC = () => {
           <div className="editor-loading">Select a tab to edit</div>
         )}
       </div>
+      {tabCtxMenu && (() => {
+        const menuTab = tabs.find((t) => t.id === tabCtxMenu.tabId)
+        if (!menuTab) return null
+        const absPath = `${menuTab.projectDir}/${menuTab.relativePath}`.replace(/\\/g, '/').replace(/\/+/g, '/')
+        return ReactDOM.createPortal(
+          <TabContextMenu
+            x={tabCtxMenu.x}
+            y={tabCtxMenu.y}
+            tabId={tabCtxMenu.tabId}
+            tabIndex={tabCtxMenu.tabIndex}
+            tabCount={tabs.length}
+            absPath={absPath}
+            relativePath={menuTab.relativePath}
+            onClose={() => setTabCtxMenu(null)}
+            onCloseTab={closeTab}
+            onCloseOthers={closeOtherTabs}
+            onCloseToLeft={closeTabsToLeft}
+            onCloseToRight={closeTabsToRight}
+            onCloseAll={closeAllTabs}
+            onRevealInExplorer={(p) => { void getDockApi().workspace.openInExplorer(menuTab.projectDir, p) }}
+          />,
+          document.body
+        )
+      })()}
     </div>
   )
 }

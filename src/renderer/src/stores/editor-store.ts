@@ -84,6 +84,12 @@ interface EditorState {
   clearPendingReveal: (id: string) => void
   closeTab: (id: string) => void
   closeAllTabs: () => void
+  /** Close every tab except the given id. */
+  closeOtherTabs: (id: string) => void
+  /** Close all tabs to the left of the given id. */
+  closeTabsToLeft: (id: string) => void
+  /** Close all tabs to the right of the given id. */
+  closeTabsToRight: (id: string) => void
   setActiveTab: (id: string) => void
   updateContent: (id: string, content: string) => void
   markSaved: (id: string, content: string) => void
@@ -205,6 +211,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   closeAllTabs: () => set({ tabs: [], activeTabId: null }),
+
+  closeOtherTabs: (id) => {
+    const { tabs } = get()
+    const keeper = tabs.find((t) => t.id === id)
+    if (!keeper) return
+    set({ tabs: [keeper], activeTabId: keeper.id })
+  },
+
+  closeTabsToLeft: (id) => {
+    const { tabs, activeTabId } = get()
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx <= 0) return
+    const newTabs = tabs.slice(idx)
+    // If the currently-active tab is one of the tabs being removed, switch
+    // to the anchor — otherwise leave the active tab as-is.
+    const stillPresent = newTabs.some((t) => t.id === activeTabId)
+    set({ tabs: newTabs, activeTabId: stillPresent ? activeTabId : id })
+  },
+
+  closeTabsToRight: (id) => {
+    const { tabs, activeTabId } = get()
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx < 0 || idx >= tabs.length - 1) return
+    const newTabs = tabs.slice(0, idx + 1)
+    const stillPresent = newTabs.some((t) => t.id === activeTabId)
+    set({ tabs: newTabs, activeTabId: stillPresent ? activeTabId : id })
+  },
 
   setActiveTab: (id) => set({ activeTabId: id }),
 
