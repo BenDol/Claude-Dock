@@ -36,10 +36,31 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 
+/**
+ * Resolve a path through any symlinks, tolerating non-existent leaves by
+ * walking up to the closest existing ancestor and re-appending the suffix.
+ * Why: on macOS `/var/folders/...` is a symlink to `/private/var/folders/...`
+ * and Node resolves `__dirname` through the symlink, so a raw payload `cwd`
+ * and the script-derived `projectDir` can disagree on prefix without this.
+ */
+function safeRealpath(p) {
+  const resolved = path.resolve(p)
+  try { return fs.realpathSync(resolved) } catch { /* fall through */ }
+  let current = resolved
+  const suffix = []
+  while (true) {
+    const parent = path.dirname(current)
+    if (parent === current) return resolved
+    suffix.unshift(path.basename(current))
+    current = parent
+    try { return path.join(fs.realpathSync(current), ...suffix) } catch { /* keep walking */ }
+  }
+}
+
 /** Normalize a filesystem path for equality comparison (case-insensitive on Windows). */
 function normalizePath(p) {
   if (!p) return ''
-  let n = path.resolve(p).replace(/\\/g, '/').replace(/\/$/, '')
+  let n = safeRealpath(p).replace(/\\/g, '/').replace(/\/$/, '')
   if (process.platform === 'win32') n = n.toLowerCase()
   return n
 }
