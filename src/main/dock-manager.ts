@@ -4,7 +4,11 @@ import { DockWindow } from './dock-window'
 import { addRecentPath } from './recent-store'
 import { getSettings, setSettings } from './settings-store'
 import { migrateProjectIfNeeded } from './linked-mode'
-import { PluginManager } from './plugins'
+// Import PluginManager directly from its module, not via the `./plugins` barrel:
+// the barrel's top-level `import.meta.glob(...)` is Vite-only. When an esbuild
+// plugin bundle (e.g. voice's standalone CJS build) pulls this file in
+// transitively, Node at runtime throws `import_meta.glob is not a function`.
+import { PluginManager } from './plugins/plugin-manager'
 import { log, logError } from './logger'
 
 let nextId = 1
