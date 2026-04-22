@@ -373,6 +373,16 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
   const pinnedRowsRef = useRef<HTMLDivElement | null>(null)
   const pinnedCursorRef = useRef<HTMLDivElement | null>(null)
   const pinnedRafRef = useRef<number | null>(null)
+  // Button-position hysteresis: the pinned-footer detection can flicker the
+  // computed footer height by ±1 row as Claude streams output (the upward
+  // walk picks up one more/fewer context rows depending on where the active
+  // tool call's sub-bullets have scrolled to). Without smoothing, the
+  // scroll-to-bottom button bounces visibly. We apply visibility toggles
+  // immediately but defer size-only updates until the footer height has been
+  // stable for a short window.
+  const pinnedBtnPxRef = useRef<number>(0)
+  const pinnedBtnPendingPxRef = useRef<number | null>(null)
+  const pinnedBtnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // File paste interception state
   const [filePasteData, setFilePasteData] = useState<{
@@ -413,13 +423,52 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
     const active = settings.terminal.pinInputBox && scrolledUpRef.current
     const wrapper = container.parentElement
     const scrollBtn = wrapper?.querySelector('.scroll-to-bottom-btn') as HTMLElement | null
-    const setButtonBottom = (footerPx: number) => {
+    const applyButtonBottom = (footerPx: number) => {
       // Match CSS: base offset (6px) when no footer, else 4px container inset
       // + footer height − 12px so the button sits roughly half over the
       // footer's top edge (button is ~24px tall).
       const v = footerPx > 0 ? `${4 + footerPx - 12}px` : '6px'
       if (scrollBtn) scrollBtn.style.bottom = v
       wrapper?.style.setProperty('--pinned-footer-height', `${footerPx}px`)
+      pinnedBtnPxRef.current = footerPx
+    }
+    const setButtonBottom = (footerPx: number) => {
+      const currentPx = pinnedBtnPxRef.current
+      // Visibility toggles (footer appearing / disappearing) apply instantly —
+      // delaying them looks like a lag when the user scrolls back to bottom.
+      const visibilityToggled = (currentPx === 0) !== (footerPx === 0)
+      if (visibilityToggled) {
+        if (pinnedBtnTimerRef.current) {
+          clearTimeout(pinnedBtnTimerRef.current)
+          pinnedBtnTimerRef.current = null
+        }
+        pinnedBtnPendingPxRef.current = null
+        applyButtonBottom(footerPx)
+        return
+      }
+      // Size already applied — nothing to do.
+      if (footerPx === currentPx) {
+        pinnedBtnPendingPxRef.current = null
+        if (pinnedBtnTimerRef.current) {
+          clearTimeout(pinnedBtnTimerRef.current)
+          pinnedBtnTimerRef.current = null
+        }
+        return
+      }
+      // Pending update matches incoming — keep the existing timer running.
+      if (pinnedBtnPendingPxRef.current === footerPx && pinnedBtnTimerRef.current) return
+      // Restart the stability timer: button only moves once the height has
+      // held for 250ms, long enough to outlast per-frame detection jitter
+      // during active streaming.
+      pinnedBtnPendingPxRef.current = footerPx
+      if (pinnedBtnTimerRef.current) clearTimeout(pinnedBtnTimerRef.current)
+      pinnedBtnTimerRef.current = setTimeout(() => {
+        pinnedBtnTimerRef.current = null
+        const target = pinnedBtnPendingPxRef.current
+        pinnedBtnPendingPxRef.current = null
+        if (target == null) return
+        applyButtonBottom(target)
+      }, 250)
     }
     if (!active) {
       footer.classList.remove('visible')
@@ -1062,6 +1111,12 @@ export function useTerminal({ terminalId, onTitleChange }: UseTerminalOptions) {
         cancelAnimationFrame(pinnedRafRef.current)
         pinnedRafRef.current = null
       }
+      if (pinnedBtnTimerRef.current) {
+        clearTimeout(pinnedBtnTimerRef.current)
+        pinnedBtnTimerRef.current = null
+      }
+      pinnedBtnPendingPxRef.current = null
+      pinnedBtnPxRef.current = 0
       pinnedFooterRef.current?.remove()
       pinnedFooterRef.current = null
       pinnedRowsRef.current = null
