@@ -39,8 +39,8 @@ registerToolbarAction({
   icon: React.createElement(ChatIcon),
   onClick: () => {
     const store = usePanelStore.getState()
-    if (store.activePanelId === 'coordinator' && store.visible) {
-      store.setVisible(false)
+    if (store.isPanelVisible('coordinator')) {
+      store.hidePanel('coordinator')
     } else {
       store.setActivePanel('coordinator')
     }

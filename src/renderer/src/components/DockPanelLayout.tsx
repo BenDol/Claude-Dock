@@ -1,54 +1,127 @@
 /**
  * DockPanelLayout — wraps DockGrid to add dockable edge panels.
  *
- * Renders an optional panel (from panel-registry) on any edge (left/right/top/bottom)
- * with a resize handle between the panel and the grid. When no panel is visible,
- * the grid takes 100% of space (zero overhead).
+ * Renders one slot per edge (left / right / top / bottom). Each slot is
+ * independent: workspace can sit on the left while the coordinator sits on
+ * the right, with their own visibility, size, and active panel.
  *
  * Other plugins register panels via registerPanel() in their renderer index.ts.
+ *
+ * IMPORTANT: The DockGrid wrapper (`.dock-panel-grid-area`) is always rendered
+ * in the same DOM position regardless of which slots are visible — switching
+ * Fragment <-> div would unmount the grid and kill all xterm instances.
  */
 import React, { useCallback, useRef, useEffect, useState, Suspense } from 'react'
-import { usePanelStore, type PanelPosition } from '../stores/panel-store'
-import { getPanel } from '../panel-registry'
+import { usePanelStore, PANEL_POSITIONS, type PanelPosition } from '../stores/panel-store'
+import { getPanel, type PanelRegistration } from '../panel-registry'
 import { useDockStore } from '../stores/dock-store'
 import { useEditorStore } from '../stores/editor-store'
 
 const EditorOverlay = React.lazy(() => import('./EditorOverlay'))
 
+const isHorizontalEdge = (pos: PanelPosition): boolean => pos === 'left' || pos === 'right'
+
+interface SlotViewProps {
+  position: PanelPosition
+  visible: boolean
+  registration: PanelRegistration
+  projectDir: string
+  effectiveSize: number
+  onHeaderDragStart: (e: React.DragEvent, panelId: string) => void
+  onHeaderDragEnd: () => void
+}
+
+const SlotView: React.FC<SlotViewProps> = ({
+  position, visible, registration, projectDir, effectiveSize,
+  onHeaderDragStart, onHeaderDragEnd
+}) => {
+  const PanelComponent = registration.component
+  const horizontal = isHorizontalEdge(position)
+  const panelStyle: React.CSSProperties = horizontal
+    ? { width: effectiveSize, minWidth: registration.minSize ?? 150, flexShrink: 0 }
+    : { height: effectiveSize, minHeight: registration.minSize ?? 150, flexShrink: 0 }
+
+  return (
+    <div
+      className={`dock-panel-area dock-panel-area-${position}`}
+      style={{ ...panelStyle, display: visible ? undefined : 'none' }}
+    >
+      <div
+        className="dock-panel-header"
+        draggable
+        onDragStart={(e) => onHeaderDragStart(e, registration.id)}
+        onDragEnd={onHeaderDragEnd}
+        title="Drag to move panel to a different edge"
+      >
+        <span className="dock-panel-title">{registration.title}</span>
+        {registration.headerActions && (
+          <Suspense fallback={null}>
+            {React.createElement(registration.headerActions, { projectDir })}
+          </Suspense>
+        )}
+        <span className="dock-panel-drag-hint">&#8942;&#8942;</span>
+      </div>
+      <div className="dock-panel-body">
+        <Suspense fallback={<div className="dock-panel-loading">Loading...</div>}>
+          <PanelComponent projectDir={projectDir} />
+        </Suspense>
+      </div>
+    </div>
+  )
+}
+
 export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { activePanelId, position, size, visible, setSize } = usePanelStore()
+  const slots = usePanelStore((s) => s.slots)
+  const setSizeAt = usePanelStore((s) => s.setSizeAt)
+  const setPanelPosition = usePanelStore((s) => s.setPanelPosition)
   const projectDir = useDockStore((s) => s.projectDir)
   const loadFromStorage = usePanelStore((s) => s.loadFromStorage)
-  const panelRef = useRef<HTMLDivElement>(null)
-  // Local drag size — avoids writing to store on every pixel of drag
-  const [dragSize, setDragSize] = useState<number | null>(null)
 
-  // Load persisted panel state when project dir changes
+  // Local drag size — avoids writing to store on every pixel of drag.
+  const [dragSize, setDragSize] = useState<{ position: PanelPosition; size: number } | null>(null)
+
+  // Track which slots have ever been shown — controls deferred mount of heavy
+  // panel components.
+  const [mounted, setMounted] = useState<Record<PanelPosition, boolean>>(() => ({
+    left: slots.left.visible,
+    right: slots.right.visible,
+    top: slots.top.visible,
+    bottom: slots.bottom.visible
+  }))
+  useEffect(() => {
+    setMounted((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const pos of PANEL_POSITIONS) {
+        if (slots[pos].visible && !prev[pos]) { next[pos] = true; changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [slots])
+
+  // Load persisted panel state when project dir changes.
   useEffect(() => {
     if (projectDir) loadFromStorage(projectDir)
   }, [projectDir, loadFromStorage])
 
-  // Resolve the active panel registration
-  const activePanel = activePanelId ? getPanel(activePanelId) : null
-  const showPanel = visible && activePanel != null
-  const effectiveSize = dragSize ?? size
-
-  // Resize handle — uses local state during drag, commits to store on mouseup
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  // Resize handler — uses local state during drag, commits to store on mouseup.
+  const handleResizeStart = useCallback((e: React.MouseEvent, position: PanelPosition) => {
     e.preventDefault()
     const startX = e.clientX
     const startY = e.clientY
-    const startSize = size
-    const isHorizontal = position === 'left' || position === 'right'
+    const slot = slots[position]
+    const startSize = slot.size
+    const registration = slot.activePanelId ? getPanel(slot.activePanelId) : null
+    const minSize = registration?.minSize ?? 150
+    const maxSize = registration?.maxSize ?? 600
+    const horizontal = isHorizontalEdge(position)
     const zoom = parseFloat(document.documentElement.style.zoom) || 1
-    const minSize = activePanel?.minSize ?? 150
-    const maxSize = activePanel?.maxSize ?? 600
 
     const onMove = (ev: MouseEvent) => {
-      const delta = isHorizontal
+      const delta = horizontal
         ? (position === 'left' ? ev.clientX - startX : startX - ev.clientX) / zoom
         : (position === 'top' ? ev.clientY - startY : startY - ev.clientY) / zoom
-      setDragSize(Math.round(Math.min(maxSize, Math.max(minSize, startSize + delta))))
+      setDragSize({ position, size: Math.round(Math.min(maxSize, Math.max(minSize, startSize + delta))) })
     }
 
     const onUp = () => {
@@ -56,62 +129,40 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      // Commit final size to store (persists to localStorage)
       setDragSize((final) => {
-        if (final != null) setSize(final)
+        if (final != null) setSizeAt(final.position, final.size)
         return null
       })
-      // Trigger terminal refit
       window.dispatchEvent(new Event('resize'))
     }
 
-    document.body.style.cursor = isHorizontal ? 'col-resize' : 'row-resize'
+    document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize'
     document.body.style.userSelect = 'none'
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
-  }, [position, size, setSize, activePanel])
+  }, [slots, setSizeAt])
 
-  // Trigger terminal refit when panel visibility changes (not on every size change)
+  // Refit terminals when any slot's visibility or position layout changes.
+  const visibilitySignature = `${slots.left.visible}|${slots.right.visible}|${slots.top.visible}|${slots.bottom.visible}|${slots.left.activePanelId}|${slots.right.activePanelId}|${slots.top.activePanelId}|${slots.bottom.activePanelId}`
   useEffect(() => {
     const timer = setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
     return () => clearTimeout(timer)
-  }, [showPanel, position])
-
-  // IMPORTANT: Always render the same DOM structure (div wrapper) regardless of
-  // panel visibility. Switching between Fragment and div causes React to unmount
-  // DockGrid which kills all terminal instances. Instead, just omit the panel
-  // elements when hidden — the layout div stays the same.
-
-  const isHorizontal = showPanel && (position === 'left' || position === 'right')
-  const isVertical = showPanel && (position === 'top' || position === 'bottom')
-  // Compute panel dimensions — needed even when hidden so it's ready when re-shown
-  const panelStyle: React.CSSProperties | undefined = !activePanel ? undefined : (
-    (position === 'left' || position === 'right')
-      ? { width: effectiveSize, minWidth: activePanel.minSize ?? 150, flexShrink: 0 }
-      : { height: effectiveSize, minHeight: activePanel.minSize ?? 150, flexShrink: 0 }
-  )
+  }, [visibilitySignature])
 
   const hasEditorTabs = useEditorStore((s) => s.tabs.length > 0)
-  const setPosition = usePanelStore((s) => s.setPosition)
-  const [draggingPanel, setDraggingPanel] = useState(false)
+
+  // Drag-drop state for moving a panel between edges.
+  const [draggingPanelId, setDraggingPanelId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<PanelPosition | null>(null)
-  const PanelComponent = activePanel?.component ?? null
 
-  // Defer panel mount until first shown — prevents heavy plugins (e.g. workspace
-  // file scanner) from running before the user actually opens the panel.
-  const [hasBeenVisible, setHasBeenVisible] = useState(showPanel)
-  useEffect(() => {
-    if (showPanel && !hasBeenVisible) setHasBeenVisible(true)
-  }, [showPanel, hasBeenVisible])
-
-  const handleHeaderDragStart = useCallback((e: React.DragEvent) => {
-    e.dataTransfer.setData('application/x-dock-panel', 'move')
+  const handleHeaderDragStart = useCallback((e: React.DragEvent, panelId: string) => {
+    e.dataTransfer.setData('application/x-dock-panel', panelId)
     e.dataTransfer.effectAllowed = 'move'
-    setDraggingPanel(true)
+    setDraggingPanelId(panelId)
   }, [])
 
   const handleHeaderDragEnd = useCallback(() => {
-    setDraggingPanel(false)
+    setDraggingPanelId(null)
     setDropTarget(null)
   }, [])
 
@@ -125,80 +176,79 @@ export const DockPanelLayout: React.FC<{ children: React.ReactNode }> = ({ child
     onDragLeave: () => setDropTarget((prev) => prev === edge ? null : prev),
     onDrop: (e: React.DragEvent) => {
       e.preventDefault()
-      setDraggingPanel(false)
+      const panelId = e.dataTransfer.getData('application/x-dock-panel') || draggingPanelId
+      setDraggingPanelId(null)
       setDropTarget(null)
-      if (edge !== position) {
-        setPosition(edge)
+      if (panelId) {
+        setPanelPosition(panelId, edge)
         setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
       }
     }
-  }), [position, setPosition])
+  }), [draggingPanelId, setPanelPosition])
 
-  // Always render the same outer div structure — never switch between Fragment
-  // and div, because that causes React to unmount/remount DockGrid (killing terminals).
-  // When panel is hidden: just skip the panel/resize elements inside.
-  const layoutClass = showPanel
-    ? `dock-panel-layout dock-panel-layout-${position}`
-    : 'dock-panel-layout'
+  // Build slot views — one per edge, each with its own resize handle.
+  const renderSlot = (position: PanelPosition): { panel: React.ReactNode; resize: React.ReactNode } => {
+    const slot = slots[position]
+    const registration = slot.activePanelId ? getPanel(slot.activePanelId) : null
+    if (!registration || !mounted[position]) return { panel: null, resize: null }
+    const effectiveSize = dragSize?.position === position ? dragSize.size : slot.size
+    const visible = slot.visible
+    const horizontal = isHorizontalEdge(position)
+    return {
+      panel: (
+        <SlotView
+          key={position}
+          position={position}
+          visible={visible}
+          registration={registration}
+          projectDir={projectDir}
+          effectiveSize={effectiveSize}
+          onHeaderDragStart={handleHeaderDragStart}
+          onHeaderDragEnd={handleHeaderDragEnd}
+        />
+      ),
+      resize: visible ? (
+        <div
+          className={`dock-panel-resize ${horizontal ? 'dock-panel-resize-col' : 'dock-panel-resize-row'}`}
+          onMouseDown={(e) => handleResizeStart(e, position)}
+        />
+      ) : null
+    }
+  }
 
-  // Mount the panel only after it's been shown at least once (deferred activation).
-  // Once mounted, keep it alive (hidden via display:none) to preserve state.
-  const panelElement = PanelComponent && hasBeenVisible && (
-    <div className="dock-panel-area" ref={panelRef} style={{ ...panelStyle, display: showPanel ? undefined : 'none' }}>
-      <div
-        className="dock-panel-header"
-        draggable
-        onDragStart={handleHeaderDragStart}
-        onDragEnd={handleHeaderDragEnd}
-        title="Drag to move panel to a different edge"
-      >
-        <span className="dock-panel-title">{activePanel!.title}</span>
-        {activePanel!.headerActions && (
-          <Suspense fallback={null}>
-            {React.createElement(activePanel!.headerActions, { projectDir })}
-          </Suspense>
-        )}
-        <span className="dock-panel-drag-hint">&#8942;&#8942;</span>
-      </div>
-      <div className="dock-panel-body">
-        <Suspense fallback={<div className="dock-panel-loading">Loading...</div>}>
-          <PanelComponent projectDir={projectDir} />
-        </Suspense>
-      </div>
-    </div>
-  )
-
-  const resizeHandle = showPanel && (
-    <div
-      className={`dock-panel-resize ${isHorizontal ? 'dock-panel-resize-col' : isVertical ? 'dock-panel-resize-row' : ''}`}
-      onMouseDown={handleResizeStart}
-    />
-  )
+  const left = renderSlot('left')
+  const right = renderSlot('right')
+  const top = renderSlot('top')
+  const bottom = renderSlot('bottom')
 
   return (
-    <div className={layoutClass}>
-      {showPanel && (position === 'left' || position === 'top') && (
-        <>{panelElement}{resizeHandle}</>
-      )}
-      <div className="dock-panel-grid-area" style={{ position: 'relative' }}>
-        {children}
-        {hasEditorTabs && (
-          <Suspense fallback={<div className="editor-overlay-loading">Loading editor...</div>}>
-            <EditorOverlay />
-          </Suspense>
-        )}
-        {draggingPanel && (
-          <>
-            <div className={`dock-panel-dropzone dock-panel-dropzone-left${dropTarget === 'left' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('left')} />
-            <div className={`dock-panel-dropzone dock-panel-dropzone-right${dropTarget === 'right' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('right')} />
-            <div className={`dock-panel-dropzone dock-panel-dropzone-top${dropTarget === 'top' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('top')} />
-            <div className={`dock-panel-dropzone dock-panel-dropzone-bottom${dropTarget === 'bottom' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('bottom')} />
-          </>
-        )}
+    <div className="dock-panel-layout">
+      {top.panel}
+      {top.resize}
+      <div className="dock-panel-layout-middle">
+        {left.panel}
+        {left.resize}
+        <div className="dock-panel-grid-area" style={{ position: 'relative' }}>
+          {children}
+          {hasEditorTabs && (
+            <Suspense fallback={<div className="editor-overlay-loading">Loading editor...</div>}>
+              <EditorOverlay />
+            </Suspense>
+          )}
+          {draggingPanelId && (
+            <>
+              <div className={`dock-panel-dropzone dock-panel-dropzone-left${dropTarget === 'left' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('left')} />
+              <div className={`dock-panel-dropzone dock-panel-dropzone-right${dropTarget === 'right' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('right')} />
+              <div className={`dock-panel-dropzone dock-panel-dropzone-top${dropTarget === 'top' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('top')} />
+              <div className={`dock-panel-dropzone dock-panel-dropzone-bottom${dropTarget === 'bottom' ? ' dock-panel-dropzone-active' : ''}`} {...makeDropZoneHandlers('bottom')} />
+            </>
+          )}
+        </div>
+        {right.resize}
+        {right.panel}
       </div>
-      {showPanel && (position === 'right' || position === 'bottom') && (
-        <>{resizeHandle}{panelElement}</>
-      )}
+      {bottom.resize}
+      {bottom.panel}
     </div>
   )
 }

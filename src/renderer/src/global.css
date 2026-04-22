@@ -1177,23 +1177,24 @@ body {
   border-color: var(--accent-color);
 }
 
-/* Dockable Panel Layout */
+/* Dockable Panel Layout — outer column wraps top/middle/bottom; middle row
+   wraps left/grid/right. Each edge slot is independent. */
 .dock-panel-layout {
   display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
-.dock-panel-layout-left,
-.dock-panel-layout-right {
+.dock-panel-layout-middle {
+  display: flex;
+  flex: 1;
   flex-direction: row;
-}
-
-.dock-panel-layout-top,
-.dock-panel-layout-bottom {
-  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .dock-panel-grid-area {
