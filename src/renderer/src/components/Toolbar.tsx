@@ -374,7 +374,7 @@ const Toolbar: React.FC<ToolbarProps> = ({ projectDir, onAddTerminal, onAddWorkt
           data-toolbar-btn
           tabIndex={-1}
           className={`toolbar-btn toolbar-btn-icon${mcpStatus === 'installed_active' ? ' toolbar-btn-active' : mcpStatus === 'installed_inactive' ? ' toolbar-btn-error' : ''}`}
-          onClick={() => onOpenSettings({ tab: 'behavior', section: 'mcp' })}
+          onClick={() => onOpenSettings({ tab: 'server' })}
           title={
             mcpStatus === 'installed_active'
               ? 'MCP Server: Active (click to configure)'
