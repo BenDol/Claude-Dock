@@ -101,8 +101,10 @@ export function registerIpcHandlers(): void {
     const dock = getDockForEvent(event)
     if (!dock) return false
     log(`TERMINAL_RESPAWN: ${terminalId} with session ${sessionId}`)
-    // Kill existing PTY
-    dock.ptyManager.kill(terminalId)
+    // Silent kill — the pty-host's 'exit' reply for the old PTY races with the new
+    // spawn and would otherwise reach the renderer after setTerminalAlive(true),
+    // leaving the card stuck with .exited (opacity: 0.6).
+    dock.ptyManager.kill(terminalId, true)
     // Spawn new PTY using the session as a resume ID
     dock.ptyManager.spawn(terminalId, dock.projectDir, sessionId)
     const newSessionId = dock.ptyManager.getSessionId(terminalId) || ''

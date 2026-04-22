@@ -41,6 +41,10 @@ export class PtyManager {
   private lastDataTime = new Map<string, number>()
   // Resume failure detection — watches early output for marker indicating session not found
   private resumeWatchers = new Map<string, { tail: string; timer: ReturnType<typeof setTimeout> }>()
+  // Terminal IDs whose next incoming 'exit' message should be swallowed instead of
+  // surfaced to the renderer. Set by kill(..., silent=true) during respawn so the
+  // phantom exit event from the old PTY doesn't flip the new PTY's UI to dead.
+  private silentKills = new Set<string>()
   // Utility process hosting node-pty
   private host: UtilityProcess | null = null
 
@@ -70,7 +74,11 @@ export class PtyManager {
           break
         case 'exit':
           this.ptys.delete(msg.terminalId)
-          this.onExit(msg.terminalId, msg.exitCode)
+          if (this.silentKills.delete(msg.terminalId)) {
+            log(`pty-host: swallowed exit for ${msg.terminalId} (silent kill during respawn)`)
+          } else {
+            this.onExit(msg.terminalId, msg.exitCode)
+          }
           if (!this.suppressSessionChanges) {
             this.onSessionsChanged()
           }
@@ -494,7 +502,13 @@ export class PtyManager {
     setTimeout(() => pokeBoth(100), 5000)
   }
 
-  kill(terminalId: string): void {
+  /**
+   * Kill the PTY for a terminal. When `silent` is true, suppress the resulting
+   * 'exit' message so it never reaches the renderer — used during respawn, where
+   * the old PTY's delayed exit would otherwise race with the new PTY's spawn and
+   * flip the terminal card to the dead/dimmed state.
+   */
+  kill(terminalId: string, silent = false): void {
     if (this.ptys.has(terminalId)) {
       const instance = this.ptys.get(terminalId)!
       // Push to closed-session stack if it was a real, interacted session
@@ -506,6 +520,7 @@ export class PtyManager {
         clearTimeout(watcher.timer)
         this.resumeWatchers.delete(terminalId)
       }
+      if (silent) this.silentKills.add(terminalId)
       this.sendToHost({ type: 'kill', terminalId })
       this.ptys.delete(terminalId)
       this.pendingData.delete(terminalId)
