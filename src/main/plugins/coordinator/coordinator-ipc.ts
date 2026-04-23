@@ -11,6 +11,7 @@
  * layers come online.
  */
 import { ipcMain } from 'electron'
+import * as crypto from 'crypto'
 import { IPC } from '../../../shared/ipc-channels'
 import {
   getCoordinatorConfig,
@@ -161,9 +162,11 @@ export function registerCoordinatorIpc(): void {
           mcpScriptPath: getMcpServerSourcePath(),
           maxToolSteps: cfg.maxToolStepsPerTurn,
           // testConnection() never spawns the MCP subprocess, so this id is
-          // unused — but ProviderDeps requires it. Fixed sentinel so logs
-          // make the source obvious if it ever does leak through.
-          coordinatorSessionId: 'coord-test-connection'
+          // typically unused — but ProviderDeps requires it AND the claude-cli
+          // binary's `--session-id` flag (used if testConnection ever evolves
+          // to do a real ping turn) rejects non-UUID values. Generate a fresh
+          // UUID per call to stay forward-compatible.
+          coordinatorSessionId: crypto.randomUUID()
         }
       )
       return await provider.testConnection()

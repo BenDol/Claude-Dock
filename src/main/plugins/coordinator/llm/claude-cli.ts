@@ -372,6 +372,17 @@ export function createClaudeCliProvider(deps: ClaudeCliProviderDeps): LLMProvide
       return
     }
 
+    // Pre-spawn abort check: if the orchestrator already cancelled this turn
+    // (e.g. user fired a second message while the previous was still pending),
+    // skip the MCP-config write + spawn entirely. Surfaces as `end_turn` —
+    // matching the post-spawn abort path so the UI doesn't flag the cancel as
+    // a failure.
+    if (signal.aborted) {
+      log('[claude-cli] aborted before spawn', `project=${deps.projectDir}`)
+      yield { type: 'done', stopReason: 'end_turn' }
+      return
+    }
+
     const resume = deps.getLatestSessionId(deps.projectDir) || undefined
     const turnUuid = crypto.randomUUID()
     let mcpConfigPath: string
@@ -444,7 +455,11 @@ export function createClaudeCliProvider(deps: ClaudeCliProviderDeps): LLMProvide
     }
 
     const tryFinalize = (): void => {
-      if (!exited || !stdoutEnded) return
+      // Wait for the process to exit AND both pipes to drain before reading
+      // stderrTail. If we synthesized the error message before stderr finished,
+      // we'd risk truncating the most recent (and usually most diagnostic)
+      // output — common on Windows where pipe close order is non-deterministic.
+      if (!exited || !stdoutEnded || !stderrEnded) return
       // Stream + process both done. If a `result` already produced a `done`
       // we've already emitted; otherwise synthesize one based on exit code.
       if (doneEmitted) {
@@ -563,7 +578,10 @@ export function createClaudeCliProvider(deps: ClaudeCliProviderDeps): LLMProvide
     child.stderr.on('data', (chunk: string) => {
       stderrTail.push(chunk)
     })
-    child.stderr.on('end', () => { stderrEnded = true })
+    child.stderr.on('end', () => {
+      stderrEnded = true
+      tryFinalize()
+    })
     child.stderr.on('error', (err: Error) => {
       logError('[claude-cli] stderr error', err)
     })

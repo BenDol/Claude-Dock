@@ -136,6 +136,22 @@ async function collect(iter: AsyncIterable<ChatDelta>, max = 100): Promise<ChatD
   return out
 }
 
+/**
+ * Simulate the kernel closing both stdio pipes and the process exiting.
+ *
+ * Real `child_process` always emits stdout 'end' AND stderr 'end' before (or
+ * concurrently with) 'exit' — anything else means the kernel held the pipe
+ * open for some reason. The provider's `tryFinalize` waits on all three
+ * signals so it never reads stderrTail before stderr has fully drained, so
+ * tests that simulate exit must do the same or `tryFinalize` will hang.
+ */
+function simulateExit(child: any, fake: FakeChild, code: number): void {
+  fake.stdout.end()
+  fake.stderr.end()
+  fake.exitCode = code
+  child.emit('exit', code)
+}
+
 beforeEach(() => {
   mockSpawn.mockReset()
   mockGetBinary.mockReset()
@@ -218,6 +234,19 @@ describe('claude-cli provider chat()', () => {
     expect(mockSpawn).not.toHaveBeenCalled()
   })
 
+  it('short-circuits when the signal is already aborted (no spawn, no MCP write)', async () => {
+    // If the orchestrator cancels a turn before chat() runs, we must not
+    // write the MCP config file or spawn the binary — both are observable
+    // side effects (file in dock data dir, brief subprocess in process list).
+    const provider = createClaudeCliProvider(makeDeps())
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const deltas = await collect(provider.chat(makeRequest(), ctrl.signal))
+    expect(deltas).toEqual([{ type: 'done', stopReason: 'end_turn' }])
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(mockWriteFile).not.toHaveBeenCalled()
+  })
+
   it('emits done/error when the bundled claude binary cannot be resolved', async () => {
     mockGetBinary.mockReturnValue(undefined)
     const provider = createClaudeCliProvider(makeDeps())
@@ -239,9 +268,7 @@ describe('claude-cli provider chat()', () => {
     // Drive the stream so the generator completes (so finally runs unlink).
     queueMicrotask(() => {
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'sx' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     await collect(iter)
 
@@ -272,9 +299,7 @@ describe('claude-cli provider chat()', () => {
 
     queueMicrotask(() => {
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'sx' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     await collect(iter)
 
@@ -310,9 +335,7 @@ describe('claude-cli provider chat()', () => {
         message: { content: [{ type: 'text', text: 'world!' }] }
       }) + '\n')
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
 
@@ -345,9 +368,7 @@ describe('claude-cli provider chat()', () => {
         }
       }) + '\n')
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
 
@@ -403,9 +424,7 @@ describe('claude-cli provider chat()', () => {
       }) + '\n')
       // Final event has NO trailing newline — must be flushed on stdout 'end'.
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1' }))
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
 
@@ -422,9 +441,7 @@ describe('claude-cli provider chat()', () => {
 
     queueMicrotask(() => {
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's2' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     await collect(iter)
 
@@ -444,9 +461,7 @@ describe('claude-cli provider chat()', () => {
 
     queueMicrotask(() => {
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'sx' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     await collect(iter)
 
@@ -470,9 +485,7 @@ describe('claude-cli provider chat()', () => {
         session_id: 's1',
         errors: ['maxTurns reached']
       }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
 
@@ -546,10 +559,7 @@ describe('claude-cli provider chat() — failure paths', () => {
         message: { content: [{ type: 'text', text: 'before-fail' }] }
       }) + '\n')
       fake.stderr.write('Error: Authentication failed (anthropic-api-key not set)\n')
-      fake.stdout.end()
-      fake.stderr.end()
-      fake.exitCode = 1
-      child.emit('exit', 1)
+      simulateExit(child, fake, 1)
     })
     const deltas = await collect(iter)
 
@@ -595,9 +605,7 @@ describe('claude-cli provider chat() — failure paths', () => {
         session_id: 's-final',
         message: { content: [{ type: 'text', text: 'orphan' }] }
       }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
     expect(deltas[deltas.length - 1]).toEqual({ type: 'done', stopReason: 'end_turn' })
@@ -618,9 +626,7 @@ describe('claude-cli provider chat() — failure paths', () => {
         message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: '{"ok":true}' }] }
       }) + '\n')
       fake.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's1' }) + '\n')
-      fake.stdout.end()
-      fake.exitCode = 0
-      child.emit('exit', 0)
+      simulateExit(child, fake, 0)
     })
     const deltas = await collect(iter)
 
