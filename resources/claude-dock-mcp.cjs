@@ -64,7 +64,13 @@ const pendingEventsFile = path.join(dataDir, 'dock-pending-events.json')
 // Each MCP server process is spawned by a single Claude Code instance.
 // We latch onto the first session_id received and reject all shell operations
 // from different sessions. This prevents cross-session shell targeting.
-let boundSessionId = null
+//
+// DOCK_MCP_BOUND_SESSION_ID lets the spawner pre-bind the session before any
+// tool call arrives. Used by the Coordinator plugin's SDK-passthrough backend:
+// the hidden Claude Code session has no way to discover its own session_id,
+// so the orchestrator generates one, pre-binds it here, and tells the LLM via
+// the system prompt to pass that same id on every dock_* tool call.
+let boundSessionId = process.env.DOCK_MCP_BOUND_SESSION_ID || null
 
 /**
  * Bind to a session ID. Returns true if the session matches (or is the first).

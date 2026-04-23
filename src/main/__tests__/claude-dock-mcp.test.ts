@@ -28,6 +28,61 @@ interface ToolsListResponse {
   }>
 }
 
+interface ToolCallResponse {
+  content?: Array<{ type: string; text: string }>
+  isError?: boolean
+}
+
+async function callTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  env: Record<string, string>
+): Promise<ToolCallResponse> {
+  const child = spawn('node', [MCP_PATH], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...env }
+  })
+
+  const requests = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {} } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: toolName, arguments: args } }
+  ]
+  for (const r of requests) child.stdin.write(JSON.stringify(r) + '\n')
+
+  let buffer = ''
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill()
+      reject(new Error('MCP timed out'))
+    }, 5000)
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString('utf8')
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        const t = line.trim()
+        if (!t.startsWith('{')) continue
+        try {
+          const msg = JSON.parse(t)
+          if (msg.id === 2 && msg.result) {
+            clearTimeout(timeout)
+            child.kill()
+            resolve(msg.result as ToolCallResponse)
+            return
+          }
+        } catch {
+          /* keep draining */
+        }
+      }
+    })
+    child.on('error', (err) => {
+      clearTimeout(timeout)
+      reject(err)
+    })
+  })
+}
+
 async function queryToolsList(env: Record<string, string>): Promise<ToolsListResponse> {
   const child = spawn('node', [MCP_PATH], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -115,6 +170,40 @@ describe('claude-dock-mcp tools/list', () => {
     const fullSize = JSON.stringify(full.tools).length
     const compactSize = JSON.stringify(compact.tools).length
     expect(compactSize).toBeLessThan(fullSize * 0.7)
+  }, 10000)
+
+  it('pre-binds the session id from DOCK_MCP_BOUND_SESSION_ID so first dock_* call succeeds without prior dock_status', async () => {
+    // The Coordinator's SDK passthrough backend has no way to discover its
+    // own session_id, so it pre-binds via env var and instructs the LLM to
+    // pass that same id. Without pre-binding, the very first dock_* call
+    // (e.g. dock_spawn_terminal) fails with "Missing required parameter:
+    // session_id" because the server's "first call binds" flow never gets
+    // to run before validateSessionBinding rejects it.
+    const result = await callTool(
+      'dock_spawn_terminal',
+      { session_id: 'coord-bound-test', project_dir: 'C:/tmp/dock-test-proj' },
+      { DOCK_MCP_BOUND_SESSION_ID: 'coord-bound-test' }
+    )
+    const text = result.content?.[0]?.text ?? ''
+    // We don't care that the spawn succeeds — there's no live dock — only
+    // that the session check passes. The success path produces a "Spawn
+    // requested" message; the failure path we're guarding against produces
+    // "Missing required parameter: session_id" or a binding-mismatch error.
+    expect(text).not.toMatch(/Missing required parameter: session_id/)
+    expect(text).not.toMatch(/Session mismatch/)
+  }, 10000)
+
+  it('rejects calls with a different session_id when pre-bound', async () => {
+    // The pre-bind lock must hold against unrelated sessions just like the
+    // normal first-call lock — otherwise the env var would silently weaken
+    // the cross-session shell-isolation guarantee.
+    const result = await callTool(
+      'dock_spawn_terminal',
+      { session_id: 'someone-else', project_dir: 'C:/tmp/dock-test-proj' },
+      { DOCK_MCP_BOUND_SESSION_ID: 'coord-bound-test' }
+    )
+    const text = result.content?.[0]?.text ?? ''
+    expect(text).toMatch(/Session mismatch/)
   }, 10000)
 
   it('preserves required fields and enum values between full and compact', async () => {

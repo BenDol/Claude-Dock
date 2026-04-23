@@ -82,6 +82,13 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
   }
   appendMessage(projectDir, userMsg, config.historyMaxMessages)
 
+  // Per-turn id assigned to the SDK-passthrough Coordinator session. The MCP
+  // subprocess gets pre-bound to it and the same id is inlined into the system
+  // prompt so the hidden Claude session can satisfy the dock_* tools' required
+  // `session_id` argument. Generating per turn is fine — the SDK spawns a
+  // fresh MCP subprocess for each turn, so the binding doesn't need to persist.
+  const coordinatorSessionId = nowId()
+
   const provider = createProvider(
     config.provider,
     {
@@ -93,7 +100,8 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
       projectDir,
       dockDataDir: getDataDir(),
       mcpScriptPath: getMcpServerSourcePath(),
-      maxToolSteps: config.maxToolStepsPerTurn
+      maxToolSteps: config.maxToolStepsPerTurn,
+      coordinatorSessionId
     }
   )
 
@@ -101,7 +109,8 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
     '[coordinator] runTurn',
     `project=${projectDir}`,
     `provider=${provider.id}`,
-    `passthrough=${provider.passthrough}`
+    `passthrough=${provider.passthrough}`,
+    `coordSession=${coordinatorSessionId.slice(0, 8)}`
   )
 
   const systemPrompt = buildSystemPrompt({
@@ -109,7 +118,8 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
     projectDir,
     maxToolSteps: config.maxToolStepsPerTurn,
     backend: provider.passthrough ? 'sdk' : 'llm',
-    mcpServerKey: provider.passthrough ? getMcpEntryName() : undefined
+    mcpServerKey: provider.passthrough ? getMcpEntryName() : undefined,
+    coordinatorSessionId: provider.passthrough ? coordinatorSessionId : undefined
   })
 
   let step = 0

@@ -33,6 +33,7 @@ function makeDeps(overrides: Partial<Parameters<typeof createClaudeSdkProvider>[
     mcpScriptPath: 'C:/tmp/claude-dock-mcp.cjs',
     mcpServerKey: 'claude-dock-uat',
     maxToolSteps: 5,
+    coordinatorSessionId: 'coord-session-test',
     getLatestSessionId: vi.fn().mockReturnValue(null),
     setLatestSessionId: vi.fn(),
     ...overrides

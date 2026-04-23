@@ -34,6 +34,14 @@ export interface SystemPromptOptions {
    * Ignored for the `llm` backend.
    */
   mcpServerKey?: string
+  /**
+   * Coordinator-assigned session id — only relevant when `backend === 'sdk'`.
+   * Every dock_* MCP tool requires `session_id`, but the hidden Claude session
+   * inside the SDK has no way to learn its own id. We pre-bind the MCP server
+   * to this id (via DOCK_MCP_BOUND_SESSION_ID) and inline it into the prompt
+   * so the LLM passes it on every tool call. Ignored for the `llm` backend.
+   */
+  coordinatorSessionId?: string
 }
 
 function sdkToolName(serverKey: string, tool: string): string {
@@ -59,8 +67,19 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
     const tPrompt = sdkToolName(key, 'dock_prompt_terminal')
     const tClose = sdkToolName(key, 'dock_close_terminal')
 
+    // The MCP subprocess is pre-bound to this session id via
+    // DOCK_MCP_BOUND_SESSION_ID, so passing the same id on each call satisfies
+    // the server's session validation. project_dir is required by spawn/prompt/
+    // close to route the command to the right dock window.
+    const sessionId = opts.coordinatorSessionId ?? ''
+
     return [
       `You are the background Coordinator for the project at ${opts.projectDir} — a hidden Claude Code session driven by Dock. Do not use Read/Edit/Bash directly; route every concrete action through ${tPrompt}.`,
+      '',
+      'CALL CONVENTION (CRITICAL — every dock_* tool call must include both):',
+      `  session_id: "${sessionId}"`,
+      `  project_dir: "${opts.projectDir}"`,
+      'These are not optional. The MCP server rejects calls missing session_id with "Missing required parameter: session_id", and spawn/prompt/close need project_dir to route to the right dock window.',
       '',
       'RULES:',
       '1. Always split work into independent tasks when possible.',

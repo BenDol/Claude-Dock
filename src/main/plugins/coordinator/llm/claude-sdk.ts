@@ -138,6 +138,16 @@ export interface ClaudeSdkProviderDeps {
    * agree on the ceiling even though the SDK enforces it transport-side.
    */
   maxToolSteps: number
+  /**
+   * Stable session id the orchestrator assigns to this Coordinator turn.
+   * Forwarded to the MCP subprocess via DOCK_MCP_BOUND_SESSION_ID so the
+   * server pre-binds before any tool call, and surfaced to the LLM in the
+   * system prompt so it can satisfy each tool's `session_id` requirement.
+   * Without this, the hidden Claude session has no way to know its own id
+   * and every dock_* tool call fails with "Missing required parameter:
+   * session_id".
+   */
+  coordinatorSessionId: string
   /** Last captured session id for this project, or null for a fresh session. */
   getLatestSessionId: (projectDir: string) => string | null
   /** Called with the final session_id once a turn's `result` event arrives. */
@@ -182,7 +192,8 @@ export function createClaudeSdkProvider(deps: ClaudeSdkProviderDeps): LLMProvide
       `project=${deps.projectDir}`,
       `mcpKey=${deps.mcpServerKey}`,
       `resume=${resume ?? '(fresh)'}`,
-      `maxTurns=${deps.maxToolSteps}`
+      `maxTurns=${deps.maxToolSteps}`,
+      `coordSession=${deps.coordinatorSessionId.slice(0, 8)}`
     )
 
     try {
@@ -206,7 +217,14 @@ export function createClaudeSdkProvider(deps: ClaudeSdkProviderDeps): LLMProvide
               // Coordinator blind to its primary orchestration verbs. Compact
               // mode keeps identical tool names and schemas but trims prose so
               // everything fits under the budget.
-              env: { DOCK_DATA_DIR: deps.dockDataDir, DOCK_MCP_COMPACT: '1' }
+              env: {
+                DOCK_DATA_DIR: deps.dockDataDir,
+                DOCK_MCP_COMPACT: '1',
+                // Pre-bind the MCP server to the orchestrator-assigned id.
+                // Pairs with the system-prompt instruction telling the LLM
+                // to pass this same id on every dock_* tool call.
+                DOCK_MCP_BOUND_SESSION_ID: deps.coordinatorSessionId
+              }
             }
           },
           // Wildcard — allow every tool the coordinator MCP exposes.
