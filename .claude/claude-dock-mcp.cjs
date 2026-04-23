@@ -986,6 +986,97 @@ function buildCompactMessagingTools() {
   ]
 }
 
+// ---------- Toolset partitioning ----------
+//
+// The Coordinator's SDK-backed subprocess spawns TWO instances of this
+// script — one with DOCK_MCP_TOOLSET=shell, one with =terminal — so each
+// registers as a distinct MCP server under Claude Code and gets its own
+// per-server token budget for tools/list. `all` is the default, used by
+// regular user terminals via their project .mcp.json.
+
+const TERMINAL_TOOLS = new Set([
+  'dock_status',
+  'dock_list_terminals',
+  'dock_spawn_terminal',
+  'dock_prompt_terminal',
+  'dock_close_terminal',
+  'dock_notify_worktree'
+])
+
+const SHELL_TOOLS = new Set([
+  'dock_run_in_shell',
+  'dock_read_shell',
+  'dock_list_shells',
+  'dock_check_shell_events',
+  'dock_clear_shell'
+  // messaging tools (dock_send_message / dock_check_messages) are
+  // gated by isMessagingEnabled() and handled separately by the caller.
+])
+
+function filterToolsByToolset(tools, toolset) {
+  if (toolset === 'terminal') return tools.filter((t) => TERMINAL_TOOLS.has(t.name))
+  if (toolset === 'shell') return tools.filter((t) => SHELL_TOOLS.has(t.name))
+  return tools // 'all' or unknown: expose everything and let the caller filter.
+}
+
+function toolsetIncludesMessaging(toolset) {
+  return toolset === 'all' || toolset === 'shell'
+}
+
+function buildInstructions(toolset) {
+  if (toolset === 'terminal') {
+    return [
+      'Claude Dock MCP — terminal-orchestration tools:',
+      '  dock_status — overview of Dock terminals + unread messages.',
+      '  dock_list_terminals — enumerate terminals with idle/alive state.',
+      '  dock_spawn_terminal — open a new Claude terminal in the project.',
+      '  dock_prompt_terminal — write a prompt into a terminal and submit it.',
+      '  dock_close_terminal — kill an idle terminal you no longer need.',
+      '  dock_notify_worktree — signal a worktree transition for the current terminal.',
+      '',
+      'Shell-panel tools (dock_run_in_shell, dock_read_shell, etc.) and',
+      'cross-terminal messaging are exposed by the sibling MCP server entry.'
+    ].join('\n')
+  }
+  if (toolset === 'shell') {
+    return [
+      'Claude Dock MCP — shell-panel tools (commands in YOUR dock shell panel):',
+      '  dock_run_in_shell, dock_read_shell, dock_list_shells,',
+      '  dock_check_shell_events, dock_clear_shell.',
+      '',
+      'Plus optional messaging: dock_send_message, dock_check_messages.',
+      '',
+      'Shell events from Dock arrive as channel notifications. React to them',
+      '(e.g. exception_detected, server_stopped, compile_error) by investigating',
+      'and helping the user.',
+      '',
+      'Terminal-orchestration tools (dock_spawn_terminal, dock_list_terminals, etc.)',
+      'are exposed by the sibling MCP server entry.'
+    ].join('\n')
+  }
+  // 'all' — the default for regular user terminals via project .mcp.json.
+  return [
+    'Claude Dock MCP exposes two families of tools:',
+    '',
+    '1. Shell-panel tools (run commands in YOUR dock shell panel):',
+    '   dock_run_in_shell, dock_read_shell, dock_list_shells,',
+    '   dock_check_shell_events, dock_clear_shell.',
+    '',
+    '2. Terminal tools (orchestrate other Claude terminals in the dock):',
+    '   dock_list_terminals — enumerate terminals with idle/alive state.',
+    '   dock_spawn_terminal — open a new Claude terminal in the project.',
+    '   dock_prompt_terminal — write a prompt into a terminal and submit it.',
+    '   dock_close_terminal — kill an idle terminal you no longer need.',
+    '',
+    'Plus: dock_status (overview), dock_notify_worktree (worktree signalling),',
+    'and the optional messaging tools (dock_send_message, dock_check_messages).',
+    '',
+    'Shell events from Dock arrive as channel notifications. React to them',
+    '(e.g. exception_detected, server_stopped, compile_error) by investigating',
+    'and helping the user.'
+  ].join('\n')
+}
+
 // ---------- MCP message handlers ----------
 
 async function handleMessage(msg) {
@@ -1000,26 +1091,7 @@ async function handleMessage(msg) {
           experimental: { 'claude/channel': {} }
         },
         serverInfo: { name: 'claude-dock', version: '2.0.0' },
-        instructions: [
-          'Claude Dock MCP exposes two families of tools:',
-          '',
-          '1. Shell-panel tools (run commands in YOUR dock shell panel):',
-          '   dock_run_in_shell, dock_read_shell, dock_list_shells,',
-          '   dock_check_shell_events, dock_clear_shell.',
-          '',
-          '2. Terminal tools (orchestrate other Claude terminals in the dock):',
-          '   dock_list_terminals — enumerate terminals with idle/alive state.',
-          '   dock_spawn_terminal — open a new Claude terminal in the project.',
-          '   dock_prompt_terminal — write a prompt into a terminal and submit it.',
-          '   dock_close_terminal — kill an idle terminal you no longer need.',
-          '',
-          'Plus: dock_status (overview), dock_notify_worktree (worktree signalling),',
-          'and the optional messaging tools (dock_send_message, dock_check_messages).',
-          '',
-          'Shell events from Dock arrive as channel notifications. React to them',
-          '(e.g. exception_detected, server_stopped, compile_error) by investigating',
-          'and helping the user.'
-        ].join('\n')
+        instructions: buildInstructions(process.env.DOCK_MCP_TOOLSET || 'all')
       })
 
     case 'notifications/initialized':
@@ -1029,14 +1101,23 @@ async function handleMessage(msg) {
     case 'tools/list': {
       // Claude Code applies a per-server token budget to MCP tools and defers
       // the tail of the list when descriptions overflow (see SDKMcpTool.isLoaded
-      // in @anthropic-ai/claude-agent-sdk). When the caller is the Coordinator
-      // plugin's SDK-backed subprocess, it spawns this script with
-      // DOCK_MCP_COMPACT=1 to receive one-line descriptions so ALL 11 tools
-      // fit under the budget. Regular user terminals get the full descriptions
-      // — they have lower tool pressure (fewer competing MCPs and built-ins).
+      // in @anthropic-ai/claude-agent-sdk). Compact mode (DOCK_MCP_COMPACT=1)
+      // was the first pass — but empirically even compact-mode payloads for
+      // all 11 tools still overflow the budget, leaving the Coordinator
+      // seeing only the first 6 shell-panel tools.
+      //
+      // DOCK_MCP_TOOLSET lets the spawner carve the exposure so the
+      // Coordinator can register two separate MCP server entries — each
+      // gets its own budget and both halves fit cleanly:
+      //   `terminal` → terminal-orchestration tools (spawn/list/prompt/close + status)
+      //   `shell`    → shell-panel tools + messaging
+      //   `all`      → everything (default; what regular user terminals
+      //                receive through their project `.mcp.json` entry)
       const compact = process.env.DOCK_MCP_COMPACT === '1'
-      const tools = compact ? buildCompactTools() : buildFullTools()
-      if (isMessagingEnabled()) {
+      const toolset = process.env.DOCK_MCP_TOOLSET || 'all'
+      const base = compact ? buildCompactTools() : buildFullTools()
+      const tools = filterToolsByToolset(base, toolset)
+      if (isMessagingEnabled() && toolsetIncludesMessaging(toolset)) {
         const msgTools = compact ? buildCompactMessagingTools() : buildFullMessagingTools()
         tools.push(...msgTools)
       }
