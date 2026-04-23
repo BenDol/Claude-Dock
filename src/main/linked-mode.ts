@@ -88,11 +88,75 @@ function getLegacyMcpServerPath(): string {
   return path.join(getDataDir(), 'claude-dock-mcp.js')
 }
 
+/**
+ * Path that external processes (coordinator subprocess, user's Claude Code
+ * terminals via project `.mcp.json`) spawn for the dock MCP server.
+ *
+ * In packaged builds, the primary location is `<install>/resources/
+ * claude-dock-mcp.cjs` (shipped via electron-builder `extraResources`).
+ * But NSIS upgrades have been observed to silently skip replacing
+ * individual extraResources files — the user's installed copy can stay
+ * frozen at the original install version while app.asar gets refreshed.
+ *
+ * Self-heal in the same shape as `ensureFallbackExtracted()` in the voice
+ * plugin: electron-vite also copies the script into `out/main/bundled/`
+ * (inside app.asar, which IS replaced atomically by NSIS), and this
+ * function extracts it to a writable userData location whenever the
+ * on-disk extraResources copy differs. Callers then run the fresh copy
+ * regardless of what NSIS did.
+ */
 export function getMcpServerSourcePath(): string {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'claude-dock-mcp.cjs')
+  if (!app.isPackaged) {
+    return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.cjs')
   }
-  return path.join(app.getAppPath(), 'resources', 'claude-dock-mcp.cjs')
+  return ensureMcpScriptFresh()
+}
+
+/**
+ * Extract `out/main/bundled/claude-dock-mcp.cjs` from inside app.asar to
+ * `<userData>/mcp/claude-dock-mcp.cjs` when the extracted copy is missing
+ * or doesn't match the asar-bundled bytes. Returns the userData path on
+ * success, or falls back to the extraResources copy if extraction fails.
+ *
+ * Idempotent: the userData copy is fingerprinted against the asar-bundled
+ * version via its byte length (cheaper than hashing and sufficient because
+ * we control both sides of the comparison).
+ */
+function ensureMcpScriptFresh(): string {
+  const packagedPath = path.join(process.resourcesPath, 'claude-dock-mcp.cjs')
+  // `__dirname` in the main bundle is `<asar>/main`. The asar-bundled copy
+  // lives at `<asar>/main/bundled/claude-dock-mcp.cjs` — see
+  // copyMcpScriptPlugin in electron.vite.config.ts.
+  const asarBundledPath = path.join(__dirname, 'bundled', 'claude-dock-mcp.cjs')
+  const userDataPath = path.join(app.getPath('userData'), 'mcp', 'claude-dock-mcp.cjs')
+
+  let asarStat: fs.Stats | null = null
+  try { asarStat = fs.statSync(asarBundledPath) } catch { /* absent */ }
+  if (!asarStat) {
+    // Older builds without the copy plugin — fall back to the packaged path.
+    // This also covers `electron-vite dev` runs when app.isPackaged is true
+    // but the bundled/ dir wasn't produced.
+    return packagedPath
+  }
+
+  try {
+    const current = fs.existsSync(userDataPath) ? fs.statSync(userDataPath) : null
+    if (!current || current.size !== asarStat.size) {
+      fs.mkdirSync(path.dirname(userDataPath), { recursive: true })
+      // `fs.copyFileSync` works transparently on asar-source paths — the
+      // Electron fs shim intercepts the read. Avoids loading the whole
+      // script into a JS buffer just to write it back out.
+      fs.copyFileSync(asarBundledPath, userDataPath)
+      log(
+        `[linked-mode] self-healed MCP script: extracted ${asarStat.size}B ` +
+        `from app.asar to ${userDataPath} (previous size: ${current?.size ?? 'missing'})`
+      )
+    }
+    return userDataPath
+  } catch (err) {
+    logError('[linked-mode] MCP script self-heal extraction failed', err)
+    return packagedPath
+  }
 }
 
 /** Bundled hook source — ships alongside the MCP server via extraResources. */

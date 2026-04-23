@@ -31,6 +31,39 @@ function copyVoicePythonPlugin() {
   }
 }
 
+/**
+ * Copies the Claude Dock MCP server script into the main-process build output.
+ *
+ * `resources/claude-dock-mcp.cjs` ships to production via electron-builder's
+ * `extraResources` — but NSIS upgrades have been observed to silently skip
+ * replacing individual `extraResources` files (same failure class as the
+ * voice-python stale-bundle bug). The result: app.asar gets the fresh TS
+ * bundle that expects new server behavior (e.g. DOCK_MCP_TOOLSET partitioning),
+ * but the on-disk .cjs is still from the original install and ignores the
+ * new env vars.
+ *
+ * Mirroring the voice-python strategy, we land a second copy inside app.asar
+ * at `out/main/bundled/claude-dock-mcp.cjs`. Because app.asar is replaced
+ * atomically by NSIS as a single blob, that copy is guaranteed to match the
+ * TS bundle. `getMcpServerSourcePath()` in linked-mode.ts self-heals by
+ * extracting the asar-bundled copy into userData whenever the two disagree.
+ */
+function copyMcpScriptPlugin() {
+  return {
+    name: 'dock-copy-mcp-script',
+    closeBundle() {
+      const src = path.resolve(__dirname, 'resources/claude-dock-mcp.cjs')
+      const dstDir = path.resolve(__dirname, 'out/main/bundled')
+      const dst = path.join(dstDir, 'claude-dock-mcp.cjs')
+      if (!fs.existsSync(src)) {
+        throw new Error(`[copy-mcp-script] source missing: ${src}`)
+      }
+      fs.mkdirSync(dstDir, { recursive: true })
+      fs.copyFileSync(src, dst)
+    }
+  }
+}
+
 function getBuildInfo() {
   try {
     const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
@@ -84,7 +117,7 @@ const pluginBuildShas: Record<string, string> = {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyVoicePythonPlugin()],
+    plugins: [externalizeDepsPlugin(), copyVoicePythonPlugin(), copyMcpScriptPlugin()],
     define: {
       __BUILD_SHA__: JSON.stringify(fullSha),
       __DEV__: JSON.stringify(isDev),
