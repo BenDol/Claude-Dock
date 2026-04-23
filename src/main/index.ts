@@ -184,6 +184,11 @@ if (!gotLock) {
 
     cleanStaleLock()
     try { cleanOldPastedFiles() } catch (e) { log(`[file-paste] cleanup error: ${e}`) }
+    // Also re-run cleanup every 24h so long-running sessions don't accumulate
+    // stale paste dirs between launches.
+    setInterval(() => {
+      try { cleanOldPastedFiles() } catch (e) { log(`[file-paste] cleanup error: ${e}`) }
+    }, 24 * 60 * 60 * 1000)
 
     const manager = DockManager.getInstance()
     const launchDir = getLaunchDirFromArgs(process.argv) || getProjectDirFromArgs(process.argv) || loadPendingProject()

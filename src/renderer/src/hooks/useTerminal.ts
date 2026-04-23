@@ -15,11 +15,11 @@ import { routeOpenFile } from '../lib/route-open-file'
 
 const WORKSPACE_PLUGIN_ID = 'workspace'
 
-// Paste sizes above this threshold are redirected to a temp file and referenced
-// back to Claude, rather than streamed into the PTY. Claude Code's TUI collapses
-// large pastes and very long inputs can choke Windows conpty / bracketed-paste
-// handling. 10k chars roughly matches Claude Code's own large-paste breakpoint.
-const MAX_PASTE_INLINE_CHARS = 10_000
+// Pastes over this threshold are redirected to a temp file and referenced back
+// to Claude as a compact [<context>path</context>] tag left in the input box.
+// Kept conservative because Windows conpty / bracketed-paste can truncate
+// streamed pastes well under 4KB in practice.
+const MAX_PASTE_INLINE_CHARS = 1_500
 
 /**
  * Check whether the workspace plugin is enabled for a project. Callers use this
@@ -461,21 +461,6 @@ type FilePasteData = {
   terminalId: string
 }
 
-/**
- * Write a prompt to the terminal using the same bracketed-paste + Escape + Enter
- * pattern as submitFilePaste / sendToTerminal. Used for the long-paste redirect.
- */
-function sendPromptToTerminal(
-  api: ReturnType<typeof getDockApi>,
-  terminalId: string,
-  prompt: string
-): void {
-  const paste = `\x1b[200~${prompt}\x1b[201~`
-  api.terminal.write(terminalId, paste)
-  setTimeout(() => api.terminal.write(terminalId, '\x1b'), 400)
-  setTimeout(() => api.terminal.write(terminalId, '\r'), 700)
-}
-
 /** Paste plain text to the terminal (standard paste fallback). */
 function pasteText(api: ReturnType<typeof getDockApi>, terminalId: string): void {
   navigator.clipboard.readText().then(async (text) => {
@@ -486,10 +471,9 @@ function pasteText(api: ReturnType<typeof getDockApi>, terminalId: string): void
         const saved = await api.filePaste.saveText(text)
         if (saved) {
           const ref = saved.tempPath.replace(/\\/g, '/')
-          const prompt =
-            `I've placed the pasted content (${text.length.toLocaleString()} chars) in a file for you:\n` +
-            `- ${ref}`
-          sendPromptToTerminal(api, terminalId, prompt)
+          // Inject a compact context tag into the input — no Enter, no Escape.
+          // The user stays in the prompt so they can add their own message.
+          api.terminal.write(terminalId, `[<context>${ref}</context>]`)
           return
         }
       } catch (e) {
