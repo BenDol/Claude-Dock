@@ -27,7 +27,7 @@ import { getOverrides as getPluginOverrides, clearAllOverrides as clearAllPlugin
 import { getOpenPluginIds } from './plugins/plugin-window-broadcast'
 import { log, logError, setDebug, getLogDir } from './logger'
 import { TelemetryCollector, type TelemetryPayload } from './telemetry'
-import { getClipboardFiles, copyFilesToTemp, saveClipboardImageToTemp } from './clipboard-files'
+import { getClipboardFiles, copyFilesToTemp, saveClipboardImageToTemp, saveClipboardTextToTemp } from './clipboard-files'
 
 declare const __DEV__: boolean
 
@@ -1177,6 +1177,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE, async () => {
     return saveClipboardImageToTemp()
+  })
+
+  ipcMain.handle(IPC.CLIPBOARD_SAVE_TEXT, async (_event, text: string) => {
+    return saveClipboardTextToTemp(text)
   })
 }
 

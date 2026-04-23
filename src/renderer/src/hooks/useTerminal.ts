@@ -15,6 +15,12 @@ import { routeOpenFile } from '../lib/route-open-file'
 
 const WORKSPACE_PLUGIN_ID = 'workspace'
 
+// Paste sizes above this threshold are redirected to a temp file and referenced
+// back to Claude, rather than streamed into the PTY. Claude Code's TUI collapses
+// large pastes and very long inputs can choke Windows conpty / bracketed-paste
+// handling. 10k chars roughly matches Claude Code's own large-paste breakpoint.
+const MAX_PASTE_INLINE_CHARS = 10_000
+
 /**
  * Check whether the workspace plugin is enabled for a project. Callers use this
  * to decide whether to open a file in the in-app editor or fall back to the
@@ -455,10 +461,43 @@ type FilePasteData = {
   terminalId: string
 }
 
+/**
+ * Write a prompt to the terminal using the same bracketed-paste + Escape + Enter
+ * pattern as submitFilePaste / sendToTerminal. Used for the long-paste redirect.
+ */
+function sendPromptToTerminal(
+  api: ReturnType<typeof getDockApi>,
+  terminalId: string,
+  prompt: string
+): void {
+  const paste = `\x1b[200~${prompt}\x1b[201~`
+  api.terminal.write(terminalId, paste)
+  setTimeout(() => api.terminal.write(terminalId, '\x1b'), 400)
+  setTimeout(() => api.terminal.write(terminalId, '\r'), 700)
+}
+
 /** Paste plain text to the terminal (standard paste fallback). */
 function pasteText(api: ReturnType<typeof getDockApi>, terminalId: string): void {
-  navigator.clipboard.readText().then((text) => {
-    if (text) api.terminal.write(terminalId, text)
+  navigator.clipboard.readText().then(async (text) => {
+    if (!text) return
+
+    if (text.length > MAX_PASTE_INLINE_CHARS) {
+      try {
+        const saved = await api.filePaste.saveText(text)
+        if (saved) {
+          const ref = saved.tempPath.replace(/\\/g, '/')
+          const prompt =
+            `I've placed the pasted content (${text.length.toLocaleString()} chars) in a file for you:\n` +
+            `- ${ref}`
+          sendPromptToTerminal(api, terminalId, prompt)
+          return
+        }
+      } catch (e) {
+        console.warn('[paste] long-paste redirect failed, pasting inline:', e)
+      }
+    }
+
+    api.terminal.write(terminalId, text)
   }).catch(() => { /* clipboard access denied — ignore */ })
 }
 

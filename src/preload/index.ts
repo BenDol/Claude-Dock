@@ -451,6 +451,7 @@ export interface DockApi {
     checkClipboard: () => Promise<{ files: string[]; image: boolean }>
     copyToTemp: (filePaths: string[]) => Promise<{ tempPaths: string[]; errors: string[] }>
     saveImage: () => Promise<{ tempPath: string } | null>
+    saveText: (text: string) => Promise<{ tempPath: string } | null>
   }
   pluginUpdater: {
     check: () => Promise<PluginUpdateEntry[]>
@@ -1021,6 +1022,7 @@ const dockApi: DockApi = {
     checkClipboard: () => ipcRenderer.invoke(IPC.CLIPBOARD_CHECK_FILES),
     copyToTemp: (filePaths: string[]) => ipcRenderer.invoke(IPC.CLIPBOARD_COPY_TO_TEMP, filePaths),
     saveImage: () => ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_IMAGE),
+    saveText: (text: string) => ipcRenderer.invoke(IPC.CLIPBOARD_SAVE_TEXT, text),
   },
   pluginUpdater: {
     check: () => ipcRenderer.invoke(IPC.PLUGIN_UPDATE_CHECK),

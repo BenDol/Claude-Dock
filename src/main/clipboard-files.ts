@@ -203,6 +203,34 @@ export async function copyFilesToTemp(
 }
 
 /**
+ * Save a chunk of pasted text to the temp paste directory as a .txt file.
+ * Used when a Ctrl+V paste is too large for Claude's TUI input box and we
+ * want to hand Claude a file reference instead of flooding the terminal.
+ */
+export async function saveClipboardTextToTemp(
+  text: string
+): Promise<{ tempPath: string } | null> {
+  try {
+    if (!text) return null
+
+    const dir = getTodayDir()
+    await fsP.mkdir(dir, { recursive: true })
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `pasted-text-${ts}.txt`
+    const dest = path.join(dir, filename)
+
+    await fsP.writeFile(dest, text, 'utf8')
+    log(`[file-paste] saved pasted text (${text.length} chars) -> ${dest}`)
+
+    return { tempPath: dest }
+  } catch (e) {
+    logError(`[file-paste] text save error: ${e}`)
+    return null
+  }
+}
+
+/**
  * Save a clipboard image (screenshot) to the temp paste directory as PNG.
  */
 export async function saveClipboardImageToTemp(): Promise<{ tempPath: string } | null> {
