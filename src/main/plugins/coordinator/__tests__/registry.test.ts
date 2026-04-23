@@ -5,6 +5,11 @@ import { describe, it, expect, vi } from 'vitest'
 // under test — the `createProvider` switch — can be instantiated in isolation.
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }))
 
+// claude-cli imports child_process.spawn at module load. The registry test
+// only constructs the provider; we never actually drive it, so a no-op stub
+// is enough to keep the import side-effect inert.
+vi.mock('child_process', () => ({ spawn: vi.fn() }))
+
 vi.mock('electron-store', () => {
   function MockStore(this: any, opts?: any) {
     this.path = '/mock/coordinator-chat.json'
@@ -53,6 +58,35 @@ describe('createProvider — claude-sdk backend', () => {
       }
     )
     expect(provider.id).toBe('claude-sdk')
+    expect(provider.passthrough).toBe(true)
+  })
+})
+
+describe('createProvider — claude-cli backend', () => {
+  it('throws when ProviderDeps is omitted', () => {
+    // Same contract as the SDK provider: deps are mandatory because the
+    // factory captures projectDir/MCP path/session id in closure.
+    expect(() =>
+      createProvider('claude-cli', { apiKey: '', defaultModel: 'claude-opus-4-7' })
+    ).toThrowError(/claude-cli provider requires ProviderDeps/)
+  })
+
+  it('constructs a passthrough provider when ProviderDeps is supplied', () => {
+    const provider = createProvider(
+      'claude-cli',
+      { apiKey: '', defaultModel: 'claude-opus-4-7' },
+      {
+        projectDir: 'C:/Projects/demo',
+        dockDataDir: 'C:/tmp/dock-link',
+        mcpScriptPath: 'C:/tmp/claude-dock-mcp.cjs',
+        maxToolSteps: 5,
+        coordinatorSessionId: '11111111-2222-3333-4444-555555555555'
+      }
+    )
+    expect(provider.id).toBe('claude-cli')
+    // Passthrough: true is the contract that tells the orchestrator NOT to
+    // dispatch tool calls locally. Without it the coordinator would double-run
+    // every dock_* tool the CLI's internal MCP loop already executed.
     expect(provider.passthrough).toBe(true)
   })
 })

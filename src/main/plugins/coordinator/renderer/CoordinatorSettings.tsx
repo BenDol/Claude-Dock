@@ -27,7 +27,11 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
     [providers, config?.provider]
   )
 
-  const isSdkBackend = config?.provider === 'claude-sdk'
+  // Both Claude backends (SDK + CLI) use the user's existing Claude Code
+  // subscription and ignore API key / temperature. UI flags them collectively
+  // so we only have to add the new provider id in one place when introducing
+  // future Claude-subscription backends.
+  const isClaudeBackend = config?.provider === 'claude-sdk' || config?.provider === 'claude-cli'
 
   const onProviderChange = useCallback(
     (providerId: CoordinatorProviderId) => {
@@ -35,15 +39,15 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
       if (!preset) return
       // Reset model + baseUrl + temperature to the preset defaults so switching
       // providers doesn't leave stale values that make the next request fail
-      // or confuse the user when fields toggle visibility (e.g. claude-sdk
-      // hides temperature; flipping back must not keep a stale value).
+      // or confuse the user when fields toggle visibility (e.g. Claude
+      // backends hide temperature; flipping back must not keep a stale value).
       void setConfigPatch({
         provider: providerId,
         model: preset.defaultModel,
         baseUrl: preset.baseUrl ?? '',
-        // Reset to the same default the hint text advertises so toggling the
-        // claude-sdk provider (which hides the field) doesn't leave the user
-        // with a stale temperature next time they pick a key-based backend.
+        // Reset to the same default the hint text advertises so toggling a
+        // Claude backend (which hides the field) doesn't leave the user with
+        // a stale temperature next time they pick a key-based backend.
         temperature: 0.2
       })
     },
@@ -109,10 +113,10 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
               </a>
             </span>
           )}
-          {isSdkBackend && (
+          {isClaudeBackend && (
             <span className="hint">
-              Uses your existing Claude Code subscription via the Claude Agent SDK — no API key
-              required. The coordinator runs tools internally through the dock MCP server.
+              Uses your existing Claude Code subscription via {selectedPreset?.label ?? 'Claude'} —
+              no API key required. The coordinator runs tools internally through the dock MCP server.
             </span>
           )}
         </div>
@@ -149,7 +153,7 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         )}
 
-        {!isSdkBackend && (
+        {!isClaudeBackend && (
           <div className="coord-field">
             <label htmlFor="coord-model">Model</label>
             <input
@@ -165,7 +169,7 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         )}
 
-        {!isSdkBackend && (
+        {!isClaudeBackend && (
           <div className="coord-field">
             <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
             <input
@@ -243,17 +247,17 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           >
             Reset to defaults
           </button>
-          {isSdkBackend && (
+          {isClaudeBackend && (
             <button
               className="coord-test-btn"
               onClick={() => {
-                if (confirm('Start a fresh Claude SDK session? Chat history is kept; only the hidden-session link is cleared.')) {
+                if (confirm('Start a fresh Claude session? Chat history is kept; only the hidden-session link is cleared.')) {
                   void resetSessionId()
                 }
               }}
               title="Starts a new hidden Claude session on the next message. Chat history is preserved."
             >
-              Reset SDK session
+              Reset Claude session
             </button>
           )}
         </div>

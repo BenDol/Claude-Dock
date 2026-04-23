@@ -14,6 +14,7 @@ import { createAnthropicProvider } from './anthropic'
 import { createGeminiProvider } from './gemini'
 import { createOllamaProvider } from './ollama'
 import { createClaudeSdkProvider } from './claude-sdk'
+import { createClaudeCliProvider } from './claude-cli'
 import {
   getLatestSessionId,
   setLatestSessionId
@@ -103,8 +104,16 @@ export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProvider
   },
   'claude-sdk': {
     id: 'claude-sdk',
-    label: 'Claude Code subscription',
+    label: 'Claude Code subscription (SDK)',
     // The SDK picks the model; this string is display-only in the UI.
+    defaultModel: 'claude-opus-4-7',
+    requiresApiKey: false
+  },
+  'claude-cli': {
+    id: 'claude-cli',
+    label: 'Claude Code subscription (CLI)',
+    // The CLI accepts model aliases (e.g. 'opus') and full names. Display-only
+    // here; the actual flag value comes from `config.model` at chat-time.
     defaultModel: 'claude-opus-4-7',
     requiresApiKey: false
   }
@@ -141,6 +150,21 @@ export function createProvider(
         throw new Error('claude-sdk provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps, coordinatorSessionId)')
       }
       return createClaudeSdkProvider({
+        projectDir: deps.projectDir,
+        dockDataDir: deps.dockDataDir,
+        mcpScriptPath: deps.mcpScriptPath,
+        mcpServerKey: getMcpEntryName(),
+        maxToolSteps: deps.maxToolSteps,
+        coordinatorSessionId: deps.coordinatorSessionId,
+        getLatestSessionId,
+        setLatestSessionId
+      })
+    }
+    case 'claude-cli': {
+      if (!deps) {
+        throw new Error('claude-cli provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps, coordinatorSessionId)')
+      }
+      return createClaudeCliProvider({
         projectDir: deps.projectDir,
         dockDataDir: deps.dockDataDir,
         mcpScriptPath: deps.mcpScriptPath,
