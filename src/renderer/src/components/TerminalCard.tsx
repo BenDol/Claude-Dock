@@ -253,20 +253,37 @@ const TerminalCard: React.FC<TerminalCardProps> = ({ terminalId, title, isAlive,
   // action, auto-open the worktree popover so the user can pick a branch.
   // The PTY spawn is blocked by pendingWorktrees=='__awaiting__' until a branch
   // is picked; if the user cancels, we discard the placeholder terminal.
-  const autoOpenHandledRef = useRef(false)
+  //
+  // Two things matter for correctness here:
+  //   1. We PEEK the autoOpenWorktreeIds flag instead of consuming it at
+  //      effect-mount. Consuming up-front loses the trigger under React
+  //      StrictMode, where mount → cleanup → remount would eat the flag on
+  //      the discarded first mount; the remount would see an empty set and
+  //      never open the popover. We only consume inside the setTimeout
+  //      callback, which is cancelled on unmount by the cleanup — so the
+  //      flag survives across a discarded mount.
+  //   2. `awaitingBranchRef.current = true` is flipped INSIDE the setTimeout,
+  //      after the popover is actually opened. Setting it at effect-mount
+  //      would race with the "cancel-on-close" effect below: that effect
+  //      runs on the same mount with `worktreePopover === false` (initial
+  //      state) and would see the ref as true → call removeTerminal before
+  //      the popover even rendered.
   const awaitingBranchRef = useRef(false)
   useEffect(() => {
-    if (autoOpenHandledRef.current) return
-    const consumed = useDockStore.getState().consumeAutoOpenWorktree(terminalId)
-    if (!consumed) return
-    autoOpenHandledRef.current = true
-    awaitingBranchRef.current = true
-    const t = setTimeout(() => { openWorktreePopover() }, 0)
+    if (!useDockStore.getState().autoOpenWorktreeIds.has(terminalId)) return
+    const t = setTimeout(() => {
+      useDockStore.getState().consumeAutoOpenWorktree(terminalId)
+      awaitingBranchRef.current = true
+      openWorktreePopover()
+    }, 0)
     return () => clearTimeout(t)
   }, [terminalId, openWorktreePopover])
 
   // If the popover closes while this terminal is still awaiting a branch pick,
-  // the user cancelled — drop the placeholder terminal.
+  // the user cancelled — drop the placeholder terminal. The `awaitingBranchRef`
+  // gate ensures this only fires AFTER the popover has actually opened once,
+  // not on the initial mount where `worktreePopover === false` would otherwise
+  // trigger an immediate removeTerminal.
   useEffect(() => {
     if (!awaitingBranchRef.current) return
     if (worktreePopover) return
