@@ -256,6 +256,7 @@ export const IPC = {
   CLIPBOARD_CHECK_FILES: 'clipboard:checkFiles',
   CLIPBOARD_COPY_TO_TEMP: 'clipboard:copyToTemp',
   CLIPBOARD_SAVE_IMAGE: 'clipboard:saveImage',
+  CLIPBOARD_SAVE_TEXT: 'clipboard:saveText',
 
   // Plugin windows
   PLUGIN_GET_OPEN_WINDOWS: 'plugin:getOpenWindows',
