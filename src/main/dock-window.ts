@@ -405,7 +405,7 @@ export class DockWindow {
                 }
                 const submit = cmd.submit !== false
                 log(`[terminal-command] prompt ${cmd.terminalId} (submit=${submit}, len=${cmd.prompt.length})`)
-                this.ptyManager.write(cmd.terminalId, submit ? cmd.prompt + '\r' : cmd.prompt)
+                this.ptyManager.writePrompt(cmd.terminalId, cmd.prompt, submit)
                 break
               }
               case 'worktree_changed': {
@@ -918,7 +918,7 @@ export class DockWindow {
       if (idleMs >= IDLE_THRESHOLD_MS) {
         // Terminal is idle — inject the event
         log(`[shell-events] injecting event into terminal ${terminalId} (idle ${idleMs}ms)`)
-        this.ptyManager.write(terminalId, item.message + '\r')
+        this.ptyManager.writePrompt(terminalId, item.message, true)
       } else {
         // Not idle yet — keep in queue for retry
         remaining.push(item)

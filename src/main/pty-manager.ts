@@ -445,6 +445,23 @@ export class PtyManager {
     }
   }
 
+  /**
+   * Inject a prompt into a terminal, optionally submitting with Enter.
+   *
+   * The text and the trailing `\r` are sent in two separate writes with a short
+   * delay between. Ink-based TUIs (Claude Code) read stdin in raw mode and use
+   * inter-byte timing to distinguish a paste from a keypress — when we bundled
+   * text + `\r` into a single write, Claude Code treated the whole thing as a
+   * paste and the `\r` landed as a newline in the buffer instead of submitting.
+   */
+  writePrompt(terminalId: string, text: string, submit: boolean): void {
+    if (!this.ptys.has(terminalId)) return
+    this.write(terminalId, text)
+    if (submit) {
+      setTimeout(() => this.write(terminalId, '\r'), 50)
+    }
+  }
+
   resize(terminalId: string, cols: number, rows: number): void {
     const instance = this.ptys.get(terminalId)
     if (instance) {

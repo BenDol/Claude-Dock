@@ -170,7 +170,7 @@ export function createBundledServices(): CoordinatorServices {
       return false
     }
     try {
-      dock.ptyManager.write(terminalId, submit ? text + '\r' : text)
+      dock.ptyManager.writePrompt(terminalId, text, submit)
       return true
     } catch (err) {
       logError('[coordinator] writeToTerminal failed', err)
