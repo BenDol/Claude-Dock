@@ -179,7 +179,9 @@ describe('buildArgv', () => {
     expect(argv).toContain('--verbose')
     expect(argv).toEqual(expect.arrayContaining(['--mcp-config', 'C:/cfg.json']))
     expect(argv).toContain('--strict-mcp-config')
+    // Two --allowedTools flags, one per MCP server half (shell + terminal).
     expect(argv).toEqual(expect.arrayContaining(['--allowedTools', 'mcp__claude-dock-uat__*']))
+    expect(argv).toEqual(expect.arrayContaining(['--allowedTools', 'mcp__claude-dock-uat-terminals__*']))
     expect(argv).toEqual(expect.arrayContaining(['--tools', '']))
     expect(argv).toEqual(expect.arrayContaining(['--model', 'claude-opus-4-7']))
     expect(argv).toEqual(expect.arrayContaining(['--max-turns', '5']))
@@ -284,6 +286,18 @@ describe('claude-cli provider chat()', () => {
       env: {
         DOCK_DATA_DIR: 'C:/tmp/dock-link',
         DOCK_MCP_COMPACT: '1',
+        DOCK_MCP_TOOLSET: 'shell',
+        DOCK_MCP_BOUND_SESSION_ID: '11111111-2222-3333-4444-555555555555'
+      }
+    })
+    expect(parsed.mcpServers['claude-dock-uat-terminals']).toMatchObject({
+      type: 'stdio',
+      command: 'node',
+      args: ['C:/tmp/claude-dock-mcp.cjs'],
+      env: {
+        DOCK_DATA_DIR: 'C:/tmp/dock-link',
+        DOCK_MCP_COMPACT: '1',
+        DOCK_MCP_TOOLSET: 'terminal',
         DOCK_MCP_BOUND_SESSION_ID: '11111111-2222-3333-4444-555555555555'
       }
     })
@@ -361,7 +375,7 @@ describe('claude-cli provider chat()', () => {
             {
               type: 'tool_use',
               id: 'tu_1',
-              name: 'mcp__claude-dock-uat__dock_list_terminals',
+              name: 'mcp__claude-dock-uat-terminals__dock_list_terminals',
               input: { project_dir: 'X' }
             }
           ]
@@ -376,7 +390,7 @@ describe('claude-cli provider chat()', () => {
     expect(toolCall).toMatchObject({
       type: 'tool_call',
       id: 'tu_1',
-      name: 'mcp__claude-dock-uat__dock_list_terminals',
+      name: 'mcp__claude-dock-uat-terminals__dock_list_terminals',
       args: { project_dir: 'X' }
     })
   })

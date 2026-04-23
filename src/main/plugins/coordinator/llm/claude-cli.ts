@@ -94,10 +94,11 @@ interface McpConfigShape {
 
 /**
  * Build the MCP config payload the CLI loads via `--mcp-config <file>`.
- * Mirrors the inline `mcpServers` object the SDK provider passes — same
- * compact-mode flag (so all 11 dock tools fit Claude Code's per-server tool
- * budget) and same DOCK_MCP_BOUND_SESSION_ID pre-bind so the server accepts
- * tool calls without waiting for a dock_status to "claim" the session.
+ * Mirrors the inline `mcpServers` object the SDK provider passes — two
+ * entries so Claude Code's per-server tool budget fits both halves of
+ * the dock toolset (terminal + shell), and same DOCK_MCP_BOUND_SESSION_ID
+ * pre-bind so each server accepts tool calls without waiting for a
+ * dock_status to "claim" the session.
  */
 function buildMcpConfig(deps: ClaudeCliProviderDeps): McpConfigShape {
   return {
@@ -109,6 +110,18 @@ function buildMcpConfig(deps: ClaudeCliProviderDeps): McpConfigShape {
         env: {
           DOCK_DATA_DIR: deps.dockDataDir,
           DOCK_MCP_COMPACT: '1',
+          DOCK_MCP_TOOLSET: 'shell',
+          DOCK_MCP_BOUND_SESSION_ID: deps.coordinatorSessionId
+        }
+      },
+      [`${deps.mcpServerKey}-terminals`]: {
+        type: 'stdio',
+        command: 'node',
+        args: [deps.mcpScriptPath],
+        env: {
+          DOCK_DATA_DIR: deps.dockDataDir,
+          DOCK_MCP_COMPACT: '1',
+          DOCK_MCP_TOOLSET: 'terminal',
           DOCK_MCP_BOUND_SESSION_ID: deps.coordinatorSessionId
         }
       }
@@ -183,8 +196,9 @@ interface BuildArgvOpts {
  * - `--strict-mcp-config`: don't load the user's `~/.claude.json` MCP servers
  *   (Gmail, voice, etc.). The coordinator only sees the dock MCP.
  *
- * - `--allowedTools mcp__<key>__*`: wildcard for every dock_* tool. Mirrors
- *   the SDK provider's `allowedTools: ['mcp__<key>__*']`.
+ * - `--allowedTools mcp__<key>__* mcp__<key>-terminals__*`: wildcard pair
+ *   covering the two dock MCP servers (shell + terminal toolsets). Mirrors
+ *   the SDK provider's matching `allowedTools` array.
  *
  * - `--tools ""`: explicitly disables all built-ins (Bash/Read/Edit/etc.) so
  *   the coordinator can't bypass `dock_prompt_terminal`. The CLI documents
@@ -218,6 +232,7 @@ export function buildArgv(deps: ClaudeCliProviderDeps, opts: BuildArgvOpts): str
     '--mcp-config', opts.mcpConfigPath,
     '--strict-mcp-config',
     '--allowedTools', `mcp__${deps.mcpServerKey}__*`,
+    '--allowedTools', `mcp__${deps.mcpServerKey}-terminals__*`,
     '--tools', '',
     '--model', opts.model,
     '--permission-mode', 'bypassPermissions'

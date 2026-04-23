@@ -114,31 +114,45 @@ export function createClaudeSdkProvider(deps: ClaudeSdkProviderDeps): LLMProvide
           abortController,
           cwd: deps.projectDir,
           ...(pathToClaudeCodeExecutable ? { pathToClaudeCodeExecutable } : {}),
+          // Two MCP server entries — terminal and shell toolsets — each
+          // under its own per-server tool budget. Compact-only in a single
+          // entry still overflowed: ~6 of 11 tools loaded and the
+          // orchestration verbs (dock_spawn_terminal, dock_list_terminals,
+          // dock_prompt_terminal) were silently deferred, leaving the
+          // Coordinator unable to spawn terminals. Splitting means each
+          // half cleanly fits under the budget with headroom.
           mcpServers: {
             [deps.mcpServerKey]: {
               type: 'stdio',
               command: 'node',
               args: [deps.mcpScriptPath],
-              // DOCK_MCP_COMPACT=1 flips the MCP server into compact-description
-              // mode. Claude Code's per-server tool-loading budget (see
-              // SDKMcpTool.isLoaded in @anthropic-ai/claude-agent-sdk) would
-              // otherwise defer the back half of our 11-tool list — notably
-              // dock_list_terminals/spawn/prompt/close — leaving the
-              // Coordinator blind to its primary orchestration verbs. Compact
-              // mode keeps identical tool names and schemas but trims prose so
-              // everything fits under the budget.
               env: {
                 DOCK_DATA_DIR: deps.dockDataDir,
                 DOCK_MCP_COMPACT: '1',
+                DOCK_MCP_TOOLSET: 'shell',
                 // Pre-bind the MCP server to the orchestrator-assigned id.
                 // Pairs with the system-prompt instruction telling the LLM
                 // to pass this same id on every dock_* tool call.
                 DOCK_MCP_BOUND_SESSION_ID: deps.coordinatorSessionId
               }
+            },
+            [`${deps.mcpServerKey}-terminals`]: {
+              type: 'stdio',
+              command: 'node',
+              args: [deps.mcpScriptPath],
+              env: {
+                DOCK_DATA_DIR: deps.dockDataDir,
+                DOCK_MCP_COMPACT: '1',
+                DOCK_MCP_TOOLSET: 'terminal',
+                DOCK_MCP_BOUND_SESSION_ID: deps.coordinatorSessionId
+              }
             }
           },
-          // Wildcard — allow every tool the coordinator MCP exposes.
-          allowedTools: [`mcp__${deps.mcpServerKey}__*`],
+          // Wildcard per server — allow every tool both halves expose.
+          allowedTools: [
+            `mcp__${deps.mcpServerKey}__*`,
+            `mcp__${deps.mcpServerKey}-terminals__*`
+          ],
           // Disable built-in Read/Edit/Bash etc. — the coordinator must
           // route concrete actions through dock_prompt_terminal, not do
           // work itself.
