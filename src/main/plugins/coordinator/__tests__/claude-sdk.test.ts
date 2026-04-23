@@ -111,7 +111,7 @@ describe('claude-sdk provider', () => {
             {
               type: 'tool_use',
               id: 'tu_1',
-              name: 'mcp__claude-dock-uat__dock_list_terminals',
+              name: 'mcp__claude-dock-uat-terminals__dock_list_terminals',
               input: { project_dir: 'X' }
             }
           ]
@@ -125,7 +125,7 @@ describe('claude-sdk provider', () => {
     expect(toolCall).toMatchObject({
       type: 'tool_call',
       id: 'tu_1',
-      name: 'mcp__claude-dock-uat__dock_list_terminals',
+      name: 'mcp__claude-dock-uat-terminals__dock_list_terminals',
       args: { project_dir: 'X' }
     })
   })
@@ -168,21 +168,40 @@ describe('claude-sdk provider', () => {
     expect(passed.options.resume).toBeUndefined()
   })
 
-  it('wires strictMcpConfig, tools:[], and allowedTools wildcard through to the SDK', async () => {
+  it('wires strictMcpConfig, tools:[], and allowedTools wildcards through to the SDK', async () => {
     mockEvents = [{ type: 'result', subtype: 'success', session_id: 'sx' }]
     const provider = createClaudeSdkProvider(makeDeps())
     await collect(provider.chat(makeRequest(), new AbortController().signal))
     const opts = mockQuery.mock.calls[0][0].options
     expect(opts.strictMcpConfig).toBe(true)
     expect(opts.tools).toEqual([])
-    expect(opts.allowedTools).toEqual(['mcp__claude-dock-uat__*'])
+    // Two wildcards — one per MCP server (shell toolset + terminal toolset).
+    // Carving the dock tools across two servers avoids Claude Code's
+    // per-server tool-loading budget, which otherwise silently deferred the
+    // terminal-orchestration verbs.
+    expect(opts.allowedTools).toEqual([
+      'mcp__claude-dock-uat__*',
+      'mcp__claude-dock-uat-terminals__*'
+    ])
     expect(opts.mcpServers['claude-dock-uat']).toMatchObject({
       type: 'stdio',
       command: 'node',
       args: ['C:/tmp/claude-dock-mcp.cjs'],
-      // DOCK_MCP_COMPACT=1 flips the MCP server into compact-description mode
-      // so all 11 tools fit under Claude Code's per-server loading budget.
-      env: { DOCK_DATA_DIR: 'C:/tmp/dock-link', DOCK_MCP_COMPACT: '1' }
+      env: {
+        DOCK_DATA_DIR: 'C:/tmp/dock-link',
+        DOCK_MCP_COMPACT: '1',
+        DOCK_MCP_TOOLSET: 'shell'
+      }
+    })
+    expect(opts.mcpServers['claude-dock-uat-terminals']).toMatchObject({
+      type: 'stdio',
+      command: 'node',
+      args: ['C:/tmp/claude-dock-mcp.cjs'],
+      env: {
+        DOCK_DATA_DIR: 'C:/tmp/dock-link',
+        DOCK_MCP_COMPACT: '1',
+        DOCK_MCP_TOOLSET: 'terminal'
+      }
     })
     expect(opts.systemPrompt).toEqual({
       type: 'preset',

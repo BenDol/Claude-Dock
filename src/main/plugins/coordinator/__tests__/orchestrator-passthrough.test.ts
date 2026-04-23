@@ -103,7 +103,7 @@ describe('orchestrator passthrough behaviour', () => {
       {
         type: 'tool_call',
         id: 'tu_1',
-        name: 'mcp__claude-dock-uat__dock_list_terminals',
+        name: 'mcp__claude-dock-uat-terminals__dock_list_terminals',
         args: {}
       },
       { type: 'done', stopReason: 'end_turn' }

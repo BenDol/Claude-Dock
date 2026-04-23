@@ -11,13 +11,14 @@ describe('buildSystemPrompt — SDK backend', () => {
       mcpServerKey: 'claude-dock-prod'
     })
 
-    // All four MCP tools must appear, fully prefixed. A missing prefix here
-    // would mean the hidden Claude calls the wrong tool name and the SDK
-    // rejects it via `strictMcpConfig` / `allowedTools`.
-    expect(prompt).toContain('mcp__claude-dock-prod__dock_list_terminals')
-    expect(prompt).toContain('mcp__claude-dock-prod__dock_spawn_terminal')
-    expect(prompt).toContain('mcp__claude-dock-prod__dock_prompt_terminal')
-    expect(prompt).toContain('mcp__claude-dock-prod__dock_close_terminal')
+    // All four terminal-orchestration tools must appear, fully prefixed
+    // with the `-terminals` sibling server key (see DOCK_MCP_TOOLSET in
+    // claude-dock-mcp.cjs). Without the sibling suffix Claude Code would
+    // route the calls to the wrong server and strict-mode MCP would reject.
+    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_list_terminals')
+    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_spawn_terminal')
+    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_prompt_terminal')
+    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_close_terminal')
 
     // The LLM-backend short names must NOT leak into the SDK prompt —
     // the SDK has no adapter that maps them back.
@@ -35,8 +36,9 @@ describe('buildSystemPrompt — SDK backend', () => {
     })
 
     // `__ENV_PROFILE__` is undefined in the test harness, so env-profile
-    // resolves to the `uat` fallback → key `claude-dock-uat`.
-    expect(prompt).toContain('mcp__claude-dock-uat__dock_prompt_terminal')
+    // resolves to the `uat` fallback → key `claude-dock-uat`. Terminal
+    // tools live on the `-terminals` sibling MCP server.
+    expect(prompt).toContain('mcp__claude-dock-uat-terminals__dock_prompt_terminal')
   })
 
   it('includes the worktree rule verbatim when enforceWorktreeInPrompt is true', () => {

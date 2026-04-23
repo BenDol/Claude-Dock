@@ -62,10 +62,16 @@ export function buildSystemPrompt(opts: SystemPromptOptions): string {
     // a silent UAT fallback would silently break prod/dev builds if a future
     // caller forgot the argument.
     const key = opts.mcpServerKey ?? getMcpEntryName()
-    const tList = sdkToolName(key, 'dock_list_terminals')
-    const tSpawn = sdkToolName(key, 'dock_spawn_terminal')
-    const tPrompt = sdkToolName(key, 'dock_prompt_terminal')
-    const tClose = sdkToolName(key, 'dock_close_terminal')
+    // Terminal-orchestration tools are exposed by the sibling MCP server
+    // `<key>-terminals` (see DOCK_MCP_TOOLSET in resources/claude-dock-mcp.cjs);
+    // both halves are wired up together by claude-sdk.ts / claude-cli.ts. We
+    // just have to name the tools with the matching prefix so Claude Code
+    // routes each call to the right server.
+    const termKey = `${key}-terminals`
+    const tList = sdkToolName(termKey, 'dock_list_terminals')
+    const tSpawn = sdkToolName(termKey, 'dock_spawn_terminal')
+    const tPrompt = sdkToolName(termKey, 'dock_prompt_terminal')
+    const tClose = sdkToolName(termKey, 'dock_close_terminal')
 
     // The MCP subprocess is pre-bound to this session id via
     // DOCK_MCP_BOUND_SESSION_ID, so passing the same id on each call satisfies
