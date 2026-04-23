@@ -33,8 +33,8 @@ const errMessage = (err: unknown): string => err instanceof Error ? err.message 
  *
  * Fallback is `true` (safe — blocks send) for unknown provider ids so a
  * typo'd registry entry can't bypass the key requirement. Key-less providers
- * (claude-sdk, ollama, openai-compat) set `requiresApiKey: false` in the
- * registry and return false here.
+ * (claude-sdk, claude-cli, ollama, openai-compat) set `requiresApiKey: false`
+ * in the registry and return false here.
  */
 export function providerNeedsApiKey(
   providers: CoordinatorProviderPreset[],
@@ -217,7 +217,8 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!config) return
     if (!userText.trim()) return
     // Only gate on apiKey for providers that actually require one. Otherwise
-    // every no-key backend (claude-sdk, ollama, openai-compat) falsely blocks.
+    // every no-key backend (claude-sdk, claude-cli, ollama, openai-compat)
+    // falsely blocks.
     if (providerNeedsApiKey(providers, config.provider) && !config.apiKey.trim()) {
       set({ error: 'Set an API key in settings before sending messages.' })
       return

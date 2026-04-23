@@ -108,7 +108,7 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   // is set yet, automatically surface the dedicated settings window so the user
   // lands on setup instead of a useless chat pane. Fires once per mount after
   // config *and* providers have loaded — key-less providers (claude-sdk,
-  // ollama, openai-compat) skip this path.
+  // claude-cli, ollama, openai-compat) skip this path.
   const autoOpenedRef = useRef(false)
   useEffect(() => {
     if (!config) return
