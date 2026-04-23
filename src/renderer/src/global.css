@@ -109,6 +109,10 @@ body {
   -webkit-app-region: no-drag;
 }
 
+.toolbar-left {
+  align-self: stretch;
+}
+
 .toolbar-center {
   flex: 1;
   -webkit-app-region: drag;
