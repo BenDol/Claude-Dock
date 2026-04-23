@@ -48,7 +48,8 @@ describe('createProvider — claude-sdk backend', () => {
         projectDir: 'C:/Projects/demo',
         dockDataDir: 'C:/tmp/dock-link',
         mcpScriptPath: 'C:/tmp/claude-dock-mcp.cjs',
-        maxToolSteps: 5
+        maxToolSteps: 5,
+        coordinatorSessionId: 'coord-session-test'
       }
     )
     expect(provider.id).toBe('claude-sdk')

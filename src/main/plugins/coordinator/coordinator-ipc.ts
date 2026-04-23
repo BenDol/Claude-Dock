@@ -159,7 +159,11 @@ export function registerCoordinatorIpc(): void {
           projectDir: process.cwd(),
           dockDataDir: getDataDir(),
           mcpScriptPath: getMcpServerSourcePath(),
-          maxToolSteps: cfg.maxToolStepsPerTurn
+          maxToolSteps: cfg.maxToolStepsPerTurn,
+          // testConnection() never spawns the MCP subprocess, so this id is
+          // unused — but ProviderDeps requires it. Fixed sentinel so logs
+          // make the source obvious if it ever does leak through.
+          coordinatorSessionId: 'coord-test-connection'
         }
       )
       return await provider.testConnection()

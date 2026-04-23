@@ -61,6 +61,22 @@ describe('buildSystemPrompt — SDK backend', () => {
     expect(prompt).not.toContain('new git worktree under ../worktrees/<slug>')
     expect(prompt).toContain('share the working tree')
   })
+
+  it('inlines coordinatorSessionId and project_dir so the LLM can satisfy MCP arg requirements', () => {
+    // Without these the hidden Claude session has no way to know what
+    // session_id to pass — every dock_* tool returns "Missing required
+    // parameter: session_id" and the Coordinator can't orchestrate.
+    const prompt = buildSystemPrompt({
+      backend: 'sdk',
+      projectDir: 'C:/Projects/demo',
+      maxToolSteps: 5,
+      enforceWorktreeInPrompt: true,
+      mcpServerKey: 'claude-dock-uat',
+      coordinatorSessionId: 'coord-abc-123'
+    })
+    expect(prompt).toContain('session_id: "coord-abc-123"')
+    expect(prompt).toContain('project_dir: "C:/Projects/demo"')
+  })
 })
 
 describe('buildSystemPrompt — LLM backend', () => {

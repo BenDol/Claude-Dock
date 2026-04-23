@@ -31,6 +31,13 @@ export interface ProviderDeps {
   mcpScriptPath: string
   /** Mirrors `config.maxToolStepsPerTurn` — becomes SDK `maxTurns`. */
   maxToolSteps: number
+  /**
+   * Orchestrator-assigned session id for the SDK-passthrough backend. Pre-binds
+   * the MCP subprocess and is surfaced to the LLM so dock_* tools can be called
+   * (every one of them requires `session_id`). Ignored by non-passthrough
+   * providers — they don't drive the dock MCP.
+   */
+  coordinatorSessionId: string
 }
 
 export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProviderPreset> = {
@@ -131,7 +138,7 @@ export function createProvider(
       return createOllamaProvider(config)
     case 'claude-sdk': {
       if (!deps) {
-        throw new Error('claude-sdk provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps)')
+        throw new Error('claude-sdk provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps, coordinatorSessionId)')
       }
       return createClaudeSdkProvider({
         projectDir: deps.projectDir,
@@ -139,6 +146,7 @@ export function createProvider(
         mcpScriptPath: deps.mcpScriptPath,
         mcpServerKey: getMcpEntryName(),
         maxToolSteps: deps.maxToolSteps,
+        coordinatorSessionId: deps.coordinatorSessionId,
         getLatestSessionId,
         setLatestSessionId
       })
