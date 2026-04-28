@@ -20,34 +20,22 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
   const setConfigPatch = useCoordinatorStore((s) => s.setConfigPatch)
   const testConnection = useCoordinatorStore((s) => s.testConnection)
   const resetConfig = useCoordinatorStore((s) => s.resetConfig)
-  const resetSessionId = useCoordinatorStore((s) => s.resetSessionId)
 
   const selectedPreset = useMemo(
     () => providers.find((p) => p.id === config?.provider),
     [providers, config?.provider]
   )
 
-  // Both Claude backends (SDK + CLI) use the user's existing Claude Code
-  // subscription and ignore API key / temperature. UI flags them collectively
-  // so we only have to add the new provider id in one place when introducing
-  // future Claude-subscription backends.
-  const isClaudeBackend = config?.provider === 'claude-sdk' || config?.provider === 'claude-cli'
-
   const onProviderChange = useCallback(
     (providerId: CoordinatorProviderId) => {
       const preset = providers.find((p) => p.id === providerId)
       if (!preset) return
       // Reset model + baseUrl + temperature to the preset defaults so switching
-      // providers doesn't leave stale values that make the next request fail
-      // or confuse the user when fields toggle visibility (e.g. Claude
-      // backends hide temperature; flipping back must not keep a stale value).
+      // providers doesn't leave stale values that make the next request fail.
       void setConfigPatch({
         provider: providerId,
         model: preset.defaultModel,
         baseUrl: preset.baseUrl ?? '',
-        // Reset to the same default the hint text advertises so toggling a
-        // Claude backend (which hides the field) doesn't leave the user with
-        // a stale temperature next time they pick a key-based backend.
         temperature: 0.2
       })
     },
@@ -113,12 +101,6 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
               </a>
             </span>
           )}
-          {isClaudeBackend && (
-            <span className="hint">
-              Uses your existing Claude Code subscription via {selectedPreset?.label ?? 'Claude'} —
-              no API key required. The coordinator runs tools internally through the dock MCP server.
-            </span>
-          )}
         </div>
 
         {selectedPreset?.requiresApiKey && (
@@ -153,37 +135,33 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         )}
 
-        {!isClaudeBackend && (
-          <div className="coord-field">
-            <label htmlFor="coord-model">Model</label>
-            <input
-              id="coord-model"
-              type="text"
-              value={config.model}
-              onChange={(e) => void setConfigPatch({ model: e.target.value })}
-              spellCheck={false}
-            />
-            {selectedPreset && (
-              <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
-            )}
-          </div>
-        )}
+        <div className="coord-field">
+          <label htmlFor="coord-model">Model</label>
+          <input
+            id="coord-model"
+            type="text"
+            value={config.model}
+            onChange={(e) => void setConfigPatch({ model: e.target.value })}
+            spellCheck={false}
+          />
+          {selectedPreset && (
+            <span className="hint">Default for {selectedPreset.label}: {selectedPreset.defaultModel}</span>
+          )}
+        </div>
 
-        {!isClaudeBackend && (
-          <div className="coord-field">
-            <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
-            <input
-              id="coord-temp"
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={config.temperature}
-              onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
-            />
-            <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
-          </div>
-        )}
+        <div className="coord-field">
+          <label htmlFor="coord-temp">Temperature ({config.temperature.toFixed(2)})</label>
+          <input
+            id="coord-temp"
+            type="number"
+            min={0}
+            max={1}
+            step={0.05}
+            value={config.temperature}
+            onChange={(e) => void setConfigPatch({ temperature: Number(e.target.value) })}
+          />
+          <span className="hint">Lower is more deterministic; 0.2 is a good default for orchestration.</span>
+        </div>
 
         <div className="coord-field-row">
           <button
@@ -247,19 +225,6 @@ export const CoordinatorSettings: React.FC<{ onClose: () => void }> = ({ onClose
           >
             Reset to defaults
           </button>
-          {isClaudeBackend && (
-            <button
-              className="coord-test-btn"
-              onClick={() => {
-                if (confirm('Start a fresh Claude session? Chat history is kept; only the hidden-session link is cleared.')) {
-                  void resetSessionId()
-                }
-              }}
-              title="Starts a new hidden Claude session on the next message. Chat history is preserved."
-            >
-              Reset Claude session
-            </button>
-          )}
         </div>
       </div>
     </div>

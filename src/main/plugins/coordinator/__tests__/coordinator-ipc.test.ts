@@ -92,11 +92,7 @@ vi.mock('../../../logger', () => ({
 import { registerCoordinatorIpc, disposeCoordinatorIpc } from '../coordinator-ipc'
 import { setServices, __resetCoordinatorServicesForTests } from '../services'
 import {
-  __resetChatStoreForTests,
-  setLatestSessionId,
-  getLatestSessionId,
-  appendMessage,
-  getHistory
+  __resetChatStoreForTests
 } from '../coordinator-chat-store'
 
 function installStubServices(): void {
@@ -151,30 +147,6 @@ describe('coordinator IPC — input validation', () => {
     await expect(h({}, 'string-not-object')).rejects.toThrow(/plain object/)
     await expect(h({}, [])).rejects.toThrow(/plain object/)
     await expect(h({}, null)).rejects.toThrow(/plain object/)
-  })
-})
-
-describe('coordinator IPC — resetSessionId', () => {
-  it('registers a RESET_SESSION_ID handler', () => {
-    expect(handlers.has(IPC.COORDINATOR_RESET_SESSION_ID)).toBe(true)
-  })
-
-  it('clears only the stored session id, not chat messages', async () => {
-    const dir = 'C:/Projects/alpha'
-    setLatestSessionId(dir, 'sess-before')
-    appendMessage(dir, { id: 'u1', role: 'user', content: 'hi', timestamp: Date.now() }, 100)
-
-    const h = handlers.get(IPC.COORDINATOR_RESET_SESSION_ID)!
-    await h({}, dir)
-
-    expect(getLatestSessionId(dir)).toBeNull()
-    // Messages must survive — distinguishes this from CLEAR_HISTORY.
-    expect(getHistory(dir).map((m) => m.id)).toEqual(['u1'])
-  })
-
-  it('rejects non-string projectDir', async () => {
-    const h = handlers.get(IPC.COORDINATOR_RESET_SESSION_ID)!
-    await expect(h({}, undefined)).rejects.toThrow(/projectDir/)
   })
 })
 

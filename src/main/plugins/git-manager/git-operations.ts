@@ -1768,10 +1768,6 @@ const CONV_COMMIT_RE = new RegExp(`^(${CONV_COMMIT_TYPES})(\\([^)]*\\))?:\\s`, '
 // Lines that clearly mean the LLM echoed the diff into the output.
 // Bullets start with a space-dash (- text), so they don't match these.
 const DIFF_MARKER_RE = /^(diff --git |index [0-9a-f]{4,}|@@ |--- [ab]?\/|--- \/dev|\+\+\+ [ab]?\/|\+\+\+ \/dev|[+-]\S)/
-// Distinctive phrases from the worked example in buildCommitPrompt. If any of
-// these show up in the output, the model copied the example instead of
-// describing the actual diff — reject so the caller retries/fails loudly.
-const EXAMPLE_LEAK_RE = /token-bucket|rate limiter|ratelimiter|api\/gateway\/rate-limit|60 req\/min|burst and refill/i
 
 /**
  * Commit-message prompt.
@@ -1786,21 +1782,19 @@ const EXAMPLE_LEAK_RE = /token-bucket|rate limiter|ratelimiter|api\/gateway\/rat
  * A one-line summary with no bullets is valid for simple commits.
  */
 const COMMIT_MSG_PROMPT = [
-  'Write ONE git commit message describing all the staged changes together.',
+  'Write ONE short git commit message describing the staged changes.',
   '',
   'Format:',
   '  <type>: <summary>',
   '',
-  '  - <detail about change A>',
-  '  - <detail about change B>',
+  '  - <optional bullet about a notable area>',
   '',
   'Rules:',
-  '- The first line uses conventional commit format: one of feat, fix, refactor, docs, chore, style, test, perf, build, ci, revert — followed by ": " and a short summary under 72 characters.',
-  '- Do NOT include a scope in parentheses after the type. Write "feat: add foo", never "feat(path/to/file.ts): add foo" or "feat(scope): add foo". The type is always immediately followed by ": ".',
-  '- The word after the colon on the first line must be lowercase.',
-  '- If the summary line alone covers everything, output just the summary line and stop.',
-  '- If there are multiple distinct changes, follow the summary line with one blank line, then bullet points starting with "- " (dash, space). Each bullet describes one change. Bullets must NEVER start with a type prefix (no "fix:", no "feat:", etc.).',
-  '- Describe all staged changes in the bullets — do not truncate to one area.',
+  '- First line: one of feat, fix, refactor, docs, chore, style, test, perf, build, ci, revert — then ": " — then a summary UNDER 72 chars.',
+  '- No scope in parentheses. Write "feat: add foo", never "feat(scope): add foo".',
+  '- Lowercase after the colon.',
+  '- If the summary alone covers it, stop. Otherwise add at most 3 bullets, each UNDER 80 chars, each starting with "- ".',
+  '- Bullets MUST NOT start with a type prefix (no "fix:", no "feat:", etc.).',
   '- Do not copy diff content (no lines starting with +, -filename, @@, diff --git, index).',
   '- Output ONLY the commit message. No quotes, no code fences, no explanation.'
 ].join('\n')
@@ -1879,46 +1873,30 @@ function cleanCommitMessage(raw: string): string {
   // This lets callers retry instead of committing with nonsense text.
   if (!CONV_COMMIT_RE.test(cleanedSummary.trim())) return ''
 
-  // Reject summaries that quote hint-block labels instead of describing the
-  // change. E.g. "feat: foo.tsx: +8 / -1 lines, touched contexts: const" —
-  // the conventional-commit prefix passes the check above, but the rest is
-  // just the model parroting the prompt.
-  const summaryBody = cleanedSummary.trim().replace(CONV_COMMIT_RE, '').trim()
-  if (HINT_ECHO_RE.test(summaryBody)) return ''
-
-  // Reject output that leaked phrases from the prompt's worked example — that
-  // means the model copied instead of describing the actual diff.
-  const combined = [cleanedSummary, ...uniqueBullets].join('\n')
-  if (EXAMPLE_LEAK_RE.test(combined)) return ''
-
   if (uniqueBullets.length === 0) return cleanedSummary.trim()
   return `${cleanedSummary.trim()}\n\n${uniqueBullets.map((b) => `- ${b}`).join('\n')}`
 }
 
-/** Assemble the LLM prompt: rules, then the actual diff. No worked example —
- *  small models tend to copy concrete examples verbatim instead of synthesizing
- *  from the diff. The schematic format in COMMIT_MSG_PROMPT is enough. */
-function buildCommitPrompt(stat: string, diff: string): string {
-  const shortDiff = diff.length > 4000 ? diff.slice(0, 4000) + '\n... (truncated)' : diff
-  return [
-    COMMIT_MSG_PROMPT,
-    '',
-    '---',
-    '',
-    'Staged changes (file stats):',
-    stat.trim(),
-    '',
-    'Diff:',
-    shortDiff,
-    '',
-    'Write the commit message for the staged changes above. Reference the actual file names, functions, and symbols that appear in the stats and diff — do not invent any topic that is not present in the diff. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
-  ].join('\n')
-}
-
-// ─── Local-LLM commit message pipeline ─────────────────────────────
-// The following helpers are used ONLY by generateViaLocalLlm. The cloud /
-// Claude paths continue to use the simpler buildCommitPrompt() above because
-// Haiku has a 200K-token context and doesn't need per-file budgeting.
+// ─── Commit-message backends ──────────────────────────────────────
+//
+// Two paths:
+//
+//   1. local-llm (default):
+//      ONE inference call against the bundled llama-server (Qwen 2.5 Coder
+//      0.5 B Q4). Prompt is `--stat` + a head/tail-trimmed diff slice.
+//      Hard wallclock deadline; on timeout / failure, fall back to a
+//      deterministic stat-driven message (no model).
+//
+//   2. anthropic-api:
+//      Direct HTTPS to api.anthropic.com using ANTHROPIC_API_KEY. Haiku
+//      4.5 has a 200 K context window, so we ship the full diff up to a
+//      512 KB cap (set in generateCommitMessage).
+//
+// Both paths run as a single inference — no per-file iteration. Earlier
+// versions sequentialised one llama-server call per staged file plus a
+// combine pass; on a 50-file commit that pegged CPU for ~30–100 s for no
+// real quality gain. The single-shot prompt + bounded diff slice is the
+// production target.
 
 interface StagedFileInfo {
   /** git --name-status code: A, M, D, R100, C95, etc. (first char is meaningful) */
@@ -1928,46 +1906,13 @@ interface StagedFileInfo {
   origPath?: string
 }
 
-interface FileDiffChunk {
-  path: string
-  status: string
-  body: string
-}
-
 /**
- * Compact structural summary of a file's diff. Captures just enough to let a
- * small LLM write a useful one-liner without feeding it the raw diff body.
- * Extraction is regex-based and best-effort: unrecognised languages produce
- * empty symbol lists and fall back to the hunk header + line counts.
- */
-interface DiffHints {
-  linesAdded: number
-  linesRemoved: number
-  /** Symbol declarations appearing on `+` lines (functions, classes, etc.). */
-  symbolsAdded: string[]
-  /** Symbol declarations appearing on `-` lines. */
-  symbolsRemoved: string[]
-  /** Import/require paths newly added (e.g. "react", "./foo"). */
-  importsAdded: string[]
-  /** Import/require paths removed. */
-  importsRemoved: string[]
-  /**
-   * Hunk-header context strings (the part after the second `@@`). Gives the
-   * enclosing function/class name for many languages via git's xfuncname.
-   */
-  hunkContexts: string[]
-}
-
-/**
- * Parse `git diff --cached --name-status -z` output (NUL-terminated) into
- * structured entries. For R/C entries the format is:
- *   <status>\0<old-path>\0<new-path>\0
- * For other statuses:
- *   <status>\0<path>\0
+ * Parse `git diff --cached --name-status -z` output (NUL-terminated).
+ *   <status>\0<path>\0                    (A, M, D, T, U, ...)
+ *   <status>\0<old-path>\0<new-path>\0    (R, C)
  */
 function parseNameStatus(raw: string): StagedFileInfo[] {
   if (!raw) return []
-  // Strip trailing NUL to avoid an empty final token
   const text = raw.endsWith('\0') ? raw.slice(0, -1) : raw
   const parts = text.split('\0')
   const out: StagedFileInfo[] = []
@@ -1990,449 +1935,240 @@ function parseNameStatus(raw: string): StagedFileInfo[] {
   return out
 }
 
-/** Human-readable status for prompt text: M/A/D/R/C etc. → word form. */
+/** Human-readable change verb for a `git --name-status` code. */
 function statusLabel(status: string): string {
   const c = (status[0] ?? '').toUpperCase()
   switch (c) {
-    case 'A': return 'added'
-    case 'M': return 'modified'
-    case 'D': return 'deleted'
-    case 'R': return 'renamed'
-    case 'C': return 'copied'
-    case 'T': return 'type-changed'
-    case 'U': return 'unmerged'
-    default: return 'changed'
+    case 'A': return 'add'
+    case 'M': return 'update'
+    case 'D': return 'delete'
+    case 'R': return 'rename'
+    case 'C': return 'copy'
+    case 'T': return 'change type of'
+    case 'U': return 'merge'
+    default:  return 'change'
   }
 }
 
+// ─── Local-LLM single-shot generator ──────────────────────────────
+
+/** Diff body cap fed to the local LLM. The model sees the head and tail of
+ *  the diff joined; head/tail split keeps signal from both ends without
+ *  feeding the tiny model a full per-file dump. */
+const LOCAL_LLM_DIFF_BUDGET = 3500
+/** Above this total diff size we skip the diff body entirely and prompt the
+ *  model with stats + file list only. */
+const LOCAL_LLM_STATS_ONLY_BYTES = 64 * 1024
+/** Above this many staged files we also skip the diff body. */
+const LOCAL_LLM_STATS_ONLY_FILES = 30
+/** Hard wallclock budget for the LLM call. On timeout we fall back to the
+ *  heuristic message — better an accurate stat-driven line than a hung UI. */
+const LOCAL_LLM_DEADLINE_MS = 20_000
+/** Output token cap for the local LLM. Keeps the model from generating
+ *  long-winded multi-paragraph messages. */
+const LOCAL_LLM_MAX_TOKENS = 200
+/** Retry attempts when cleanCommitMessage rejects the model's output. */
+const LOCAL_LLM_RETRY_ATTEMPTS = 2
+
 /**
- * Split a combined `git diff --cached` output into per-file chunks using the
- * `diff --git a/... b/...` boundary. Each chunk retains its full header so it
- * is syntactically valid on its own.
+ * Take the head + tail of a long diff joined with an explicit ellipsis
+ * marker so the model sees signal from both ends without ballooning the
+ * prompt. Diffs at or under the budget are returned unchanged.
  */
-function extractFileDiffs(diff: string): FileDiffChunk[] {
-  if (!diff) return []
-  // Ignore any trailer we appended (like "(Data files changed but diff excluded: ...)")
-  const firstHeader = diff.search(/^diff --git /m)
-  if (firstHeader < 0) return []
-  const body = diff.slice(firstHeader)
-  // Split keeping the "diff --git " markers; split on a zero-width lookahead.
-  const chunks = body.split(/(?=^diff --git )/m).map((s) => s.replace(/\s+$/, ''))
-  const out: FileDiffChunk[] = []
-  for (const chunk of chunks) {
-    if (!chunk.startsWith('diff --git ')) continue
-    // diff --git a/<old> b/<new>
-    const m = chunk.match(/^diff --git a\/(.+?) b\/(.+?)$/m)
-    const p = m ? m[2] : ''
-    // Status is populated later by merging with name-status; leave blank here.
-    out.push({ path: p, status: '', body: chunk })
-  }
-  return out
+function trimDiffBudget(diff: string, budget: number): string {
+  if (diff.length <= budget) return diff
+  const half = Math.max(500, Math.floor((budget - 32) / 2))
+  const head = diff.slice(0, half)
+  const tail = diff.slice(diff.length - half)
+  return `${head}\n... (diff trimmed) ...\n${tail}`
 }
 
 /**
- * Compute a diff character budget for the local LLM based on its current
- * context size (tokens). Heuristic: ~4 chars/token, reserve most of ctx for
- * the system prompt + instructions + response. Cap at 6000 — even with a
- * bigger context, feeding a small model a huge raw diff wastes CPU without
- * improving output. The structural-hint path handles large diffs instead.
+ * Top-level directory of a path (e.g. `src/foo/bar.ts` → `src`).
+ * Used by the heuristic fallback to pick a representative scope.
  */
-function computeDiffBudget(ctxTokens: number): number {
-  const approxChars = ctxTokens * 4
-  const budget = Math.floor(approxChars * 0.65)
-  return Math.max(2000, Math.min(6000, budget))
+function topDir(p: string): string {
+  const slash = p.indexOf('/')
+  if (slash <= 0) return ''
+  return p.slice(0, slash)
 }
 
-// Regexes for per-file hint extraction. Kept broad (not language-specific)
-// because the git-manager handles mixed-language repos. False positives are
-// cheap; we only use these hints as prompt context, not as source of truth.
-const DECL_ADD_RE = new RegExp(
-  [
-    '\\bfunction\\s+([A-Za-z_$][\\w$]*)',
-    '\\bclass\\s+([A-Za-z_$][\\w$]*)',
-    '\\binterface\\s+([A-Za-z_$][\\w$]*)',
-    '\\btype\\s+([A-Za-z_$][\\w$]*)\\s*=',
-    '\\benum\\s+([A-Za-z_$][\\w$]*)',
-    '\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)',
-    '\\bdef\\s+([A-Za-z_$][\\w$]*)',
-    '\\bpublic\\s+(?:static\\s+)?(?:async\\s+)?[\\w<>\\[\\]]+\\s+([A-Za-z_$][\\w$]*)\\s*\\(',
-    '\\bprivate\\s+(?:static\\s+)?(?:async\\s+)?[\\w<>\\[\\]]+\\s+([A-Za-z_$][\\w$]*)\\s*\\('
-  ].join('|')
-)
-const IMPORT_RE = /(?:import\s+[^'"]*from\s+|require\s*\(\s*|import\s*\(\s*)['"]([^'"]+)['"]/
-const HUNK_RE = /^@@\s+-\S+\s+\+\S+\s+@@\s*(.*)$/
+/** Pick a conventional-commit type from staged file paths. Best-effort
+ *  heuristic — wrong type is fine because the LLM path is preferred and
+ *  the heuristic only runs as a fallback. */
+function pickHeuristicType(fileInfos: StagedFileInfo[]): string {
+  const paths = fileInfos.map((f) => f.path.toLowerCase())
+  const all = (test: (p: string) => boolean): boolean =>
+    paths.length > 0 && paths.every(test)
+  const some = (test: (p: string) => boolean): boolean =>
+    paths.some(test)
 
-/**
- * Extract a compact, structural summary of a file diff suitable for prompting
- * a small LLM. Avoids feeding the whole diff body — which on large commits
- * overwhelms the tiny context window and spikes CPU on every token.
- */
-function extractDiffHints(chunk: FileDiffChunk): DiffHints {
-  const hints: DiffHints = {
-    linesAdded: 0,
-    linesRemoved: 0,
-    symbolsAdded: [],
-    symbolsRemoved: [],
-    importsAdded: [],
-    importsRemoved: [],
-    hunkContexts: []
-  }
-  const seenAdded = new Set<string>()
-  const seenRemoved = new Set<string>()
-  const seenImpAdded = new Set<string>()
-  const seenImpRemoved = new Set<string>()
-  const seenHunks = new Set<string>()
-
-  const lines = chunk.body.split('\n')
-  for (const line of lines) {
-    if (line.startsWith('@@')) {
-      const m = line.match(HUNK_RE)
-      const ctx = m?.[1]?.trim()
-      if (ctx && !seenHunks.has(ctx)) {
-        seenHunks.add(ctx)
-        hints.hunkContexts.push(ctx)
-      }
-      continue
-    }
-    // Skip file headers so we don't mis-read them as additions
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git') || line.startsWith('index ')) continue
-
-    const isAdd = line.startsWith('+')
-    const isRemove = line.startsWith('-')
-    if (!isAdd && !isRemove) continue
-
-    const content = line.slice(1)
-    if (isAdd) hints.linesAdded++
-    else hints.linesRemoved++
-
-    const imp = content.match(IMPORT_RE)
-    if (imp && imp[1]) {
-      const importPath = imp[1]
-      if (isAdd && !seenImpAdded.has(importPath)) {
-        seenImpAdded.add(importPath)
-        hints.importsAdded.push(importPath)
-      } else if (isRemove && !seenImpRemoved.has(importPath)) {
-        seenImpRemoved.add(importPath)
-        hints.importsRemoved.push(importPath)
-      }
-      continue
-    }
-
-    const decl = content.match(DECL_ADD_RE)
-    if (decl) {
-      // The matched capture group is whichever alternative fired.
-      const name = decl.slice(1).find((g) => typeof g === 'string' && g.length > 0)
-      if (name) {
-        if (isAdd && !seenAdded.has(name)) {
-          seenAdded.add(name)
-          hints.symbolsAdded.push(name)
-        } else if (isRemove && !seenRemoved.has(name)) {
-          seenRemoved.add(name)
-          hints.symbolsRemoved.push(name)
-        }
-      }
-    }
-  }
-
-  // Cap list sizes so one huge file can't flood the prompt.
-  function cap<T>(arr: T[], n: number): T[] {
-    return arr.length > n ? arr.slice(0, n) : arr
-  }
-  hints.symbolsAdded = cap(hints.symbolsAdded, 12)
-  hints.symbolsRemoved = cap(hints.symbolsRemoved, 12)
-  hints.importsAdded = cap(hints.importsAdded, 8)
-  hints.importsRemoved = cap(hints.importsRemoved, 8)
-  hints.hunkContexts = cap(hints.hunkContexts, 6)
-  return hints
+  if (all((p) => /(?:^|\/)tests?\//.test(p) || /\.test\.[a-z]+$/.test(p) || /\.spec\.[a-z]+$/.test(p))) return 'test'
+  if (all((p) => /\.(md|markdown|rst|adoc)$/.test(p) || /\/docs?\//.test(p))) return 'docs'
+  if (all((p) => /^\.github\//.test(p) || /(?:^|\/)\.gitlab-ci\.yml$/.test(p) || /(?:^|\/)circleci\//.test(p))) return 'ci'
+  if (some((p) => /(?:^|\/)package\.json$|(?:^|\/)package-lock\.json$|(?:^|\/)pnpm-lock\.yaml$|(?:^|\/)yarn\.lock$|\.gradle$|\.gradle\.kts$|(?:^|\/)build\.gradle|(?:^|\/)pom\.xml$|(?:^|\/)cargo\.toml$|(?:^|\/)pyproject\.toml$/.test(p))) return 'build'
+  if (some((p) => /\bDockerfile\b|electron-builder\.config\./.test(p) || /\.config\.[jt]s$/.test(p))) return 'chore'
+  return 'chore'
 }
 
 /**
- * Render DiffHints as a machine-readable key=value block for the LLM prompt.
+ * Deterministic commit message used as a fallback when the LLM is unavailable
+ * or its output fails validation. No inference — just stats + file paths.
  *
- * We deliberately avoid prose-like labels ("Changes: +8 / -1 lines", "Touched
- * contexts: const") because small models (0.5B-class) tend to copy those back
- * verbatim as the summary — one observed failure produced
- * `feat: CoordinatorPanel.tsx: +8 / -1 lines, touched contexts: const`.
- * The bracketed block below reads as metadata, not sentence fragments.
+ * Always produces a valid conventional-commit message that passes
+ * `cleanCommitMessage`. Designed for the worst case (huge commits, model
+ * timeouts) so the user never sees a blank input.
  */
-function formatHintsBlock(hints: DiffHints): string {
-  const parts: string[] = ['[diff-stats]', `lines=+${hints.linesAdded}/-${hints.linesRemoved}`]
-  if (hints.symbolsAdded.length > 0) parts.push(`syms_added=${hints.symbolsAdded.join(', ')}`)
-  if (hints.symbolsRemoved.length > 0) parts.push(`syms_removed=${hints.symbolsRemoved.join(', ')}`)
-  if (hints.importsAdded.length > 0) parts.push(`imports_added=${hints.importsAdded.join(', ')}`)
-  if (hints.importsRemoved.length > 0) parts.push(`imports_removed=${hints.importsRemoved.join(', ')}`)
-  if (hints.hunkContexts.length > 0) parts.push(`ctx=${hints.hunkContexts.join(' | ')}`)
-  return parts.join('\n')
-}
+function buildHeuristicCommitMessage(stat: string, fileInfos: StagedFileInfo[]): string {
+  if (fileInfos.length === 0) {
+    // No structured info; emit a generic chore line with the stat header.
+    const head = stat.split('\n').slice(-1)[0]?.trim() || 'staged files'
+    return `chore: update ${head}`
+  }
+  const type = pickHeuristicType(fileInfos)
+  const dirs = new Map<string, number>()
+  for (const f of fileInfos) {
+    const d = topDir(f.path) || '(root)'
+    dirs.set(d, (dirs.get(d) ?? 0) + 1)
+  }
+  const sortedDirs = Array.from(dirs.entries()).sort((a, b) => b[1] - a[1])
+  const fileCount = fileInfos.length
 
-// Lines that indicate the model didn't actually understand the diff —
-// generic hedging/filler with no concrete signal. These are dropped from the
-// final commit message instead of being included as noise.
-const HEDGE_LINE_RE = /^(?:\s*)(?:various\s+)?(?:minor\s+|small\s+|some\s+|a\s+few\s+)?(?:changes?|updates?|modifications?|adjustments?|tweaks?|improvements?|fixes?|refactor(?:ing)?|cleanup|miscellaneous|misc\.?|other)(?:\s+(?:were\s+)?made)?\s*\.?\s*$/i
-const UNSURE_PHRASE_RE = /\b(?:not\s+sure|unclear|unknown|cannot\s+determine|can't\s+tell|hard\s+to\s+say|i\s+(?:don'?t|cannot|can'?t)\s+(?:know|tell|determine))\b/i
-// Fragments lifted verbatim from the hint block — both the historical prose
-// format ("touched contexts:", "+8 / -1 lines") and the current key=value
-// format ("lines=+8/-1", "syms_added=..."). If any of these show up in a
-// one-line summary, the model is parroting the prompt rather than describing
-// the change. The combine pass is better off with a status-only fallback line.
-const HINT_ECHO_RE = /(?:\blines\s*=\s*[+\-]\d+\s*\/\s*-?\d+\b)|(?:\+\d+\s*\/\s*-\d+\s+lines?\b)|\b(?:syms_(?:added|removed)|imports_(?:added|removed)|diff-stats)\s*=|\b(?:touched\s+contexts?|added\s+symbols?|removed\s+symbols?|added\s+imports?|removed\s+imports?)\s*[:=]/i
+  let summary: string
+  if (sortedDirs.length === 1) {
+    summary = `${type}: update ${fileCount} file${fileCount === 1 ? '' : 's'} in ${sortedDirs[0][0]}`
+  } else {
+    const top = sortedDirs.slice(0, 2).map(([d]) => d).join(', ')
+    summary = `${type}: update ${fileCount} files across ${top}`
+  }
+  if (summary.length > 72) summary = summary.slice(0, 72).replace(/\s+\S*$/, '')
 
-/**
- * Returns true if a single line looks like a confident, informative summary
- * and is worth keeping in the commit message. Rejects pure hedging filler
- * ("minor changes", "various updates"), uncertainty phrases ("not sure what
- * changed"), and lines that only echo the hint block back ("lines=+8/-1,
- * ctx=const"). Lines that survive still need the usual cleanup.
- */
-function isConfidentSummary(line: string): boolean {
-  const trimmed = line.trim()
-  if (trimmed.length < 10) return false
-  if (HEDGE_LINE_RE.test(trimmed)) return false
-  if (UNSURE_PHRASE_RE.test(trimmed)) return false
-  if (HINT_ECHO_RE.test(trimmed)) return false
-  // Must contain at least one alphanumeric character beyond trivial fillers —
-  // require at least two "word-ish" tokens so "ok." / "done" are dropped.
-  const tokens = trimmed.split(/\s+/).filter((t) => /[A-Za-z0-9]/.test(t))
-  if (tokens.length < 3) return false
-  return true
-}
-
-/**
- * Distribute the diff budget across per-file chunks. Files smaller than their
- * fair share get their full diff; remaining budget is split evenly among the
- * larger files, truncating each with a trailing "... (truncated)" marker.
- */
-function buildPerFileBudgetedDiff(chunks: FileDiffChunk[], budget: number): string {
-  if (chunks.length === 0) return ''
-  const remaining = new Set(chunks.map((_, i) => i))
-  const allocated = new Map<number, string>()
-  let budgetLeft = budget
-
-  // Iterate: give small files their full body; if none fits the current
-  // per-file fair share, split the remaining budget evenly among the rest.
-  let changed = true
-  while (changed && remaining.size > 0) {
-    changed = false
-    const fairShare = Math.floor(budgetLeft / remaining.size)
-    if (fairShare <= 200) break
-    for (const i of Array.from(remaining)) {
-      const chunk = chunks[i]
-      if (chunk.body.length <= fairShare) {
-        allocated.set(i, chunk.body)
-        budgetLeft -= chunk.body.length
-        remaining.delete(i)
-        changed = true
-      }
+  // Up to 3 representative bullets — pick the most-changed top-dirs first.
+  const bullets: string[] = []
+  for (const [dir, count] of sortedDirs.slice(0, 3)) {
+    const sample = fileInfos.find((f) => (topDir(f.path) || '(root)') === dir)
+    if (!sample) continue
+    const verb = statusLabel(sample.status)
+    if (count === 1) {
+      bullets.push(`${verb} ${sample.path}`)
+    } else {
+      bullets.push(`${verb} ${count} files in ${dir}`)
     }
   }
-
-  if (remaining.size > 0) {
-    const fairShare = Math.max(400, Math.floor(budgetLeft / remaining.size))
-    for (const i of remaining) {
-      const chunk = chunks[i]
-      const truncated = chunk.body.slice(0, fairShare) + '\n... (truncated)'
-      allocated.set(i, truncated)
-    }
-  }
-
-  // Reassemble in original order
-  return chunks.map((_, i) => allocated.get(i) ?? '').filter(Boolean).join('\n')
+  if (bullets.length === 0) return summary
+  return `${summary}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`
 }
 
 /**
- * Build the single-shot prompt used for small commits in the local LLM.
- * Adds an explicit numbered file checklist so the model can't forget files
- * when summarizing — each bullet in the response should correspond to at
- * least one file on the checklist.
+ * Build the local-LLM prompt. ~250 chars of rules + (optional) diff slice +
+ * stat block. Keep this short — the 0.5 B-param model spends real CPU on
+ * every token of input.
  */
-function buildLocalCommitPrompt(stat: string, diff: string, fileInfos: StagedFileInfo[]): string {
-  const checklistLines: string[] = []
-  if (fileInfos.length > 0) {
-    const checklist = fileInfos
-      .map((f, i) => {
-        const label = statusLabel(f.status)
-        const rename = f.origPath && f.origPath !== f.path ? ` (from ${f.origPath})` : ''
-        return `  ${i + 1}. [${label}] ${f.path}${rename}`
-      })
-      .join('\n')
-    checklistLines.push(
-      'File checklist — every listed file must be represented (covered by the summary for uniform changes, or as its own bullet for distinct changes):',
-      checklist,
-      ''
-    )
-  }
-
-  return [
+function buildLocalLlmPrompt(
+  stat: string,
+  diff: string,
+  fileInfos: StagedFileInfo[],
+  statsOnly: boolean
+): string {
+  const fileCount = fileInfos.length
+  const blocks: string[] = [
     COMMIT_MSG_PROMPT,
     '',
     '---',
     '',
     'Staged changes (file stats):',
-    stat.trim(),
-    '',
-    ...checklistLines,
-    'Diff (per-file, budgeted):',
-    diff,
-    '',
-    'Write the commit message for the staged changes above. Reference the actual file names, functions, and symbols that appear in the stats and diff — do not invent any topic that is not present in the diff. Cover every distinct change — do not describe only one area when multiple unrelated files changed. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
-  ].join('\n')
-}
-
-/** Maximum diff-snippet length included alongside hints in the per-file
- * prompt. Kept small on purpose: the hints already carry the signal — the
- * snippet is just there so the model can describe concrete changes in prose.
- */
-const PER_FILE_SNIPPET_CAP = 400
-
-/**
- * Multi-pass phase 1 prompt: summarize ONE file's diff in one short line.
- * Feeds the LLM a compact hint block (+/- counts, added/removed symbols,
- * imports, hunk contexts) plus a tiny diff snippet — NOT the full body —
- * so CPU cost stays bounded even on huge files. The output is fed to
- * buildCombineSummariesPrompt.
- *
- * Callers should drop the result via `isConfidentSummary` if the model
- * produces pure hedging output instead of a concrete description.
- */
-function buildPerFileSummaryPrompt(
-  info: StagedFileInfo,
-  hints: DiffHints,
-  snippet: string
-): string {
-  const label = statusLabel(info.status)
-  const renameLine = info.origPath && info.origPath !== info.path
-    ? `Renamed from: ${info.origPath}\n`
-    : ''
-  const blocks: string[] = [
-    `Summarize this single staged file change in ONE short line (max 120 chars).`,
-    'Use the structural hints to describe what actually changed — interpret the added/removed symbols and imports in your own words. Do NOT copy the hint labels ("lines", "syms_added", "syms_removed", "imports_added", "imports_removed", "ctx", "diff-stats") into your answer. Do NOT quote line counts like "+N/-N" as the summary. If the hints are empty or ambiguous, reply with the single word: UNSURE. Do not guess. No conventional-commit prefixes. No quotes, no code fences, no preamble.',
-    '',
-    `File: ${info.path}`,
-    `Change type: ${label}`,
-    renameLine + `Hints (metadata — describe what these changes do, do not echo the labels):`,
-    formatHintsBlock(hints)
+    stat.trim()
   ]
-  if (snippet) {
-    blocks.push('', 'Snippet (first change):', snippet)
+  if (statsOnly) {
+    // Don't feed the diff at all; provide a compact file checklist instead so
+    // the model can name areas without seeing token-heavy content. Cap the
+    // checklist so 200-file commits don't blow the context.
+    const sample = fileInfos.slice(0, 30)
+    if (sample.length > 0) {
+      blocks.push('', `Files (${fileCount} total):`)
+      for (const f of sample) blocks.push(`  ${statusLabel(f.status)} ${f.path}`)
+      if (fileInfos.length > sample.length) {
+        blocks.push(`  ... and ${fileInfos.length - sample.length} more`)
+      }
+    }
+  } else {
+    blocks.push('', 'Diff (head + tail of the staged changes):', trimDiffBudget(diff, LOCAL_LLM_DIFF_BUDGET))
   }
-  blocks.push('', 'One-line summary:')
+  blocks.push('', 'Write the commit message now. One conventional-commit prefix; lowercase summary; at most 3 short bullets.')
   return blocks.join('\n')
 }
 
 /**
- * Pull the first added/removed line region from a diff body and cap it at
- * PER_FILE_SNIPPET_CAP characters. Keeps the per-file prompt short while
- * still giving the model one concrete chunk of diff to anchor on.
- */
-function buildShortDiffSnippet(body: string): string {
-  if (!body) return ''
-  const lines = body.split('\n')
-  let start = lines.findIndex((l) => l.startsWith('@@'))
-  if (start < 0) {
-    // No hunk header — skip any leading git diff header lines so the snippet
-    // shows actual content rather than `diff --git` / `index` / `---` / `+++`.
-    start = 0
-    while (
-      start < lines.length &&
-      (lines[start].startsWith('diff --git') ||
-        lines[start].startsWith('index ') ||
-        lines[start].startsWith('--- ') ||
-        lines[start].startsWith('+++ '))
-    ) {
-      start++
-    }
-  }
-  const tail = lines.slice(start).join('\n')
-  if (tail.length <= PER_FILE_SNIPPET_CAP) return tail
-  return tail.slice(0, PER_FILE_SNIPPET_CAP) + '\n... (truncated)'
-}
-
-/**
- * Multi-pass phase 2 prompt: combine per-file summaries into one commit
- * message. No raw diff — just the synthesized summaries — which keeps the
- * combine step well within ctx even for large commits.
- */
-function buildCombineSummariesPrompt(stat: string, summaries: Array<{ info: StagedFileInfo; text: string }>): string {
-  const list = summaries.map((s, i) => {
-    const label = statusLabel(s.info.status)
-    return `  ${i + 1}. [${label}] ${s.info.path}: ${s.text}`
-  }).join('\n')
-
-  return [
-    COMMIT_MSG_PROMPT,
-    '',
-    '---',
-    '',
-    'Staged changes (file stats):',
-    stat.trim(),
-    '',
-    'Per-file change summaries (already analyzed — combine these into ONE commit message):',
-    list,
-    '',
-    'Write a single commit message that covers ALL of the per-file summaries above. The bullet list in the message must reflect every distinct change — do not collapse unrelated files into a single bullet, and do not drop any. Start the first line with one of: feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: (no parentheses, no scope).'
-  ].join('\n')
-}
-
-// Thresholds that decide which pipeline to run. Kept small on purpose —
-// small local models (Qwen2.5-0.5B, Phi-3-mini) cannot reason over large
-// raw diffs, and forcing them to try spikes CPU without improving output.
-const SMALL_COMMIT_FILE_LIMIT = 4
-// Pinned to computeDiffBudget()'s upper bound — if that cap moves, update this
-// too so single-shot mode never hits buildPerFileBudgetedDiff truncation.
-const SMALL_COMMIT_DIFF_LIMIT = 6000
-// Above this, skip raw-diff bodies entirely and drive the per-file pass
-// from DiffHints alone. Chosen to cap worst-case prompt chars per file.
-const HINTS_ONLY_TOTAL_DIFF = 256 * 1024
-const HINTS_ONLY_FILE_COUNT = 50
-
-/**
- * Run `llm.generate` and validate the result via cleanCommitMessage, retrying
- * on empty output. Local LLMs are non-deterministic — empty/invalid responses
- * often succeed on the next attempt. Bounded to avoid runaway loops.
- * Returns the cleaned message, or the raw output from the final attempt if
- * none produced a valid message (so the caller can log diagnostics).
+ * Run `llm.generate` and validate via cleanCommitMessage, retrying on empty
+ * output. Local LLMs are non-deterministic — empty/invalid responses often
+ * succeed on the next attempt. Returns the cleaned message, or '' if every
+ * attempt failed (caller falls back to the heuristic).
  */
 async function llmGenerateCommitMessageWithRetry(
-  llm: { generate: (prompt: string, opts?: { maxTokens?: number }) => Promise<string> },
+  llm: { generate: (prompt: string, opts?: { maxTokens?: number; signal?: AbortSignal }) => Promise<string> },
   prompt: string,
-  opts: { maxTokens: number },
-  label: string,
-  attempts = 3
-): Promise<{ msg: string; lastRaw: string; attempts: number }> {
+  opts: { maxTokens: number; signal?: AbortSignal },
+  attempts = LOCAL_LLM_RETRY_ATTEMPTS
+): Promise<{ msg: string; lastRaw: string }> {
   let lastRaw = ''
   for (let i = 1; i <= attempts; i++) {
-    const raw = await llm.generate(prompt, opts)
+    if (opts.signal?.aborted) break
+    const raw = await llm.generate(prompt, { maxTokens: opts.maxTokens, signal: opts.signal })
     lastRaw = raw
     const msg = cleanCommitMessage(raw)
     if (msg) {
       if (i > 1) {
-        getServices().log(`[git-manager] local-llm ${label} succeeded on attempt ${i}/${attempts}`)
+        getServices().log(`[git-manager] local-llm succeeded on attempt ${i}/${attempts}`)
       }
-      return { msg, lastRaw, attempts: i }
+      return { msg, lastRaw }
     }
     if (i < attempts) {
       getServices().log(
-        `[git-manager] local-llm ${label} attempt ${i}/${attempts} produced empty output; retrying. raw=${JSON.stringify((raw || '').slice(0, 200))}`
+        `[git-manager] local-llm attempt ${i}/${attempts} produced empty output; retrying. raw=${JSON.stringify((raw || '').slice(0, 200))}`
       )
     }
   }
-  return { msg: '', lastRaw, attempts }
+  return { msg: '', lastRaw }
 }
 
 /**
- * Local-LLM commit message generation, tuned to avoid feeding a small model
- * huge raw diffs. The cloud providers continue to use the simpler
- * buildCommitPrompt() path.
- *
- *   - Small commits (≤SMALL_COMMIT_FILE_LIMIT files AND diff ≤ SMALL_COMMIT_DIFF_LIMIT):
- *     single-shot with a per-file budgeted diff and a file checklist.
- *   - Large commits: phase 1 summarizes each file individually using a
- *     compact hint block plus a tiny diff snippet. Low-confidence / UNSURE
- *     summaries are dropped. Phase 2 combines the kept summaries.
- *   - Extreme commits (> HINTS_ONLY_TOTAL_DIFF chars or > HINTS_ONLY_FILE_COUNT files):
- *     phase 1 runs on hints only — no diff snippet at all.
+ * Race a promise against a hard deadline. If the deadline fires first, the
+ * AbortController is signalled (so a signal-aware generate() can short-
+ * circuit) and we throw a timeout error. The underlying HTTP request to
+ * llama-server may keep running until the model finishes — that's fine,
+ * the server idle-times out anyway and the next request is queued.
  */
-async function generateViaLocalLlm(stat: string, diff: string, fileInfos: StagedFileInfo[]): Promise<string> {
+async function withDeadline<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+  outerSignal?: AbortSignal
+): Promise<T> {
+  const ctrl = new AbortController()
+  if (outerSignal) {
+    if (outerSignal.aborted) ctrl.abort()
+    else outerSignal.addEventListener('abort', () => ctrl.abort(), { once: true })
+  }
+  const deadline = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      ctrl.abort()
+      reject(new Error(`local-llm deadline exceeded after ${ms}ms`))
+    }, ms)
+    ctrl.signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
+  })
+  return Promise.race([task(ctrl.signal), deadline])
+}
+
+/**
+ * Single-shot local-LLM commit message. No per-file loop, no combine pass.
+ * Falls back to `buildHeuristicCommitMessage` on timeout / empty output —
+ * the user always gets a valid conventional-commit message.
+ */
+async function generateViaLocalLlm(
+  stat: string,
+  diff: string,
+  fileInfos: StagedFileInfo[],
+  signal?: AbortSignal
+): Promise<string> {
   const localLlm = await import('../../local-llm')
   // Plugin archives bundle their own muted copy of `./logger` — route
   // local-llm logs through the injected services logger so they actually
@@ -2442,198 +2178,52 @@ async function generateViaLocalLlm(stat: string, diff: string, fileInfos: Staged
     localLlm.setLocalLlmLoggers(s.log, s.logError)
   }
   const llm = localLlm.LocalLlmManager.getInstance()
-  const ctxTokens = llm.getContextSize()
-  const budget = computeDiffBudget(ctxTokens)
 
-  const chunks = extractFileDiffs(diff)
-  // Merge status info into chunks by path (best effort — fileInfos is authoritative)
-  const statusByPath = new Map<string, string>()
-  for (const f of fileInfos) statusByPath.set(f.path, f.status)
-  for (const c of chunks) c.status = statusByPath.get(c.path) ?? ''
-
+  const fileCount = fileInfos.length
   const totalDiffLen = diff.length
-  const fileCount = fileInfos.length || chunks.length
-  const needsMultiPass = fileCount > SMALL_COMMIT_FILE_LIMIT || totalDiffLen > SMALL_COMMIT_DIFF_LIMIT
-  const hintsOnly = totalDiffLen > HINTS_ONLY_TOTAL_DIFF || fileCount > HINTS_ONLY_FILE_COUNT
+  const statsOnly = totalDiffLen > LOCAL_LLM_STATS_ONLY_BYTES || fileCount > LOCAL_LLM_STATS_ONLY_FILES
 
   getServices().log(
-    `[git-manager] local-llm: ctx=${ctxTokens} budget=${budget} files=${fileCount} diffLen=${totalDiffLen} multiPass=${needsMultiPass} hintsOnly=${hintsOnly}`
+    `[git-manager] local-llm single-shot: files=${fileCount} diffLen=${totalDiffLen} statsOnly=${statsOnly} budget=${LOCAL_LLM_DIFF_BUDGET}`
   )
 
-  if (!needsMultiPass) {
-    const budgeted = buildPerFileBudgetedDiff(chunks, budget)
-    const prompt = buildLocalCommitPrompt(stat, budgeted || diff, fileInfos)
-    const { msg, lastRaw, attempts } = await llmGenerateCommitMessageWithRetry(
-      llm, prompt, { maxTokens: 400 }, 'single-shot'
+  const prompt = buildLocalLlmPrompt(stat, diff, fileInfos, statsOnly)
+
+  try {
+    const t0 = Date.now()
+    const result = await withDeadline(
+      (sig) =>
+        llmGenerateCommitMessageWithRetry(
+          llm,
+          prompt,
+          { maxTokens: LOCAL_LLM_MAX_TOKENS, signal: sig }
+        ),
+      LOCAL_LLM_DEADLINE_MS,
+      signal
     )
-    if (!msg) {
-      getServices().log(
-        `[git-manager] local-llm single-shot rejected after ${attempts} attempts (empty after cleanCommitMessage). raw=${JSON.stringify((lastRaw || '').slice(0, 500))}`
-      )
-      throw new Error(`Empty response from local LLM after ${attempts} attempts`)
-    }
-    return msg
-  }
-
-  // --- Multi-pass (hint-driven) ---
-  // Phase 1: per-file summaries driven by DiffHints (+ optional tiny snippet).
-  // Running sequentially avoids interleaving KV cache state on the single-worker
-  // llama server. Each prompt is ~<1KB — orders of magnitude cheaper than
-  // feeding the full per-file diff.
-  const summaries: Array<{ info: StagedFileInfo; text: string }> = []
-  const chunkByPath = new Map<string, FileDiffChunk>()
-  for (const c of chunks) chunkByPath.set(c.path, c)
-
-  for (const info of fileInfos) {
-    const chunk = chunkByPath.get(info.path)
-    const hints: DiffHints = chunk
-      ? extractDiffHints(chunk)
-      : { linesAdded: 0, linesRemoved: 0, symbolsAdded: [], symbolsRemoved: [], importsAdded: [], importsRemoved: [], hunkContexts: [] }
-    const snippet = chunk && !hintsOnly ? buildShortDiffSnippet(chunk.body) : ''
-    try {
-      const raw = await llm.generate(buildPerFileSummaryPrompt(info, hints, snippet), { maxTokens: 96 })
-      const line = (raw || '')
-        .split('\n')
-        .map((l) => l.trim())
-        .find((l) => l.length > 0) ?? ''
-      // Strip surrounding quotes/backticks/leading bullets the model may add
-      const cleaned = line
-        .replace(/^["'`]|["'`]$/g, '')
-        .replace(/^[-*]\s+/, '')
-        .replace(/^```[^\n]*$/g, '')
-        .trim()
-      // Drop the UNSURE sentinel and any low-confidence output — the combine
-      // step is better off not hearing about files the model couldn't read.
-      if (/^unsure\b/i.test(cleaned)) continue
-      if (cleaned && isConfidentSummary(cleaned)) {
-        summaries.push({ info, text: cleaned })
-      }
-    } catch (err) {
-      getServices().log(`[git-manager] per-file summary failed for ${info.path}: ${err instanceof Error ? err.message : String(err)}`)
-      // Skip this file; combine pass will still mention the others.
-    }
-  }
-
-  // Synthesize status-only fallback lines for files the model dropped
-  // (UNSURE, low-confidence, binary, or threw). Without this, renames and
-  // opaque files silently disappear from the commit message instead of
-  // showing up as "added x" / "deleted y".
-  const covered = new Set(summaries.map((s) => s.info.path))
-  for (const info of fileInfos) {
-    if (covered.has(info.path)) continue
-    summaries.push({ info, text: `${statusLabel(info.status)} ${info.path}` })
-  }
-
-  if (summaries.length === 0) {
-    throw new Error('Local LLM produced no confident per-file summaries')
-  }
-
-  // Phase 2: combine. No raw diff — just the synthesized lines.
-  const combinePrompt = buildCombineSummariesPrompt(stat, summaries)
-  const { msg, lastRaw, attempts } = await llmGenerateCommitMessageWithRetry(
-    llm, combinePrompt, { maxTokens: 500 }, 'combine pass'
-  )
-  if (!msg) {
-    const summaryPreview = summaries.slice(0, 8).map((s) => `${s.info.path}: ${s.text}`).join(' | ')
     getServices().log(
-      `[git-manager] local-llm combine pass rejected after ${attempts} attempts (empty after cleanCommitMessage). raw=${JSON.stringify((lastRaw || '').slice(0, 500))} summaries=${JSON.stringify(summaryPreview.slice(0, 400))}`
+      `[git-manager] local-llm single-shot done in ${Date.now() - t0}ms ok=${result.msg ? 'yes' : 'no'}`
     )
-    throw new Error(`Empty response from local LLM (combine pass) after ${attempts} attempts`)
+    if (result.msg) return result.msg
+    getServices().log(
+      `[git-manager] local-llm output rejected after ${LOCAL_LLM_RETRY_ATTEMPTS} attempts; using heuristic. raw=${JSON.stringify((result.lastRaw || '').slice(0, 300))}`
+    )
+  } catch (err) {
+    if (signal?.aborted) throw new Error('Commit message generation was cancelled')
+    getServices().log(
+      `[git-manager] local-llm failed; using heuristic. reason=${err instanceof Error ? err.message : String(err)}`
+    )
   }
-  // Post-filter bullet lines in the combined output — the combine model can
-  // still emit hedging bullets even when per-file summaries were concrete.
-  return filterLowConfidenceBullets(msg)
+  return buildHeuristicCommitMessage(stat, fileInfos)
 }
 
-/**
- * Drop any bullet line in the final combined commit message that looks like
- * hedging/filler. The summary line is preserved as-is — it's already been
- * validated by cleanCommitMessage (conventional-commit prefix required).
- */
-function filterLowConfidenceBullets(msg: string): string {
-  const lines = msg.split('\n')
-  const out: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/)
-    if (bulletMatch) {
-      const content = bulletMatch[1]
-      if (!isConfidentSummary(content)) continue
-    }
-    out.push(line)
-  }
-  // Collapse trailing/duplicate blank lines that may result from bullet drops
-  const collapsed = out
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/\n+$/, '')
-  return collapsed
-}
+// ─── Anthropic API backend ────────────────────────────────────────
 
-// ─── Claude Code CLI commit message pipeline ──────────────────────
-// Runs `claude -p` (print mode) against the user's logged-in subscription.
-// Two paths:
-//   - Single-shot for commits up to CLAUDE_SINGLE_SHOT_DIFF_LIMIT bytes and
-//     CLAUDE_SINGLE_SHOT_FILE_LIMIT files: one process, full diff in prompt.
-//   - Two-pass for anything bigger: phase 1 runs `claude -p` per file with a
-//     budgeted per-file diff (pool of CLAUDE_PER_FILE_POOL); phase 2 combines
-//     the summaries into the final conventional-commit message.
-// All calls accept an AbortSignal so the renderer can cancel mid-flight.
-
-// Single-shot diff cap halved vs. the original 400 KB — Claude was spending
-// noticeable wallclock on the extra ~50 K tokens with no improvement in
-// message quality. Above this we fall through to the two-pass path.
-const CLAUDE_SINGLE_SHOT_DIFF_LIMIT = 200 * 1024
-const CLAUDE_SINGLE_SHOT_FILE_LIMIT = 50
-const CLAUDE_PER_FILE_DIFF_CAP = 64 * 1024
-const CLAUDE_PER_FILE_POOL = 4
-const CLAUDE_CALL_TIMEOUT_MS = 60_000
-const CLAUDE_JOB_TIMEOUT_MS = 5 * 60_000
-
-/**
- * Slimmer prompt for the Claude Code CLI path. Claude does not need the
- * defensive rule list that COMMIT_MSG_PROMPT carries for the tiny local
- * model (it already knows conventional-commit format), and the larger
- * prompt was making `claude -p` produce verbose, multi-paragraph output
- * that took noticeably longer to stream back. This prompt keeps the
- * rules Claude actually needs and adds explicit length caps.
- */
-const CLAUDE_COMMIT_MSG_PROMPT = [
-  'Write ONE concise git commit message for the staged changes.',
-  '',
-  'Format:',
-  '  <type>: <summary>',
-  '',
-  '  - <detail A>',
-  '  - <detail B>',
-  '',
-  'Rules:',
-  '- First line uses a conventional prefix — one of feat:, fix:, refactor:, docs:, chore:, style:, test:, perf:, build:, ci:, revert: — followed by a summary UNDER 72 chars. No scope in parentheses. Lowercase after the colon.',
-  '- If one line covers it, stop after the summary. Otherwise add at most 5 bullets, each UNDER 90 chars, each starting with "- ". Bullets MUST NOT start with a type prefix.',
-  '- No paragraphs, no preamble, no closing notes, no "Generated by", no quotes, no code fences.',
-  '- Describe the actual code/file changes — do not speculate about motivation.',
-  '- Output ONLY the commit message.'
-].join('\n')
-
-export type CommitMsgProgress =
-  | { phase: 'single' }
-  | { phase: 'per-file'; done: number; total: number }
-  | { phase: 'combine' }
-
-export interface GenerateCommitMessageOptions {
-  jobId?: string
-  signal?: AbortSignal
-  onProgress?: (p: CommitMsgProgress) => void
-}
-
-/** Build the Claude single-shot commit prompt. Unlike buildCommitPrompt (which
- *  is tuned for the tiny local LLM and caps the diff at 4000 chars), this
- *  passes up to CLAUDE_SINGLE_SHOT_DIFF_LIMIT of diff — well inside Claude's
- *  ~200K-token window. Uses the slimmer CLAUDE_COMMIT_MSG_PROMPT instead of
- *  the defensive COMMIT_MSG_PROMPT so output stays terse. */
-function buildClaudeCommitPrompt(stat: string, diff: string): string {
+/** Slim Anthropic prompt — Haiku 4.5 doesn't need the defensive small-model
+ *  rules. Diff is shipped whole (capped upstream at 512 KB). */
+function buildAnthropicCommitPrompt(stat: string, diff: string): string {
   return [
-    CLAUDE_COMMIT_MSG_PROMPT,
+    COMMIT_MSG_PROMPT,
     '',
     '---',
     '',
@@ -2645,256 +2235,15 @@ function buildClaudeCommitPrompt(stat: string, diff: string): string {
   ].join('\n')
 }
 
-/** Claude-side combine prompt for the two-pass path. Keeps the length caps
- *  from CLAUDE_COMMIT_MSG_PROMPT so the final message does not balloon even
- *  when many per-file summaries are stitched together. */
-function buildClaudeCombinePrompt(
-  stat: string,
-  summaries: Array<{ info: StagedFileInfo; text: string }>
-): string {
-  const list = summaries.map((s, i) => {
-    const label = statusLabel(s.info.status)
-    return `  ${i + 1}. [${label}] ${s.info.path}: ${s.text}`
-  }).join('\n')
-
-  return [
-    CLAUDE_COMMIT_MSG_PROMPT,
-    '',
-    '---',
-    '',
-    'Staged changes (file stats):',
-    stat.trim(),
-    '',
-    'Per-file summaries (already analyzed — combine into ONE message):',
-    list,
-    '',
-    'Merge related summaries into a single bullet where sensible; drop trivial churn. Stay within the 5-bullet / 90-char caps.'
-  ].join('\n')
-}
-
-/** Spawn `claude -p` once, pipe the prompt on stdin, return stdout.
- *  Model === 'default' omits the --model flag so `claude -p` uses the user's
- *  configured default. AbortSignal cleanly SIGTERMs (then SIGKILLs) the child. */
-function spawnClaudeOnce(prompt: string, model: string, signal?: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error('Commit message generation was cancelled'))
-      return
-    }
-    const args = ['-p', '--max-turns', '1', '--output-format', 'text']
-    if (model && model !== 'default') {
-      args.splice(1, 0, '--model', model)
-    }
-    const proc: ChildProcess = spawn('claude', args, {
-      timeout: CLAUDE_CALL_TIMEOUT_MS,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: process.platform === 'win32'
-    })
-    // BE-5: cap stdout/stderr at OUTPUT_BUFFER_CAP so a misbehaving `claude`
-    // can't OOM the main process. Commit messages are always << 1 MB.
-    const OUTPUT_BUFFER_CAP = 1024 * 1024
-    let out = ''
-    let err = ''
-    let outOverflowed = false
-    let killed = false
-    const appendCapped = (existing: string, chunk: Buffer, flag: { o: boolean }): string => {
-      if (existing.length >= OUTPUT_BUFFER_CAP) { flag.o = true; return existing }
-      const room = OUTPUT_BUFFER_CAP - existing.length
-      const s = chunk.toString('utf8')
-      if (s.length <= room) return existing + s
-      flag.o = true
-      return existing + s.slice(0, room)
-    }
-    const outFlag = { o: false }
-    const errFlag = { o: false }
-    // BE-1: on Windows, spawning with shell:true wraps claude in cmd.exe.
-    // proc.kill('SIGTERM') only kills cmd.exe; the grandchild claude.exe
-    // survives until its pipes close. Use `taskkill /F /T` to tree-kill.
-    const killTree = (): void => {
-      try {
-        if (process.platform === 'win32' && proc.pid) {
-          spawn('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { shell: false, stdio: 'ignore' })
-            .on('error', () => { /* best effort */ })
-        } else {
-          proc.kill('SIGTERM')
-        }
-      } catch { /* already gone */ }
-      setTimeout(() => {
-        try { proc.kill('SIGKILL') } catch { /* already gone */ }
-      }, 2000)
-    }
-    const onAbort = (): void => {
-      killed = true
-      killTree()
-    }
-    if (signal) signal.addEventListener('abort', onAbort, { once: true })
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      out = appendCapped(out, chunk, outFlag)
-      if (outFlag.o && !outOverflowed) {
-        outOverflowed = true
-        getServices().log(`[git-manager] claude-cli stdout exceeded ${OUTPUT_BUFFER_CAP} bytes — truncating`)
-        killTree()
-      }
-    })
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      err = appendCapped(err, chunk, errFlag)
-    })
-    proc.on('error', (e: Error) => {
-      signal?.removeEventListener('abort', onAbort)
-      reject(e)
-    })
-    proc.on('close', (code: number | null) => {
-      signal?.removeEventListener('abort', onAbort)
-      if (killed || signal?.aborted) {
-        reject(new Error('Commit message generation was cancelled'))
-        return
-      }
-      if (code !== 0) {
-        reject(new Error((err.trim() || `claude exited with code ${code ?? 'null'}`).slice(0, 4000)))
-      } else {
-        resolve(out)
-      }
-    })
-    try {
-      proc.stdin?.write(prompt)
-      proc.stdin?.end()
-    } catch (e) {
-      signal?.removeEventListener('abort', onAbort)
-      reject(e instanceof Error ? e : new Error(String(e)))
-    }
-  })
-}
-
-async function generateViaClaudeCli(
+async function generateViaAnthropicAPI(
   stat: string,
   diff: string,
-  fileInfos: StagedFileInfo[],
-  opts: { model: string; signal?: AbortSignal; onProgress?: (p: CommitMsgProgress) => void }
+  signal?: AbortSignal
 ): Promise<string> {
-  const { model, signal, onProgress } = opts
-  const fileCount = fileInfos.length
-  const diffLen = diff.length
-  const needsMultiPass =
-    diffLen > CLAUDE_SINGLE_SHOT_DIFF_LIMIT ||
-    fileCount > CLAUDE_SINGLE_SHOT_FILE_LIMIT
-
-  getServices().log(
-    `[git-manager] claude-cli: model=${model} files=${fileCount} diffLen=${diffLen} multiPass=${needsMultiPass}`
-  )
-
-  // ── Single-shot ──────────────────────────────────────────────────
-  if (!needsMultiPass) {
-    onProgress?.({ phase: 'single' })
-    const prompt = buildClaudeCommitPrompt(stat, diff)
-    const t0 = Date.now()
-    const raw = await spawnClaudeOnce(prompt, model, signal)
-    getServices().log(
-      `[git-manager] claude-cli phase=single bytes=${prompt.length} ms=${Date.now() - t0}`
-    )
-    const msg = cleanCommitMessage(raw)
-    if (!msg) throw new Error('Empty response from Claude CLI (single-shot)')
-    return filterLowConfidenceBullets(msg)
-  }
-
-  // ── Two-pass: per-file summaries + combine ───────────────────────
-  const chunks = extractFileDiffs(diff)
-  const chunkByPath = new Map<string, FileDiffChunk>()
-  for (const c of chunks) chunkByPath.set(c.path, c)
-
-  const summaries: Array<{ info: StagedFileInfo; text: string }> = []
-  let done = 0
-  const total = fileInfos.length
-  onProgress?.({ phase: 'per-file', done, total })
-
-  // Run per-file summaries in a bounded pool to avoid swarming the user's
-  // subscription with 50+ parallel Claude processes.
-  let cursor = 0
-  const workers: Promise<void>[] = []
-  for (let w = 0; w < Math.min(CLAUDE_PER_FILE_POOL, total); w++) {
-    workers.push((async () => {
-      while (cursor < total) {
-        if (signal?.aborted) return
-        const idx = cursor++
-        const info = fileInfos[idx]
-        const chunk = chunkByPath.get(info.path)
-        const hints: DiffHints = chunk
-          ? extractDiffHints(chunk)
-          : { linesAdded: 0, linesRemoved: 0, symbolsAdded: [], symbolsRemoved: [], importsAdded: [], importsRemoved: [], hunkContexts: [] }
-        // Per-file snippet — bigger than the local LLM path since Claude can
-        // handle it. Cap per file to CLAUDE_PER_FILE_DIFF_CAP.
-        let snippet = ''
-        if (chunk) {
-          const body = chunk.body
-          snippet = body.length > CLAUDE_PER_FILE_DIFF_CAP
-            ? body.slice(0, CLAUDE_PER_FILE_DIFF_CAP) + '\n... (truncated)'
-            : body
-        }
-        const prompt = buildPerFileSummaryPrompt(info, hints, snippet)
-        const tFile = Date.now()
-        try {
-          const raw = await spawnClaudeOnce(prompt, model, signal)
-          const line = (raw || '')
-            .split('\n')
-            .map((l) => l.trim())
-            .find((l) => l.length > 0) ?? ''
-          const cleaned = line
-            .replace(/^["'`]|["'`]$/g, '')
-            .replace(/^[-*]\s+/, '')
-            .replace(/^```[^\n]*$/g, '')
-            .trim()
-          getServices().log(
-            `[git-manager] claude-cli phase=per-file file=${info.path} bytes=${prompt.length} ms=${Date.now() - tFile}`
-          )
-          if (/^unsure\b/i.test(cleaned)) {
-            // fall through — will be synthesised below
-          } else if (cleaned && isConfidentSummary(cleaned)) {
-            summaries.push({ info, text: cleaned })
-          }
-        } catch (err) {
-          if (signal?.aborted) return
-          getServices().log(
-            `[git-manager] claude-cli per-file failed for ${info.path}: ${err instanceof Error ? err.message : String(err)}`
-          )
-          // Swallow; the covered-set fallback below will synthesise a line.
-        } finally {
-          done++
-          onProgress?.({ phase: 'per-file', done, total })
-        }
-      }
-    })())
-  }
-  await Promise.all(workers)
-  if (signal?.aborted) throw new Error('Commit message generation was cancelled')
-
-  // Synthesize status-only fallback lines for files Claude dropped.
-  const covered = new Set(summaries.map((s) => s.info.path))
-  for (const info of fileInfos) {
-    if (covered.has(info.path)) continue
-    summaries.push({ info, text: `${statusLabel(info.status)} ${info.path}` })
-  }
-  if (summaries.length === 0) {
-    throw new Error('Claude CLI produced no confident per-file summaries')
-  }
-
-  // Phase 2: combine. Use the Claude-specific combine prompt so the final
-  // message respects the same terse bullet caps as the single-shot path.
-  onProgress?.({ phase: 'combine' })
-  const combinePrompt = buildClaudeCombinePrompt(stat, summaries)
-  const tCombine = Date.now()
-  const raw = await spawnClaudeOnce(combinePrompt, model, signal)
-  getServices().log(
-    `[git-manager] claude-cli phase=combine bytes=${combinePrompt.length} ms=${Date.now() - tCombine}`
-  )
-  const msg = cleanCommitMessage(raw)
-  if (!msg) throw new Error('Empty response from Claude CLI (combine pass)')
-  return filterLowConfidenceBullets(msg)
-}
-
-async function generateViaAnthropicAPI(stat: string, diff: string): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set')
 
-  const prompt = buildCommitPrompt(stat, diff)
+  const prompt = buildAnthropicCommitPrompt(stat, diff)
 
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
@@ -2903,6 +2252,10 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
   })
 
   const response = await new Promise<string>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Commit message generation was cancelled'))
+      return
+    }
     const req = https.request({
       hostname: 'api.anthropic.com',
       path: '/v1/messages',
@@ -2929,6 +2282,10 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
     })
     req.on('error', (e) => reject(e))
     req.setTimeout(15000, () => { req.destroy(); reject(new Error('Anthropic API request timed out')) })
+    if (signal) {
+      const onAbort = (): void => { req.destroy(new Error('Commit message generation was cancelled')) }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
     req.write(body)
     req.end()
   })
@@ -2938,10 +2295,11 @@ async function generateViaAnthropicAPI(stat: string, diff: string): Promise<stri
   return msg
 }
 
-// File extensions that are data/binary — include in stat but exclude from diff
+// ─── File-extension classifier (data files excluded from the diff) ─
+
 const DATA_FILE_PATTERNS = /\.(jsonl|json|csv|tsv|parquet|arrow|sqlite|db|pkl|pickle|npy|npz|h5|hdf5|bin|dat|model|onnx|pt|pth|safetensors|gguf|weights|tar|gz|zip|7z|rar|bz2|xz|log|lock)$/i
 
-/** Build git pathspec excludes for data files: [':(exclude)*.jsonl', ':(exclude)*.csv', ...] */
+/** Build git pathspec excludes for data files: [':(exclude)*.jsonl', ...] */
 function getDataFileExcludes(_cwd: string): string[] {
   const exts = ['jsonl', 'json', 'csv', 'tsv', 'parquet', 'arrow', 'sqlite', 'db',
     'pkl', 'pickle', 'npy', 'npz', 'h5', 'hdf5', 'bin', 'dat', 'model', 'onnx',
@@ -2950,15 +2308,37 @@ function getDataFileExcludes(_cwd: string): string[] {
   return exts.map((ext) => `:(exclude)*.${ext}`)
 }
 
-type CommitMsgBackend = 'local-llm' | 'claude-cli' | 'anthropic-api'
+// ─── Backend selection + job orchestration ────────────────────────
 
-/** Walk up to 5 levels from cwd looking for the nearest configured setting.
- *  Submodule roots often inherit plugin settings from the parent project.
- *  Each key is resolved independently — e.g. backend may live in the parent
- *  while model is overridden in the submodule. */
+type CommitMsgBackend = 'local-llm' | 'anthropic-api'
+
+/** Whole-job timeout. Local LLM has its own (shorter) deadline; this is the
+ *  outer wallclock cap that applies to every backend, primarily protecting
+ *  the Anthropic path. */
+const COMMIT_MSG_JOB_TIMEOUT_MS = 5 * 60_000
+
+export type CommitMsgProgress =
+  | { phase: 'single' }
+  | { phase: 'fallback' }
+
+export interface GenerateCommitMessageOptions {
+  jobId?: string
+  signal?: AbortSignal
+  onProgress?: (p: CommitMsgProgress) => void
+}
+
+/**
+ * Walk up to 5 levels from cwd looking for the nearest configured backend
+ * setting. Submodule roots often inherit plugin settings from the parent.
+ *
+ * Backwards-compatibility: legacy `'claude-cli'` and `enableClaude=true` opt
+ * into the (now removed) Claude Code subscription path. Both migrate
+ * silently to `'local-llm'` here so existing installs keep working without
+ * the user touching settings — they can flip to `'anthropic-api'` if they
+ * have a key.
+ */
 function lookupCommitMsgSettings(cwd: string): {
   backend: CommitMsgBackend
-  claudeModel: string
   settingsDir: string
 } {
   const findSetting = (key: string): { value: unknown; dir: string } => {
@@ -2973,21 +2353,24 @@ function lookupCommitMsgSettings(cwd: string): {
     return { value: undefined, dir: cwd }
   }
   const backendR = findSetting('commitMsgBackend')
-  const modelR = findSetting('commitMsgClaudeModel')
   const legacyR = findSetting('enableClaude')
 
   let backend: CommitMsgBackend = 'local-llm'
   let settingsDir = cwd
-  if (backendR.value === 'claude-cli' || backendR.value === 'anthropic-api' || backendR.value === 'local-llm') {
+  if (backendR.value === 'anthropic-api' || backendR.value === 'local-llm') {
     backend = backendR.value
     settingsDir = backendR.dir
+  } else if (backendR.value === 'claude-cli') {
+    // Legacy subscription backend — silently migrate.
+    backend = 'local-llm'
+    settingsDir = backendR.dir
+    getServices().log('[git-manager] migrated legacy backend claude-cli -> local-llm')
   } else if (legacyR.value === true) {
-    // One-way migration from the old boolean: treat opt-in as claude-cli.
-    backend = 'claude-cli'
+    backend = 'local-llm'
     settingsDir = legacyR.dir
+    getServices().log('[git-manager] migrated legacy enableClaude=true -> local-llm')
   }
-  const claudeModel = typeof modelR.value === 'string' && modelR.value ? modelR.value : 'haiku'
-  return { backend, claudeModel, settingsDir }
+  return { backend, settingsDir }
 }
 
 // Registry of in-flight commit-message generation jobs keyed by jobId so the
@@ -3013,9 +2396,8 @@ export async function generateCommitMessage(
   cwd: string,
   opts: GenerateCommitMessageOptions = {}
 ): Promise<string> {
-  // Get staged file list, stat, name-status, and diff.
-  // Cap diff fetch at 128 KB for local-llm; bump to 512 KB so the Claude path
-  // can actually see the whole commit on the single-shot branch.
+  // Cap diff fetch at 512 KB so the Anthropic path can ship most commits
+  // whole. Local-LLM trims further internally (LOCAL_LLM_DIFF_BUDGET).
   const MAX_DIFF_BYTES = 512 * 1024
   const [namesResult, statResult, nameStatusResult, diffResult] = await Promise.all([
     gitExec(cwd, ['diff', '--cached', '--name-only'], 5000),
@@ -3024,7 +2406,7 @@ export async function generateCommitMessage(
     gitExec(cwd, ['diff', '--cached', '--name-status', '-z'], 5000),
     // Exclude large data files from the diff to avoid overwhelming the LLM.
     // core.quotePath=false keeps paths with spaces/unicode unquoted so they
-    // match the raw paths returned by `--name-status -z` in extractFileDiffs.
+    // match the raw paths returned by `--name-status -z`.
     new Promise<{ stdout: string; stderr: string }>((resolve) => {
       const args = ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--unified=1', '--', '.', ...getDataFileExcludes(cwd)]
       execFile('git', args, { cwd, timeout: 15000, maxBuffer: MAX_DIFF_BYTES }, (err, stdout) => {
@@ -3047,9 +2429,9 @@ export async function generateCommitMessage(
 
   const fileInfos = parseNameStatus(nameStatusResult.stdout)
 
-  const { backend, claudeModel, settingsDir } = lookupCommitMsgSettings(cwd)
+  const { backend, settingsDir } = lookupCommitMsgSettings(cwd)
   getServices().log(
-    `[git-manager] generating commit message: backend=${backend} model=${claudeModel} settingsDir=${settingsDir} stat=${stat.length} chars, diff=${diff.length} chars, files=${fileInfos.length}, dataFiles=${dataFiles.length}`
+    `[git-manager] generating commit message: backend=${backend} settingsDir=${settingsDir} stat=${stat.length} chars, diff=${diff.length} chars, files=${fileInfos.length}, dataFiles=${dataFiles.length}`
   )
   const t0 = Date.now()
 
@@ -3061,11 +2443,9 @@ export async function generateCommitMessage(
     if (opts.signal.aborted) controller.abort()
     else opts.signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
-  // Whole-job timeout (Claude two-pass can legitimately take a minute, but not
-  // five). Local LLM path ignores this since it doesn't accept a signal.
-  const jobTimeout = setTimeout(() => controller.abort(), CLAUDE_JOB_TIMEOUT_MS)
-  // BE-3: refuse duplicate jobIds so a second caller can't stomp on an
-  // in-flight controller and break cancellation for the first job.
+  const jobTimeout = setTimeout(() => controller.abort(), COMMIT_MSG_JOB_TIMEOUT_MS)
+  // Refuse duplicate jobIds so a second caller can't stomp on an in-flight
+  // controller and break cancellation for the first job.
   if (opts.jobId) {
     if (activeCommitMsgJobs.has(opts.jobId)) {
       clearTimeout(jobTimeout)
@@ -3076,29 +2456,22 @@ export async function generateCommitMessage(
 
   try {
     let msg: string
+    opts.onProgress?.({ phase: 'single' })
     switch (backend) {
-      case 'claude-cli':
-        msg = await generateViaClaudeCli(stat, diff, fileInfos, {
-          model: claudeModel,
-          signal: controller.signal,
-          onProgress: opts.onProgress
-        })
-        getServices().log(`[git-manager] Claude CLI responded in ${Date.now() - t0}ms`)
-        break
       case 'anthropic-api':
-        // BE-12: fail loudly rather than silently fall back. The user
-        // explicitly picked this backend — hiding the misconfig is worse than
-        // surfacing it in the UI toast.
+        // Fail loudly rather than silently fall back. The user explicitly
+        // picked this backend — hiding the misconfig is worse than surfacing
+        // it in the UI toast.
         if (!process.env.ANTHROPIC_API_KEY) {
-          throw new Error('ANTHROPIC_API_KEY is not set — set the env var or switch backend to Local LLM or Claude Code in Git Manager settings.')
+          throw new Error('ANTHROPIC_API_KEY is not set — set the env var or switch to Local LLM in Git Manager settings.')
         }
-        msg = await generateViaAnthropicAPI(stat, diff)
-        getServices().log(`[git-manager] ${backend} responded in ${Date.now() - t0}ms`)
+        msg = await generateViaAnthropicAPI(stat, diff, controller.signal)
+        getServices().log(`[git-manager] anthropic-api responded in ${Date.now() - t0}ms`)
         break
       case 'local-llm':
       default:
-        msg = await generateViaLocalLlm(stat, diff, fileInfos)
-        getServices().log(`[git-manager] Local LLM responded in ${Date.now() - t0}ms`)
+        msg = await generateViaLocalLlm(stat, diff, fileInfos, controller.signal)
+        getServices().log(`[git-manager] local-llm responded in ${Date.now() - t0}ms`)
         break
     }
     return msg
@@ -3109,15 +2482,15 @@ export async function generateCommitMessage(
       throw new Error('Commit message generation was cancelled')
     }
     const hint =
-      backend === 'claude-cli' ? ' Check that `claude` is installed and logged in.' :
       backend === 'anthropic-api' ? ' Check that ANTHROPIC_API_KEY is valid.' :
-      ' You can switch to Claude Code in Git Manager settings.'
+      ' The local LLM should self-heal — try again, or switch backend in Git Manager settings.'
     throw new Error(`Could not generate commit message (${backend}): ${reason}${hint}`)
   } finally {
     clearTimeout(jobTimeout)
     if (opts.jobId) activeCommitMsgJobs.delete(opts.jobId)
   }
 }
+
 
 // ── Submodule list cache (in-memory + disk) ─────────────────────────
 // Stale-while-revalidate: return cached list instantly, refresh in background.
@@ -4840,16 +4213,18 @@ async function searchWorking(cwd: string, query: string, maxResults: number, gen
 // Internal helpers exposed for unit tests only. Not part of the public API —
 // callers outside the git-manager plugin should not use these.
 export const __testInternals = {
-  extractDiffHints,
-  formatHintsBlock,
-  isConfidentSummary,
-  buildShortDiffSnippet,
-  buildPerFileSummaryPrompt,
-  filterLowConfidenceBullets,
-  computeDiffBudget,
   cleanCommitMessage,
-  buildClaudeCommitPrompt,
+  parseNameStatus,
+  statusLabel,
+  trimDiffBudget,
+  buildHeuristicCommitMessage,
+  buildLocalLlmPrompt,
+  buildAnthropicCommitPrompt,
+  pickHeuristicType,
   lookupCommitMsgSettings,
-  CLAUDE_SINGLE_SHOT_DIFF_LIMIT,
-  CLAUDE_SINGLE_SHOT_FILE_LIMIT
+  LOCAL_LLM_DIFF_BUDGET,
+  LOCAL_LLM_STATS_ONLY_BYTES,
+  LOCAL_LLM_STATS_ONLY_FILES,
+  LOCAL_LLM_DEADLINE_MS,
+  LOCAL_LLM_MAX_TOKENS
 }

@@ -5707,15 +5707,12 @@ const WorkingChanges: React.FC<{
     onBusyChange?.(!!committing || generating)
   }, [committing, generating, onBusyChange])
 
-  // Commit-msg generation progress — driven by the backend when the claude-cli
-  // path is in its per-file summarisation phase.
+  // Commit-msg generation progress.
   useEffect(() => {
     const off = getDockApi().gitManager.onCommitMsgProgress?.((p) => {
       if (p.jobId !== activeJobIdRef.current) return
-      if (p.phase === 'per-file' && p.total != null) {
-        setGenProgress(`Summarising ${p.done ?? 0}/${p.total} files via Claude…`)
-      } else if (p.phase === 'combine') {
-        setGenProgress('Combining summaries into commit message…')
+      if (p.phase === 'fallback') {
+        setGenProgress('Local LLM unavailable — using stat-based fallback…')
       } else {
         setGenProgress(null)
       }
@@ -10906,16 +10903,8 @@ const PLUGIN_SETTINGS: SettingEntry[] = [
   { key: 'escToHide', label: 'Press Esc to hide window', type: 'boolean', default: true },
   { key: 'autoGenerateCommitMsg', label: 'Auto-generate commit messages', type: 'boolean', default: true },
   { key: 'commitMsgBackend', label: 'Commit message backend', type: 'select', default: 'local-llm', options: [
-    { value: 'local-llm',     label: 'Local LLM (fast, small)' },
-    { value: 'claude-cli',    label: 'Claude Code (your subscription)' },
+    { value: 'local-llm',     label: 'Local LLM (on-device)' },
     { value: 'anthropic-api', label: 'Anthropic API (ANTHROPIC_API_KEY)' }
-  ]},
-  { key: 'commitMsgClaudeModel', label: 'Claude model', type: 'select', default: 'haiku',
-    dependsOn: { key: 'commitMsgBackend', value: 'claude-cli' }, options: [
-    { value: 'haiku',   label: 'Haiku — fast, cheap' },
-    { value: 'sonnet',  label: 'Sonnet — balanced' },
-    { value: 'opus',    label: 'Opus — highest quality' },
-    { value: 'default', label: 'Subscription default' }
   ]},
   { key: 'autoFetchAll', label: 'Auto fetch all on open and on interval', type: 'boolean', default: false },
   { key: 'autoRecheckMinutes', label: 'Auto recheck interval (minutes, 0 to disable)', type: 'number', default: 15 },

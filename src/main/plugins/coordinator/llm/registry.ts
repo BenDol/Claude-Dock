@@ -5,6 +5,11 @@
  * default endpoint, default model, and whether an API key is required.
  * The orchestrator calls `createProvider(id, config)` to get an LLMProvider
  * instance tuned to the selected backend.
+ *
+ * Anthropic access is API-key only — see the `'anthropic'` preset below.
+ * Subscription-based backends (the bundled `claude` CLI, the
+ * `@anthropic-ai/claude-agent-sdk` passthrough) were removed in favour of
+ * direct HTTPS to api.anthropic.com.
  */
 
 import type { CoordinatorProviderId, CoordinatorProviderPreset } from '../../../../shared/coordinator-types'
@@ -13,33 +18,6 @@ import { createOpenAICompatProvider } from './openai-compat'
 import { createAnthropicProvider } from './anthropic'
 import { createGeminiProvider } from './gemini'
 import { createOllamaProvider } from './ollama'
-import { createClaudeSdkProvider } from './claude-sdk'
-import { createClaudeCliProvider } from './claude-cli'
-import {
-  getLatestSessionId,
-  setLatestSessionId
-} from '../coordinator-chat-store'
-import { getMcpEntryName } from '../../../../shared/env-profile'
-
-/**
- * Per-call context the SDK backend needs — not derivable from `ProviderConfig`
- * alone. The orchestrator supplies this; the test-connection IPC path can
- * skip it (SDK `testConnection()` ignores MCP/session state).
- */
-export interface ProviderDeps {
-  projectDir: string
-  dockDataDir: string
-  mcpScriptPath: string
-  /** Mirrors `config.maxToolStepsPerTurn` — becomes SDK `maxTurns`. */
-  maxToolSteps: number
-  /**
-   * Orchestrator-assigned session id for the SDK-passthrough backend. Pre-binds
-   * the MCP subprocess and is surfaced to the LLM so dock_* tools can be called
-   * (every one of them requires `session_id`). Ignored by non-passthrough
-   * providers — they don't drive the dock MCP.
-   */
-  coordinatorSessionId: string
-}
 
 export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProviderPreset> = {
   groq: {
@@ -101,21 +79,6 @@ export const PROVIDER_PRESETS: Record<CoordinatorProviderId, CoordinatorProvider
     label: 'OpenAI-compatible (custom)',
     defaultModel: '',
     requiresApiKey: false
-  },
-  'claude-sdk': {
-    id: 'claude-sdk',
-    label: 'Claude Code subscription (SDK)',
-    // The SDK picks the model; this string is display-only in the UI.
-    defaultModel: 'claude-opus-4-7',
-    requiresApiKey: false
-  },
-  'claude-cli': {
-    id: 'claude-cli',
-    label: 'Claude Code subscription (CLI)',
-    // The CLI accepts model aliases (e.g. 'opus') and full names. Display-only
-    // here; the actual flag value comes from `config.model` at chat-time.
-    defaultModel: 'claude-opus-4-7',
-    requiresApiKey: false
   }
 }
 
@@ -129,8 +92,7 @@ export function getPreset(id: CoordinatorProviderId): CoordinatorProviderPreset 
 
 export function createProvider(
   id: CoordinatorProviderId,
-  config: ProviderConfig,
-  deps?: ProviderDeps
+  config: ProviderConfig
 ): LLMProvider {
   switch (id) {
     case 'groq':
@@ -145,36 +107,6 @@ export function createProvider(
       return createGeminiProvider(config)
     case 'ollama':
       return createOllamaProvider(config)
-    case 'claude-sdk': {
-      if (!deps) {
-        throw new Error('claude-sdk provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps, coordinatorSessionId)')
-      }
-      return createClaudeSdkProvider({
-        projectDir: deps.projectDir,
-        dockDataDir: deps.dockDataDir,
-        mcpScriptPath: deps.mcpScriptPath,
-        mcpServerKey: getMcpEntryName(),
-        maxToolSteps: deps.maxToolSteps,
-        coordinatorSessionId: deps.coordinatorSessionId,
-        getLatestSessionId,
-        setLatestSessionId
-      })
-    }
-    case 'claude-cli': {
-      if (!deps) {
-        throw new Error('claude-cli provider requires ProviderDeps (projectDir, dockDataDir, mcpScriptPath, maxToolSteps, coordinatorSessionId)')
-      }
-      return createClaudeCliProvider({
-        projectDir: deps.projectDir,
-        dockDataDir: deps.dockDataDir,
-        mcpScriptPath: deps.mcpScriptPath,
-        mcpServerKey: getMcpEntryName(),
-        maxToolSteps: deps.maxToolSteps,
-        coordinatorSessionId: deps.coordinatorSessionId,
-        getLatestSessionId,
-        setLatestSessionId
-      })
-    }
     default: {
       const _exhaustive: never = id
       throw new Error(`Unknown provider id: ${_exhaustive}`)

@@ -1,106 +1,57 @@
 import { describe, it, expect } from 'vitest'
 import { buildSystemPrompt } from '../llm/system-prompt'
 
-describe('buildSystemPrompt — SDK backend', () => {
-  it('uses the supplied mcpServerKey to build MCP-prefixed tool names', () => {
+describe('buildSystemPrompt', () => {
+  it('uses short tool names — no MCP prefix in the prompt', () => {
     const prompt = buildSystemPrompt({
-      backend: 'sdk',
       projectDir: 'C:/Projects/demo',
-      maxToolSteps: 5,
-      enforceWorktreeInPrompt: true,
-      mcpServerKey: 'claude-dock-prod'
+      maxToolSteps: 6,
+      enforceWorktreeInPrompt: true
     })
-
-    // All four terminal-orchestration tools must appear, fully prefixed
-    // with the `-terminals` sibling server key (see DOCK_MCP_TOOLSET in
-    // claude-dock-mcp.cjs). Without the sibling suffix Claude Code would
-    // route the calls to the wrong server and strict-mode MCP would reject.
-    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_list_terminals')
-    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_spawn_terminal')
-    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_prompt_terminal')
-    expect(prompt).toContain('mcp__claude-dock-prod-terminals__dock_close_terminal')
-
-    // The LLM-backend short names must NOT leak into the SDK prompt —
-    // the SDK has no adapter that maps them back.
-    expect(prompt).not.toMatch(/\blist_terminals\b(?!_)/)
-    expect(prompt).not.toMatch(/\bspawn_terminal\b(?!_)/)
+    // The orchestrator dispatches tools locally (the legacy SDK passthrough
+    // path was removed); short names — not `mcp__<server>__<tool>` — are the
+    // only form the LLM should see.
+    expect(prompt).toContain('list_terminals')
+    expect(prompt).toContain('spawn_terminal')
+    expect(prompt).toContain('prompt_terminal')
+    expect(prompt).toContain('close_terminal')
+    expect(prompt).not.toContain('mcp__')
   })
 
-  it('falls back to the active profile entry name when mcpServerKey is omitted', () => {
+  it('surfaces the maxToolSteps budget to the model', () => {
     const prompt = buildSystemPrompt({
-      backend: 'sdk',
       projectDir: 'C:/Projects/demo',
-      maxToolSteps: 5,
+      maxToolSteps: 7,
       enforceWorktreeInPrompt: true
-      // mcpServerKey deliberately omitted
     })
-
-    // `__ENV_PROFILE__` is undefined in the test harness, so env-profile
-    // resolves to the `uat` fallback → key `claude-dock-uat`. Terminal
-    // tools live on the `-terminals` sibling MCP server.
-    expect(prompt).toContain('mcp__claude-dock-uat-terminals__dock_prompt_terminal')
+    expect(prompt).toContain('at most 7 tool-calling steps per turn')
   })
 
   it('includes the worktree rule verbatim when enforceWorktreeInPrompt is true', () => {
     const prompt = buildSystemPrompt({
-      backend: 'sdk',
       projectDir: 'C:/Projects/demo',
       maxToolSteps: 5,
-      enforceWorktreeInPrompt: true,
-      mcpServerKey: 'claude-dock-uat'
+      enforceWorktreeInPrompt: true
     })
     expect(prompt).toContain('new git worktree under ../worktrees/<slug>')
   })
 
   it('drops the worktree rule when enforceWorktreeInPrompt is false', () => {
     const prompt = buildSystemPrompt({
-      backend: 'sdk',
       projectDir: 'C:/Projects/demo',
       maxToolSteps: 5,
-      enforceWorktreeInPrompt: false,
-      mcpServerKey: 'claude-dock-uat'
+      enforceWorktreeInPrompt: false
     })
     expect(prompt).not.toContain('new git worktree under ../worktrees/<slug>')
     expect(prompt).toContain('share the working tree')
   })
 
-  it('inlines coordinatorSessionId and project_dir so the LLM can satisfy MCP arg requirements', () => {
-    // Without these the hidden Claude session has no way to know what
-    // session_id to pass — every dock_* tool returns "Missing required
-    // parameter: session_id" and the Coordinator can't orchestrate.
+  it('embeds the project directory in the prompt', () => {
     const prompt = buildSystemPrompt({
-      backend: 'sdk',
       projectDir: 'C:/Projects/demo',
       maxToolSteps: 5,
-      enforceWorktreeInPrompt: true,
-      mcpServerKey: 'claude-dock-uat',
-      coordinatorSessionId: 'coord-abc-123'
-    })
-    expect(prompt).toContain('session_id: "coord-abc-123"')
-    expect(prompt).toContain('project_dir: "C:/Projects/demo"')
-  })
-})
-
-describe('buildSystemPrompt — LLM backend', () => {
-  it('uses short tool names without any MCP prefix', () => {
-    const prompt = buildSystemPrompt({
-      backend: 'llm',
-      projectDir: 'C:/Projects/demo',
-      maxToolSteps: 6,
       enforceWorktreeInPrompt: true
     })
-    expect(prompt).toContain('list_terminals')
-    expect(prompt).toContain('prompt_terminal')
-    expect(prompt).not.toContain('mcp__')
-  })
-
-  it('surfaces the maxToolSteps budget to the model', () => {
-    const prompt = buildSystemPrompt({
-      backend: 'llm',
-      projectDir: 'C:/Projects/demo',
-      maxToolSteps: 7,
-      enforceWorktreeInPrompt: true
-    })
-    expect(prompt).toContain('at most 7 tool-calling steps per turn')
+    expect(prompt).toContain('C:/Projects/demo')
   })
 })

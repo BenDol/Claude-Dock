@@ -87,4 +87,31 @@ describe('coordinator-settings-store', () => {
   it('exposes a store path for diagnostics', () => {
     expect(getCoordinatorStorePath()).toBe('/mock/coordinator-plugin.json')
   })
+
+  // The Claude Code subscription paths (claude-cli, claude-sdk) were removed
+  // in favour of the API-key Anthropic provider. Old configs that stored
+  // those provider ids must self-migrate so the orchestrator never sees an
+  // unknown id from getCoordinatorConfig().
+  it('migrates a stored claude-cli provider to anthropic on read', () => {
+    setCoordinatorConfig({ provider: 'claude-cli' as never, model: 'claude-opus-4-7' })
+    const migrated = getCoordinatorConfig()
+    expect(migrated.provider).toBe('anthropic')
+    // Model should be reset to a sane Anthropic API default — not left as the
+    // CLI alias 'claude-opus-4-7' which the API rejects.
+    expect(migrated.model.startsWith('claude-')).toBe(true)
+    expect(migrated.baseUrl).toBe('')
+  })
+
+  it('migrates a stored claude-sdk provider to anthropic on read', () => {
+    setCoordinatorConfig({ provider: 'claude-sdk' as never })
+    const migrated = getCoordinatorConfig()
+    expect(migrated.provider).toBe('anthropic')
+  })
+
+  it('leaves a non-removed provider id untouched', () => {
+    setCoordinatorConfig({ provider: 'openai', model: 'gpt-4.1-mini' })
+    const cfg = getCoordinatorConfig()
+    expect(cfg.provider).toBe('openai')
+    expect(cfg.model).toBe('gpt-4.1-mini')
+  })
 })

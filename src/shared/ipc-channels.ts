@@ -127,7 +127,7 @@ export const IPC = {
   GIT_MGR_REFRESH_SUBMODULE: 'gitMgr:refreshSubmodule',
   GIT_MGR_GENERATE_COMMIT_MSG: 'gitMgr:generateCommitMsg',
   GIT_MGR_CANCEL_COMMIT_MSG: 'gitMgr:cancelCommitMsg',
-  /** main -> renderer event: { jobId, phase: 'single'|'per-file'|'combine', done?, total? } */
+  /** main -> renderer event: { jobId, phase: 'single'|'fallback' } */
   GIT_MGR_COMMIT_MSG_PROGRESS: 'gitMgr:commitMsgProgress',
   GIT_MGR_RESET: 'gitMgr:reset',
   GIT_MGR_REVERT: 'gitMgr:revert',
@@ -406,12 +406,6 @@ export const IPC = {
   COORDINATOR_TEST_PROVIDER: 'coordinator:testProvider',
   COORDINATOR_GET_HISTORY: 'coordinator:getHistory',
   COORDINATOR_CLEAR_HISTORY: 'coordinator:clearHistory',
-  /**
-   * Clears only the Claude-SDK session id for a project, leaving chat
-   * history intact. Useful when users want a fresh hidden-Claude session
-   * without losing their conversation log. No-op for non-SDK providers.
-   */
-  COORDINATOR_RESET_SESSION_ID: 'coordinator:resetSessionId',
   COORDINATOR_SEND_MESSAGE: 'coordinator:sendMessage',
   COORDINATOR_CANCEL: 'coordinator:cancel',
   COORDINATOR_LIST_TERMINALS: 'coordinator:listTerminals',
