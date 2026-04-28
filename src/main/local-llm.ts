@@ -68,12 +68,27 @@ const HEALTH_POLL_INTERVAL = 500
 
 // Allowed context sizes (tokens). Larger = more headroom for big prompts but
 // linearly more KV-cache RAM. KV cache for qwen2.5-coder-0.5b q4_k_m ≈ 0.25 MB
-// per token, so 16384 ctx ≈ 4 GB. Base model weight footprint is ~500 MB.
-const CTX_TIERS = [2048, 4096, 8192, 16384] as const
+// per token, so 8192 ctx ≈ 2 GB. Base model weight footprint is ~500 MB.
+//
+// We deliberately cap the upper tier at 8192 even on big-RAM machines: the
+// commit-msg generator's prompt budget is ~4 KB (well under 2 K tokens), so
+// a larger context just buys KV cache for prompts we never send.
+const CTX_TIERS = [2048, 4096, 8192] as const
 const DEFAULT_CTX_SIZE = 4096
 // Approx KV bytes per token for this model (empirical — q4_k_m has small KV).
 // Using a conservative estimate: 256 KB/token.
 const KV_BYTES_PER_TOKEN = 256 * 1024
+
+/**
+ * Maximum llama-server worker threads. Two is enough for a 0.5B-param Q4
+ * model — the prior cap of 4 saturated quad-core laptops while inferring,
+ * making the rest of the UI sluggish. We pick min(2, cpus/2) so users on
+ * single- and dual-core machines still get one thread.
+ */
+function pickThreadCount(): number {
+  const cpus = Math.max(1, os.cpus().length)
+  return Math.max(1, Math.min(2, Math.floor(cpus / 2) || 1))
+}
 
 function getLlmDir(): string {
   return path.join(app.getPath('userData'), 'llm')
@@ -107,13 +122,12 @@ function pickContextSize(): number {
     let byTotal: number
     if (totalGB < 4) byTotal = 2048
     else if (totalGB < 8) byTotal = 4096
-    else if (totalGB < 16) byTotal = 8192
-    else byTotal = 16384
+    else byTotal = 8192
 
     // Leave ~1.5 GB headroom for other apps + model weights (~500 MB).
     const usableFreeBytes = Math.max(0, freeBytes - 1.5 * 1024 ** 3)
     const maxTokensByFree = Math.floor(usableFreeBytes / KV_BYTES_PER_TOKEN)
-    let byFree = CTX_TIERS[0]
+    let byFree: number = CTX_TIERS[0]
     for (const tier of CTX_TIERS) {
       if (tier <= maxTokensByFree) byFree = tier
     }
@@ -134,7 +148,7 @@ export class LocalLlmManager {
 
   private serverProcess: ChildProcess | null = null
   private serverPort = 0
-  private currentContextSize = DEFAULT_CTX_SIZE
+  private currentContextSize: number = DEFAULT_CTX_SIZE
   private lastRequestTime = 0
   private idleTimer: ReturnType<typeof setInterval> | null = null
   private downloadPromise: Promise<void> | null = null
@@ -143,6 +157,14 @@ export class LocalLlmManager {
   private shutdownRegistered = false
   private downloading = false
   private _downloadProgress = 0
+  /**
+   * Single-slot semaphore around `generate()`. llama-server is single-worker
+   * and serialises requests internally, but issuing multiple parallel HTTP
+   * requests against it produced KV-cache interleaving and nondeterministic
+   * output in earlier versions. Queue at the JS layer to keep one inference
+   * in flight at a time per process.
+   */
+  private inferenceQueue: Promise<unknown> = Promise.resolve()
 
   static getInstance(): LocalLlmManager {
     if (!LocalLlmManager.instance) {
@@ -458,14 +480,18 @@ export class LocalLlmManager {
     this.serverPort = await this.findFreePort()
     this.currentContextSize = pickContextSize()
 
-    log(`[local-llm] Starting llama-server on port ${this.serverPort} ctx=${this.currentContextSize}`)
+    const threads = pickThreadCount()
+    log(`[local-llm] Starting llama-server on port ${this.serverPort} ctx=${this.currentContextSize} threads=${threads}`)
 
     const args = [
       '-m', this.getModelPath(),
       '--port', String(this.serverPort),
       '--ctx-size', String(this.currentContextSize),
       '-ngl', '0',
-      '--threads', String(Math.min(4, os.cpus().length)),
+      '--threads', String(threads),
+      // Skip the warm-up batch on startup. Saves ~1s of initial latency and,
+      // more importantly, avoids the visible CPU spike right after spawn.
+      '--no-warmup',
       '--log-disable'
     ]
 
@@ -591,15 +617,37 @@ export class LocalLlmManager {
 
   // -- Inference --
 
-  async generate(prompt: string, opts?: { maxTokens?: number }): Promise<string> {
-    await this.ensureServer()
-    this.lastRequestTime = Date.now()
+  /**
+   * Run a single chat completion against the bundled llama-server.
+   *
+   * Calls are serialised through `inferenceQueue` — concurrent calls wait
+   * their turn rather than firing parallel HTTP requests at the single-
+   * worker server. The optional `signal` aborts the in-flight request and
+   * removes the caller from the queue.
+   */
+  async generate(prompt: string, opts?: { maxTokens?: number; signal?: AbortSignal }): Promise<string> {
+    const run = async (): Promise<string> => {
+      if (opts?.signal?.aborted) {
+        throw new Error('local-llm generate aborted')
+      }
+      await this.ensureServer()
+      this.lastRequestTime = Date.now()
+      return this.dispatch(prompt, opts)
+    }
+    // Chain onto the queue, swallowing prior errors so one failure doesn't
+    // poison subsequent callers. Each caller still sees their own outcome.
+    const next = this.inferenceQueue.then(run, run)
+    this.inferenceQueue = next.catch(() => undefined)
+    return next
+  }
 
-    // Correlation id — included in the prompt AND logged with the response so
-    // we can verify responses belong to their request (not a stale leftover).
+  /** Single HTTP round-trip to llama-server. Caller must hold the queue. */
+  private async dispatch(prompt: string, opts?: { maxTokens?: number; signal?: AbortSignal }): Promise<string> {
+    // Correlation id — logged with both the request and the response so we
+    // can verify responses belong to their request (not a stale leftover).
     const reqId = Math.random().toString(36).slice(2, 10)
-
     const maxTokens = Math.max(1, opts?.maxTokens ?? 400)
+    const signal = opts?.signal
 
     const body = JSON.stringify({
       messages: [{ role: 'user', content: prompt }],
@@ -618,7 +666,11 @@ export class LocalLlmManager {
 
     log(`[local-llm] req=${reqId} promptChars=${prompt.length} maxTokens=${maxTokens} ctx=${this.currentContextSize}`)
 
-    const response = await new Promise<string>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error('local-llm generate aborted'))
+        return
+      }
       const req = http.request({
         hostname: '127.0.0.1',
         port: this.serverPort,
@@ -627,7 +679,6 @@ export class LocalLlmManager {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
-          // Prevent any proxy/agent from caching the response
           'Cache-Control': 'no-cache'
         }
       }, (res) => {
@@ -649,11 +700,17 @@ export class LocalLlmManager {
         })
       })
       req.on('error', (e) => reject(e))
-      req.setTimeout(30_000, () => { req.destroy(); reject(new Error('llama-server request timed out')) })
+      // 25s aligns with the commit-msg deadline (LOCAL_LLM_DEADLINE_MS=20s)
+      // plus a small buffer — our typical caller is the commit generator,
+      // which wraps us in withDeadline anyway.
+      req.setTimeout(25_000, () => { req.destroy(); reject(new Error('llama-server request timed out')) })
+      if (signal) {
+        const onAbort = (): void => { req.destroy(new Error('local-llm generate aborted')) }
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
+      }
       req.write(body)
       req.end()
     })
-
-    return response
   }
 }

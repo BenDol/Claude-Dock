@@ -15,8 +15,6 @@ import type {
 import type { ChatDelta, Message } from '../llm/provider'
 import { createProvider } from '../llm/registry'
 import { buildSystemPrompt } from '../llm/system-prompt'
-import { getMcpEntryName } from '../../../../shared/env-profile'
-import { getDataDir, getMcpServerSourcePath } from '../../../linked-mode'
 import { COORDINATOR_TOOLS, dispatchTool } from './tools'
 import { appendMessage, getHistory, upsertMessage } from '../coordinator-chat-store'
 import { getServices } from '../services'
@@ -82,44 +80,22 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
   }
   appendMessage(projectDir, userMsg, config.historyMaxMessages)
 
-  // Per-turn id assigned to the SDK-passthrough Coordinator session. The MCP
-  // subprocess gets pre-bound to it and the same id is inlined into the system
-  // prompt so the hidden Claude session can satisfy the dock_* tools' required
-  // `session_id` argument. Generating per turn is fine — the SDK spawns a
-  // fresh MCP subprocess for each turn, so the binding doesn't need to persist.
-  const coordinatorSessionId = nowId()
-
-  const provider = createProvider(
-    config.provider,
-    {
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl || undefined,
-      defaultModel: config.model
-    },
-    {
-      projectDir,
-      dockDataDir: getDataDir(),
-      mcpScriptPath: getMcpServerSourcePath(),
-      maxToolSteps: config.maxToolStepsPerTurn,
-      coordinatorSessionId
-    }
-  )
+  const provider = createProvider(config.provider, {
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl || undefined,
+    defaultModel: config.model
+  })
 
   svc.log(
     '[coordinator] runTurn',
     `project=${projectDir}`,
-    `provider=${provider.id}`,
-    `passthrough=${provider.passthrough}`,
-    `coordSession=${coordinatorSessionId.slice(0, 8)}`
+    `provider=${provider.id}`
   )
 
   const systemPrompt = buildSystemPrompt({
     enforceWorktreeInPrompt: config.enforceWorktreeInPrompt,
     projectDir,
-    maxToolSteps: config.maxToolStepsPerTurn,
-    backend: provider.passthrough ? 'sdk' : 'llm',
-    mcpServerKey: provider.passthrough ? getMcpEntryName() : undefined,
-    coordinatorSessionId: provider.passthrough ? coordinatorSessionId : undefined
+    maxToolSteps: config.maxToolStepsPerTurn
   })
 
   let step = 0
@@ -229,18 +205,6 @@ export async function runTurn(args: RunTurnArgs): Promise<void> {
     }
 
     if (stopReason === 'end_turn' || toolCalls.length === 0) {
-      broadcast({
-        projectDir,
-        messageId: assistantId,
-        payload: { type: 'done', stopReason: 'end_turn' }
-      })
-      return
-    }
-
-    // Passthrough providers (e.g. Claude SDK) run tools internally via MCP
-    // — the tool_call ChatDeltas are display-only, we must not dispatch
-    // them locally or we'd double-run the work. Close the turn instead.
-    if (provider.passthrough) {
       broadcast({
         projectDir,
         messageId: assistantId,

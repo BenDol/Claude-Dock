@@ -33,8 +33,8 @@ const errMessage = (err: unknown): string => err instanceof Error ? err.message 
  *
  * Fallback is `true` (safe — blocks send) for unknown provider ids so a
  * typo'd registry entry can't bypass the key requirement. Key-less providers
- * (claude-sdk, claude-cli, ollama, openai-compat) set `requiresApiKey: false`
- * in the registry and return false here.
+ * (ollama, openai-compat) set `requiresApiKey: false` in the registry and
+ * return false here.
  */
 export function providerNeedsApiKey(
   providers: CoordinatorProviderPreset[],
@@ -81,7 +81,6 @@ interface CoordinatorState {
   sendMessage: (userText: string) => Promise<void>
   cancel: () => Promise<void>
   clearHistory: () => Promise<void>
-  resetSessionId: () => Promise<void>
   setConfigPatch: (patch: Partial<CoordinatorConfig>) => Promise<void>
   resetConfig: () => Promise<void>
   testConnection: () => Promise<void>
@@ -217,8 +216,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!config) return
     if (!userText.trim()) return
     // Only gate on apiKey for providers that actually require one. Otherwise
-    // every no-key backend (claude-sdk, claude-cli, ollama, openai-compat)
-    // falsely blocks.
+    // every no-key backend (ollama, openai-compat) falsely blocks.
     if (providerNeedsApiKey(providers, config.provider) && !config.apiKey.trim()) {
       set({ error: 'Set an API key in settings before sending messages.' })
       return
@@ -261,16 +259,6 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
     if (!projectDir) return
     await dockApi().coordinator.clearHistory(projectDir)
     set({ messages: [], streamingMessageId: null, turnActive: false })
-  },
-
-  resetSessionId: async () => {
-    const { projectDir } = get()
-    if (!projectDir) return
-    try {
-      await dockApi().coordinator.resetSessionId(projectDir)
-    } catch (err) {
-      set({ error: errMessage(err) })
-    }
   },
 
   setConfigPatch: async (patch) => {

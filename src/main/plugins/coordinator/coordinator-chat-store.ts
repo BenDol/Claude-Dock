@@ -4,15 +4,11 @@
  * One electron-store instance is shared across projects, keyed by a
  * normalized-path hash. Histories are capped to avoid unbounded growth.
  *
- * The per-project value is `{ messages, latestSessionId }`. The
- * `latestSessionId` field is populated only by the Claude-SDK backend,
- * which uses it to resume the hidden Claude session across user turns
- * (the SDK forks a new session id on every resume, so we chain forward).
- * Other backends ignore it.
- *
- * Legacy entries were a bare `CoordinatorMessage[]`; a read-time migration
- * wraps them as `{ messages: [...], latestSessionId: null }` on first
- * access and writes the new shape back.
+ * Persisted shape is `{ messages: CoordinatorMessage[] }`. Two legacy shapes
+ * are migrated transparently on first read:
+ *   - bare `CoordinatorMessage[]` (very old)
+ *   - `{ messages, latestSessionId }` (held the Claude-SDK passthrough id;
+ *     the SDK provider was removed, so we drop the field on first read).
  */
 import Store from 'electron-store'
 import * as crypto from 'crypto'
@@ -22,14 +18,13 @@ import { log, logError } from '../../logger'
 
 interface ProjectChatState {
   messages: CoordinatorMessage[]
-  latestSessionId: string | null
 }
 
 interface ChatStoreData {
   [projectKey: string]: ProjectChatState | CoordinatorMessage[]
 }
 
-const EMPTY_STATE: ProjectChatState = { messages: [], latestSessionId: null }
+const EMPTY_STATE: ProjectChatState = { messages: [] }
 
 let store: Store<ChatStoreData> | null = null
 
@@ -49,28 +44,23 @@ function projectKey(projectDir: string): string {
 }
 
 function normaliseEntry(raw: unknown): ProjectChatState {
-  if (!raw) return { messages: [], latestSessionId: null }
-  // Legacy shape: a bare array of messages, no session id.
+  if (!raw) return { messages: [] }
+  // Legacy shape: a bare array of messages.
   if (Array.isArray(raw)) {
-    return { messages: raw as CoordinatorMessage[], latestSessionId: null }
+    return { messages: raw as CoordinatorMessage[] }
   }
   if (typeof raw === 'object') {
-    const obj = raw as Partial<ProjectChatState>
-    const messagesValid = Array.isArray(obj.messages)
-    const sessionIdValid = obj.latestSessionId === undefined || obj.latestSessionId === null || typeof obj.latestSessionId === 'string'
-    if (!messagesValid || !sessionIdValid) {
+    const obj = raw as { messages?: unknown }
+    if (!Array.isArray(obj.messages)) {
       logError('[coordinator-chat] discarded malformed persisted entry', {
-        messagesType: typeof obj.messages,
-        sessionIdType: typeof obj.latestSessionId
+        messagesType: typeof obj.messages
       })
+      return { messages: [] }
     }
-    return {
-      messages: messagesValid ? (obj.messages as CoordinatorMessage[]) : [],
-      latestSessionId: typeof obj.latestSessionId === 'string' ? obj.latestSessionId : null
-    }
+    return { messages: obj.messages as CoordinatorMessage[] }
   }
   logError('[coordinator-chat] discarded persisted entry of unexpected type', { type: typeof raw })
-  return { messages: [], latestSessionId: null }
+  return { messages: [] }
 }
 
 function readState(projectDir: string): ProjectChatState {
@@ -99,7 +89,7 @@ export function appendMessage(
 ): CoordinatorMessage[] {
   const state = readState(projectDir)
   const next = capMessages([...state.messages, message], maxMessages)
-  const ok = writeState(projectDir, { messages: next, latestSessionId: state.latestSessionId })
+  const ok = writeState(projectDir, { messages: next })
   if (!ok) {
     logError('[coordinator-chat] failed to append message', projectDir, message.id)
   }
@@ -122,7 +112,7 @@ export function upsertMessage(
       ? state.messages.map((m, i) => (i === idx ? message : m))
       : [...state.messages, message]
   const trimmed = capMessages(next, maxMessages)
-  const ok = writeState(projectDir, { messages: trimmed, latestSessionId: state.latestSessionId })
+  const ok = writeState(projectDir, { messages: trimmed })
   if (!ok) {
     logError('[coordinator-chat] failed to upsert message', projectDir, message.id)
   }
@@ -137,26 +127,6 @@ export function clearHistory(projectDir: string): void {
     return
   }
   log('[coordinator-chat] cleared history', projectDir)
-}
-
-export function getLatestSessionId(projectDir: string): string | null {
-  return readState(projectDir).latestSessionId
-}
-
-export function setLatestSessionId(projectDir: string, id: string): void {
-  const state = readState(projectDir)
-  const ok = writeState(projectDir, { messages: state.messages, latestSessionId: id })
-  if (!ok) {
-    logError('[coordinator-chat] failed to set latest session id', projectDir, id)
-  }
-}
-
-export function clearLatestSessionId(projectDir: string): void {
-  const state = readState(projectDir)
-  const ok = writeState(projectDir, { messages: state.messages, latestSessionId: null })
-  if (!ok) {
-    logError('[coordinator-chat] failed to clear latest session id', projectDir)
-  }
 }
 
 export function getChatStorePath(): string {

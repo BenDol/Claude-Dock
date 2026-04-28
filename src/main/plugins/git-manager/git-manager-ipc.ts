@@ -402,8 +402,8 @@ export function registerGitManagerIpc(): void {
   })
 
   ipcMain.handle(IPC.GIT_MGR_GENERATE_COMMIT_MSG, async (event, projectDir: string, jobId?: string) => {
-    // Forward phase-by-phase progress back to the originating webContents so the
-    // commit dialog can show "Summarising n/N files via Claude…" while we wait.
+    // Forward phase progress (single | fallback) back to the originating
+    // webContents so the commit dialog can show a status hint while we wait.
     const sender = event.sender
     const onProgress = jobId
       ? (p: gitOps.CommitMsgProgress): void => {

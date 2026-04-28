@@ -30,27 +30,13 @@ export class GitManagerPlugin implements DockPlugin {
     {
       key: 'commitMsgBackend',
       label: 'Commit message backend',
-      description: 'Which engine generates commit messages. Claude Code uses your logged-in `claude` CLI subscription and handles large diffs far better than the local LLM.',
+      description: 'Which engine generates commit messages. Local LLM runs entirely on-device with a tiny bundled model. Anthropic API uses Claude Haiku 4.5 over HTTPS — set ANTHROPIC_API_KEY in your environment.',
       type: 'select',
       options: [
-        { value: 'local-llm',     label: 'Local LLM (fast, small)' },
-        { value: 'claude-cli',    label: 'Claude Code (your subscription)' },
+        { value: 'local-llm',     label: 'Local LLM (on-device)' },
         { value: 'anthropic-api', label: 'Anthropic API (requires ANTHROPIC_API_KEY)' }
       ],
       defaultValue: 'local-llm'
-    },
-    {
-      key: 'commitMsgClaudeModel',
-      label: 'Claude model',
-      description: '--model flag passed to `claude -p`. Only used when backend is Claude Code.',
-      type: 'select',
-      options: [
-        { value: 'haiku',   label: 'Haiku — fast, cheap' },
-        { value: 'sonnet',  label: 'Sonnet — balanced' },
-        { value: 'opus',    label: 'Opus — highest quality' },
-        { value: 'default', label: 'Subscription default' }
-      ],
-      defaultValue: 'haiku'
     },
     {
       key: 'autoFetchAll',

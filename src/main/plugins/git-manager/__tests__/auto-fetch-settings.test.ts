@@ -72,10 +72,10 @@ describe('GitManagerPlugin settings schema', () => {
   })
 
   it('has all expected settings registered', () => {
-    // 7 core (incl. commitMsgBackend + commitMsgClaudeModel, replacing the
-    // legacy enableClaude boolean) + 4 Issues-tab + 3 Working Changes issues +
-    // 3 GitHub Projects v2 = 18
-    expect(plugin.settingsSchema.length).toBe(18)
+    // 6 core (commitMsgClaudeModel was dropped with the Claude CLI backend
+    // removal) + 4 Issues-tab + 3 Working Changes issues + 3 GitHub Projects
+    // v2 + 1 commit comment template = 17.
+    expect(plugin.settingsSchema.length).toBe(17)
   })
 
   it('has enableIssuesTab boolean setting defaulting false', () => {

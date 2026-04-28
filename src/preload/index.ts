@@ -306,7 +306,7 @@ export interface DockApi {
     refreshSubmodule: (projectDir: string, subPath: string) => Promise<Partial<GitSubmoduleInfo> | null>
     generateCommitMsg: (projectDir: string, jobId?: string) => Promise<{ success: boolean; message?: string; error?: string }>
     cancelCommitMsg: (jobId: string) => Promise<{ success: boolean }>
-    onCommitMsgProgress: (callback: (p: { jobId: string; phase: 'single' | 'per-file' | 'combine'; done?: number; total?: number }) => void) => () => void
+    onCommitMsgProgress: (callback: (p: { jobId: string; phase: 'single' | 'fallback' }) => void) => () => void
     reset: (projectDir: string, hash: string, mode: string) => Promise<{ success: boolean; error?: string }>
     revert: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
     cherryPick: (projectDir: string, hash: string) => Promise<{ success: boolean; error?: string }>
@@ -571,7 +571,6 @@ export interface DockApi {
     testProvider: () => Promise<CoordinatorTestConnectionResult>
     getHistory: (projectDir: string) => Promise<CoordinatorMessage[]>
     clearHistory: (projectDir: string) => Promise<void>
-    resetSessionId: (projectDir: string) => Promise<void>
     sendMessage: (projectDir: string, userText: string) => Promise<void>
     cancel: (projectDir: string) => Promise<void>
     listTerminals: (projectDir: string) => Promise<CoordinatorTerminalSummary[]>
@@ -851,7 +850,7 @@ const dockApi: DockApi = {
     generateCommitMsg: (projectDir, jobId) => ipcRenderer.invoke(IPC.GIT_MGR_GENERATE_COMMIT_MSG, projectDir, jobId),
     cancelCommitMsg: (jobId) => ipcRenderer.invoke(IPC.GIT_MGR_CANCEL_COMMIT_MSG, jobId),
     onCommitMsgProgress: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, p: { jobId: string; phase: 'single' | 'per-file' | 'combine'; done?: number; total?: number }) => callback(p)
+      const handler = (_event: Electron.IpcRendererEvent, p: { jobId: string; phase: 'single' | 'fallback' }) => callback(p)
       ipcRenderer.on(IPC.GIT_MGR_COMMIT_MSG_PROGRESS, handler)
       return () => ipcRenderer.removeListener(IPC.GIT_MGR_COMMIT_MSG_PROGRESS, handler)
     },
@@ -1178,7 +1177,6 @@ const dockApi: DockApi = {
     testProvider: () => ipcRenderer.invoke(IPC.COORDINATOR_TEST_PROVIDER),
     getHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_GET_HISTORY, projectDir),
     clearHistory: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CLEAR_HISTORY, projectDir),
-    resetSessionId: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_RESET_SESSION_ID, projectDir),
     sendMessage: (projectDir, userText) => ipcRenderer.invoke(IPC.COORDINATOR_SEND_MESSAGE, projectDir, userText),
     cancel: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_CANCEL, projectDir),
     listTerminals: (projectDir) => ipcRenderer.invoke(IPC.COORDINATOR_LIST_TERMINALS, projectDir),

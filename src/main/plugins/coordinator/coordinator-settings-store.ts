@@ -47,10 +47,30 @@ function deepMergeDefaults(defaults: any, stored: any): any {
   return result
 }
 
+// Removed providers — old configs may still hold these; rewrite to a sane
+// default on first read so the orchestrator's createProvider switch never
+// sees an unknown id. Both removed paths were Claude-subscription-only;
+// migrate to the API-key Anthropic provider with a known-good default model.
+const REMOVED_PROVIDER_IDS = new Set(['claude-sdk', 'claude-cli'])
+const SUBSCRIPTION_FALLBACK_PROVIDER = 'anthropic' as const
+const SUBSCRIPTION_FALLBACK_MODEL = 'claude-haiku-4-5-20251001'
+
 export function getCoordinatorConfig(): CoordinatorConfig {
   const stored = safeRead(() => getStore().store)
   if (!stored) return DEFAULT_COORDINATOR_CONFIG
-  return deepMergeDefaults(DEFAULT_COORDINATOR_CONFIG, stored) as CoordinatorConfig
+  const merged = deepMergeDefaults(DEFAULT_COORDINATOR_CONFIG, stored) as CoordinatorConfig
+  if (REMOVED_PROVIDER_IDS.has(merged.provider as string)) {
+    const previous = merged.provider as string
+    merged.provider = SUBSCRIPTION_FALLBACK_PROVIDER
+    merged.model = SUBSCRIPTION_FALLBACK_MODEL
+    merged.baseUrl = ''
+    // We can't infer an API key from the old subscription path, so leave
+    // apiKey untouched (likely empty). The first-run gate in the renderer
+    // will surface settings so the user can paste one in.
+    log(`[coordinator-settings] migrated removed provider ${previous} -> ${SUBSCRIPTION_FALLBACK_PROVIDER}`)
+    safeWriteSync(() => getStore().set(merged as unknown as Record<string, unknown>))
+  }
+  return merged
 }
 
 export type DeepPartial<T> = T extends object

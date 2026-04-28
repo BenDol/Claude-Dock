@@ -14,8 +14,6 @@ export type CoordinatorProviderId =
   | 'gemini'
   | 'ollama'
   | 'openai-compat' // generic OpenAI-compatible endpoint (custom baseUrl)
-  | 'claude-sdk' // hidden Claude Code session via @anthropic-ai/claude-agent-sdk; reuses the user's subscription
-  | 'claude-cli' // raw subprocess to the bundled Claude binary; controls flags + stream end-to-end
 
 export interface CoordinatorProviderPreset {
   id: CoordinatorProviderId

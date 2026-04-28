@@ -107,8 +107,8 @@ const CoordinatorPanel: React.FC<PanelProps> = ({ projectDir }) => {
   // First-run: if the coordinator's selected provider needs an API key and none
   // is set yet, automatically surface the dedicated settings window so the user
   // lands on setup instead of a useless chat pane. Fires once per mount after
-  // config *and* providers have loaded — key-less providers (claude-sdk,
-  // claude-cli, ollama, openai-compat) skip this path.
+  // config *and* providers have loaded — key-less providers (ollama,
+  // openai-compat) skip this path.
   const autoOpenedRef = useRef(false)
   useEffect(() => {
     if (!config) return
